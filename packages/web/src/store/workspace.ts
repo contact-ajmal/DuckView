@@ -40,7 +40,7 @@ interface WorkspaceState {
   results: Record<string, TabResult>;
   drafts: Record<string, string>;
   cursors: Record<string, number>;
-  catalog: { objects: CatalogObject[]; files: JailEntry[] } | null;
+  catalog: { objects: CatalogObject[]; files: JailEntry[]; truncated_folders?: string[] } | null;
   catalogLoading: boolean;
   history: HistoryEntry[];
   clearHistory(): void;
@@ -260,7 +260,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!ws || (get().catalogLoading && !force)) return;
     set({ catalogLoading: true });
     try {
-      const r = await api.get<{ objects: CatalogObject[]; files: JailEntry[] }>(`/api/workspaces/${ws}/catalog`);
+      const r = await api.get<{ objects: CatalogObject[]; files: JailEntry[]; truncated_folders?: string[] }>(`/api/workspaces/${ws}/catalog`);
       if (get().activeId === ws) set({ catalog: r });
     } catch {
       /* ignore */

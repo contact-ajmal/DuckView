@@ -148,14 +148,17 @@ export class WorkspaceService {
   async listAllFiles(p: Principal, id: string) {
     const w = await this.get(p, id);
     const files = this.engines.jail.listFiles();
+    const truncated: string[] = [];
     for (const f of w.folders) {
       try {
-        files.push(...this.engines.jail.listFilesIn(f.path));
+        const entries = this.engines.jail.listFilesIn(f.path, { maxEntries: 500 });
+        if (entries.length >= 500) truncated.push(f.path);
+        files.push(...entries);
       } catch {
         /* folder removed or unreadable — skipped */
       }
     }
-    return { folders: w.folders, files };
+    return { folders: w.folders, files, truncated };
   }
 
   async remove(p: Principal, id: string): Promise<void> {

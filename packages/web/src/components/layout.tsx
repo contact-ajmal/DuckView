@@ -36,7 +36,7 @@ export function Panel({ title, meta, actions, children, className, bodyClassName
           {actions}
         </header>
       )}
-      <div className={cn('p-4', bodyClassName)}>{children}</div>
+      <div className={bodyClassName ?? 'p-4'}>{children}</div>
     </section>
   );
 }

@@ -9,6 +9,7 @@ import { useWorkspace } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { ResultsGrid } from '../workspace/ResultsGrid';
 import { Eyebrow, PageTitle, SideCard, Panel, TypePill, Tag } from '../../components/layout';
+import { SplitPane } from '../../components/panes';
 import { Empty, Spinner, cn } from '../../components/ui';
 import { quoteIdent } from '../workspace/SchemaTree';
 
@@ -211,9 +212,16 @@ export function OverviewPage() {
   const selectedFile = files.find((f) => f.path === target);
 
   return (
-    <div className="flex h-full min-h-0 gap-5 overflow-auto p-5">
-      {/* Sidebar */}
-      <aside className="flex w-[270px] shrink-0 flex-col gap-4">
+    <SplitPane
+      direction="horizontal"
+      storageKey="overview.sidebar"
+      defaultSize={290}
+      min={220}
+      max={640}
+      minSecondary={480}
+      className="h-full p-5"
+      primary={
+      <aside className="flex h-full flex-col gap-4 overflow-auto pr-2">
         <SideCard
           title="Your datasets"
           meta={
@@ -287,7 +295,9 @@ export function OverviewPage() {
                       {open ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
                       {isFolder ? (open ? <FolderOpen className="h-3.5 w-3.5 text-accent-300" /> : <Folder className="h-3.5 w-3.5 text-accent-300" />) : <Database className="h-3.5 w-3.5 text-zinc-400" />}
                       <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-zinc-400">{label}</span>
-                      <span className="font-mono text-[10px] text-zinc-600">{items.length}</span>
+                      <span className="font-mono text-[10px] text-zinc-600" title={ws.catalog?.truncated_folders?.includes(root) ? 'Showing the first 500 data files (4 levels deep). Use the Explorer on the Query page to browse everything.' : undefined}>
+                        {items.length}{ws.catalog?.truncated_folders?.includes(root) ? '+' : ''}
+                      </span>
                     </button>
                     {isFolder && canWrite && (
                       <button onClick={() => void removeFolder(root)} className="rounded p-0.5 text-zinc-600 opacity-0 hover:text-red-300 group-hover/root:opacity-100" title="Remove folder from workspace">
@@ -338,9 +348,9 @@ export function OverviewPage() {
         {wsId && <FolderPicker open={picker} workspaceId={wsId} onClose={() => setPicker(false)} onPick={addFolder} />}
 
       </aside>
-
-      {/* Main */}
-      <main className="min-w-0 flex-1">
+      }
+      secondary={
+      <main className="h-full min-w-0 overflow-auto pl-3">
         {!target ? (
           <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-zinc-800">
             <Empty icon={<UploadCloud className="h-10 w-10" />} title="Ingest a dataset to get started" hint="Drop a Parquet, CSV or JSON file onto the left panel. DuckView profiles it instantly: row/column counts, null ratios, a sample and distributions." />
@@ -470,6 +480,7 @@ export function OverviewPage() {
           </div>
         ) : null}
       </main>
-    </div>
+      }
+    />
   );
 }

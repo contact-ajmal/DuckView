@@ -128,6 +128,10 @@ Key settings:
 5. **Secrets.** Stored S3/GCS/Azure/HTTP/Postgres/MotherDuck credentials are AES-256-GCM encrypted (unique IV, auth tag, row-id as AAD) and applied via `CREATE SECRET` / `motherduck_token` only for the owning user's engine. Passwords use scrypt; API tokens are `dv_…` random strings stored as SHA-256 hashes and shown once.
 6. **Isolation & limits.** One DuckDB instance per workspace, a fresh connection per query (so `interrupt()` on timeout/cancel is query-scoped), row caps, cell truncation, rate limiting, and a full audit trail (`actor_type` USER/AGENT, action, SQL, duration, IP, status).
 
+## Layout
+
+Every region resizes like an IDE: drag the splitters between the side bar and the main area, between the editor and the results pane, and between the side bar sections (Explorer · Tables & views · Saved queries · History). Section headers collapse, the side bar can be hidden, and double-clicking a splitter resets it. Sizes are remembered per browser.
+
 ## DuckCopilot
 
 An in-app assistant docked beside the workbench and the dashboard builder. Every turn is hydrated automatically with the workspace's tables/views (columns + types), the data files in the jail, the configured cloud buckets, the SQL in the active tab, and — for selected files/tables — `SUMMARIZE` statistics (min/max/distinct/null %). Providers: **Anthropic** (official SDK, streaming, default `claude-opus-5`), **OpenAI** (`gpt-4o`) and **Ollama** (local, OpenAI-compatible endpoint). Keys are server-managed (`copilot.*`) or bring-your-own from the drawer's settings (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query* (sends the failing SQL + DuckDB error), *Suggest questions* (top analytical questions for a selected dataset). Conversations persist in `chat_history` with the context snapshot of each turn.

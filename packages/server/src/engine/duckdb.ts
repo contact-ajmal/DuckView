@@ -551,7 +551,7 @@ export class WorkspaceEngine {
   }
 
   /** Resolves a user-supplied target (table, quoted identifier, file path, remote URI, or SELECT) into a guarded SELECT. */
-  resolveRelation(target: string): { select: string; relation: string; filePath: string | null; kind: 'table' | 'file' | 'remote' | 'query' } {
+  resolveRelation(target: string): { select: string; selectFallback?: string; relation: string; filePath: string | null; kind: 'table' | 'file' | 'remote' | 'query' } {
     const t = target.trim();
     if (!t) throw new SandboxViolation('Empty profile target', t);
     if (/^(select|with|from|pivot|unpivot)\b/i.test(t)) {
@@ -564,6 +564,11 @@ export class WorkspaceEngine {
         return { select: `SELECT * FROM ${sqlString(t)}`, relation: sqlString(t), filePath: null, kind: 'remote' };
       }
       const filePath = this.jail.resolve(t, { allowGlob: true }).absolute;
+      if (/\.xlsx?$/i.test(filePath)) {
+        // Excel needs the explicit reader; `selectFallback` re-reads every cell as text when typed parsing fails
+        // (e.g. locale decimals like '66,9').
+        return { select: `SELECT * FROM read_xlsx(${sqlString(filePath)})`, selectFallback: `SELECT * FROM read_xlsx(${sqlString(filePath)}, all_varchar = true)`, relation: `read_xlsx(${sqlString(filePath)})`, filePath, kind: 'file' };
+      }
       return { select: `SELECT * FROM ${sqlString(filePath)}`, relation: sqlString(filePath), filePath, kind: 'file' };
     }
     if (/^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*){0,2}$/.test(t) || /^"[^"]+"(\."[^"]+")*$/.test(t)) {
@@ -572,24 +577,38 @@ export class WorkspaceEngine {
     throw new SandboxViolation(`Unrecognised profile target: ${t}`, t);
   }
 
+  /** Runs `fn(select)`; when it fails on a typed-parse error and a lenient fallback exists, retries with it. */
+  private async withReaderFallback<T>(rel: { select: string; selectFallback?: string }, fn: (select: string) => Promise<T>): Promise<T> {
+    try {
+      return await fn(rel.select);
+    } catch (err) {
+      if (rel.selectFallback && /Could not convert|Failed to parse|Conversion Error|Invalid Input Error/i.test((err as Error).message)) {
+        logger().warn({ err: (err as Error).message.split('\n')[0] }, 'Typed spreadsheet read failed; retrying with all_varchar');
+        return fn(rel.selectFallback);
+      }
+      throw err;
+    }
+  }
+
   /** SUMMARIZE a table, view, file path or subquery. */
   async summarize(target: string, opts: { timeoutMs?: number } = {}): Promise<{ summary: Record<string, unknown>[]; rowCount: number | null; columnCount: number; sizeBytes: number | null; sql: string }> {
     const timeoutMs = opts.timeoutMs ?? this.cfg.duckdb.query_timeout_seconds * 1000;
-    const { select, filePath } = this.resolveRelation(target);
-    const sql = `SUMMARIZE ${select}`;
+    const rel = this.resolveRelation(target);
     return this.withConnection(
-      async (conn) => {
-        const r = await conn.runAndReadAll(sql);
-        const summary = r.getRowObjectsJson() as Record<string, unknown>[];
-        let rowCount: number | null = null;
-        try {
-          const c = await conn.runAndReadAll(`SELECT count(*) AS n FROM (${select}) AS _dv_profile`);
-          rowCount = Number(c.getRowsJson()[0]?.[0] ?? 0);
-        } catch {
-          /* ignore */
-        }
-        return { summary, rowCount, columnCount: summary.length, sizeBytes: fileSize(filePath), sql };
-      },
+      (conn) =>
+        this.withReaderFallback(rel, async (select) => {
+          const sql = `SUMMARIZE ${select}`;
+          const r = await conn.runAndReadAll(sql);
+          const summary = r.getRowObjectsJson() as Record<string, unknown>[];
+          let rowCount: number | null = null;
+          try {
+            const c = await conn.runAndReadAll(`SELECT count(*) AS n FROM (${select}) AS _dv_profile`);
+            rowCount = Number(c.getRowsJson()[0]?.[0] ?? 0);
+          } catch {
+            /* ignore */
+          }
+          return { summary, rowCount, columnCount: summary.length, sizeBytes: fileSize(rel.filePath), sql };
+        }),
       timeoutMs,
     );
   }
@@ -602,10 +621,11 @@ export class WorkspaceEngine {
     const timeoutMs = opts.timeoutMs ?? this.cfg.duckdb.query_timeout_seconds * 1000;
     const sampleRows = Math.min(opts.sampleRows ?? 50, 500);
     const maxColumns = opts.maxColumns ?? 12;
-    const { select, filePath, kind } = this.resolveRelation(target);
+    const rel = this.resolveRelation(target);
+    const { filePath, kind } = rel;
     const start = performance.now();
     return this.withConnection(
-      async (conn) => {
+      (conn) => this.withReaderFallback(rel, async (select) => {
         const summary = (await conn.runAndReadAll(`SUMMARIZE ${select}`)).getRowObjectsJson() as Record<string, unknown>[];
         const rowCount = Number((await conn.runAndReadAll(`SELECT count(*) FROM (${select}) AS _dv`)).getRowsJson()[0]?.[0] ?? 0);
         const sampleReader = await conn.runAndReadAll(`SELECT * FROM (${select}) AS _dv LIMIT ${sampleRows}`);
@@ -682,7 +702,7 @@ export class WorkspaceEngine {
           sample: { columns: sample.columns, rows: sample.rows },
           duration_ms: Math.round(performance.now() - start),
         };
-      },
+      }),
       timeoutMs,
     );
   }
@@ -750,9 +770,10 @@ export class WorkspaceEngine {
         timeoutMs,
       );
     }
-    const { select, relation, filePath, kind } = this.resolveRelation(t);
+    const rel = this.resolveRelation(t);
+    const { relation, filePath, kind } = rel;
     return this.withConnection(
-      async (conn) => {
+      (conn) => this.withReaderFallback(rel, async (select) => {
         const desc = (await conn.runAndReadAll(`DESCRIBE ${select.replace(/;\s*$/, '')} LIMIT 0`)).getRowObjectsJson();
         const columns = desc.map((r) => ({ name: String(r.column_name), type: String(r.column_type), nullable: String(r['null'] ?? 'YES').toUpperCase() === 'YES' }));
         let rowCount: number | null = null;
@@ -781,9 +802,9 @@ export class WorkspaceEngine {
             /* view or missing */
           }
         }
-        const display = kind === 'file' ? `'${this.jail.relativeTo(filePath!)}'` : relation;
+        const display = kind === 'file' ? (/\.xlsx?$/i.test(filePath!) ? `read_xlsx('${this.jail.relativeTo(filePath!)}'${select === rel.selectFallback ? ', all_varchar = true' : ''})` : `'${this.jail.relativeTo(filePath!)}'`) : relation;
         return { target: t, kind, columns, row_count: rowCount, row_count_source: source, size_bytes: fileSize(filePath), suggested_sql: `SELECT *\nFROM ${display}\nLIMIT 100;` };
-      },
+      }),
       timeoutMs,
     );
   }

@@ -154,11 +154,11 @@ export class QueryService {
     }
   }
 
-  async catalog(p: Principal, workspaceId: string): Promise<{ objects: CatalogObject[]; files: JailEntry[] }> {
+  async catalog(p: Principal, workspaceId: string): Promise<{ objects: CatalogObject[]; files: JailEntry[]; truncated_folders: string[] }> {
     requireScope(p, 'read');
     const { engine } = await this.workspaces.engine(p, workspaceId);
     const [objects, all] = await Promise.all([engine.catalog(), this.workspaces.listAllFiles(p, workspaceId)]);
-    return { objects, files: all.files };
+    return { objects, files: all.files, truncated_folders: all.truncated };
   }
 
   /** COPY (sql) TO '<jail>/<target>' (FORMAT ...). Always writes inside the jail. */

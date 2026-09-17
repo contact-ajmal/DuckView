@@ -3,6 +3,7 @@ import { Users, Trash2, Plug, KeyRound, Activity } from 'lucide-react';
 import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type Workspace, type EngineSettings } from '../../api/client';
 import { Gauge } from '../../components/Gauge';
 import { Eyebrow, PageTitle, SideCard, Panel, KvRows, Tag } from '../../components/layout';
+import { SplitPane } from '../../components/panes';
 import { Button, Badge, Card, Input, Label, Modal, Select } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { CloudWizard } from '../explorer/CloudWizard';
@@ -248,8 +249,17 @@ export function SettingsPage() {
   const datasets = ws.catalog ? ws.catalog.files.length + ws.catalog.objects.length : 0;
 
   return (
-    <div className="flex h-full min-h-0 gap-5 overflow-auto p-5">
-      <aside className="flex w-[270px] shrink-0 flex-col gap-4">
+    <>
+    <SplitPane
+      direction="horizontal"
+      storageKey="settings.sidebar"
+      defaultSize={290}
+      min={220}
+      max={640}
+      minSecondary={480}
+      className="h-full p-5"
+      primary={
+      <aside className="flex h-full flex-col gap-4 overflow-auto pr-2">
         <SideCard title="Live resources" meta={<span className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-400' : 'bg-zinc-600'}`} />}>
           <KvRows
             rows={[
@@ -275,8 +285,9 @@ export function SettingsPage() {
           />
         </SideCard>
       </aside>
-
-      <main className="min-w-0 flex-1 space-y-5">
+      }
+      secondary={
+      <main className="h-full min-w-0 space-y-5 overflow-auto pl-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <Eyebrow>Settings</Eyebrow>
@@ -522,7 +533,9 @@ export function SettingsPage() {
           )}
         </div>
       </main>
-
+      }
+    />
+    <>
       <Modal open={newUser.open} onClose={() => setNewUser({ ...newUser, open: false })} title="Create user">
         <div className="space-y-3">
           <div>
@@ -612,6 +625,7 @@ export function SettingsPage() {
           </div>
         </div>
       </Modal>
-    </div>
+    </>
+    </>
   );
 }
