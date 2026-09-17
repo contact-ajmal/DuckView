@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { cn } from './ui';
+import { HideButton } from './LayoutMenu';
 
 /** Small violet uppercase label above a page title (e.g. "OVERVIEW · AUTO-GENERATED ON LOAD"). */
 export function Eyebrow({ children }: { children: ReactNode }) {
@@ -11,12 +12,15 @@ export function PageTitle({ children, className, title }: { children: ReactNode;
 }
 
 /** Sidebar card: uppercase header with an optional right-aligned meta slot. */
-export function SideCard({ title, meta, children, className, bodyClassName }: { title: ReactNode; meta?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string }) {
+export function SideCard({ title, meta, children, className, bodyClassName, hideId }: { title: ReactNode; meta?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string; hideId?: string }) {
   return (
     <section className={cn('rounded-xl border border-zinc-800 bg-zinc-900/40', className)}>
-      <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-2.5">
+      <header className="group/hdr flex items-center justify-between gap-2 border-b border-zinc-800 px-4 py-2.5">
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-300">{title}</h3>
-        {meta && <div className="text-[11px] text-zinc-500">{meta}</div>}
+        <div className="flex items-center gap-1.5">
+          {meta && <div className="text-[11px] text-zinc-500">{meta}</div>}
+          {hideId && <HideButton id={hideId} className="opacity-0 group-hover/hdr:opacity-100" />}
+        </div>
       </header>
       <div className={cn('p-3', bodyClassName)}>{children}</div>
     </section>
@@ -24,16 +28,19 @@ export function SideCard({ title, meta, children, className, bodyClassName }: { 
 }
 
 /** Main-area card with a title row (e.g. "Schema  profiled with SUMMARIZE in 205 ms"). */
-export function Panel({ title, meta, actions, children, className, bodyClassName }: { title?: ReactNode; meta?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string }) {
+export function Panel({ title, meta, actions, children, className, bodyClassName, hideId }: { title?: ReactNode; meta?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string; hideId?: string }) {
   return (
-    <section className={cn('rounded-xl border border-zinc-800 bg-zinc-900/40', className)}>
-      {(title || actions) && (
-        <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-zinc-800 px-4 py-2.5">
+    <section className={cn('relative rounded-xl border border-zinc-800 bg-zinc-900/40', className)}>
+      {(title || actions || hideId) && (
+        <header className="group/hdr flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-zinc-800 px-4 py-2.5">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {title && <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>}
             {meta && <span className="font-mono text-[11px] text-zinc-500">{meta}</span>}
           </div>
-          {actions}
+          <div className="flex items-center gap-2">
+            {actions}
+            {hideId && <HideButton id={hideId} className="opacity-0 group-hover/hdr:opacity-100" />}
+          </div>
         </header>
       )}
       <div className={bodyClassName ?? 'p-4'}>{children}</div>

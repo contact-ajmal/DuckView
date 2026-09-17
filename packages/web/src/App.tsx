@@ -11,6 +11,7 @@ import { DashboardsPage } from './features/dashboards/DashboardsPage';
 import { CopilotDrawer } from './features/copilot/CopilotDrawer';
 import { useCopilot } from './store/copilot';
 import { Bot } from 'lucide-react';
+import { LayoutMenu } from './components/LayoutMenu';
 import { Logo } from './components/Logo';
 import { Tag } from './components/layout';
 import { Button, Input, Label, Modal, Spinner, cn } from './components/ui';
@@ -88,6 +89,7 @@ export default function App() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-3">
+          <LayoutMenu currentPage={route === 'dashboards' ? null : route} />
           <button onClick={() => cp.toggle()} className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs', cp.open ? 'border-accent-600/60 bg-accent-600/20 text-accent-100' : 'border-zinc-800 bg-zinc-900/70 text-zinc-300 hover:text-zinc-100')} title="DuckCopilot — context-aware AI assistant">
             <Bot className="h-3.5 w-3.5" /> Copilot
           </button>

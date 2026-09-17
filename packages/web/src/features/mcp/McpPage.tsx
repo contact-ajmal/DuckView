@@ -5,6 +5,8 @@ import { subscribeLiveEvents, type LiveEvent } from '../../lib/liveEvents';
 import { Button, Badge, Card, CopyButton, Input, Label, Modal, Select, Stat, cn } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { Eyebrow, PageTitle } from '../../components/layout';
+import { useLayout } from '../../store/layout';
+import { HideButton } from '../../components/LayoutMenu';
 
 interface McpInfo { transports: { sse: string; streamable_http: string; stdio: string }; tools: string[]; resources: string[]; prompts: string[]; limits: { default_page_size: number; max_page_size: number; max_cell_chars: number }; hitl_enabled: boolean; snippets: Record<string, string> }
 
@@ -46,6 +48,7 @@ export function McpPage() {
   const [form, setForm] = useState({ name: '', scopes: ['read', 'mcp'] as string[], workspace_id: '', expires_in_days: 90 });
   const [snippet, setSnippet] = useState('claude_desktop');
   const [error, setError] = useState<string | null>(null);
+  const hidden = useLayout((l) => l.hidden);
 
   const refresh = async () => {
     const [t, s] = await Promise.all([api.get<{ tokens: ApiToken[] }>('/api/tokens'), api.get<{ sessions: McpSession[] }>('/api/mcp/sessions')]);
@@ -106,18 +109,19 @@ export function McpPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      {!hidden['mcp.stats'] && <div className="group/st relative grid grid-cols-2 gap-3 md:grid-cols-4">
+        <HideButton id="mcp.stats" className="absolute -top-5 right-0 opacity-0 group-hover/st:opacity-100" />
         <Stat label="Live sessions" value={sessions.length} sub="SSE + streamable HTTP" />
         <Stat label="Tokens" value={tokens.length} sub={`${tokens.filter((t) => t.expires_at && new Date(t.expires_at) < new Date()).length} expired`} />
         <Stat label="Agent activity (feed)" value={feed.filter((f) => f.kind === 'tool' || f.title.startsWith('agent')).length} sub={`${feed.filter((f) => f.status === 'approval_required' || f.status === 'blocked').length} awaiting approval / blocked`} />
         <Stat label="Safety" value={info?.hitl_enabled ? 'HITL on' : 'HITL off'} sub={`${info?.limits.default_page_size ?? 50}/${info?.limits.max_page_size ?? 200} rows per call`} />
-      </div>
+      </div>}
 
       <div className="grid gap-6 lg:grid-cols-5">
-        <Card
+        {!hidden['mcp.connect'] && <Card
           title="Connect a client"
           className="lg:col-span-2"
-          actions={<CopyButton text={snippetText} label={lastToken ? 'Copy with token' : 'Copy'} />}
+          actions={<span className="flex items-center gap-1"><CopyButton text={snippetText} label={lastToken ? 'Copy with token' : 'Copy'} /><HideButton id="mcp.connect" /></span>}
         >
           <div className="mb-3 flex flex-wrap gap-1">
             {SNIPPETS.map((s) => (
@@ -154,9 +158,9 @@ export function McpPage() {
               </div>
             </div>
           )}
-        </Card>
+        </Card>}
 
-        <Card
+        {!hidden['mcp.inspector'] && <Card
           title={
             <span className="flex items-center gap-2">
               Live inspector
@@ -184,6 +188,7 @@ export function McpPage() {
               >
                 {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
               </Button>
+              <HideButton id="mcp.inspector" />
             </div>
           }
         >
@@ -205,9 +210,9 @@ export function McpPage() {
               </div>
             ))}
           </div>
-        </Card>
+        </Card>}
 
-        <Card title="API tokens" className="lg:col-span-3">
+        {!hidden['mcp.tokens'] && <Card title="API tokens" className="lg:col-span-3" actions={<HideButton id="mcp.tokens" />}>
           {tokens.length === 0 ? (
             <p className="text-xs text-zinc-500">No tokens yet. Tokens are shown once at creation and stored as SHA-256 hashes.</p>
           ) : (
@@ -260,9 +265,9 @@ export function McpPage() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Card>}
 
-        <Card title="Live MCP sessions" className="lg:col-span-2">
+        {!hidden['mcp.sessions'] && <Card title="Live MCP sessions" className="lg:col-span-2" actions={<HideButton id="mcp.sessions" />}>
           {sessions.length === 0 ? (
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <Radio className="h-4 w-4" /> No agents connected right now.
@@ -284,7 +289,7 @@ export function McpPage() {
               ))}
             </div>
           )}
-        </Card>
+        </Card>}
       </div>
 
       <Modal open={creating} onClose={() => setCreating(false)} title="Create API token">

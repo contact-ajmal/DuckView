@@ -4,6 +4,8 @@ import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, 
 import { Gauge } from '../../components/Gauge';
 import { Eyebrow, PageTitle, SideCard, Panel, KvRows, Tag } from '../../components/layout';
 import { SplitPane } from '../../components/panes';
+import { useLayout } from '../../store/layout';
+import { HideButton, LayoutSettings } from '../../components/LayoutMenu';
 import { Button, Badge, Card, Input, Label, Modal, Select } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { CloudWizard } from '../explorer/CloudWizard';
@@ -245,6 +247,7 @@ export function SettingsPage() {
   const duckPct = live && live.duckdb.memory_limit_bytes ? (live.duckdb.memory_usage_bytes / live.duckdb.memory_limit_bytes) * 100 : 0;
   const scratchPct = live && live.scratch.total_bytes ? ((live.scratch.total_bytes - (live.scratch.free_bytes ?? 0)) / live.scratch.total_bytes) * 100 : 0;
 
+  const hidden = useLayout((l) => l.hidden);
   const running = live?.duckdb.engines.reduce((a, e) => a + e.active_queries, 0) ?? 0;
   const datasets = ws.catalog ? ws.catalog.files.length + ws.catalog.objects.length : 0;
 
@@ -257,10 +260,11 @@ export function SettingsPage() {
       min={220}
       max={640}
       minSecondary={480}
+      collapsed={!!hidden['settings.sidebar']}
       className="h-full p-5"
       primary={
       <aside className="flex h-full flex-col gap-4 overflow-auto pr-2">
-        <SideCard title="Live resources" meta={<span className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-400' : 'bg-zinc-600'}`} />}>
+        <SideCard title="Live resources" hideId="settings.sidebar" meta={<span className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-400' : 'bg-zinc-600'}`} />}>
           <KvRows
             rows={[
               { k: 'engine mem', v: live ? formatBytes(live.duckdb.memory_usage_bytes) : '…', sub: live ? `/ ${formatBytes(live.duckdb.memory_limit_bytes)}` : undefined },
@@ -296,14 +300,15 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+        {!hidden['settings.gauges'] && <div className="group/g relative grid grid-cols-2 gap-4 xl:grid-cols-4">
+          <HideButton id="settings.gauges" className="absolute -top-5 right-0 opacity-0 group-hover/g:opacity-100" />
           <Gauge value={hostMemPct} label="Host RAM" primary={live ? `${formatBytes(live.host.memory_used_bytes)} used` : '—'} secondary={live ? `of ${formatBytes(live.host.memory_total_bytes)} · OS-reported (includes cache)` : undefined} />
           <Gauge value={duckPct} label="DuckDB memory" primary={live ? `${formatBytes(live.duckdb.memory_usage_bytes)} allocated` : '—'} secondary={live ? `ceiling ${formatBytes(live.duckdb.memory_limit_bytes)} · ${live.duckdb.engines.length} engine${live.duckdb.engines.length === 1 ? '' : 's'}` : undefined} tone="accent" />
           <Gauge value={live?.host.cpu_percent ?? 0} label="CPU load" primary={live ? `${live.host.cpus} cores · load ${live.host.load_average[0]?.toFixed(2)}` : '—'} secondary={live ? `duckview process ${live.process.cpu_percent.toFixed(1)}%` : undefined} />
           <Gauge value={scratchPct} label="Scratch storage" primary={live ? `${formatBytes(live.scratch.used_bytes)} spilled` : '—'} secondary={live ? `${formatBytes(live.scratch.free_bytes)} free on ${live.scratch.path.split('/').slice(-1)[0]}` : undefined} />
-        </div>
+        </div>}
 
-        <Panel bodyClassName="p-0">
+        {!hidden['settings.machine'] && <Panel bodyClassName="p-0" hideId="settings.machine">
           <div className="grid gap-px bg-zinc-800 md:grid-cols-3">
             <div className="bg-zinc-900/60 p-4">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">This machine</div>
@@ -320,10 +325,10 @@ export function SettingsPage() {
               <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">Parquet is read column-by-column with predicate push-down, so files far larger than RAM still query fine — the limit is the <em>working set</em> of one query, not the file. Filter early, aggregate, avoid <Tag>SELECT *</Tag>.</p>
             </div>
           </div>
-        </Panel>
+        </Panel>}
 
-        {live && live.duckdb.engines.length > 0 && (
-          <Panel title="Warm engines" meta={`${live.duckdb.engines.length} cached`} bodyClassName="p-0">
+        {live && live.duckdb.engines.length > 0 && !hidden['settings.engines'] && (
+          <Panel hideId="settings.engines" title="Warm engines" meta={`${live.duckdb.engines.length} cached`} bodyClassName="p-0">
             <table className="w-full font-mono text-xs">
               <thead className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
                 <tr className="border-b border-zinc-800">
@@ -363,10 +368,14 @@ export function SettingsPage() {
           </Panel>
         )}
 
-        {workspace && <EngineSettingsForm key={workspace.id} workspace={workspace} sys={sys} live={live} connections={connections} onSaved={() => void ws.loadCatalog(true)} />}
+        {workspace && !hidden['settings.engine'] && <EngineSettingsForm key={workspace.id} workspace={workspace} sys={sys} live={live} connections={connections} onSaved={() => void ws.loadCatalog(true)} />}
+
+        <Card title="Layout" actions={<span className="text-[11px] text-zinc-500">hide or restore any component</span>}>
+          <LayoutSettings />
+        </Card>
 
         <div className="grid gap-5 lg:grid-cols-2">
-          <Card
+          {!hidden['settings.cloud'] && <Card
             title="Cloud storage"
             className="lg:col-span-2"
             actions={
@@ -396,8 +405,8 @@ export function SettingsPage() {
               </div>
             )}
             <CloudWizard open={wizard} onClose={() => setWizard(false)} onCreated={() => void refresh()} />
-          </Card>
-          <Card
+          </Card>}
+          {!hidden['settings.connections'] && <Card
             title="Data connections"
             actions={
               <Button size="sm" onClick={() => setNewConn({ open: true, name: '', type: 'S3', creds: {} })}>
@@ -432,9 +441,9 @@ export function SettingsPage() {
                 ))}
               </div>
             )}
-          </Card>
+          </Card>}
 
-          <Card title="Account">
+          {!hidden['settings.account'] && <Card title="Account">
             <div className="mb-3 text-xs text-zinc-400">
               Signed in as <span className="text-zinc-200">{auth.user?.email}</span> · role <Badge tone="violet">{auth.user?.role}</Badge> · provider {auth.user?.auth_provider}
             </div>
@@ -462,9 +471,9 @@ export function SettingsPage() {
                 </div>
               </form>
             )}
-          </Card>
+          </Card>}
 
-          {isAdmin && (
+          {isAdmin && !hidden['settings.users'] && (
             <Card
               title="Users"
               className="lg:col-span-2"

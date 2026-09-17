@@ -18,6 +18,8 @@ import { CloudWizard } from '../explorer/CloudWizard';
 import { registerCopilotHost } from '../copilot/CopilotDrawer';
 import { Eyebrow, PageTitle, Panel, TypePill } from '../../components/layout';
 import { SplitPane, StackedPanes, usePersisted } from '../../components/panes';
+import { useLayout } from '../../store/layout';
+import { HideButton } from '../../components/LayoutMenu';
 import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
 
 type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile';
@@ -38,6 +40,8 @@ export function WorkspacePage() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersisted<boolean>('duckview.pane.workbench.sidebar.collapsed', false);
+  const hidden = useLayout((l) => l.hidden);
+  const isHidden = (id: string) => !!hidden[id];
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [dropping, setDropping] = useState(false);
@@ -223,6 +227,7 @@ export function WorkspacePage() {
     {
       key: 'explorer',
       title: 'Explorer',
+      hideId: 'query.explorer',
       defaultHeight: 300,
       meta: (
         <button onClick={() => setExplorerKey((k) => k + 1)} className="text-zinc-500 hover:text-zinc-200" title="Refresh">
@@ -234,6 +239,7 @@ export function WorkspacePage() {
     {
       key: 'tables',
       title: 'Tables & views',
+      hideId: 'query.tables',
       defaultHeight: 180,
       meta: (
         <span className="flex items-center gap-2">
@@ -252,6 +258,7 @@ export function WorkspacePage() {
     {
       key: 'saved',
       title: 'Saved queries',
+      hideId: 'query.saved',
       defaultHeight: 180,
       meta: (
         <button onClick={openSave} disabled={!tab || !sql.trim() || !canWrite} className="inline-flex items-center gap-1 text-accent-300 hover:underline disabled:opacity-40">
@@ -280,6 +287,7 @@ export function WorkspacePage() {
     {
       key: 'history',
       title: 'History',
+      hideId: 'query.history',
       defaultHeight: 200,
       meta: (
         <button onClick={ws.clearHistory} className="text-zinc-500 hover:text-red-300" title="Clear history">
@@ -302,7 +310,7 @@ export function WorkspacePage() {
           </div>
         ),
     },
-  ];
+  ].filter((sec) => !isHidden(sec.hideId));
 
   const editorPane = (
     <Panel bodyClassName="flex min-h-0 flex-1 flex-col p-0" className="flex h-full min-h-0 flex-col">
@@ -352,7 +360,7 @@ export function WorkspacePage() {
         {dropping && <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-accent-600/10 text-sm text-accent-100">Drop .sql files to open them as tabs</div>}
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-3 border-t border-zinc-800 px-3 py-2">
+      {!isHidden('query.toolbar') && <div className="group/tb flex shrink-0 flex-wrap items-center gap-3 border-t border-zinc-800 px-3 py-2">
         {result?.status === 'running' ? (
           <button onClick={() => tab && ws.cancelQuery(tab.id)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-800 bg-red-950/50 px-3 text-xs font-medium text-red-200 hover:bg-red-900/60">
             <Square className="h-3.5 w-3.5" /> Stop
@@ -390,13 +398,15 @@ export function WorkspacePage() {
           <button className="inline-flex items-center gap-1 hover:text-zinc-100" onClick={() => { navigator.clipboard.writeText(sql).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }); }}>
             {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />} Copy
           </button>
+          <HideButton id="query.toolbar" className="opacity-0 group-hover/tb:opacity-100" />
         </div>
-      </div>
+      </div>}
     </Panel>
   );
 
   const resultsPane = (
     <Panel
+      hideId="query.results"
       bodyClassName="flex min-h-0 flex-1 flex-col p-0"
       className="flex h-full min-h-0 flex-col"
       title={
@@ -453,10 +463,11 @@ export function WorkspacePage() {
         {view === 'plan' && <PlanView plan={plan} loading={planLoading} onExplain={() => void explain(false)} onAnalyze={() => void explain(true)} />}
         {view === 'profile' && <ProfilePanel profile={profile} loading={profileLoading} onProfile={doProfile} defaultTarget={ws.catalog?.files[0]?.path ?? ws.catalog?.objects[0]?.name ?? ''} />}
       </div>
-      {executed && result.columns.length > 0 && (
-        <div className="flex shrink-0 flex-wrap gap-x-5 gap-y-1 border-t border-zinc-800 px-4 py-1.5 font-mono text-[11px]">
+      {executed && result.columns.length > 0 && !isHidden('query.columns') && (
+        <div className="group/cols flex shrink-0 flex-wrap gap-x-5 gap-y-1 border-t border-zinc-800 px-4 py-1.5 font-mono text-[11px]">
           {result.columns.slice(0, 12).map((c) => <span key={c.name} className="flex items-center gap-1.5"><span className="text-zinc-200">{c.name}</span><TypePill type={c.type} /></span>)}
           {result.columns.length > 12 && <span className="text-zinc-500">+{result.columns.length - 12} more</span>}
+          <HideButton id="query.columns" className="ml-auto opacity-0 group-hover/cols:opacity-100" />
         </div>
       )}
     </Panel>
@@ -464,7 +475,7 @@ export function WorkspacePage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 px-5 pb-3 pt-4">
+      {!isHidden('query.header') && <div className="group/ph flex shrink-0 flex-wrap items-center justify-between gap-3 px-5 pb-3 pt-4">
         <div className="flex items-center gap-3">
           <button onClick={() => setSidebarCollapsed((c) => !c)} className={cn('rounded-md border p-1.5', sidebarCollapsed ? 'border-zinc-800 text-zinc-500 hover:text-zinc-200' : 'border-zinc-800 bg-zinc-900/70 text-zinc-300')} title={sidebarCollapsed ? 'Show side bar' : 'Hide side bar'}>
             <PanelLeft className="h-4 w-4" />
@@ -488,8 +499,9 @@ export function WorkspacePage() {
           <button className={cn('inline-flex items-center gap-1 rounded-md border px-2 py-1', cp.open ? 'border-accent-600/60 bg-accent-600/20 text-accent-100' : 'border-zinc-800 hover:text-zinc-100')} onClick={() => cp.toggle()} title="DuckCopilot">
             <Bot className="h-3.5 w-3.5" /> Copilot
           </button>
+          <HideButton id="query.header" className="opacity-0 group-hover/ph:opacity-100" />
         </div>
-      </div>
+      </div>}
 
       <SplitPane
         direction="horizontal"
@@ -498,16 +510,21 @@ export function WorkspacePage() {
         min={200}
         max={640}
         minSecondary={480}
-        collapsed={sidebarCollapsed}
+        collapsed={sidebarCollapsed || isHidden('query.sidebar')}
         onExpand={() => setSidebarCollapsed(false)}
-        className="min-h-0 flex-1 px-5 pb-4"
+        className={cn('min-h-0 flex-1 px-5 pb-4', isHidden('query.header') && 'pt-4')}
         primary={
-          <div className="h-full overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40">
+          <div className="group/sb relative h-full overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40">
             <StackedPanes storageKey="workbench.sidebar" sections={sidebarSections} />
+            {sidebarSections.length === 0 && <div className="p-4 text-[11px] text-zinc-500">All side bar sections are hidden — restore them from Layout in the header.</div>}
           </div>
         }
         secondary={
-          <SplitPane direction="vertical" storageKey="workbench.editor" defaultSize={300} min={140} max={1600} minSecondary={160} className="h-full pl-1" primary={editorPane} secondary={resultsPane} />
+          isHidden('query.results') ? (
+            <div className="h-full pl-1">{editorPane}</div>
+          ) : (
+            <SplitPane direction="vertical" storageKey="workbench.editor" defaultSize={300} min={140} max={1600} minSecondary={160} className="h-full pl-1" primary={editorPane} secondary={resultsPane} />
+          )
         }
       />
 

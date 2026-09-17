@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from './ui';
+import { HideButton } from './LayoutMenu';
 
 export function usePersisted<T>(key: string, initial: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -120,6 +121,8 @@ export interface StackSection {
   content: ReactNode;
   defaultHeight?: number;
   minHeight?: number;
+  /** Layout registry id — renders a × in the header that hides the section. */
+  hideId?: string;
 }
 
 /** Vertically stacked, individually resizable and collapsible sections (like an IDE side bar). */
@@ -149,7 +152,7 @@ export function StackedPanes({ storageKey, sections, className }: { storageKey: 
         return (
           <div key={s.key} className={cn('flex min-h-0 flex-col', isFlex && !isCollapsed ? 'flex-1' : 'shrink-0')} style={isCollapsed ? { height: HEADER } : isFlex ? undefined : { height: heightOf(s) }}>
             <header
-              className="flex h-[34px] shrink-0 cursor-pointer select-none items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-900/60 px-3"
+              className="group/sec flex h-[34px] shrink-0 cursor-pointer select-none items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-900/60 px-3"
               onClick={() => setCollapsed((c) => ({ ...c, [s.key]: !c[s.key] }))}
               title={isCollapsed ? 'Expand section' : 'Collapse section'}
             >
@@ -157,11 +160,10 @@ export function StackedPanes({ storageKey, sections, className }: { storageKey: 
                 {isCollapsed ? <ChevronRight className="h-3 w-3 text-zinc-500" /> : <ChevronDown className="h-3 w-3 text-zinc-500" />}
                 <span className="truncate">{s.title}</span>
               </span>
-              {s.meta && (
-                <span className="flex shrink-0 items-center text-[11px] text-zinc-500" onClick={(e) => e.stopPropagation()}>
-                  {s.meta}
-                </span>
-              )}
+              <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-500" onClick={(e) => e.stopPropagation()}>
+                {s.meta}
+                {s.hideId && <HideButton id={s.hideId} className="opacity-0 group-hover/sec:opacity-100" />}
+              </span>
             </header>
             {!isCollapsed && <div className="min-h-0 flex-1 overflow-auto">{s.content}</div>}
             {next && !isCollapsed && !isFlex && (

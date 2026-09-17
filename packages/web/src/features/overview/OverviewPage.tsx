@@ -10,6 +10,8 @@ import { useAuth } from '../../store/auth';
 import { ResultsGrid } from '../workspace/ResultsGrid';
 import { Eyebrow, PageTitle, SideCard, Panel, TypePill, Tag } from '../../components/layout';
 import { SplitPane } from '../../components/panes';
+import { useLayout } from '../../store/layout';
+import { HideButton } from '../../components/LayoutMenu';
 import { Empty, Spinner, cn } from '../../components/ui';
 import { quoteIdent } from '../workspace/SchemaTree';
 
@@ -104,6 +106,7 @@ export function OverviewPage() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const fileInput = useRef<HTMLInputElement>(null);
   const wsId = ws.activeId;
+  const hidden = useLayout((l) => l.hidden);
 
   const load = useCallback(
     async (t: string) => {
@@ -219,11 +222,13 @@ export function OverviewPage() {
       min={220}
       max={640}
       minSecondary={480}
+      collapsed={!!hidden['overview.sidebar']}
       className="h-full p-5"
       primary={
       <aside className="flex h-full flex-col gap-4 overflow-auto pr-2">
         <SideCard
           title="Your datasets"
+          hideId="overview.sidebar"
           meta={
             <span className="flex items-center gap-2">
               <span>{files.length + objects.length}</span>
@@ -387,7 +392,8 @@ export function OverviewPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {!hidden['overview.kpis'] && <div className="group/kpi relative grid grid-cols-1 gap-4 md:grid-cols-3">
+              <HideButton id="overview.kpis" className="absolute -top-5 right-0 opacity-0 group-hover/kpi:opacity-100" />
               <Kpi label="Total rows" value={overview.row_count.toLocaleString()} sub={`COUNT(*) · ${overview.duration_ms} ms suite`} sql={`SELECT count(*) AS rows FROM ${relation};`} onSql={openInQuery} />
               <Kpi label="Total columns" value={overview.column_count} sub={kindCounts ? `${kindCounts.numeric} numeric · ${kindCounts.text} text · ${kindCounts.temporal} temporal · ${kindCounts.other} other` : undefined} sql={`DESCRIBE SELECT * FROM ${relation};`} onSql={openInQuery} />
               <Kpi
@@ -398,9 +404,10 @@ export function OverviewPage() {
                 sql={`SELECT count(*) - count(DISTINCT *) AS duplicate_rows FROM ${relation};`}
                 onSql={openInQuery}
               />
-            </div>
+            </div>}
 
-            <Panel
+            {!hidden['overview.schema'] && <Panel
+              hideId="overview.schema"
               title="Schema"
               meta={`profiled with SUMMARIZE in ${overview.duration_ms} ms`}
               bodyClassName="p-0"
@@ -456,9 +463,9 @@ export function OverviewPage() {
                   ))}
                 </tbody>
               </table>
-            </Panel>
+            </Panel>}
 
-            <Panel title="Distributions" meta="equi-width histograms · top values · time buckets">
+            {!hidden['overview.distributions'] && <Panel hideId="overview.distributions" title="Distributions" meta="equi-width histograms · top values · time buckets">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {overview.columns.map((c) => (
                   <div key={c.name} className="rounded-lg border border-zinc-800/80 bg-zinc-950/60 p-3">
@@ -470,13 +477,13 @@ export function OverviewPage() {
                   </div>
                 ))}
               </div>
-            </Panel>
+            </Panel>}
 
-            <Panel title="Sample" meta={`first ${overview.sample.rows.length} rows`} bodyClassName="p-0" actions={<button className="inline-flex items-center gap-0.5 font-mono text-[11px] text-zinc-400 hover:text-accent-300" onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)}>SELECT * <ArrowUpRight className="h-3 w-3" /></button>}>
+            {!hidden['overview.sample'] && <Panel hideId="overview.sample" title="Sample" meta={`first ${overview.sample.rows.length} rows`} bodyClassName="p-0" actions={<button className="inline-flex items-center gap-0.5 font-mono text-[11px] text-zinc-400 hover:text-accent-300" onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)}>SELECT * <ArrowUpRight className="h-3 w-3" /></button>}>
               <div className="h-80 overflow-hidden rounded-b-xl">
                 <ResultsGrid columns={overview.sample.columns} rows={overview.sample.rows} />
               </div>
-            </Panel>
+            </Panel>}
           </div>
         ) : null}
       </main>

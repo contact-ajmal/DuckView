@@ -130,7 +130,9 @@ Key settings:
 
 ## Layout
 
-Every region resizes like an IDE: drag the splitters between the side bar and the main area, between the editor and the results pane, and between the side bar sections (Explorer · Tables & views · Saved queries · History). Section headers collapse, the side bar can be hidden, and double-clicking a splitter resets it. Sizes are remembered per browser.
+Every region resizes like an IDE: drag the splitters between the side bar and the main area, between the editor and the results pane, and between the side bar sections (Explorer · Tables & views · Saved queries · History). Section headers collapse, the side bar can be hidden, and double-clicking a splitter resets it.
+
+Any component can be removed to declutter: hover a panel header and click its ×. Hidden components are listed under **Layout** in the header (with a count badge) for one-click restore, and Settings → Layout has a checklist of every component per page. Sizes and hidden components are remembered per browser.
 
 ## DuckCopilot
 
