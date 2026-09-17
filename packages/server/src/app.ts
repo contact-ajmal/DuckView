@@ -115,7 +115,9 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   // Static SPA (built web bundle), with history fallback for non-API GETs.
   const webDist = findWebDist();
   if (webDist) {
-    await app.register(fastifyStatic, { root: webDist, prefix: '/', wildcard: false, index: ['index.html'], maxAge: '1h', immutable: false });
+    // wildcard:true resolves files on each request (instead of indexing the directory once at boot), so a
+    // `pnpm build` of the web bundle while the server runs never leaves index.html pointing at 404 assets.
+    await app.register(fastifyStatic, { root: webDist, prefix: '/', wildcard: true, index: ['index.html'], maxAge: '1h', immutable: false });
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api') && !req.url.startsWith('/mcp') && req.headers.accept?.includes('text/html')) {
         return reply.type('text/html').send(fs.createReadStream(path.join(webDist, 'index.html')));
