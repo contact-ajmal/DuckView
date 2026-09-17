@@ -1,295 +1,221 @@
-# DuckView Enterprise
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="DuckView SQL workbench querying an Iceberg lakehouse table with DuckDB" width="100%">
+</p>
 
-A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces with a polished UI, lakehouse connectors (AWS Glue / SageMaker Lakehouse, S3 Tables, Iceberg REST, Databricks), and an enterprise-grade **Model Context Protocol (MCP)** server plus REST/OpenAPI façade so autonomous agents (Claude, Cursor, Strands, LangGraph, LangChain, CrewAI, Bedrock AgentCore, …) can query the same sandboxed engines with human-in-the-loop safety.
+<h1 align="center">DuckView</h1>
 
-```
-┌──────────────── React + Vite + Tailwind v4 (zinc/violet) + Chart.js ─────────┐
-│ #/  Overview     drag-and-drop ingestion · KPIs · null bars · distributions   │
-│ #/query          VS Code-style explorer (any local folder + S3/R2/GCS/Azure  │
-│                  + lakehouse catalogs) · schema pane · tabs · engine picker  │
-│                  (DuckDB / Databricks warehouse) · saved queries · .sql io   │
-│ #/dashboards     BI builder: drag-and-drop grid, KPI/chart/table/markdown,   │
-│                  auto-refresh                                                 │
-│ #/settings       categorised: appearance · layout · hardware · engine ·     │
-│                  storage · copilot · account · users                          │
-│ #/mcp            registered agents · framework snippets · OpenAPI · tokens  │
-│                  · live agent inspector                                       │
-│ DuckCopilot      dockable AI drawer (Anthropic · OpenAI · Ollama · Bedrock ·  │
-│                  Bedrock Agent · AgentCore runtime, BYOK)                     │
-└──────────────┬───────────────────────────────────────────────────────────────┘
-               │ REST · WS (rows, live events) · SSE (copilot, MCP) · Streamable HTTP
-┌──────────────▼───────────────────────────────────────────────────────────────┐
-│ Fastify 5 (TypeScript strict)                                                │
-│  auth: local (scrypt) · OIDC+PKCE · API tokens (sha256, scoped)              │
-│  QueryService ─ single choke point: authz → SQL guard → HITL → audit         │
-│  Storage: jailed tree · S3/Azure SDK listings · DESCRIBE-based inspection     │
-│  Exports: COPY … TO (parquet/csv/json) + streaming Arrow IPC writer          │
-│  Copilot: schema/SUMMARIZE/active-SQL context → provider bridge (SSE)        │
-│  Lakehouse: Iceberg ATTACH (Glue/S3 Tables/REST/UC) · Databricks SQL API     │
-│  Agent tools: one registry → MCP (10 tools · 3 resources · 2 prompts)        │
-│               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
-│  filesystem jail (Node) + allowed_directories/enable_external_access=off     │
-│  + lock_configuration (DuckDB) · httpfs/azure/iceberg secrets + ATTACHed     │
-│  lakehouse catalogs hot-applied                                              │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ Metadata store (Drizzle): SQLite by default · PostgreSQL via DATABASE_URL    │
-│  users · workspaces · session_tabs · saved_queries · dashboards · widgets    │
-│  cloud_connections · lakehouse_connections · data_connections (AES-256-GCM) │
-│  · agents · chat_history · tokens                                            │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <strong>The analytics workspace where DuckDB, your lakehouse and your AI agents meet.</strong><br>
+  Query files, warehouses and Iceberg catalogs from one SQL workbench. Build dashboards. Let agents do the same — safely.
+</p>
 
-## Quick start
+<p align="center">
+  <a href="https://github.com/contact-ajmal/DuckView/actions/workflows/ci.yml"><img src="https://github.com/contact-ajmal/DuckView/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/contact-ajmal/DuckView/actions/workflows/docker-publish.yml"><img src="https://github.com/contact-ajmal/DuckView/actions/workflows/docker-publish.yml/badge.svg" alt="Docker image"></a>
+  <img src="https://img.shields.io/badge/DuckDB-1.5-FFF000?logo=duckdb&logoColor=black" alt="DuckDB 1.5">
+  <img src="https://img.shields.io/badge/MCP-stdio%20%C2%B7%20SSE%20%C2%B7%20Streamable%20HTTP-7c3aed" alt="MCP transports">
+  <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript strict">
+  <img src="https://img.shields.io/badge/tests-147%20passing-22c55e" alt="147 tests">
+</p>
 
-```bash
-pnpm install
-pnpm build
+<p align="center">
+  <a href="#-quick-start">Quick start</a> ·
+  <a href="#-what-you-get">Features</a> ·
+  <a href="#-lakehouse-connectors">Lakehouse</a> ·
+  <a href="#-built-for-ai-agents">Agents & MCP</a> ·
+  <a href="#-duckcopilot">Copilot</a> ·
+  <a href="#-themes">Themes</a> ·
+  <a href="#-security-model">Security</a> ·
+  <a href="docs/REFERENCE.md">Technical reference</a>
+</p>
 
-export JWT_SECRET=$(openssl rand -hex 32)
-export ENCRYPTION_KEY=$(openssl rand -hex 32)
-export DUCKVIEW_DATA_DIR=./data                 # the filesystem jail
-export DUCKVIEW_ADMIN_EMAIL=admin@example.com   # bootstrap admin (first start only)
-export DUCKVIEW_ADMIN_PASSWORD=change-me-now
+---
 
-pnpm start          # → http://localhost:4200
-```
+## Why DuckView?
 
-Drop Parquet/CSV/JSON files (or Delta/Iceberg directories) into `./data` and query them by relative path:
+Most "SQL UIs" stop at the query box. DuckView is a complete, self-hosted data workspace built on a **native DuckDB engine per workspace** — no Python sidecars, no JDBC, no data leaving your machine unless you ask it to.
 
-```sql
-SELECT region, sum(revenue) FROM 'sales.parquet' GROUP BY 1;
-SELECT * FROM read_csv('events/*.csv');
-```
+|  |  |
+|---|---|
+| ⚡ **Query anything, instantly** | Parquet, CSV, JSON, Excel, DuckDB files, S3 / R2 / GCS / Azure objects — and now **Iceberg catalogs on AWS Glue, S3 Tables, any Iceberg REST catalog and Databricks**. Drop a file or add a folder and it's queryable in seconds. |
+| 🤖 **Agent-native from day one** | A hardened **MCP server** plus a **REST / OpenAPI façade** expose the same tools to Claude Desktop, Cursor, Claude Code, Strands, LangGraph, LangChain, CrewAI, Bedrock AgentCore and Bedrock Agents. Every mutation is held for **human approval**. |
+| 🧠 **DuckCopilot** | An in-app assistant hydrated with your live schema, files, buckets and the SQL you're writing. Bring Anthropic, OpenAI, Ollama, Amazon Bedrock — or point it at **your own agent** on AgentCore. |
+| 📊 **From profile to dashboard** | Auto-profiling on load (KPIs, null ratios, distributions), a tabbed IDE-style workbench with charts, plans and profiles, and a drag-and-drop BI dashboard builder with auto-refresh. |
+| 🔒 **Enterprise hardening** | Filesystem jail, DuckDB `lock_configuration`, per-workspace memory/thread limits, AES-256-GCM credential vault, scoped API tokens, audit log, Prometheus + OpenTelemetry, OIDC. |
+| 🎨 **Yours to shape** | Six themes (three dark, three light incl. a *Professional* corporate look), resizable IDE panes, and the ability to hide any component and bring it back. |
 
-Development (hot reload for both packages, web on :5173 proxying to :4200):
+---
+
+## 🚀 Quick start
 
 ```bash
-pnpm dev
+git clone https://github.com/contact-ajmal/DuckView.git && cd DuckView
+pnpm install && pnpm build
+DUCKVIEW_ADMIN_EMAIL=admin@example.com DUCKVIEW_ADMIN_PASSWORD='change-me' pnpm start
+# → http://localhost:4200  (set JWT_SECRET / ENCRYPTION_KEY for anything beyond a first look)
 ```
 
-### Docker / Compose
+Or with Docker:
 
 ```bash
-cp .env.example .env            # JWT_SECRET, ENCRYPTION_KEY, admin credentials, POSTGRES_PASSWORD
-docker compose up --build                     # DuckView with SQLite metadata; ./data mounted at /data
-docker compose --profile postgres up --build  # optional PostgreSQL metadata (set DATABASE_URL in .env)
-docker compose --profile ollama up            # + local Ollama for DuckCopilot
-docker compose --profile observability up     # + Prometheus on :9090
+docker run -p 4200:4200 -v duckview-data:/data -v duckview-meta:/app/meta \
+  -e DUCKVIEW_ADMIN_EMAIL=admin@example.com -e DUCKVIEW_ADMIN_PASSWORD='change-me' \
+  ghcr.io/contact-ajmal/duckview:latest
 ```
 
-The image (`node:20-bookworm-slim`, multi-stage, runs as `duckuser:duckgroup`) declares two volumes: `/data` (the filesystem jail) and `/app/meta` (SQLite metadata when no `DATABASE_URL` is set). Standalone:
+`docker compose up` gives you the same with persistent volumes; add `--profile postgres` for a PostgreSQL metadata store, `--profile ollama` for a local Copilot, `--profile observability` for Prometheus + Grafana. Kubernetes manifests live in [`k8s/`](k8s).
 
-```bash
-docker run -p 4200:4200 -v $PWD/data:/data -v duckview-meta:/app/meta \
-  -e JWT_SECRET=… -e ENCRYPTION_KEY=… -e DUCKVIEW_ADMIN_EMAIL=… -e DUCKVIEW_ADMIN_PASSWORD=… \
-  duckview/enterprise:latest
-```
+> **Requirements:** Node 20+, pnpm 10. DuckDB ships as a native module — nothing else to install.
 
-### CI/CD
+---
 
-- `.github/workflows/ci.yml` — typecheck, unit + integration tests, build, then `scripts/smoke.mjs` against the built server and against a freshly built image.
-- `.github/workflows/docker-publish.yml` — on a `v*` tag: multi-architecture build (`linux/amd64`, `linux/arm64`) with Buildx/QEMU, push to Docker Hub (`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets, optional `DOCKERHUB_IMAGE` variable), SBOM + provenance, smoke-test of the pushed tag.
-- `scripts/smoke.mjs <url> <admin-email> <password>` — 22 end-to-end checks: probes, metrics, auth, sandbox, SQL errors, tab/cursor state, upload, overview, live stats, tokens, HITL, and a full MCP Streamable HTTP handshake.
+## ✨ What you get
 
-### Kubernetes
+### Overview — your data, profiled on arrival
 
-```bash
-cp k8s/secret.example.yaml k8s/secret.yaml   # fill in, or wire ExternalSecrets/SealedSecrets
-kubectl apply -k k8s/
-```
+Drop a file or add a folder from anywhere on your machine (VS Code-style workspace folders). DuckView profiles it immediately: row/column counts, type mix, null ratios, duplicate rows, min/max/avg per column and equi-width distributions — all computed by DuckDB, never sampled by hand.
 
-The Deployment ships liveness (`/healthz`), readiness/startup (`/readyz`), non-root + read-only rootfs, an `emptyDir` spill volume, a PVC for `/data`, `ClientIP` session affinity (keeps SSE streams pinned) and Prometheus scrape annotations (`k8s/servicemonitor.yaml` for the Operator).
+<p align="center"><img src="docs/screenshots/overview.png" alt="Overview page with KPIs, schema profile and distributions" width="92%"></p>
 
-## Configuration
+### Workbench — an IDE for SQL
 
-`duckview.config.yaml` is loaded from `$DUCKVIEW_CONFIG`, `./duckview.config.yaml`, or `/etc/duckview/duckview.config.yaml`. Values may reference environment variables with `${VAR}` / `${VAR:-default}` (nesting allowed). Any key can also be overridden with `DUCKVIEW__<SECTION>__<KEY>` (e.g. `DUCKVIEW__DUCKDB__MAX_RESULT_ROWS=1000`), and well-known short names (`PORT`, `JWT_SECRET`, `ENCRYPTION_KEY`, `DUCKVIEW_DATA_DIR`, `DATABASE_URL`, `OIDC_*`, `DUCKDB_MEMORY_LIMIT`, …) are honoured. The effective, redacted config is available via `duckview config` and `GET /api/admin/config`.
+Tabs with per-tab *Stop*, cursor and draft persistence, a schema explorer that opens at the bottom when you click a file, chart / plan / profile views, `.sql` import/export, a saved-query library with folders and tags, and streaming results over WebSocket. Every pane is a resizable splitter; every component can be hidden and restored.
 
-Key settings:
+<p align="center"><img src="docs/screenshots/copilot.png" alt="Workbench with the DuckCopilot drawer docked on the right" width="92%"></p>
 
-| Section | Setting | Notes |
+### Dashboards — from query to executive view in minutes
+
+KPI, chart, table and Markdown widgets on a drag-and-drop grid with auto-refresh. Widgets run the same guarded queries as the workbench — and agents can build dashboards for you through `create_dashboard_widget`.
+
+<p align="center"><img src="docs/screenshots/dashboard.png" alt="BI dashboard with KPIs, bar and line charts" width="92%"></p>
+
+---
+
+## 🧊 Lakehouse connectors
+
+Attach catalogs once; query them as `alias.schema.table` from SQL, dashboards, Copilot and agents alike. Credentials are encrypted at rest and applied to running engines **without a restart** — your in-memory tables survive.
+
+| Platform | How | Auth |
 |---|---|---|
-| `security` | `data_jail_directory` | Every DuckDB file read/write is confined here. |
-| | `enable_external_access` | `false` (default) blocks S3/GCS/HTTP/MotherDuck and extension installs. Set `true` to use remote sources — local files stay jailed by the Node guard. |
-| | `lock_configuration` | DuckDB refuses `SET`/`PRAGMA` on hardened settings from any connection. |
-| | `allowed_extensions` / `blocked_extensions` | `INSTALL`/`LOAD` allow-list; `allow_arbitrary_extensions: true` disables the allow-list (blocked list still applies). |
-| | `jwt_secret`, `encryption_key` | Required in `NODE_ENV=production`; ephemeral (with a warning) in dev. |
-| `database` | `metadata_url` | `sqlite://duckview_meta.db` or `postgres://…`; migrations run at start. |
-| `auth` | `strategy` | `local` or `oidc` (Authorization Code + PKCE, stateless signed `state`). `oidc.admin_emails` promotes SSO users to ADMIN. |
-| `security` | `filesystem_mode` | `full` (default, VS Code-like): add any local folder to the explorer, query files anywhere on the host, cloud sources on. `sandboxed` (multi-tenant): everything confined to `data_jail_directory`, external access off unless enabled. Relative paths always anchor to the data directory. |
-| `duckdb` | `extension_directory` | Where `httpfs`/`azure`/`arrow`/`iceberg`/`delta` are installed. The image ships them pre-installed at `/app/duckdb-extensions` (`scripts/install-extensions.mjs`). |
-| | `export_ttl_seconds`, `export_max_rows` | Server-side export files expire after the TTL. |
-| `copilot` | `provider`, `model`, `api_key`, `base_url`, `allow_byok` | DuckCopilot LLM bridge (`anthropic` / `openai` / `ollama`); users may bring their own key when `allow_byok` is true. |
-| `duckdb` | `default_memory_limit` | `80%` of host RAM or absolute (`16GB`). Per-workspace overrides in the UI. |
-| | `default_threads`, `temp_directory`, `query_timeout_seconds`, `max_result_rows` | Threads/timeout are per-workspace tunable; results are hard-capped for the grid. |
-| `mcp` | `default_page_size` / `max_page_size` | 50 / 200 rows per tool call; `max_cell_chars` truncates long strings. |
-| | `require_confirmation_for_mutations` | HITL gate for agents. |
-| `observability` | `metrics_enabled`, `otel.*` | Prometheus at `/metrics`; OTLP/HTTP trace export when `otel.enabled`. |
+| **AWS Glue / SageMaker Lakehouse** | Native DuckDB `ATTACH` over Glue's Iceberg REST endpoint (SigV4). Federated / S3 Tables catalogs via `s3tablescatalog/<bucket>`. | Access keys or the server's IAM role |
+| **Amazon S3 Tables** | `ATTACH` by table-bucket ARN | Access keys or IAM role |
+| **Iceberg REST** | Polaris, Lakekeeper, Nessie, Snowflake Open Catalog, Tabular, Unity Catalog IRC | Bearer · OAuth2 client credentials · none |
+| **Databricks** | Browse Unity Catalog; run SQL on a **SQL warehouse** (Statement Execution API); **materialise** results into DuckDB to join with local data; optionally attach UniForm tables natively | PAT or OAuth M2M — works with **Free Edition** |
 
-## Security model
+<p align="center"><img src="docs/screenshots/lakehouse-wizard.png" alt="Lakehouse connection wizard" width="70%"></p>
 
-1. **Filesystem jail (Node layer).** `DataJail` resolves every path-looking SQL string literal (`'sales.parquet'`, `read_csv('/x')`, `COPY … TO`, `ATTACH`) against `data_jail_directory`, rejects any `..` segment, home-relative paths, drive letters, null bytes, and symlinks that escape — then **rewrites relative literals to absolute jail paths** before the SQL reaches DuckDB.
-2. **DuckDB hardening (engine layer).** Each engine starts with `memory_limit`, `threads`, `temp_directory`, autoinstall off; then `SET allowed_directories = [jail, spill]`, `SET enable_external_access = false`, `SET lock_configuration = true`. A literal that dodges the Node heuristic (e.g. built with `concat()`) still hits DuckDB's own `Permission Error`.
-3. **Statement classification.** A quote/comment/CTE-aware lexer classifies each statement as `read` / `write` / `destructive` / `admin`. `READ_ONLY` users and tokens without `write` cannot run mutating SQL; `admin` statements (`SET`, `PRAGMA`, `ATTACH`, `INSTALL`, `LOAD`, `CALL`) require the `admin` scope for agents.
-4. **Human-in-the-loop for agents.** Any mutating statement from an MCP/API-token actor is blocked with an `approval_required` challenge (the verbs, per-statement previews, and how to proceed) until it is re-issued with `dry_run: false`. `save_dataset` is gated the same way.
-5. **Secrets.** Stored S3/GCS/Azure/HTTP/Postgres/MotherDuck credentials are AES-256-GCM encrypted (unique IV, auth tag, row-id as AAD) and applied via `CREATE SECRET` / `motherduck_token` only for the owning user's engine. Passwords use scrypt; API tokens are `dv_…` random strings stored as SHA-256 hashes and shown once.
-6. **Isolation & limits.** One DuckDB instance per workspace, a fresh connection per query (so `interrupt()` on timeout/cancel is query-scoped), row caps, cell truncation, rate limiting, and a full audit trail (`actor_type` USER/AGENT, action, SQL, duration, IP, status).
+Browsing is lazy — DuckView lists namespaces and tables without loading table metadata until you `DESCRIBE` or query. A tab's **engine picker** switches between DuckDB and any Databricks warehouse; remote results land in the same grid with a one-click *Materialise into DuckDB*.
 
-## Layout
+---
 
-Every region resizes like an IDE: drag the splitters between the side bar and the main area, between the editor and the results pane, and between the side bar sections (Explorer · Tables & views · Saved queries · History). Section headers collapse, the side bar can be hidden, and double-clicking a splitter resets it.
+## 🤖 Built for AI agents
 
-Any component can be removed to declutter: hover a panel header and click its ×. Hidden components are listed under **Layout** in the header (with a count badge) for one-click restore, and Settings → Layout has a checklist of every component per page. Sizes and hidden components are remembered per browser.
+DuckView treats agents as first-class users. **One tool registry** backs three surfaces, so they can never drift:
 
-## Themes
+- **MCP server** — stdio, legacy SSE and Streamable HTTP; 10 tools, 3 resources, 2 guided prompts.
+- **REST façade** — `POST /api/agent/v1/tools/<tool>` for frameworks that prefer plain HTTPS.
+- **OpenAPI 3.0** — generated on the fly for Bedrock Agents action groups and AgentCore Gateway targets.
 
-Six built-in themes decide both the colour system and the typeface — three dark (**Midnight** zinc/violet · **Graphite** neutral/blue · **Fjord** Nord-style teal) and three light (**Daylight** violet · **Professional** navy on grey with IBM Plex, for corporate/print contexts · **Paper** warm off-white with orange). Switch from the header quick-menu or Settings → Appearance, where you can also override the sans/mono fonts and the UI scale independently of the theme. Every colour in the app (surfaces, tones, status, code editor, chart series/grid/tooltips) resolves through runtime CSS variables set on `<html>` — Tailwind's `@theme` tokens reference them, so opacity variants like `bg-zinc-800/60` re-theme too. Chart palettes are validated per theme for colour-vision-deficiency separation and contrast against each surface. Preference is stored in the browser (`duckview.theme`); `prefers-color-scheme` picks Midnight or Daylight on first load.
+<p align="center"><img src="docs/screenshots/agents.png" alt="Agent & MCP hub with registered agents, framework snippets and the live inspector" width="92%"></p>
 
-## Settings
+**Register an agent** — Strands, LangGraph, LangChain, CrewAI, AgentCore Runtime / Gateway, Bedrock Agents or anything custom — and DuckView mints a workspace-scoped token, shows a copy-paste snippet with the token already filled in, attributes every call in the **live inspector**, and lets you self-test or *chat with* AWS-hosted agents right from the hub.
 
-Settings is split into categories in a left-hand nav (deep-linkable as `#/settings/<category>`): **Appearance** (themes, fonts, scale) · **Layout** (show/hide components) · **Hardware** (live gauges, resources, warm engines) · **Engine** (memory, threads, timeout, sandbox) · **Storage** (cloud connections, data connections) · **Copilot** (provider status) · **Account** · **Users** (admin).
+```python
+# Strands — the whole integration
+duckview = MCPClient(lambda: streamablehttp_client("https://duckview.example.com/mcp",
+                                                   headers={"Authorization": "Bearer dv_…"}))
+with duckview:
+    Agent(tools=duckview.list_tools_sync())("Which region grew fastest last quarter?")
+```
 
-## Lakehouse connectors
+**Safety is not optional.** Results are capped, long strings truncated, paths jailed, and every mutating statement — local or on a Databricks warehouse — returns an *approval challenge* until a human re-issues it with `dry_run=false`.
 
-Connect catalogs from **Settings → Storage → Lakehouse connections** or the **Lakehouse** root of the explorer (`+`). Credentials are AES-256-GCM encrypted; secrets and `ATTACH` statements are hot-applied to your running engines (in-memory tables survive), and attached catalogs are queried as `alias.schema.table` from SQL, dashboards, Copilot and agents alike. Browsing is lazy (namespaces/tables from the REST catalog; table metadata only on `DESCRIBE`).
-
-| Provider | How it works | Auth |
-|---|---|---|
-| **AWS Glue / SageMaker Lakehouse** | `ATTACH '<account>[:catalog]' (TYPE ICEBERG, ENDPOINT_TYPE glue)` — Glue's Iceberg REST endpoint, SigV4-signed. Sub-catalogs such as `s3tablescatalog/<bucket>` cover SageMaker Lakehouse / federated catalogs. | Access keys, or the server's default credential chain (IAM role, SSO profile) |
-| **Amazon S3 Tables** | `ATTACH 'arn:aws:s3tables:…:bucket/<name>' (TYPE ICEBERG, ENDPOINT_TYPE s3_tables)` | same |
-| **Iceberg REST catalog** | Polaris, Lakekeeper, Nessie, Snowflake Open Catalog, Tabular, Unity Catalog IRC … `ATTACH '<warehouse>' (TYPE ICEBERG, ENDPOINT …)` | Bearer token · OAuth2 client credentials (`OAUTH2_SERVER_URI`, scope) · none |
-| **Databricks** | Unity Catalog REST for browsing (catalog → schema → table, formats, UniForm flag); the **SQL Statement Execution API** for running SQL on a SQL warehouse (polling, chunk paging, cancellation, typed rows); optional `ATTACH` of the catalog through the Unity Catalog Iceberg REST endpoint so UniForm/Iceberg tables run natively in DuckDB. | PAT or OAuth M2M service principal (`/oidc/v1/token`, `all-apis`) |
-
-In the workbench a tab's **engine picker** switches between *DuckDB (local)* and any Databricks SQL warehouse; remote results land in the same grid and can be **materialised into DuckDB** (rows stream through NDJSON into a typed `CREATE TABLE`, so you can join them with local files). Agents get the same through `browse_storage(provider=lakehouse)`, `execute_query` on attached catalogs, `lakehouse_query(connection_id, sql)` for warehouses and `inspect_schema(…, connection_id)` for non-attached Databricks tables. Non-read statements sent to a warehouse by an agent are held for human approval exactly like local SQL. In `filesystem_mode: sandboxed` (external access off) catalogs can be configured but not attached; Databricks warehouses still work.
-
-`GET /api/lakehouse/providers` · `GET/POST/PATCH/DELETE /api/lakehouse-connections[/:id]` · `POST /api/lakehouse-connections/:id/test` · `GET /api/lakehouse/browse?connection_id&workspace_id[&catalog][&schema]` · `GET /api/lakehouse/:id/inspect?table=` · `POST /api/lakehouse/:id/query {sql, max_rows?, dry_run?}` · `POST /api/lakehouse/:id/materialize {sql, table, workspace_id}`. Config: `lakehouse.statement_timeout_seconds`, `lakehouse.max_rows`, `lakehouse.materialize_max_rows`.
-
-## Agent integrations
-
-The **Agent & MCP hub** (`#/mcp`) registers the agents that call DuckView and gives each one a dedicated, workspace-scoped token (`read + mcp`, optionally `write` — mutations are still held for approval). Every tool call is attributed to the agent (call/error counters, "last seen", the live inspector shows the agent name and whether it came over MCP or REST). Copy-paste snippets are generated per framework with the token substituted:
-
-| Framework | Integration |
+| Tool | What it does |
 |---|---|
-| **Strands Agents** | `MCPClient(lambda: streamablehttp_client(url, headers=…))` → `Agent(tools=…)` |
-| **LangGraph** / **LangChain** | `langchain-mcp-adapters` `MultiServerMCPClient` → `create_react_agent` / `create_agent` |
-| **CrewAI** | `MCPServerAdapter({url, transport: "streamable-http", headers})` |
-| **AgentCore Runtime** | `BedrockAgentCoreApp` entrypoint (Strands + DuckView MCP) deployable with the starter toolkit; DuckView can **invoke it back** (`InvokeAgentRuntime`, SSE or JSON) from the hub or as a Copilot backend |
-| **AgentCore Gateway** | `create_gateway_target` with DuckView as an **MCP server target** or an **OpenAPI target** (API-key credential provider holding the DuckView token) |
-| **Bedrock Agents (Classic)** | Action group from the generated **OpenAPI 3.0** document + a Lambda forwarder to the REST façade; invocation (`InvokeAgent`) from the hub / Copilot. Bedrock Agents Classic is closed to new customers — prefer AgentCore for new builds. |
-| **Custom / HTTP** | `curl`, Python `requests`, or any MCP client config |
+| `execute_query` | Guarded DuckDB SQL with paging — including attached lakehouse catalogs |
+| `profile_dataset` · `inspect_schema` · `explain_query` | SUMMARIZE stats, DESCRIBE without scanning, physical plans with timings |
+| `list_accessible_data` · `browse_storage` | Workspaces, tables, files, cloud buckets and lakehouse catalogs — one level at a time |
+| `lakehouse_query` | SQL on a Databricks SQL warehouse |
+| `save_dataset` · `list_dashboards` · `create_dashboard_widget` | Materialise results, build dashboards |
 
-Both surfaces share one tool registry (`packages/server/src/agent/tools.ts`): the **MCP server** and the **REST façade** — `GET /api/agent/v1/tools` (names, descriptions, JSON-schema inputs) and `POST /api/agent/v1/tools/<tool>` (returns `{text, structured, is_error}`; invalid arguments → 400) — plus `GET /api/agent/openapi.json`. Registered-agent endpoints: `GET/POST /api/agents`, `GET/PATCH/DELETE /api/agents/:id`, `POST /api/agents/:id/rotate-token`, `GET /api/agents/:id/snippets`, `POST /api/agents/:id/test` (runs `list_accessible_data` as the agent), `POST /api/agents/:id/invoke` (SSE `delta*` → `done`), `GET /api/agents/discover?kind=bedrock_agents|agentcore_runtimes|bedrock_models&region=` (pickers, server AWS credentials), `GET /api/agents/frameworks`, `GET /api/agents/snippets?framework=`.
+---
 
-## DuckCopilot
+## 🧠 DuckCopilot
 
-An in-app assistant docked beside the workbench and the dashboard builder. Every turn is hydrated automatically with the workspace's tables/views (columns + types), the data files in the jail, the configured cloud buckets, the SQL in the active tab, and — for selected files/tables — `SUMMARIZE` statistics (min/max/distinct/null %). Providers: **Anthropic** (official SDK, streaming, default `claude-opus-5`), **OpenAI** (`gpt-4o`), **Ollama** (local, OpenAI-compatible endpoint), **Amazon Bedrock** (Converse streaming — Claude on Bedrock, model/inference-profile picker), **Bedrock Agent** (`InvokeAgent`, one session per conversation) and **AgentCore runtime** (`InvokeAgentRuntime`; the workspace context is sent as `payload.context` so your own Strands/LangGraph/CrewAI agent can use it). AWS providers use the server's default credential chain (`copilot.aws_region`, `copilot.bedrock_agent_*`, `copilot.agentcore_runtime_arn`, or bring-your-own from the drawer — including a one-click pick of any registered invokable agent). Keys are server-managed (`copilot.*`) or bring-your-own from the drawer's settings (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query* (sends the failing SQL + DuckDB error), *Suggest questions* (top analytical questions for a selected dataset). Conversations persist in `chat_history` with the context snapshot of each turn.
+Ask in plain English; get DuckDB SQL you can insert, open in a tab, or *run & inspect* — the result is explained back in business language. Copilot sees your tables and columns, data files, buckets, the active tab's SQL and, for selected datasets, `SUMMARIZE` statistics.
 
-`POST /api/copilot/chat` streams SSE events (`context` → `delta`* → `done` | `error`); `GET /api/copilot/config`, `POST /api/copilot/models`, `GET /api/copilot/conversations`, `GET /api/copilot/messages`, `DELETE /api/copilot/conversations/:id`.
-
-## MCP server
-
-**Transports**
-
-| Mode | How |
+| Provider | Notes |
 |---|---|
-| stdio | `duckview mcp --token dv_… [--workspace <id>]` (or `DUCKVIEW_API_TOKEN`) — stdout is JSON-RPC only, logs go to stderr |
-| SSE (2024-11-05) | `GET /mcp/sse` + `POST /mcp/messages?sessionId=…` with `Authorization: Bearer dv_…` |
-| Streamable HTTP (2025-03-26) | `POST/GET/DELETE /mcp` with `Authorization: Bearer dv_…` and `mcp-session-id` |
+| **Anthropic** | Official SDK, streaming, `claude-opus-5` by default |
+| **OpenAI** · **Ollama** | `gpt-4o`, or any local model over the OpenAI-compatible endpoint |
+| **Amazon Bedrock** | Converse streaming with model / inference-profile discovery |
+| **Bedrock Agent** · **AgentCore runtime** | Route the drawer to *your* deployed agent; DuckView passes the workspace context along |
 
-Tokens need the `mcp` scope (plus `write` for mutations and `admin` for administrative SQL). A token may be pinned to one workspace; otherwise pass `workspace_id` to tools or `?workspace_id=` on connect.
+Keys can be server-managed or bring-your-own (kept in the browser, sent per request, never stored).
 
-```bash
-claude mcp add --transport http duckview http://localhost:4200/mcp --header "Authorization: Bearer dv_…"
-```
+---
 
-**Tools**
+## 🎨 Themes
 
-| Tool | Purpose |
-|---|---|
-| `execute_query(sql, workspace_id?, page_size?, page?, dry_run?)` | Runs SQL; returns a Markdown table + typed JSON (`columns`, `rows`, `total_rows`, `truncated`, `rows_changed`). Hard cap 200 rows/call, long strings truncated. Mutations need `dry_run=false`. |
-| `profile_dataset(table_or_path, workspace_id?)` | `SUMMARIZE` stats: types, min/max, approx distinct, null %, quartiles, row count, footprint. |
-| `explain_query(sql, workspace_id?, analyze?)` | Physical plan as JSON tree + ASCII with cardinality estimates; `analyze=true` adds measured timings (read-only SQL only). |
-| `list_accessible_data(workspace_id?)` | Workspaces, tables/views with columns, every data file/Delta/Iceberg table in the jail, and the attached lakehouse catalogs (with attach status). |
-| `save_dataset(sql, output_format, target_filename, workspace_id?, dry_run?)` | `COPY (sql) TO` parquet/csv/json inside the jail (`exports/` by default). |
-| `browse_storage(provider?, path?, connection_id?, bucket?, catalog?, schema?)` | One level of the data directory, cloud connections → buckets → objects (S3/R2/GCS/Azure), or lakehouse connections → schemas → tables (with the engine each table runs on). |
-| `inspect_schema(file_path_or_table, connection_id?)` | Columns/types/nullability for tables, files, remote objects, `.duckdb` files, attached lakehouse tables or a SELECT — no scan; `connection_id` reads Unity Catalog metadata for non-attached Databricks tables. |
-| `lakehouse_query(connection_id, sql, page_size?, dry_run?)` | Runs SQL on a Databricks SQL warehouse; non-read statements need `dry_run=false` after approval. |
-| `list_dashboards(workspace_id?)` | Dashboards with their widgets and layouts. |
-| `create_dashboard_widget(dashboard_id | dashboard_name, title, sql, widget_type, chart_config?, refresh_interval_sec?)` | Builds dashboards autonomously; the SQL is validated read-only and dry-run first. |
+Six themes decide both colour and typeface, applied through runtime CSS variables so every component — charts, code editor, gauges — follows. First visit follows your OS scheme.
 
-**Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines).
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screenshots/theme-fjord.png" width="100%" alt="Fjord theme"><br><sub><b>Fjord</b> · Nord-style teal</sub></td>
+    <td align="center"><img src="docs/screenshots/theme-graphite.png" width="100%" alt="Graphite theme"><br><sub><b>Graphite</b> · neutral / blue</sub></td>
+    <td align="center"><img src="docs/screenshots/theme-daylight.png" width="100%" alt="Daylight theme"><br><sub><b>Daylight</b> · light / violet</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/theme-professional.png" width="100%" alt="Professional theme"><br><sub><b>Professional</b> · corporate navy, IBM Plex</sub></td>
+    <td align="center"><img src="docs/screenshots/theme-paper.png" width="100%" alt="Paper theme"><br><sub><b>Paper</b> · warm off-white / orange</sub></td>
+    <td align="center"><img src="docs/screenshots/appearance.png" width="100%" alt="Appearance settings"><br><sub><b>Appearance</b> · fonts & UI scale</sub></td>
+  </tr>
+</table>
 
-**Prompts** — `data_quality_audit(table_or_path)` and `sql_optimization(sql)` encode complete agent workflows over the tools above.
+---
 
-## HTTP API (summary)
+## 🔒 Security model
 
-| Area | Endpoints |
-|---|---|
-| Auth | `POST /api/auth/login` · `POST /api/auth/register` · `GET /api/auth/me` · `POST /api/auth/password` · `GET /api/auth/oidc/login` · `GET /api/auth/oidc/callback` |
-| Workspaces | `GET/POST /api/workspaces` · `GET/PATCH/DELETE /api/workspaces/:id` · `POST /api/workspaces/:id/restart` · `…/tabs` CRUD (`sql_content`, `chart_config`, `cursor_position`, `order_index`) |
-| Storage explorer | `GET/POST/DELETE /api/workspaces/:id/folders` (workspace folders) · `GET /api/storage/browse?workspace_id&path` (folder picker) · `GET /api/storage/local?workspace_id&path` (tree, one level) · `GET /api/storage/cloud?connection_id[&bucket&prefix]` (buckets / objects with folders via S3 `ListObjectsV2` delimiter or Azure hierarchy) · `POST /api/storage/inspect {workspace_id,target}` (`DESCRIBE … LIMIT 0` for files, `s3://`/`r2://`/`gs://`/`az://` objects, tables, `.duckdb` files, subqueries; Parquet row counts from the footer) |
-| Cloud connections | `GET /api/cloud-connections/providers` · `GET/POST/PATCH/DELETE /api/cloud-connections` (S3 · R2 · GCS · Azure, AES-256-GCM at rest, applied as DuckDB `CREATE SECRET` to every engine of the owner) · `POST /api/cloud-connections/:id/test` |
-| Exports | `POST /api/workspaces/:id/export {sql, format: parquet\|csv\|json\|arrow}` (native `COPY … TO` on disk, Arrow IPC via a streaming writer) · `GET /api/exports` · `GET /api/exports/:id/download` (streamed with `Content-Length`) · `DELETE /api/exports/:id` |
-| BI | `…/queries` CRUD (saved queries with folders/tags) · `…/dashboards` CRUD · `GET/PATCH/DELETE /api/dashboards/:id` (layout) · `POST/PATCH/DELETE /api/dashboards/:id/widgets[/:wid]` · `POST /api/dashboards/:id/widgets/:wid/data` |
-| Data | `POST /api/workspaces/:id/files` (multipart upload into the jail) · `DELETE /api/workspaces/:id/files?path=` · `POST /api/workspaces/:id/overview` (KPIs, null ratios, sample, distributions) · `GET /api/workspaces/:id/catalog` |
-| Query | `POST /api/workspaces/:id/query` · `/explain` · `/profile` · `/save` · `WS /api/ws/query` (auth → run/cancel; schema → rows* → done) |
-| Live | `WS /api/ws/events` — audit rows, MCP tool invocations and session events in real time (admins: all; others: own) · `GET /api/system/live` — CPU %, RAM, `duckdb_memory()` per engine, scratch/data disk usage |
-| Agents | `GET/POST/DELETE /api/tokens` · `GET /api/mcp/sessions` · `GET /api/mcp/info` (Claude Desktop / Cursor / Claude Code snippets) · `/api/agents…` (registered agents, snippets, self-test, invoke, discovery) · `GET /api/agent/openapi.json` · `GET/POST /api/agent/v1/tools[/:tool]` (REST façade) |
-| Lakehouse | `GET /api/lakehouse/providers` · `/api/lakehouse-connections…` · `GET /api/lakehouse/browse` · `GET /api/lakehouse/:id/inspect` · `POST /api/lakehouse/:id/query` · `POST /api/lakehouse/:id/materialize` |
-| Connections | `GET /api/connections/types` · `GET/POST/DELETE /api/connections` |
-| Ops | `GET /api/system` · `GET /api/audit` · `GET/POST/PATCH/DELETE /api/admin/users` · `GET /api/admin/engines` · `POST /api/admin/engines/:id/evict` · `GET /api/admin/config` |
-| Probes | `GET /healthz` · `GET /readyz` · `GET /metrics` |
+- **Two layers of sandboxing** — a Node-side filesystem jail *and* DuckDB's own `allowed_directories` / `enable_external_access` / `lock_configuration`, so even `SET` and `PRAGMA` can't loosen the box. `filesystem_mode: full` for a personal workstation, `sandboxed` for multi-tenant.
+- **A single choke point** — every query, from the UI or an agent, passes authorization → SQL guard → HITL → audit.
+- **Secrets never leave the server** — cloud, lakehouse and data-connection credentials are AES-256-GCM encrypted with the row id as AAD and applied to DuckDB as scoped `CREATE SECRET`s; the API never returns them.
+- **Scoped tokens** — `read` / `write` / `mcp` / `admin`, optional workspace pinning and expiry, SHA-256 at rest, revocable per agent.
+- **Observability** — Prometheus metrics, OpenTelemetry traces, liveness/readiness probes, real-time audit feed.
 
-Errors are uniform JSON: `{ error, message, request_id, challenge? }` — `403 SANDBOX_VIOLATION`, `409 APPROVAL_REQUIRED` (with the HITL challenge), `408 QUERY_TIMEOUT`, `400 SQL_ERROR` (DuckDB parser/binder errors), `429 RATE_LIMITED`.
+---
 
-## CLI
+## 🏗 Architecture at a glance
 
 ```
-duckview serve [--port] [--host]
-duckview mcp [--token dv_…|--user email] [--workspace id]
-duckview migrate
-duckview create-user --email … --password … [--role ADMIN|USER|READ_ONLY]
-duckview create-token --email … --name … [--scopes read,write,mcp] [--workspace id] [--days n]
-duckview config
+React 19 · Vite · Tailwind v4 · Chart.js · CodeMirror
+        │  REST · WebSocket (rows, live events) · SSE (Copilot, MCP) · Streamable HTTP
+Fastify 5 (TypeScript strict)
+  auth (local · OIDC · API tokens)   QueryService (authz → guard → HITL → audit)
+  Lakehouse (Iceberg ATTACH · Databricks SQL API)   Agent tool registry → MCP + REST + OpenAPI
+  Copilot bridge (Anthropic · OpenAI · Ollama · Bedrock · Bedrock Agent · AgentCore)
+        │
+EngineManager — one native DuckDB instance per workspace (LRU + idle TTL), jailed and locked
+        │
+Metadata (Drizzle) — SQLite by default, PostgreSQL via DATABASE_URL
 ```
 
-## Observability
+Full details — configuration keys, every endpoint, the MCP tool contracts, CLI, Kubernetes and CI — are in the [technical reference](docs/REFERENCE.md).
 
-- **Logs:** pino structured JSON (pretty in dev TTYs), `x-request-id` propagated.
-- **Metrics (`/metrics`):** `duckview_queries_total{actor,class,status}`, `duckview_query_duration_seconds` histogram, `duckview_query_rows_returned`, `duckview_active_queries`, `duckview_engines_active`, `duckview_mcp_connections_active{transport}`, `duckview_mcp_tool_calls_total{tool,status}`, `duckview_mcp_tool_duration_seconds`, `duckview_mcp_hitl_challenges_total`, `duckview_sandbox_violations_total{actor}`, `duckview_ws_connections_active`, host/DuckDB memory gauges, plus Node process defaults.
-- **Traces:** `duckdb.query` and `mcp.tool.<name>` spans (`db.system`, `db.statement`, workspace, actor, statement class) via OpenTelemetry; exported over OTLP/HTTP when `observability.otel.enabled`.
+---
 
-## Project layout
+## 🧪 Quality
 
-```
-packages/server/src
-  config/        YAML + env loader (zod-validated)
-  db/            Drizzle schemas (sqlite + pg), store factory, migrations in ../drizzle
-  engine/        sandbox (DataJail), sql-guard (lexer/classifier/rewriter), duckdb (engines, overview, memory stats), results
-  security/      AES-256-GCM, scrypt, token hashing
-  services/      audit, auth/tokens, connections, files (uploads), workspaces/tabs, query (authz + HITL),
-                 lakehouse (Iceberg ATTACH + Databricks), databricks (UC + Statement Execution client), agents, aws (Bedrock/AgentCore bridge)
-  agent/         tool registry (shared by MCP + REST), OpenAPI generator, framework snippets
-  mcp/           server (registry → tools, resources, prompts), stdio, http (SSE + Streamable HTTP)
-  routes/        auth (local + OIDC), workspaces, query (REST + WS), files, events (WS), connections, tokens, admin, system
-  observability/ pino, prom-client, OpenTelemetry, live event bus, CPU sampler
-packages/web/src
-  features/overview   drop zone · KPI badges · null-ratio bars · Chart.js distributions · sample grid
-  features/workspace  schema tree (click-to-insert) · tabs with per-tab Stop · editor (cursor persisted) · streaming grid · chart · plan · profile
-  features/settings   categorised left-nav: appearance (themes/fonts/scale) · layout · hardware gauges · engine tuning · storage · copilot · account · users
-  theme/              theme definitions (ramps, accents, tones, chart series, fonts) · store/theme.ts applies them as CSS variables
-  features/mcp        registered agents (tokens, self-test, chat) · framework snippets + OpenAPI · client snippets · live inspector (WS)
-  features/explorer   VS Code-style tree (data dir, folders, cloud, lakehouse) · schema panel · cloud & lakehouse wizards
-```
+`pnpm test` runs **147 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API) and exercise the agent façade against a fake AWS bridge. `scripts/smoke.mjs` verifies a running instance end to end.
 
-## Tests
+---
 
-```bash
-pnpm test        # 147 tests: jail, SQL guard, crypto, config, and integration suites that boot real DuckDB
-                 # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
-                 # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
-                 # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +
-                 # Statement Execution API) and the agent façade / AWS providers against a fake AWS bridge
-node scripts/smoke.mjs http://localhost:4200 admin@example.com <password>   # against a running instance
-```
+## 🗺 Roadmap
+
+- Delta Lake browsing via the `delta` extension
+- Scheduled dashboard snapshots & alerts
+- Row-level access policies per workspace
+- Shared workspaces & comments
+
+Ideas and pull requests welcome — open an [issue](https://github.com/contact-ajmal/DuckView/issues).
+
+<p align="center"><sub>Built with DuckDB, Fastify, React and a lot of ⌘↵.</sub></p>

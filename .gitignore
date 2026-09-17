@@ -10,3 +10,6 @@ data/exports/
 /tmp/
 coverage/
 .DS_Store
+
+# third-party design references — kept locally, not published
+docs/reference/

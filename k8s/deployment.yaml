@@ -29,7 +29,7 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
         - name: duckview
-          image: duckview/enterprise:latest
+          image: ghcr.io/contact-ajmal/duckview:latest
           imagePullPolicy: IfNotPresent
           args: ["serve"]
           ports:
