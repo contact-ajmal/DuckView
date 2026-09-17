@@ -11,7 +11,8 @@
 
 <p align="center">
   <a href="https://github.com/contact-ajmal/DuckView/actions/workflows/ci.yml"><img src="https://github.com/contact-ajmal/DuckView/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/contact-ajmal/DuckView/actions/workflows/docker-publish.yml"><img src="https://github.com/contact-ajmal/DuckView/actions/workflows/docker-publish.yml/badge.svg" alt="Docker image"></a>
+  <a href="https://hub.docker.com/r/anbproject/duckview"><img src="https://img.shields.io/docker/v/anbproject/duckview?sort=semver&label=Docker%20Hub&logo=docker&logoColor=white&color=2496ED" alt="Docker Hub"></a>
+  <a href="https://hub.docker.com/r/anbproject/duckview"><img src="https://img.shields.io/docker/pulls/anbproject/duckview?logo=docker&logoColor=white&color=2496ED" alt="Docker pulls"></a>
   <img src="https://img.shields.io/badge/DuckDB-1.5-FFF000?logo=duckdb&logoColor=black" alt="DuckDB 1.5">
   <img src="https://img.shields.io/badge/MCP-stdio%20%C2%B7%20SSE%20%C2%B7%20Streamable%20HTTP-7c3aed" alt="MCP transports">
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript strict">
@@ -55,12 +56,12 @@ DUCKVIEW_ADMIN_EMAIL=admin@example.com DUCKVIEW_ADMIN_PASSWORD='change-me' pnpm 
 # → http://localhost:4200  (set JWT_SECRET / ENCRYPTION_KEY for anything beyond a first look)
 ```
 
-Or with Docker:
+Or with Docker — a multi-arch image (amd64 + arm64) is published to [Docker Hub](https://hub.docker.com/r/anbproject/duckview):
 
 ```bash
 docker run -p 4200:4200 -v duckview-data:/data -v duckview-meta:/app/meta \
   -e DUCKVIEW_ADMIN_EMAIL=admin@example.com -e DUCKVIEW_ADMIN_PASSWORD='change-me' \
-  ghcr.io/contact-ajmal/duckview:latest
+  anbproject/duckview:latest
 ```
 
 `docker compose up` gives you the same with persistent volumes; add `--profile postgres` for a PostgreSQL metadata store, `--profile ollama` for a local Copilot, `--profile observability` for Prometheus + Grafana. Kubernetes manifests live in [`k8s/`](k8s).

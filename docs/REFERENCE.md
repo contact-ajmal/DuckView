@@ -86,7 +86,7 @@ The image (`node:20-bookworm-slim`, multi-stage, runs as `duckuser:duckgroup`) d
 ```bash
 docker run -p 4200:4200 -v $PWD/data:/data -v duckview-meta:/app/meta \
   -e JWT_SECRET=… -e ENCRYPTION_KEY=… -e DUCKVIEW_ADMIN_EMAIL=… -e DUCKVIEW_ADMIN_PASSWORD=… \
-  ghcr.io/contact-ajmal/duckview:latest
+  anbproject/duckview:latest
 ```
 
 ### CI/CD
