@@ -1,16 +1,31 @@
 name: Publish Docker image
 
+# Publishes a multi-arch image (linux/amd64 + linux/arm64) to Docker Hub — and mirrors it to GitHub Container
+# Registry — on every v* tag, or on demand from the Actions tab.
+#
+# Required repository secrets for Docker Hub:
+#   DOCKERHUB_USERNAME  your Docker Hub username / organisation (also the image namespace)
+#   DOCKERHUB_TOKEN     a Docker Hub access token with Read & Write scope (Account settings → Personal access tokens)
+# Optional repository variable:
+#   DOCKERHUB_IMAGE     image name without registry, default "<DOCKERHUB_USERNAME>/duckview"
+
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Extra tag to publish (e.g. 1.0.0-rc1); 'latest' is always pushed"
+        required: false
+        default: ""
 
 permissions:
   contents: read
   packages: write
 
 env:
-  # GitHub Container Registry by default (no secrets needed); set the IMAGE repository variable to publish elsewhere.
-  IMAGE: ${{ vars.IMAGE || 'ghcr.io/contact-ajmal/duckview' }}
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/duckview
 
 jobs:
   build-and-push:
@@ -18,11 +33,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve image names
+        id: names
+        run: |
+          set -euo pipefail
+          images="$(echo "${GHCR_IMAGE}" | tr '[:upper:]' '[:lower:]')"
+          if [ -n "${DOCKERHUB_USERNAME}" ]; then
+            hub="${{ vars.DOCKERHUB_IMAGE }}"
+            [ -n "$hub" ] || hub="${DOCKERHUB_USERNAME}/duckview"
+            images="docker.io/${hub}"$'\n'"${images}"
+            echo "hub_image=docker.io/${hub}" >> "$GITHUB_OUTPUT"
+            echo "hub_repo=${hub}" >> "$GITHUB_OUTPUT"
+            echo "hub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets are not set — publishing to GHCR only."
+            echo "hub=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "images<<EOF"
+            echo "$images"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Set up QEMU (arm64 emulation)
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: steps.names.outputs.hub == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -35,13 +79,18 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE }}
+          images: ${{ steps.names.outputs.images }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
             type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=DuckView
+            org.opencontainers.image.description=DuckDB analytics workspace with lakehouse connectors, BI dashboards, DuckCopilot and an MCP + REST server for AI agents
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=UNLICENSED
 
       - name: Build and push (linux/amd64, linux/arm64)
         uses: docker/build-push-action@v6
@@ -60,11 +109,26 @@ jobs:
 
       - name: Smoke test the pushed image (native arch)
         run: |
+          set -euo pipefail
+          image="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
+          echo "Testing $image"
           docker run -d --name dv -p 4200:4200 \
             -e JWT_SECRET=ci-jwt-secret-0123456789abcdef \
             -e ENCRYPTION_KEY=$(openssl rand -hex 32) \
             -e DUCKVIEW_ADMIN_EMAIL=ci@example.com -e DUCKVIEW_ADMIN_PASSWORD=ci-password-123 \
-            ${{ env.IMAGE }}:${{ github.ref_name }}
+            "$image"
+          for i in $(seq 1 60); do curl -fsS http://localhost:4200/readyz >/dev/null 2>&1 && break; sleep 2; done
           node scripts/smoke.mjs http://localhost:4200 ci@example.com ci-password-123
           docker logs dv | tail -20
           docker rm -f dv
+
+      - name: Update the Docker Hub description from the README
+        if: steps.names.outputs.hub == 'true'
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ steps.names.outputs.hub_repo }}
+          short-description: DuckDB analytics workspace with lakehouse connectors, dashboards, Copilot and an MCP server for AI agents
+          readme-filepath: ./README.md
+          enable-url-completion: true
