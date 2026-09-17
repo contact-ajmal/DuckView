@@ -133,5 +133,5 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ steps.names.outputs.hub_repo }}
           short-description: DuckDB analytics workspace — lakehouse connectors, dashboards, Copilot, MCP server for AI agents
-          readme-filepath: ./README.md
+          readme-filepath: ./docs/DOCKERHUB.md
           enable-url-completion: true
