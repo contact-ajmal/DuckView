@@ -27,10 +27,10 @@ export async function systemRoutes(app: FastifyInstance, ctx: AppContext) {
     checks.metadata_store = { ok: await ctx.store.ping(), detail: ctx.store.dialect };
     try {
       const { accessSync, constants } = await import('node:fs');
-      accessSync(ctx.engines.jail.root, constants.R_OK | constants.W_OK);
-      checks.data_jail = { ok: true, detail: ctx.engines.jail.root };
+      accessSync(ctx.engines.jail.baseDir, constants.R_OK | constants.W_OK);
+      checks.data_directory = { ok: true, detail: ctx.engines.jail.baseDir };
     } catch (err) {
-      checks.data_jail = { ok: false, detail: (err as Error).message };
+      checks.data_directory = { ok: false, detail: (err as Error).message };
     }
     try {
       checks.duckdb = { ok: true, detail: await getDuckDbVersion() };

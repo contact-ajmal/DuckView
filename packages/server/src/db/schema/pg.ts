@@ -3,7 +3,7 @@
  * Mirrors ./sqlite.ts exactly (names, nullability, JSON shapes).
  */
 import { pgTable, text, integer, timestamp, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
-import type { EngineSettings, ChartConfig, TokenScope } from './sqlite.js';
+import type { EngineSettings, ChartConfig, TokenScope, WorkspaceFolder } from './sqlite.js';
 import { AUTH_PROVIDERS, USER_ROLES, CONNECTION_TYPES, ACTOR_TYPES } from './sqlite.js';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -31,6 +31,7 @@ export const workspaces = pgTable(
     name: text('name').notNull(),
     active_db_path: text('active_db_path').notNull().default(':memory:'),
     engine_settings: jsonb('engine_settings').$type<EngineSettings>().notNull().default({}),
+    folders: jsonb('folders').$type<WorkspaceFolder[]>().notNull().default([]),
     created_at: ts('created_at').notNull(),
     updated_at: ts('updated_at').notNull(),
   },

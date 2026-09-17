@@ -36,7 +36,7 @@ beforeAll(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-p2-'));
   const cfg = loadConfig({
     configPath: null,
-    env: { DUCKVIEW_DATA_DIR: path.join(dir, 'data'), DUCKDB_TEMP_DIRECTORY: path.join(dir, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '1GB', DUCKVIEW_ADMIN_EMAIL: 'admin@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', LOG_LEVEL: 'silent' },
+    env: { DUCKVIEW_DATA_DIR: path.join(dir, 'data'), DUCKVIEW_FILESYSTEM_MODE: 'sandboxed', DUCKDB_TEMP_DIRECTORY: path.join(dir, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '1GB', DUCKVIEW_ADMIN_EMAIL: 'admin@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', LOG_LEVEL: 'silent' },
   });
   ctx = await createContext(cfg);
   const user = await ctx.auth.findByEmail('admin@test.local');
@@ -83,9 +83,17 @@ describe('DataJail explorer + full filesystem mode', () => {
     expect(jail.listDir(fs.realpathSync(os.tmpdir())).absolute).toBe(fs.realpathSync(os.tmpdir()));
     expect(() => jail.resolve('../x')).toThrow(SandboxViolation); // traversal stays forbidden even in full mode
   });
-  it('config refuses full mode in production without explicit opt-in', () => {
-    expect(() => loadConfig({ configPath: null, env: { NODE_ENV: 'production', JWT_SECRET: 'x'.repeat(32), ENCRYPTION_KEY: 'a'.repeat(64), DUCKVIEW_FILESYSTEM_MODE: 'full' } })).toThrow(/single-user/);
-    expect(loadConfig({ configPath: null, env: { NODE_ENV: 'production', JWT_SECRET: 'x'.repeat(32), ENCRYPTION_KEY: 'a'.repeat(64), DUCKVIEW_FILESYSTEM_MODE: 'full', DUCKVIEW_ALLOW_FULL_FS: '1' } }).security.filesystem_mode).toBe('full');
+  it('full filesystem mode is the default; sandboxed is the multi-tenant opt-in', () => {
+    expect(loadConfig({ configPath: null, env: {} }).security.filesystem_mode).toBe('full');
+    expect(loadConfig({ configPath: null, env: { DUCKVIEW_FILESYSTEM_MODE: 'sandboxed' } }).security.filesystem_mode).toBe('sandboxed');
+  });
+  it('sandboxed mode refuses folders outside the data directory', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-outside-'));
+    expect((await api('POST', `/api/workspaces/${wsId}/folders`, { path: outside })).status).toBe(403);
+    expect((await api('GET', `/api/storage/browse?workspace_id=${wsId}&path=${encodeURIComponent(os.homedir())}`)).status).toBe(403);
+    const b = await api('GET', `/api/storage/browse?workspace_id=${wsId}`);
+    expect(b.json.path).toBe(fs.realpathSync(path.join(dir, 'data')));
+    fs.rmSync(outside, { recursive: true, force: true });
   });
 });
 
@@ -324,7 +332,7 @@ describe('cloud secrets with httpfs (external access on)', () => {
     const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-p2x-'));
     const cfg = loadConfig({
       configPath: null,
-      env: { DUCKVIEW_DATA_DIR: path.join(d2, 'data'), DUCKDB_TEMP_DIRECTORY: path.join(d2, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '512MB', DUCKVIEW_ADMIN_EMAIL: 'x@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', DUCKVIEW_ENABLE_EXTERNAL_ACCESS: 'true', DUCKDB_EXTENSION_DIRECTORY: extDir, LOG_LEVEL: 'silent' },
+      env: { DUCKVIEW_DATA_DIR: path.join(d2, 'data'), DUCKVIEW_FILESYSTEM_MODE: 'sandboxed', DUCKDB_TEMP_DIRECTORY: path.join(d2, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '512MB', DUCKVIEW_ADMIN_EMAIL: 'x@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', DUCKVIEW_ENABLE_EXTERNAL_ACCESS: 'true', DUCKDB_EXTENSION_DIRECTORY: extDir, LOG_LEVEL: 'silent' },
     });
     const c2 = await createContext(cfg);
     try {
@@ -359,4 +367,75 @@ describe('cloud secrets with httpfs (external access on)', () => {
       fs.rmSync(extDir, { recursive: true, force: true });
     }
   }, 120_000);
+});
+
+describe('full filesystem mode: VS Code-style workspace folders', () => {
+  let c2: AppContext;
+  let app2: Awaited<ReturnType<typeof buildApp>>['app'];
+  let base2: string;
+  let jwt2: string;
+  let ws2: string;
+  let d2: string;
+  let folder: string;
+  const api2 = async (method: string, url: string, body?: unknown) => {
+    const res = await fetch(base2 + url, { method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), authorization: `Bearer ${jwt2}` }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+  };
+  beforeAll(async () => {
+    d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-full-'));
+    folder = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-mounted-'));
+    fs.mkdirSync(path.join(folder, 'nested'));
+    const cfg = loadConfig({ configPath: null, env: { DUCKVIEW_DATA_DIR: path.join(d2, 'data'), DUCKDB_TEMP_DIRECTORY: path.join(d2, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '512MB', DUCKVIEW_ADMIN_EMAIL: 'f@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', LOG_LEVEL: 'silent' } });
+    expect(cfg.security.filesystem_mode).toBe('full');
+    c2 = await createContext(cfg);
+    const u = await c2.auth.findByEmail('f@test.local');
+    const p = c2.auth.principalFromUser(u!, 'jwt');
+    ws2 = (await c2.workspaces.ensureDefault(p)).id;
+    // a file that lives OUTSIDE the data directory, written via an absolute path
+    await c2.queries.run(p, ws2, `COPY (SELECT range AS id, 'x' || range AS label FROM range(42)) TO '${folder.replace(/'/g, "''")}/nested/outside.parquet' (FORMAT PARQUET)`);
+    ({ app: app2 } = await buildApp(c2));
+    await app2.listen({ port: 0, host: '127.0.0.1' });
+    base2 = `http://127.0.0.1:${(app2.server.address() as { port: number }).port}`;
+    jwt2 = ((await (await fetch(base2 + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'f@test.local', password: 'super-secret-pw' }) })).json()) as { token: string }).token;
+  });
+  afterAll(async () => {
+    await app2.close();
+    await c2.shutdown();
+    fs.rmSync(d2, { recursive: true, force: true });
+    fs.rmSync(folder, { recursive: true, force: true });
+  });
+  it('queries absolute paths anywhere and browses from the home directory', async () => {
+    const q = await api2('POST', `/api/workspaces/${ws2}/query`, { sql: `SELECT count(*) FROM '${folder}/nested/outside.parquet'` });
+    expect(q.status).toBe(200);
+    expect((q.json.rows as number[][])[0]![0]).toBe(42);
+    const b = await api2('GET', `/api/storage/browse?workspace_id=${ws2}`);
+    expect(b.json.mode).toBe('full');
+    expect(b.json.path).toBe(fs.realpathSync(os.homedir()));
+    const tmp = await api2('GET', `/api/storage/browse?workspace_id=${ws2}&path=${encodeURIComponent(folder)}`);
+    expect((tmp.json.entries as { name: string; data_files: number }[])).toEqual([{ name: 'nested', path: path.join(fs.realpathSync(folder), 'nested'), data_files: 1 }]);
+  });
+  it('adds a folder, lists it in the explorer and catalog, inspects and removes it', async () => {
+    const add = await api2('POST', `/api/workspaces/${ws2}/folders`, { path: folder });
+    expect(add.status, JSON.stringify(add.json)).toBe(200);
+    const folders = add.json.folders as { path: string; name: string }[];
+    expect(folders[0]!.path).toBe(fs.realpathSync(folder));
+    expect((await api2('POST', `/api/workspaces/${ws2}/folders`, { path: folder })).json.folders).toHaveLength(1); // idempotent
+    expect((await api2('POST', `/api/workspaces/${ws2}/folders`, { path: path.join(folder, 'missing') })).status).toBe(400);
+    const listing = await api2('GET', `/api/storage/local?workspace_id=${ws2}&path=${encodeURIComponent(folder)}`);
+    expect((listing.json.entries as { name: string; type: string; path: string }[])[0]).toMatchObject({ name: 'nested', type: 'dir', path: path.join(fs.realpathSync(folder), 'nested') });
+    const nested = await api2('GET', `/api/storage/local?workspace_id=${ws2}&path=${encodeURIComponent(path.join(folder, 'nested'))}`);
+    expect((nested.json.entries as { name: string; kind: string; path: string }[])[0]).toMatchObject({ name: 'outside.parquet', kind: 'parquet' });
+    const cat = await api2('GET', `/api/workspaces/${ws2}/catalog`);
+    const files = cat.json.files as { path: string; root?: string }[];
+    expect(files.some((f) => f.path.endsWith('nested/outside.parquet') && f.root === fs.realpathSync(folder))).toBe(true);
+    const ins = await api2('POST', '/api/storage/inspect', { workspace_id: ws2, target: `${folder}/nested/outside.parquet` });
+    expect(ins.json.row_count).toBe(42);
+    const rm = await api2('DELETE', `/api/workspaces/${ws2}/folders?path=${encodeURIComponent(fs.realpathSync(folder))}`);
+    expect(rm.json.folders).toEqual([]);
+    expect((await api2('DELETE', `/api/workspaces/${ws2}/folders?path=/nope`)).status).toBe(404);
+  });
+  it('cloud/remote sources are queryable by default in full mode', async () => {
+    const r = await api2('GET', '/api/cloud-connections/providers');
+    expect(r.json.external_access_enabled).toBe(true);
+  });
 });

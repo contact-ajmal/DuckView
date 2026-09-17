@@ -69,7 +69,7 @@ export interface SessionTab { id: string; workspace_id: string; title: string; s
 export interface ColumnSchema { name: string; type: string; kind: 'number' | 'string' | 'boolean' | 'temporal' | 'json' | 'binary' | 'null' }
 export interface QueryResult { columns: ColumnSchema[]; rows: unknown[][]; rowCount: number; totalRows: number | null; truncated: boolean; rowsChanged: number | null; durationMs: number; statementCount: number; statementClass: string; statements?: { verb: string; class: string }[] }
 export interface CatalogObject { database: string; schema: string; name: string; type: 'TABLE' | 'VIEW'; estimated_rows: number | null; column_count: number; sql: string | null; columns: { name: string; type: string; nullable: boolean }[] }
-export interface JailEntry { path: string; kind: string; size_bytes: number; modified_at: string }
+export interface JailEntry { path: string; kind: string; size_bytes: number; modified_at: string; root?: string }
 export interface ApiToken { id: string; name: string; token_prefix: string; scopes: string[]; workspace_id: string | null; expires_at: string | null; last_used_at: string | null; created_at: string }
 export interface McpSession { id: string; transport: string; user: string; workspace_id: string | null; started_at: string; last_activity: string; ip: string }
 export interface AuditEvent { id: string; user_id: string | null; actor_type: string; action: string; resource: string | null; query_text: string | null; duration_ms: number | null; ip_address: string | null; status: string; error: string | null; timestamp: string }

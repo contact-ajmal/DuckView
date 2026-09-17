@@ -41,8 +41,12 @@ export const ConfigSchema = z.object({
         .regex(/^[0-9a-fA-F]{64}$/, 'encryption_key must be a 32-byte hex string (64 hex chars)')
         .optional(),
       data_jail_directory: z.string().default('./data'),
-      /** 'sandboxed' (multi-tenant: file access confined to data_jail_directory) or 'full' (single-user: whole host filesystem). */
-      filesystem_mode: z.enum(['sandboxed', 'full']).default('sandboxed'),
+      /**
+       * 'full' (default, single-user): any local folder can be added to the explorer and DuckDB may read files anywhere
+       * the process can; cloud/remote sources are enabled. 'sandboxed' (multi-tenant): everything is confined to
+       * data_jail_directory and external access is off unless enable_external_access is set.
+       */
+      filesystem_mode: z.enum(['sandboxed', 'full']).default('full'),
       allow_arbitrary_extensions: z.coerce.boolean().default(false),
       allowed_extensions: z.array(z.string()).default(['parquet', 'json', 'icu', 'httpfs', 'iceberg', 'delta', 'motherduck', 'postgres', 'spatial', 'excel']),
       blocked_extensions: z.array(z.string()).default(['shellfs', 'python', 'jemalloc']),
@@ -312,9 +316,6 @@ export function loadConfig(opts: LoadOptions = {}): DuckViewConfig {
     ephemeralSecrets = true;
   }
   cfg.security.data_jail_directory = path.resolve(cfg.security.data_jail_directory);
-  if (cfg.security.filesystem_mode === 'full' && env.NODE_ENV === 'production' && !env.DUCKVIEW_ALLOW_FULL_FS) {
-    throw new Error('security.filesystem_mode=full exposes the whole host filesystem; set DUCKVIEW_ALLOW_FULL_FS=1 to confirm this is a single-user deployment');
-  }
   if (cfg.duckdb.extension_directory) cfg.duckdb.extension_directory = path.resolve(cfg.duckdb.extension_directory);
   cfg.duckdb.temp_directory = path.resolve(cfg.duckdb.temp_directory);
 

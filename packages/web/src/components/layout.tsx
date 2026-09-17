@@ -28,8 +28,8 @@ export function Panel({ title, meta, actions, children, className, bodyClassName
   return (
     <section className={cn('rounded-xl border border-zinc-800 bg-zinc-900/40', className)}>
       {(title || actions) && (
-        <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-2.5">
-          <div className="flex items-baseline gap-2">
+        <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-zinc-800 px-4 py-2.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             {title && <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>}
             {meta && <span className="font-mono text-[11px] text-zinc-500">{meta}</span>}
           </div>

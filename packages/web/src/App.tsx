@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { LogOut, Plus, ChevronDown } from 'lucide-react';
 import { useAuth } from './store/auth';
 import { useWorkspace } from './store/workspace';
-import { api, formatBytes, type SystemInfo, type LiveStats } from './api/client';
 import { LoginPage } from './features/auth/LoginPage';
 import { OverviewPage } from './features/overview/OverviewPage';
 import { WorkspacePage } from './features/workspace/WorkspacePage';
@@ -13,7 +12,7 @@ import { CopilotDrawer } from './features/copilot/CopilotDrawer';
 import { useCopilot } from './store/copilot';
 import { Bot } from 'lucide-react';
 import { Logo } from './components/Logo';
-import { StatusPill, Tag } from './components/layout';
+import { Tag } from './components/layout';
 import { Button, Input, Label, Modal, Spinner, cn } from './components/ui';
 
 type Route = 'overview' | 'query' | 'dashboards' | 'settings' | 'mcp';
@@ -32,32 +31,6 @@ function parseRoute(): Route {
   if (h.startsWith('settings')) return 'settings';
   if (h.startsWith('mcp') || h.startsWith('agents')) return 'mcp';
   return 'overview';
-}
-
-function HeaderStatus() {
-  const [sys, setSys] = useState<SystemInfo | null>(null);
-  const [live, setLive] = useState<LiveStats | null>(null);
-  useEffect(() => {
-    api.get<SystemInfo>('/api/system').then(setSys).catch(() => undefined);
-    const tick = () => api.get<LiveStats>('/api/system/live').then(setLive).catch(() => undefined);
-    void tick();
-    const t = setInterval(tick, 5000);
-    return () => clearInterval(t);
-  }, []);
-  const safe = !!sys && !sys.duckdb.external_access && sys.duckdb.configuration_locked;
-  const headroom = live ? Math.max(0, live.duckdb.memory_limit_bytes - live.duckdb.memory_usage_bytes) : null;
-  return (
-    <div className="hidden items-center gap-1.5 lg:flex">
-      <StatusPill dot tone="green" title="Native DuckDB engine">
-        DuckDB {sys?.duckdb.version ?? '…'}
-      </StatusPill>
-      <StatusPill title="Logical cores available to DuckDB">{sys ? `${sys.host.cpus} cores` : '…'}</StatusPill>
-      <StatusPill title="DuckDB memory ceiling minus current allocation">{headroom != null ? `${formatBytes(headroom)} headroom` : '…'}</StatusPill>
-      <StatusPill dot tone={safe ? 'green' : 'amber'} title={safe ? 'Filesystem jail + external access off + configuration locked' : 'External access enabled or configuration unlocked'}>
-        {safe ? 'Safe' : 'Open'}
-      </StatusPill>
-    </div>
-  );
 }
 
 export default function App() {
@@ -115,7 +88,6 @@ export default function App() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-3">
-          <HeaderStatus />
           <button onClick={() => cp.toggle()} className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs', cp.open ? 'border-accent-600/60 bg-accent-600/20 text-accent-100' : 'border-zinc-800 bg-zinc-900/70 text-zinc-300 hover:text-zinc-100')} title="DuckCopilot — context-aware AI assistant">
             <Bot className="h-3.5 w-3.5" /> Copilot
           </button>

@@ -103,7 +103,7 @@ beforeAll(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-p3-'));
   const cfg = loadConfig({
     configPath: null,
-    env: { DUCKVIEW_DATA_DIR: path.join(dir, 'data'), DUCKDB_TEMP_DIRECTORY: path.join(dir, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '512MB', DUCKVIEW_ADMIN_EMAIL: 'admin@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', COPILOT_PROVIDER: 'anthropic', COPILOT_API_KEY: 'server-key', COPILOT_MODEL: 'claude-opus-5', LOG_LEVEL: 'silent' },
+    env: { DUCKVIEW_DATA_DIR: path.join(dir, 'data'), DUCKVIEW_FILESYSTEM_MODE: 'sandboxed', DUCKDB_TEMP_DIRECTORY: path.join(dir, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '512MB', DUCKVIEW_ADMIN_EMAIL: 'admin@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', COPILOT_PROVIDER: 'anthropic', COPILOT_API_KEY: 'server-key', COPILOT_MODEL: 'claude-opus-5', LOG_LEVEL: 'silent' },
   });
   ctx = await createContext(cfg, { providerFactory: stubFactory });
   const user = await ctx.auth.findByEmail('admin@test.local');

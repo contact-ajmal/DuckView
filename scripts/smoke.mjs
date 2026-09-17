@@ -57,8 +57,11 @@ ok('default workspace exists', !!ws, ws?.name);
 
 const q = await json('POST', `/api/workspaces/${ws.id}/query`, { sql: "SELECT 21 * 2 AS answer, 'ok' AS s" }, jwt);
 ok('query executes', q.status === 200 && q.data.rows?.[0]?.[0] === 42, JSON.stringify(q.data.rows));
-const jail = await json('POST', `/api/workspaces/${ws.id}/query`, { sql: "SELECT * FROM read_csv('/etc/passwd')" }, jwt);
-ok('sandbox blocks /etc/passwd', jail.status === 403, jail.data.error);
+const fmode = (await json('GET', `/api/workspaces/${ws.id}/folders`, undefined, jwt)).data.mode;
+const outside = await json('POST', `/api/workspaces/${ws.id}/query`, { sql: "SELECT length(content) > 0 AS readable FROM read_text('/etc/hosts')" }, jwt);
+if (fmode === 'sandboxed') ok('sandboxed mode blocks files outside the data directory', outside.status === 403, outside.data.error);
+else ok('full mode reads files anywhere on the host', outside.status === 200, outside.data.message);
+ok('traversal outside the explorer root is still rejected', (await json('GET', `/api/storage/local?workspace_id=${ws.id}&path=../..`, undefined, jwt)).status === 403 || fmode === 'full');
 const bad = await json('POST', `/api/workspaces/${ws.id}/query`, { sql: 'SELECT * FROM nope' }, jwt);
 ok('SQL error surfaces as 400 SQL_ERROR', bad.status === 400 && bad.data.error === 'SQL_ERROR');
 
@@ -79,7 +82,6 @@ ok('live hardware stats', live.status === 200 && live.data.host?.memory_total_by
 // Phase 2: explorer, schema inspection, streaming export, saved queries + dashboards
 const tree = await json('GET', `/api/storage/local?workspace_id=${ws.id}`, undefined, jwt);
 ok('local explorer lists the data directory', tree.status === 200 && Array.isArray(tree.data.entries) && tree.data.entries.some((e) => e.name === 'smoke.csv'));
-ok('local explorer refuses traversal', (await json('GET', `/api/storage/local?workspace_id=${ws.id}&path=../..`, undefined, jwt)).status === 403);
 const insp = await json('POST', '/api/storage/inspect', { workspace_id: ws.id, target: 'smoke.csv' }, jwt);
 ok('schema inspector (DESCRIBE LIMIT 0)', insp.status === 200 && insp.data.columns?.length === 2 && String(insp.data.suggested_sql).includes('smoke.csv'));
 const exp = await json('POST', `/api/workspaces/${ws.id}/export`, { sql: "SELECT * FROM 'smoke.csv'", format: 'parquet', filename: 'smoke' }, jwt);

@@ -5,8 +5,8 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 ```
 ┌──────────────── React + Vite + Tailwind v4 (zinc/violet) + Chart.js ─────────┐
 │ #/  Overview     drag-and-drop ingestion · KPIs · null bars · distributions   │
-│ #/query          VS Code-style explorer (local + S3/R2/GCS/Azure) · schema    │
-│                  drawer · tabs · saved-query library · .sql import/export     │
+│ #/query          VS Code-style explorer (any local folder + S3/R2/GCS/Azure) │
+│                  schema pane · tabs · saved-query library · .sql import/export│
 │ #/dashboards     BI builder: drag-and-drop grid, KPI/chart/table/markdown,   │
 │                  auto-refresh                                                 │
 │ #/settings       live gauges · engine tuning · cloud connections · users      │
@@ -109,7 +109,7 @@ Key settings:
 | | `jwt_secret`, `encryption_key` | Required in `NODE_ENV=production`; ephemeral (with a warning) in dev. |
 | `database` | `metadata_url` | `sqlite://duckview_meta.db` or `postgres://…`; migrations run at start. |
 | `auth` | `strategy` | `local` or `oidc` (Authorization Code + PKCE, stateless signed `state`). `oidc.admin_emails` promotes SSO users to ADMIN. |
-| `security` | `filesystem_mode` | `sandboxed` (multi-tenant, default) or `full` (single-user: the explorer and DuckDB may read the whole host; production requires `DUCKVIEW_ALLOW_FULL_FS=1`). Relative paths still anchor to the data directory. |
+| `security` | `filesystem_mode` | `full` (default, VS Code-like): add any local folder to the explorer, query files anywhere on the host, cloud sources on. `sandboxed` (multi-tenant): everything confined to `data_jail_directory`, external access off unless enabled. Relative paths always anchor to the data directory. |
 | `duckdb` | `extension_directory` | Where `httpfs`/`azure`/`arrow`/`iceberg`/`delta` are installed. The image ships them pre-installed at `/app/duckdb-extensions` (`scripts/install-extensions.mjs`). |
 | | `export_ttl_seconds`, `export_max_rows` | Server-side export files expire after the TTL. |
 | `copilot` | `provider`, `model`, `api_key`, `base_url`, `allow_byok` | DuckCopilot LLM bridge (`anthropic` / `openai` / `ollama`); users may bring their own key when `allow_byok` is true. |
@@ -174,7 +174,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 |---|---|
 | Auth | `POST /api/auth/login` · `POST /api/auth/register` · `GET /api/auth/me` · `POST /api/auth/password` · `GET /api/auth/oidc/login` · `GET /api/auth/oidc/callback` |
 | Workspaces | `GET/POST /api/workspaces` · `GET/PATCH/DELETE /api/workspaces/:id` · `POST /api/workspaces/:id/restart` · `…/tabs` CRUD (`sql_content`, `chart_config`, `cursor_position`, `order_index`) |
-| Storage explorer | `GET /api/storage/local?workspace_id&path` (jailed tree, one level) · `GET /api/storage/cloud?connection_id[&bucket&prefix]` (buckets / objects with folders via S3 `ListObjectsV2` delimiter or Azure hierarchy) · `POST /api/storage/inspect {workspace_id,target}` (`DESCRIBE … LIMIT 0` for files, `s3://`/`r2://`/`gs://`/`az://` objects, tables, `.duckdb` files, subqueries; Parquet row counts from the footer) |
+| Storage explorer | `GET/POST/DELETE /api/workspaces/:id/folders` (workspace folders) · `GET /api/storage/browse?workspace_id&path` (folder picker) · `GET /api/storage/local?workspace_id&path` (tree, one level) · `GET /api/storage/cloud?connection_id[&bucket&prefix]` (buckets / objects with folders via S3 `ListObjectsV2` delimiter or Azure hierarchy) · `POST /api/storage/inspect {workspace_id,target}` (`DESCRIBE … LIMIT 0` for files, `s3://`/`r2://`/`gs://`/`az://` objects, tables, `.duckdb` files, subqueries; Parquet row counts from the footer) |
 | Cloud connections | `GET /api/cloud-connections/providers` · `GET/POST/PATCH/DELETE /api/cloud-connections` (S3 · R2 · GCS · Azure, AES-256-GCM at rest, applied as DuckDB `CREATE SECRET` to every engine of the owner) · `POST /api/cloud-connections/:id/test` |
 | Exports | `POST /api/workspaces/:id/export {sql, format: parquet\|csv\|json\|arrow}` (native `COPY … TO` on disk, Arrow IPC via a streaming writer) · `GET /api/exports` · `GET /api/exports/:id/download` (streamed with `Content-Length`) · `DELETE /api/exports/:id` |
 | BI | `…/queries` CRUD (saved queries with folders/tags) · `…/dashboards` CRUD · `GET/PATCH/DELETE /api/dashboards/:id` (layout) · `POST/PATCH/DELETE /api/dashboards/:id/widgets[/:wid]` · `POST /api/dashboards/:id/widgets/:wid/data` |
@@ -227,7 +227,7 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 103 tests: jail, SQL guard, crypto, config, and an integration suite that boots real DuckDB
+pnpm test        # 107 tests: jail, SQL guard, crypto, config, and an integration suite that boots real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API and WebSocket streaming
 node scripts/smoke.mjs http://localhost:4200 admin@example.com <password>   # against a running instance

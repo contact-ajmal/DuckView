@@ -24,7 +24,15 @@ export class StorageService {
     await this.workspaces.get(p, workspaceId);
     const jail = this.workspaces.jail;
     const listing = jail.listDir(dirPath || '.', { showHidden: false });
+    // Entries under an added folder are reported with absolute paths (relativeTo() returns absolute outside the data dir).
     return { mode: this.cfg.security.filesystem_mode, root: jail.isFullFilesystem ? jail.baseDir : jail.root, ...listing };
+  }
+
+  /** Folder picker: directories under `dirPath` (home directory by default in full mode). */
+  async browse(p: Principal, workspaceId: string, dirPath?: string) {
+    requireScope(p, 'read');
+    await this.workspaces.get(p, workspaceId);
+    return { mode: this.cfg.security.filesystem_mode, ...this.workspaces.jail.browseDirs(dirPath) };
   }
 
   async cloudBuckets(p: Principal, connectionId: string) {

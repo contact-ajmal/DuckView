@@ -12,13 +12,14 @@ import { ProfilePanel, type ProfileResult } from './ProfilePanel';
 import { SchemaTree } from './SchemaTree';
 import { SavedQueriesTree } from './SavedQueries';
 import { Explorer, type ExplorerNode } from '../explorer/Explorer';
-import { SchemaDrawer } from '../explorer/SchemaDrawer';
+import { SchemaPanel } from '../explorer/SchemaPanel';
+import { FolderPicker } from '../explorer/FolderPicker';
 import { CloudWizard } from '../explorer/CloudWizard';
 import { registerCopilotHost } from '../copilot/CopilotDrawer';
 import { Eyebrow, PageTitle, SideCard, Panel, TypePill } from '../../components/layout';
 import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
 
-type View = 'table' | 'chart' | 'plan' | 'profile';
+type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile';
 
 export function WorkspacePage() {
   const ws = useWorkspace();
@@ -41,6 +42,7 @@ export function WorkspacePage() {
   const [dropping, setDropping] = useState(false);
   const [inspect, setInspect] = useState<string | null>(null);
   const [wizard, setWizard] = useState(false);
+  const [picker, setPicker] = useState(false);
   const [explorerKey, setExplorerKey] = useState(0);
   const [saved, setSaved] = useState<SavedQuery[]>([]);
   const [saveModal, setSaveModal] = useState<{ open: boolean; name: string; folder: string; tags: string; description: string; existing?: SavedQuery }>({ open: false, name: '', folder: '', tags: '', description: '' });
@@ -63,7 +65,7 @@ export function WorkspacePage() {
       if (!tab) return;
       void ws.flushDraft(tab.id);
       void ws.runQuery(tab.id, selection ?? (ws.drafts[tab.id] ?? tab.sql_content), { dryRun });
-      setView((v) => (v === 'plan' || v === 'profile' ? 'table' : v));
+      setView((v) => (v === 'plan' || v === 'profile' || v === 'schema' ? 'table' : v));
     },
     [tab, ws],
   );
@@ -186,7 +188,11 @@ export function WorkspacePage() {
 
   const explorerActions = useMemo(
     () => ({
-      onInspect: (n: ExplorerNode) => n.target && setInspect(n.target),
+      onInspect: (n: ExplorerNode) => {
+        if (!n.target) return;
+        setInspect(n.target);
+        setView('schema');
+      },
       onQuery: (n: ExplorerNode) => n.target && void ws.addTab({ title: n.name, sql: n.kind === 'object' || n.fileKind !== 'duckdb' ? `SELECT *\nFROM '${n.target}'\nLIMIT 100;` : `ATTACH '${n.target}' AS attached_db (READ_ONLY);\nSHOW ALL TABLES;` }),
       onInsert: (text: string) => editor.current?.insert(text),
       onAskCopilot: (n: ExplorerNode) => {
@@ -194,9 +200,16 @@ export function WorkspacePage() {
         cp.toggle(true);
       },
       onAddConnection: () => setWizard(true),
+      onAddFolder: () => setPicker(true),
+      onRemoveFolder: async (path: string) => {
+        if (!workspace || !confirm(`Remove ${path} from this workspace? Files are not deleted.`)) return;
+        await api.del(`/api/workspaces/${workspace.id}/folders?path=${encodeURIComponent(path)}`);
+        setExplorerKey((k) => k + 1);
+        void ws.loadCatalog(true);
+      },
       onDeleted: () => void ws.loadCatalog(true),
     }),
-    [ws, cp],
+    [ws, cp, workspace],
   );
 
   useEffect(() => setPlan(null), [tab?.id]);
@@ -369,10 +382,10 @@ export function WorkspacePage() {
         <Panel
           bodyClassName="p-0"
           title={
-            <span className="flex items-center gap-2">
-              Results {tab && <span className="text-zinc-500">· {tab.title}</span>}
-              <span className="ml-2 flex rounded-md border border-zinc-800 p-0.5 font-normal">
-                {(['table', 'chart', 'plan', 'profile'] as View[]).map((v) => <button key={v} onClick={() => setView(v)} className={cn('rounded px-2.5 py-0.5 text-[11px] capitalize', view === v ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-200')}>{v}</button>)}
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="whitespace-nowrap">Results {tab && <span className="text-zinc-500">· {tab.title}</span>}</span>
+              <span className="flex rounded-md border border-zinc-800 p-0.5 font-normal">
+                {(['table', 'schema', 'chart', 'plan', 'profile'] as View[]).map((v) => <button key={v} onClick={() => setView(v)} className={cn('rounded px-2.5 py-0.5 text-[11px] capitalize', view === v ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-200')}>{v}</button>)}
               </span>
             </span>
           }
@@ -409,6 +422,15 @@ export function WorkspacePage() {
                 {(!result || result.status === 'idle') && <Empty icon={<Play className="h-8 w-8" />} title="Run a query" hint="⌘/Ctrl + Enter runs the editor contents, or just the selection. Click a file in the Explorer to preview its schema; double-click to query it." />}
               </>
             )}
+            {view === 'schema' && (
+              <SchemaPanel
+                workspaceId={workspace.id}
+                target={inspect}
+                onQuery={(s, title) => { void ws.addTab({ title, sql: s }); setView('table'); }}
+                onProfile={(t) => void doProfile(t)}
+                onAskCopilot={(t) => { cp.setTargets([t]); cp.toggle(true); }}
+              />
+            )}
             {view === 'chart' && tab && (chartable ? <ChartPanel columns={result!.columns} rows={result!.rows} config={tab.chart_config} onChange={(c: ChartConfig) => void ws.setChart(tab.id, c)} /> : <Empty title="Run a query to chart it" />)}
             {view === 'plan' && <PlanView plan={plan} loading={planLoading} onExplain={() => void explain(false)} onAnalyze={() => void explain(true)} />}
             {view === 'profile' && <ProfilePanel profile={profile} loading={profileLoading} onProfile={doProfile} defaultTarget={ws.catalog?.files[0]?.path ?? ws.catalog?.objects[0]?.name ?? ''} />}
@@ -422,15 +444,17 @@ export function WorkspacePage() {
         </Panel>
       </main>
 
-      <SchemaDrawer
-        workspaceId={workspace.id}
-        target={inspect}
-        onClose={() => setInspect(null)}
-        onQuery={(s) => { void ws.addTab({ title: inspect?.split('/').pop() ?? 'Query', sql: s }); setInspect(null); }}
-        onProfile={(t) => { setInspect(null); void doProfile(t); }}
-        onAskCopilot={(t) => { cp.setTargets([t]); cp.toggle(true); setInspect(null); }}
-      />
       <CloudWizard open={wizard} onClose={() => setWizard(false)} onCreated={() => setExplorerKey((k) => k + 1)} />
+      <FolderPicker
+        open={picker}
+        workspaceId={workspace.id}
+        onClose={() => setPicker(false)}
+        onPick={async (path) => {
+          await api.post(`/api/workspaces/${workspace.id}/folders`, { path });
+          setExplorerKey((k) => k + 1);
+          void ws.loadCatalog(true);
+        }}
+      />
 
       <Modal open={saveModal.open} onClose={() => setSaveModal({ ...saveModal, open: false })} title={saveModal.existing ? 'Update saved query' : 'Save query'}>
         <div className="space-y-3">

@@ -21,6 +21,35 @@ export async function storageRoutes(app: FastifyInstance, ctx: AppContext) {
     return ctx.storage.cloudObjects(req.principal!, q.connection_id, q.bucket, q.prefix ?? '', q.token);
   });
 
+  // ---- folder picker (directories only)
+  app.get('/api/storage/browse', async (req) => {
+    const q = z.object({ workspace_id: z.string().min(1), path: z.string().optional() }).parse(req.query ?? {});
+    return ctx.storage.browse(req.principal!, q.workspace_id, q.path);
+  });
+
+  // ---- workspace folders (VS Code-style "Add folder to workspace")
+  app.get('/api/workspaces/:id/folders', async (req) => {
+    const { id } = req.params as { id: string };
+    const w = await ctx.workspaces.get(req.principal!, id);
+    return { folders: w.folders, data_directory: ctx.workspaces.jail.baseDir, mode: ctx.cfg.security.filesystem_mode };
+  });
+  app.post('/api/workspaces/:id/folders', async (req) => {
+    requireWrite(req.principal!);
+    const { id } = req.params as { id: string };
+    const body = z.object({ path: z.string().min(1), name: z.string().max(120).optional() }).parse(req.body);
+    const folders = await ctx.workspaces.addFolder(req.principal!, id, body.path, body.name);
+    ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.folder_add', resource: `folder:${body.path}`, ip: req.ip });
+    return { folders };
+  });
+  app.delete('/api/workspaces/:id/folders', async (req) => {
+    requireWrite(req.principal!);
+    const { id } = req.params as { id: string };
+    const q = z.object({ path: z.string().min(1) }).parse(req.query ?? {});
+    const folders = await ctx.workspaces.removeFolder(req.principal!, id, q.path);
+    ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.folder_remove', resource: `folder:${q.path}`, ip: req.ip });
+    return { folders };
+  });
+
   // ---- instant schema inspection (DESCRIBE … LIMIT 0)
   app.post('/api/storage/inspect', async (req) => {
     const body = z.object({ workspace_id: z.string().min(1), target: z.string().min(1) }).parse(req.body);

@@ -1,6 +1,8 @@
 import { eq, and, asc, desc } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
-import type { Workspace, SessionTab, EngineSettings, ChartConfig } from '../db/schema/sqlite.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Workspace, SessionTab, EngineSettings, ChartConfig, WorkspaceFolder } from '../db/schema/sqlite.js';
 import { newId } from '../security/crypto.js';
 import { EngineManager, type WorkspaceEngine } from '../engine/duckdb.js';
 import type { ConnectionService } from './connections.js';
@@ -90,6 +92,7 @@ export class WorkspaceService {
       name: (input.name ?? '').trim() || 'Untitled workspace',
       active_db_path: this.validateDbPath(input.active_db_path ?? ':memory:'),
       engine_settings: this.validateSettings(input.engine_settings ?? {}),
+      folders: [],
       created_at: now,
       updated_at: now,
     };
@@ -108,6 +111,51 @@ export class WorkspaceService {
     // Engine settings changed → the cached engine is stale; next query rebuilds it.
     if (set.active_db_path !== undefined || set.engine_settings !== undefined) this.engines.evict(id);
     return { ...w, ...set };
+  }
+
+  // ---------- Workspace folders (VS Code-style roots) ----------
+
+  /** Adds an absolute folder to the explorer. In sandboxed mode the folder must live inside the data directory. */
+  async addFolder(p: Principal, id: string, folderPath: string, name?: string): Promise<WorkspaceFolder[]> {
+    const w = await this.get(p, id);
+    const raw = (folderPath ?? '').trim();
+    if (!raw) throw badRequest('path is required');
+    const resolved = this.engines.jail.resolve(raw); // SandboxViolation outside the jail (sandboxed mode)
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(resolved.absolute);
+    } catch {
+      throw badRequest(`Folder not found: ${raw}`);
+    }
+    if (!stat.isDirectory()) throw badRequest(`${raw} is not a directory`);
+    const abs = resolved.absolute;
+    if (abs === this.engines.jail.baseDir) throw badRequest('The data directory is always part of the explorer');
+    if (w.folders.some((f) => f.path === abs)) return w.folders;
+    const folders: WorkspaceFolder[] = [...w.folders, { path: abs, name: (name ?? '').trim() || path.basename(abs) || abs, added_at: new Date().toISOString() }];
+    await this.db.update(this.s.workspaces).set({ folders, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    return folders;
+  }
+
+  async removeFolder(p: Principal, id: string, folderPath: string): Promise<WorkspaceFolder[]> {
+    const w = await this.get(p, id);
+    const folders = w.folders.filter((f) => f.path !== folderPath);
+    if (folders.length === w.folders.length) throw notFound('Folder');
+    await this.db.update(this.s.workspaces).set({ folders, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    return folders;
+  }
+
+  /** Data files from the data directory plus every added folder (absolute paths for the latter). */
+  async listAllFiles(p: Principal, id: string) {
+    const w = await this.get(p, id);
+    const files = this.engines.jail.listFiles();
+    for (const f of w.folders) {
+      try {
+        files.push(...this.engines.jail.listFilesIn(f.path));
+      } catch {
+        /* folder removed or unreadable — skipped */
+      }
+    }
+    return { folders: w.folders, files };
   }
 
   async remove(p: Principal, id: string): Promise<void> {

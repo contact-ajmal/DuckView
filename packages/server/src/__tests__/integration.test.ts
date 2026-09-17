@@ -26,7 +26,7 @@ beforeAll(async () => {
   const cfg = loadConfig({
     configPath: null,
     env: {
-      DUCKVIEW_DATA_DIR: path.join(dir, 'data'),
+      DUCKVIEW_DATA_DIR: path.join(dir, 'data'), DUCKVIEW_FILESYSTEM_MODE: 'sandboxed',
       DUCKDB_TEMP_DIRECTORY: path.join(dir, 'spill'),
       DATABASE_URL: ':memory:',
       DUCKDB_QUERY_TIMEOUT_SECONDS: '2',

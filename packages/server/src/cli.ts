@@ -53,7 +53,7 @@ program
     process.on('SIGTERM', () => void shutdown('SIGTERM'));
     process.on('SIGINT', () => void shutdown('SIGINT'));
     await app.listen({ port: cfg.server.port, host: cfg.server.host });
-    logger().info({ port: cfg.server.port, host: cfg.server.host, dataDir: cfg.security.data_jail_directory, metadata: ctx.store.dialect, auth: cfg.auth.strategy, externalAccess: cfg.security.enable_external_access, config: cfg.configPath }, 'DuckView Enterprise listening');
+    logger().info({ port: cfg.server.port, host: cfg.server.host, dataDir: cfg.security.data_jail_directory, metadata: ctx.store.dialect, auth: cfg.auth.strategy, filesystemMode: cfg.security.filesystem_mode, externalAccess: cfg.security.enable_external_access || cfg.security.filesystem_mode === 'full', config: cfg.configPath }, 'DuckView Enterprise listening');
   });
 
 program

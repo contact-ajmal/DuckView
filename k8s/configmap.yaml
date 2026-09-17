@@ -16,6 +16,7 @@ data:
       jwt_secret: "${JWT_SECRET}"
       encryption_key: "${ENCRYPTION_KEY}"
       data_jail_directory: "/data"
+      filesystem_mode: "sandboxed"   # multi-tenant: confine every user to /data
       allow_arbitrary_extensions: false
       enable_external_access: ${DUCKVIEW_ENABLE_EXTERNAL_ACCESS:-false}
       lock_configuration: true

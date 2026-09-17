@@ -22,6 +22,13 @@
       "when": 1789602807178,
       "tag": "0002_bi_cloud_copilot",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789629654223,
+      "tag": "0003_workspace_folders",
+      "breakpoints": true
     }
   ]
 }

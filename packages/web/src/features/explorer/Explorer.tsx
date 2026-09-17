@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, ChevronDown, Folder, FolderOpen, FileSpreadsheet, FileJson, Database, Box, File, Cloud, Plus, RefreshCw, Search, HardDrive, Loader2, Layers } from 'lucide-react';
+import { ChevronRight, ChevronDown, Folder, FolderOpen, FileSpreadsheet, FileJson, Database, Box, File, Cloud, Plus, RefreshCw, Search, HardDrive, Loader2, Layers, FolderPlus } from 'lucide-react';
 import { api, formatBytes, getToken, type TreeEntry, type CloudEntry, type CloudConnection, type LocalListing } from '../../api/client';
 import { cn } from '../../components/ui';
 
 export interface ExplorerNode {
   id: string;
   name: string;
-  kind: 'local-root' | 'dir' | 'file' | 'table_dir' | 'cloud-root' | 'connection' | 'bucket' | 'prefix' | 'object';
+  kind: 'local-root' | 'folder-root' | 'dir' | 'file' | 'table_dir' | 'cloud-root' | 'connection' | 'bucket' | 'prefix' | 'object';
   fileKind?: string;
   /** Query target: relative local path or cloud URI. */
   target?: string;
@@ -31,6 +31,8 @@ export interface ExplorerActions {
   onInsert(text: string): void;
   onAskCopilot?(node: ExplorerNode): void;
   onAddConnection(): void;
+  onAddFolder(): void;
+  onRemoveFolder(path: string): void;
   onDeleted?(): void;
 }
 
@@ -83,7 +85,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
       try {
         let children: ExplorerNode[] = [];
         let truncated = false;
-        if (node.kind === 'local-root' || node.kind === 'dir') {
+        if (node.kind === 'local-root' || node.kind === 'folder-root' || node.kind === 'dir') {
           const r = await api.get<LocalListing>(`/api/storage/local?workspace_id=${workspaceId}&path=${encodeURIComponent(node.localPath ?? '.')}`);
           setMode(r.mode);
           children = r.entries.map(localEntryToNode);
@@ -107,11 +109,27 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
   );
 
   useEffect(() => {
-    const local: ExplorerNode = { id: 'local-root', name: 'Data directory', kind: 'local-root', localPath: '.', children: [], loaded: false };
-    const cloud: ExplorerNode = { id: 'cloud-root', name: 'Cloud storage', kind: 'cloud-root', children: [], loaded: false };
-    setRoots([local, cloud]);
-    void loadChildren(local);
-    void loadChildren(cloud);
+    let alive = true;
+    (async () => {
+      const local: ExplorerNode = { id: 'local-root', name: 'Data directory', kind: 'local-root', localPath: '.', children: [], loaded: false };
+      let folderRoots: ExplorerNode[] = [];
+      try {
+        const r = await api.get<{ folders: { path: string; name: string }[] }>(`/api/workspaces/${workspaceId}/folders`);
+        folderRoots = r.folders.map((f) => ({ id: `folder:${f.path}`, name: f.name, kind: 'folder-root' as const, localPath: f.path, children: [], loaded: false }));
+      } catch {
+        /* ignore */
+      }
+      const cloud: ExplorerNode = { id: 'cloud-root', name: 'Cloud storage', kind: 'cloud-root', children: [], loaded: false };
+      if (!alive) return;
+      setRoots([local, ...folderRoots, cloud]);
+      setExpanded((e) => new Set([...e, ...folderRoots.map((f) => f.id)]));
+      void loadChildren(local);
+      for (const f of folderRoots) void loadChildren(f);
+      void loadChildren(cloud);
+    })();
+    return () => {
+      alive = false;
+    };
   }, [workspaceId, refreshKey, loadChildren]);
 
   useEffect(() => {
@@ -161,6 +179,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
     const isSelected = selected && node.target === selected;
     const icon =
       node.kind === 'local-root' ? <HardDrive className="h-3.5 w-3.5 text-zinc-400" /> :
+      node.kind === 'folder-root' ? (open ? <FolderOpen className="h-3.5 w-3.5 text-accent-300" /> : <Folder className="h-3.5 w-3.5 text-accent-300" />) :
       node.kind === 'cloud-root' ? <Cloud className="h-3.5 w-3.5 text-zinc-400" /> :
       node.kind === 'connection' ? <Cloud className="h-3.5 w-3.5 text-sky-300" /> :
       node.kind === 'bucket' ? <Database className="h-3.5 w-3.5 text-sky-300" /> :
@@ -185,7 +204,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
             <span className="w-3.5" />
           )}
           {icon}
-          <span className={cn('min-w-0 flex-1 truncate', node.kind === 'local-root' || node.kind === 'cloud-root' ? 'font-semibold uppercase tracking-wider text-[10px] text-zinc-400' : 'text-zinc-200')}>{node.name}</span>
+          <span className={cn('min-w-0 flex-1 truncate', node.kind === 'local-root' || node.kind === 'cloud-root' || node.kind === 'folder-root' ? 'font-semibold uppercase tracking-wider text-[10px] text-zinc-400' : 'text-zinc-200')} title={node.localPath ?? node.name}>{node.name}</span>
           {node.kind === 'connection' && <span className="rounded border border-sky-900 bg-sky-950/40 px-1 font-mono text-[9px] text-sky-300">{node.provider}</span>}
           {node.size != null && <span className="font-mono text-[10px] text-zinc-500">{formatBytes(node.size)}</span>}
           {node.kind === 'cloud-root' && (
@@ -250,11 +269,13 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
       if (n.kind === 'file') items.push({ label: 'Download', run: () => void download(n) });
       if (n.kind === 'file' || n.kind === 'table_dir') items.push({ label: 'Delete', run: () => void remove(n), danger: true });
     }
-    if (n.kind === 'dir' || n.kind === 'prefix' || n.kind === 'bucket' || n.kind === 'local-root' || n.kind === 'connection') {
+    if (n.kind === 'dir' || n.kind === 'prefix' || n.kind === 'bucket' || n.kind === 'local-root' || n.kind === 'folder-root' || n.kind === 'connection') {
       items.push({ label: 'Refresh', run: () => void loadChildren(n) });
       if (n.kind === 'dir') items.push({ label: 'Insert glob (*.parquet)', run: () => actions.onInsert(`'${n.localPath}/*.parquet'`) });
       if (n.kind === 'prefix' && n.target === undefined) items.push({ label: 'Insert glob (*.parquet)', run: () => actions.onInsert(`'${n.uriScheme ?? (n.provider === 'R2' ? 'r2' : n.provider === 'GCS' ? 'gs' : n.provider === 'AZURE' ? 'az' : 's3')}://${n.bucket}/${n.prefix}*.parquet'`) });
     }
+    if (n.kind === 'local-root' || n.kind === 'folder-root') items.push({ label: 'Add folder to workspace…', run: actions.onAddFolder });
+    if (n.kind === 'folder-root') items.push({ label: 'Copy folder path', run: () => void navigator.clipboard.writeText(n.localPath ?? '') }, { label: 'Remove folder from workspace', run: () => actions.onRemoveFolder(n.localPath!), danger: true });
     if (n.kind === 'cloud-root') items.push({ label: 'Add cloud connection', run: actions.onAddConnection });
     return items;
   }, [menu, actions, loadChildren]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -264,7 +285,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
       <div className="flex items-center gap-1.5 border-b border-zinc-800 px-2 py-1.5">
         <Search className="h-3 w-3 text-zinc-500" />
         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter files…" className="h-6 min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none" />
-        {mode === 'full' && <span className="rounded border border-amber-900 bg-amber-950/40 px-1 font-mono text-[9px] text-amber-300" title="Single-user mode: the whole host filesystem is browsable">full fs</span>}
+        <button onClick={actions.onAddFolder} className="rounded p-1 text-zinc-500 hover:text-accent-300" title={mode === 'full' ? 'Add folder to workspace…' : 'Add a folder inside the data directory'}><FolderPlus className="h-3.5 w-3.5" /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-1">
         {roots.map((r) => (

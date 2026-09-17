@@ -61,6 +61,9 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const chat = new ChatHistoryService(store, workspaces);
   const copilot = new CopilotService(cfg, workspaces, queries, cloud, chat, audit, opts.providerFactory);
   await auth.bootstrapAdmin();
+  if (cfg.security.filesystem_mode === 'full') {
+    logger().warn({ dataDir: cfg.security.data_jail_directory }, 'filesystem_mode=full: users can mount any local folder and DuckDB may read anywhere this process can. Set security.filesystem_mode=sandboxed for multi-tenant deployments.');
+  }
   if (cfg.ephemeralSecrets) {
     logger().warn('JWT_SECRET / ENCRYPTION_KEY not configured — using ephemeral secrets. Sessions and stored credentials will NOT survive a restart. Set them before production use.');
   }

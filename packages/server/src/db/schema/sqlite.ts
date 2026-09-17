@@ -27,6 +27,13 @@ export interface EngineSettings {
   connection_ids?: string[];
 }
 
+/** A local folder mounted into the explorer (VS Code-style workspace folder). */
+export interface WorkspaceFolder {
+  path: string; // absolute, canonical
+  name: string;
+  added_at: string;
+}
+
 export interface ChartConfig {
   type: 'bar' | 'line' | 'area' | 'scatter' | 'pie' | 'none';
   x?: string;
@@ -57,6 +64,7 @@ export const workspaces = sqliteTable(
     name: text('name').notNull(),
     active_db_path: text('active_db_path').notNull().default(':memory:'),
     engine_settings: text('engine_settings', { mode: 'json' }).$type<EngineSettings>().notNull().default({}),
+    folders: text('folders', { mode: 'json' }).$type<WorkspaceFolder[]>().notNull().default([]),
     created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },

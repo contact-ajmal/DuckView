@@ -14,7 +14,7 @@ security:
   jwt_secret: "${JWT_SECRET}"            # ≥16 chars; REQUIRED in production
   encryption_key: "${ENCRYPTION_KEY}"    # 32-byte hex (64 chars) for AES-256-GCM credential encryption; REQUIRED in production
   data_jail_directory: "${DUCKVIEW_DATA_DIR:-./data}"   # all DuckDB file reads/writes are confined here
-  filesystem_mode: "${DUCKVIEW_FILESYSTEM_MODE:-sandboxed}"  # sandboxed (multi-tenant) | full (single-user: browse the whole host)
+  filesystem_mode: "${DUCKVIEW_FILESYSTEM_MODE:-full}"   # full (default): add any local folder, query anywhere, cloud on · sandboxed: multi-tenant jail
   allow_arbitrary_extensions: false
   allowed_extensions: [parquet, json, icu, httpfs, iceberg, delta, motherduck, postgres, spatial, excel]
   blocked_extensions: [shellfs, python, jemalloc]

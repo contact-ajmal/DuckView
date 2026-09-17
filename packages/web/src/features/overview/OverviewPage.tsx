@@ -3,11 +3,11 @@ import { Bar } from 'react-chartjs-2';
 import { UploadCloud, Table2, Eye, FileSpreadsheet, FileJson, Database, Box, Folder, Trash2, ArrowRight, ArrowUpRight, RefreshCw } from 'lucide-react';
 import '../../lib/chart';
 import { ACCENT, GRID, withAlpha, compactNumber } from '../../lib/chart';
-import { api, uploadFiles, formatBytes, type OverviewResult, type OverviewColumn, type JailEntry, type SystemInfo } from '../../api/client';
+import { api, uploadFiles, formatBytes, type OverviewResult, type OverviewColumn, type JailEntry } from '../../api/client';
 import { useWorkspace } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { ResultsGrid } from '../workspace/ResultsGrid';
-import { Eyebrow, PageTitle, SideCard, Panel, KvRows, TypePill, Tag } from '../../components/layout';
+import { Eyebrow, PageTitle, SideCard, Panel, TypePill, Tag } from '../../components/layout';
 import { Empty, Spinner, cn } from '../../components/ui';
 import { quoteIdent } from '../workspace/SchemaTree';
 
@@ -98,13 +98,8 @@ export function OverviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [uploads, setUploads] = useState<{ name: string; pct: number; error?: string }[]>([]);
-  const [sys, setSys] = useState<SystemInfo | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const wsId = ws.activeId;
-
-  useEffect(() => {
-    api.get<SystemInfo>('/api/system').then(setSys).catch(() => undefined);
-  }, []);
 
   const load = useCallback(
     async (t: string) => {
@@ -224,22 +219,26 @@ export function OverviewPage() {
             </div>
           )}
           <div className="mt-3 space-y-0.5">
-            {files.map((f) => (
-              <div key={f.path} className={cn('group flex items-center gap-2 rounded-md px-2 py-1.5', target === f.path ? 'bg-accent-600/15' : 'hover:bg-zinc-800/60')}>
-                <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', target === f.path ? 'bg-emerald-400' : 'bg-zinc-700')} />
-                <button className="min-w-0 flex-1 text-left" onClick={() => setTarget(f.path)} title={f.path}>
-                  <div className="truncate font-mono text-xs text-zinc-100">{f.path}</div>
-                  <div className="font-mono text-[10px] text-zinc-500">
-                    {f.kind.toUpperCase()} · {formatBytes(f.size_bytes)}
-                  </div>
-                </button>
-                {canWrite && (
-                  <button className="rounded p-0.5 text-zinc-600 opacity-0 hover:text-red-300 group-hover:opacity-100" onClick={() => void removeFile(f)} title="Delete file">
-                    <Trash2 className="h-3 w-3" />
+            {files.map((f) => {
+              const display = f.root ? f.path.slice(f.root.length + 1) : f.path;
+              const rootName = f.root ? f.root.split('/').filter(Boolean).pop() : null;
+              return (
+                <div key={f.path} className={cn('group flex items-center gap-2 rounded-md px-2 py-1.5', target === f.path ? 'bg-accent-600/15' : 'hover:bg-zinc-800/60')}>
+                  <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', target === f.path ? 'bg-emerald-400' : 'bg-zinc-700')} />
+                  <button className="min-w-0 flex-1 text-left" onClick={() => setTarget(f.path)} title={f.path}>
+                    <div className="truncate font-mono text-xs text-zinc-100">{display}</div>
+                    <div className="truncate font-mono text-[10px] text-zinc-500">
+                      {rootName ? `${rootName} · ` : ''}{f.kind.toUpperCase()} · {formatBytes(f.size_bytes)}
+                    </div>
                   </button>
-                )}
-              </div>
-            ))}
+                  {canWrite && !f.root && (
+                    <button className="rounded p-0.5 text-zinc-600 opacity-0 hover:text-red-300 group-hover:opacity-100" onClick={() => void removeFile(f)} title="Delete file">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
             {objects.map((o) => {
               const name = o.schema === 'main' ? o.name : `${o.schema}.${o.name}`;
               return (
@@ -255,20 +254,9 @@ export function OverviewPage() {
               );
             })}
           </div>
-          <p className="mt-3 text-[11px] leading-snug text-zinc-500">Files are stored in the server's data directory and read natively by DuckDB. Nothing leaves the jail.</p>
+          <p className="mt-3 text-[11px] leading-snug text-zinc-500">Files in the data directory and in folders added to the workspace (Query → Explorer). DuckDB reads them in place.</p>
         </SideCard>
 
-        <SideCard title="System" meta={<button onClick={() => void ws.loadCatalog(true)} className={cn('text-zinc-500 hover:text-zinc-200', ws.catalogLoading && 'animate-spin')} title="Refresh catalog"><RefreshCw className="h-3 w-3" /></button>}>
-          <KvRows
-            rows={[
-              { k: 'engine', v: sys ? `DuckDB ${sys.duckdb.version}` : '…', sub: 'native' },
-              { k: 'cores', v: sys ? `${sys.host.cpus} detected` : '…', sub: sys ? `· ${sys.duckdb.threads} threads` : undefined },
-              { k: 'memory', v: sys ? formatBytes(sys.host.total_memory_bytes) : '…', sub: sys ? `· ceiling ${sys.duckdb.memory_limit}` : undefined },
-              { k: 'sandbox', v: sys ? (sys.duckdb.external_access ? 'external access on' : 'jailed') : '…', sub: sys?.duckdb.configuration_locked ? '· config locked' : undefined },
-              { k: 'metadata', v: sys?.server.metadata_dialect ?? '…' },
-            ]}
-          />
-        </SideCard>
       </aside>
 
       {/* Main */}

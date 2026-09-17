@@ -7,6 +7,7 @@
  *   2. In DuckDB itself via `allowed_directories` + `enable_external_access=false` + `lock_configuration=true`.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export class SandboxViolation extends Error {
@@ -143,6 +144,78 @@ export class DataJail {
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
   }
 
+  /**
+   * Recursively lists data files under an added workspace folder. Paths are absolute (the folder is outside the
+   * data directory). Bounded so that mounting a large folder stays cheap.
+   */
+  listFilesIn(folder: string, opts: { maxEntries?: number; maxDepth?: number } = {}): JailEntry[] {
+    const start = this.resolve(folder).absolute;
+    const maxEntries = opts.maxEntries ?? 500;
+    const maxDepth = opts.maxDepth ?? 4;
+    const out: JailEntry[] = [];
+    const walk = (dir: string, depth: number) => {
+      if (out.length >= maxEntries || depth > maxDepth) return;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (out.length >= maxEntries) return;
+        if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+        const full = path.join(dir, e.name);
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(full);
+        } catch {
+          continue;
+        }
+        if (stat.isDirectory()) {
+          const kind = this.detectTableDir(full);
+          if (kind) out.push({ path: full, kind, size_bytes: dirSize(full), modified_at: stat.mtime.toISOString(), root: start });
+          else walk(full, depth + 1);
+        } else if (stat.isFile()) {
+          const kind = fileKind(e.name);
+          if (kind) out.push({ path: full, kind, size_bytes: stat.size, modified_at: stat.mtime.toISOString(), root: start });
+        }
+      }
+    };
+    walk(start, 0);
+    return out.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  /**
+   * Directory browser for the "add folder" picker: directories only (plus a data-file count per directory),
+   * starting at the home directory (full mode) or the data directory (sandboxed).
+   */
+  browseDirs(dirPath?: string): { path: string; parent: string | null; entries: { name: string; path: string; data_files: number }[] } {
+    const start = dirPath && dirPath.trim() ? this.resolve(dirPath).absolute : this.isFullFilesystem ? os.homedir() : this.baseDir;
+    const abs = this.resolve(start).absolute;
+    let dirents: fs.Dirent[] = [];
+    try {
+      dirents = fs.readdirSync(abs, { withFileTypes: true });
+    } catch (err) {
+      throw new SandboxViolation(`Cannot read directory: ${(err as Error).message}`, abs);
+    }
+    const entries: { name: string; path: string; data_files: number }[] = [];
+    for (const d of dirents) {
+      if (d.name.startsWith('.') || !d.isDirectory()) continue;
+      const full = path.join(abs, d.name);
+      let count = 0;
+      try {
+        for (const f of fs.readdirSync(full)) if (fileKind(f)) count++;
+      } catch {
+        /* unreadable */
+      }
+      entries.push({ name: d.name, path: full, data_files: count });
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const parentAbs = path.dirname(abs);
+    const parent = parentAbs !== abs && this.isInside(parentAbs) ? parentAbs : null;
+    return { path: abs, parent, entries };
+  }
+
   /** Recursively list data files (and directories that look like Delta/Iceberg tables) inside the jail. */
   listFiles(subdir = '', maxEntries = 2000): JailEntry[] {
     const start = this.resolve(subdir || '.').absolute;
@@ -223,10 +296,13 @@ export class DataJail {
 }
 
 export interface JailEntry {
+  /** Relative to the data directory, or absolute when the file lives in an added workspace folder. */
   path: string;
   kind: 'parquet' | 'csv' | 'json' | 'duckdb' | 'arrow' | 'excel' | 'delta' | 'iceberg' | 'other';
   size_bytes: number;
   modified_at: string;
+  /** Absolute path of the workspace folder this entry came from (absent for the data directory). */
+  root?: string;
 }
 
 export interface TreeEntry {
