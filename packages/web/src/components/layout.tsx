@@ -6,8 +6,8 @@ export function Eyebrow({ children }: { children: ReactNode }) {
   return <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent-400">{children}</div>;
 }
 
-export function PageTitle({ children, className }: { children: ReactNode; className?: string }) {
-  return <h1 className={cn('text-2xl font-semibold tracking-tight text-zinc-50', className)}>{children}</h1>;
+export function PageTitle({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
+  return <h1 className={cn('text-2xl font-semibold tracking-tight text-zinc-50', className)} title={title}>{children}</h1>;
 }
 
 /** Sidebar card: uppercase header with an optional right-aligned meta slot. */
