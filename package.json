@@ -1,0 +1,19 @@
+{
+  "name": "duckview-enterprise",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DuckView Enterprise — hardened, stateful, native DuckDB data platform with an enterprise-grade MCP server",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=20.0.0" },
+  "packageManager": "pnpm@10.33.3",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "start": "node packages/server/dist/cli.js serve",
+    "mcp": "node packages/server/dist/cli.js mcp",
+    "migrate": "node packages/server/dist/cli.js migrate"
+  }
+}

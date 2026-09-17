@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Smoke test the built server
+        run: |
+          export JWT_SECRET=ci-jwt-secret-0123456789abcdef ENCRYPTION_KEY=$(openssl rand -hex 32)
+          export DUCKVIEW_DATA_DIR=$RUNNER_TEMP/data DATABASE_URL=sqlite://$RUNNER_TEMP/meta.db
+          export DUCKVIEW_ADMIN_EMAIL=ci@example.com DUCKVIEW_ADMIN_PASSWORD=ci-password-123 PORT=4200
+          node packages/server/dist/cli.js serve & echo $! > server.pid
+          node scripts/smoke.mjs http://localhost:4200 ci@example.com ci-password-123
+          kill $(cat server.pid)
+
+  image:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: duckview/enterprise:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test the image
+        run: |
+          docker run -d --name dv -p 4200:4200 \
+            -e JWT_SECRET=ci-jwt-secret-0123456789abcdef -e ENCRYPTION_KEY=$(openssl rand -hex 32) \
+            -e DUCKVIEW_ADMIN_EMAIL=ci@example.com -e DUCKVIEW_ADMIN_PASSWORD=ci-password-123 \
+            duckview/enterprise:ci
+          node scripts/smoke.mjs http://localhost:4200 ci@example.com ci-password-123
+          docker rm -f dv

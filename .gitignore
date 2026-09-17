@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+.env
+.env.local
+duckview_meta.db*
+data/*.duckdb
+data/*.duckdb.wal
+data/exports/
+/tmp/
+coverage/
+.DS_Store

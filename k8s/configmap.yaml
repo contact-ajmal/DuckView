@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: duckview-config
+  namespace: duckview
+data:
+  # Non-secret settings. Secrets are injected via env from the `duckview-secrets` Secret.
+  duckview.config.yaml: |
+    server:
+      port: 4200
+      host: "0.0.0.0"
+      log_level: "${LOG_LEVEL:-info}"
+      public_url: "${DUCKVIEW_PUBLIC_URL}"
+      trust_proxy: true
+    security:
+      jwt_secret: "${JWT_SECRET}"
+      encryption_key: "${ENCRYPTION_KEY}"
+      data_jail_directory: "/data"
+      allow_arbitrary_extensions: false
+      enable_external_access: ${DUCKVIEW_ENABLE_EXTERNAL_ACCESS:-false}
+      lock_configuration: true
+      allow_registration: false
+    database:
+      metadata_url: "${DATABASE_URL}"
+    auth:
+      strategy: "${AUTH_STRATEGY:-local}"
+      oidc:
+        issuer_url: "${OIDC_ISSUER}"
+        client_id: "${OIDC_CLIENT_ID}"
+        client_secret: "${OIDC_CLIENT_SECRET}"
+      bootstrap_admin:
+        email: "${DUCKVIEW_ADMIN_EMAIL}"
+        password: "${DUCKVIEW_ADMIN_PASSWORD}"
+    duckdb:
+      default_memory_limit: "${DUCKDB_MEMORY_LIMIT:-75%}"
+      default_threads: "auto"
+      temp_directory: "/tmp/duckview_spill"
+      query_timeout_seconds: 120
+      max_result_rows: 5000
+    mcp:
+      require_confirmation_for_mutations: true
+    observability:
+      metrics_enabled: true
+      otel:
+        enabled: ${DUCKVIEW_OTEL_ENABLED:-false}
+        service_name: duckview
+        exporter_otlp_endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"

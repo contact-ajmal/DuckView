@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duckview
+  namespace: duckview
+  labels: { app.kubernetes.io/name: duckview }
+spec:
+  # DuckDB engines are process-local (in-memory workspaces live in the pod). Scale vertically first;
+  # for >1 replica use PostgreSQL metadata, a RWX data volume, and session affinity for /mcp/sse.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app.kubernetes.io/name: duckview }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: duckview }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "4200"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: { type: RuntimeDefault }
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: duckview
+          image: duckview/enterprise:latest
+          imagePullPolicy: IfNotPresent
+          args: ["serve"]
+          ports:
+            - { name: http, containerPort: 4200 }
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: DUCKVIEW_CONFIG, value: /etc/duckview/duckview.config.yaml }
+            - { name: DUCKVIEW_PUBLIC_URL, value: "https://duckview.example.com" }
+            - { name: DUCKDB_MEMORY_LIMIT, value: "75%" }
+            - { name: DUCKDB_EXTENSION_DIRECTORY, value: /app/duckdb-extensions }
+            - { name: LOG_LEVEL, value: info }
+          envFrom:
+            - secretRef: { name: duckview-secrets }
+          resources:
+            requests: { cpu: "2", memory: "8Gi" }
+            limits: { cpu: "8", memory: "16Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          startupProbe:
+            httpGet: { path: /readyz, port: http }
+            failureThreshold: 30
+            periodSeconds: 5
+          volumeMounts:
+            - { name: config, mountPath: /etc/duckview, readOnly: true }
+            - { name: data, mountPath: /data }
+            - { name: spill, mountPath: /tmp/duckview_spill }
+            - { name: tmp, mountPath: /tmp }
+            - { name: home, mountPath: /app/.duckdb }
+            - { name: meta, mountPath: /app/meta }
+      volumes:
+        - name: config
+          configMap: { name: duckview-config }
+        - name: data
+          persistentVolumeClaim: { claimName: duckview-data }
+        - name: spill
+          emptyDir: { sizeLimit: 50Gi }
+        - name: tmp
+          emptyDir: {}
+        - name: home
+          emptyDir: {}
+        - name: meta
+          emptyDir: {}   # unused when DATABASE_URL points at PostgreSQL; required by readOnlyRootFilesystem

@@ -1,0 +1,14 @@
+# Optional: Prometheus Operator scrape target.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: duckview
+  namespace: duckview
+  labels: { release: prometheus }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: duckview }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

@@ -1,0 +1,1 @@
+ALTER TABLE `session_tabs` ADD `cursor_position` integer DEFAULT 0 NOT NULL;

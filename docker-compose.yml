@@ -1,0 +1,80 @@
+# DuckView Enterprise
+#   docker compose up --build                       → single container, SQLite metadata in the duckview-meta volume
+#   docker compose --profile postgres up --build    → + PostgreSQL metadata store (set DATABASE_URL in .env, see below)
+#   docker compose --profile observability up       → + Prometheus on :9090
+#   docker compose --profile ollama up              → + local Ollama for DuckCopilot (COPILOT_PROVIDER=ollama, COPILOT_BASE_URL=http://ollama:11434)
+# Secrets & admin credentials come from .env (see .env.example).
+services:
+  duckview:
+    build:
+      context: .
+      args:
+        DUCKVIEW_VERSION: ${DUCKVIEW_VERSION:-dev}
+    image: ${DUCKVIEW_IMAGE:-duckview/enterprise:latest}
+    ports:
+      - "${PORT:-4200}:4200"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      DUCKVIEW_DATA_DIR: /data
+      # Default: SQLite in the /app/meta volume. With the postgres profile set
+      # DATABASE_URL=postgres://duckview:${POSTGRES_PASSWORD}@postgres:5432/duckview in .env.
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///app/meta/duckview_meta.db}
+      DUCKVIEW_PUBLIC_URL: ${DUCKVIEW_PUBLIC_URL:-http://localhost:4200}
+      DUCKVIEW_TRUST_PROXY: "true"
+      DUCKDB_MEMORY_LIMIT: ${DUCKDB_MEMORY_LIMIT:-70%}
+      DUCKDB_EXTENSION_DIRECTORY: /app/duckdb-extensions
+    volumes:
+      - ./data:/data
+      - duckview-meta:/app/meta
+    tmpfs:
+      - /tmp/duckview_spill:size=${DUCKVIEW_SPILL_SIZE:-4g}
+    deploy:
+      resources:
+        limits:
+          memory: ${DUCKVIEW_MEMORY:-8g}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4200/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: duckview
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-duckview}
+      POSTGRES_DB: duckview
+    volumes:
+      - duckview-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U duckview -d duckview"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+volumes:
+  duckview-meta:
+  duckview-pg:
+  ollama-models:

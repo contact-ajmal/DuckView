@@ -1,0 +1,82 @@
+# DuckView Enterprise configuration.
+# Every value may reference environment variables: ${VAR} or ${VAR:-default}.
+# Any key can also be overridden with DUCKVIEW__<SECTION>__<KEY> (e.g. DUCKVIEW__DUCKDB__MAX_RESULT_ROWS=1000).
+
+server:
+  port: ${PORT:-4200}
+  host: "${HOST:-0.0.0.0}"
+  log_level: "${LOG_LEVEL:-info}"        # pino structured JSON logger (pretty in dev TTYs)
+  public_url: "${DUCKVIEW_PUBLIC_URL:-}"  # used for OIDC redirects and MCP snippets, e.g. https://duckview.example.com
+  trust_proxy: ${DUCKVIEW_TRUST_PROXY:-false}
+  rate_limit_per_minute: 600
+
+security:
+  jwt_secret: "${JWT_SECRET}"            # ≥16 chars; REQUIRED in production
+  encryption_key: "${ENCRYPTION_KEY}"    # 32-byte hex (64 chars) for AES-256-GCM credential encryption; REQUIRED in production
+  data_jail_directory: "${DUCKVIEW_DATA_DIR:-./data}"   # all DuckDB file reads/writes are confined here
+  filesystem_mode: "${DUCKVIEW_FILESYSTEM_MODE:-sandboxed}"  # sandboxed (multi-tenant) | full (single-user: browse the whole host)
+  allow_arbitrary_extensions: false
+  allowed_extensions: [parquet, json, icu, httpfs, iceberg, delta, motherduck, postgres, spatial, excel]
+  blocked_extensions: [shellfs, python, jemalloc]
+  enable_external_access: ${DUCKVIEW_ENABLE_EXTERNAL_ACCESS:-false}   # true is required for S3/GCS/HTTP/MotherDuck; local files stay jailed by the Node guard
+  lock_configuration: true               # SET/PRAGMA on hardened settings is rejected by DuckDB itself
+  allow_registration: ${DUCKVIEW_ALLOW_REGISTRATION:-false}
+  password_min_length: 10
+
+database:
+  metadata_url: "${DATABASE_URL:-${METADATA_URL:-sqlite://duckview_meta.db}}"   # sqlite://file.db | postgres://user:pass@host:5432/db
+  run_migrations: true
+
+auth:
+  strategy: "${AUTH_STRATEGY:-local}"    # local | oidc
+  oidc:
+    issuer_url: "${OIDC_ISSUER}"
+    client_id: "${OIDC_CLIENT_ID}"
+    client_secret: "${OIDC_CLIENT_SECRET}"
+    redirect_uri: "${OIDC_REDIRECT_URI:-}"
+    scopes: "openid email profile"
+    admin_emails: []
+  bootstrap_admin:                       # created on first start when no users exist
+    email: "${DUCKVIEW_ADMIN_EMAIL:-}"
+    password: "${DUCKVIEW_ADMIN_PASSWORD:-}"
+
+duckdb:
+  default_memory_limit: "${DUCKDB_MEMORY_LIMIT:-80%}"   # percentage of host RAM or absolute (e.g. 16GB)
+  default_threads: "${DUCKDB_THREADS:-auto}"
+  temp_directory: "${DUCKDB_TEMP_DIRECTORY:-/tmp/duckview_spill}"
+  query_timeout_seconds: ${DUCKDB_QUERY_TIMEOUT_SECONDS:-60}
+  max_result_rows: ${DUCKDB_MAX_RESULT_ROWS:-5000}     # hard cap for UI result grids
+  max_cached_engines: 32
+  engine_idle_ttl_seconds: 1800
+  preload_extensions: []
+  extension_directory: "${DUCKDB_EXTENSION_DIRECTORY:-}"   # httpfs/azure/arrow/iceberg/delta live here (pre-installed in the image)
+  export_ttl_seconds: 3600        # streamed exports are deleted after this
+  export_max_rows: 50000000
+
+mcp:
+  default_page_size: 50
+  max_page_size: 200
+  max_cell_chars: 400
+  require_confirmation_for_mutations: true   # HITL: agents must pass dry_run=false for DROP/DELETE/ALTER/UPDATE/…
+  sse_heartbeat_seconds: 25
+
+copilot:                                 # DuckCopilot — in-app AI assistant
+  enabled: true
+  provider: "${COPILOT_PROVIDER:-none}"   # anthropic | openai | ollama | none (users may bring their own key)
+  model: "${COPILOT_MODEL:-}"             # e.g. claude-sonnet-4-5, gpt-4o, llama3.1
+  api_key: "${COPILOT_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+  base_url: "${COPILOT_BASE_URL:-}"       # Ollama / OpenAI-compatible endpoint
+  allow_byok: true
+  max_context_tables: 40
+  include_summaries: true
+  max_output_tokens: 4096
+  temperature: 0.2
+
+observability:
+  metrics_enabled: true                  # GET /metrics (Prometheus)
+  metrics_require_auth: false
+  otel:
+    enabled: ${DUCKVIEW_OTEL_ENABLED:-false}
+    service_name: "${OTEL_SERVICE_NAME:-duckview}"
+    exporter_otlp_endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"   # e.g. http://otel-collector:4318/v1/traces
+    console_exporter: false
