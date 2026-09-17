@@ -5,7 +5,8 @@ name: Publish Docker image
 #
 # Required repository secrets for Docker Hub:
 #   DOCKERHUB_USERNAME  your Docker Hub username / organisation (also the image namespace)
-#   DOCKERHUB_TOKEN     a Docker Hub access token with Read & Write scope (Account settings → Personal access tokens)
+#   DOCKERHUB_TOKEN     a Docker Hub access token with Read & Write scope (Account settings → Personal access tokens);
+#                       the optional README → Hub description sync additionally needs the Delete scope
 # Optional repository variable:
 #   DOCKERHUB_IMAGE     image name without registry, default "<DOCKERHUB_USERNAME>/duckview"
 
@@ -122,13 +123,15 @@ jobs:
           docker logs dv | tail -20
           docker rm -f dv
 
+      # Best effort: Docker Hub only allows description edits with a Read/Write/Delete token or the account password.
       - name: Update the Docker Hub description from the README
         if: steps.names.outputs.hub == 'true'
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ steps.names.outputs.hub_repo }}
-          short-description: DuckDB analytics workspace with lakehouse connectors, dashboards, Copilot and an MCP server for AI agents
+          short-description: DuckDB analytics workspace — lakehouse connectors, dashboards, Copilot, MCP server for AI agents
           readme-filepath: ./README.md
           enable-url-completion: true
