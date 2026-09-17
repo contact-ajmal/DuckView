@@ -3,7 +3,7 @@ import { Bar } from 'react-chartjs-2';
 import { UploadCloud, Table2, Eye, FileSpreadsheet, FileJson, Database, Box, Folder, FolderPlus, FolderOpen, Trash2, ArrowRight, ArrowUpRight, RefreshCw, ChevronDown, ChevronRight, X } from 'lucide-react';
 import { FolderPicker } from '../explorer/FolderPicker';
 import '../../lib/chart';
-import { ACCENT, GRID, withAlpha, compactNumber } from '../../lib/chart';
+import { withAlpha, compactNumber, useChartTheme } from '../../lib/chart';
 import { api, uploadFiles, formatBytes, type OverviewResult, type OverviewColumn, type JailEntry } from '../../api/client';
 import { useWorkspace } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
@@ -50,6 +50,9 @@ function Kpi({ label, value, sub, sql, onSql, tone }: { label: string; value: Re
 }
 
 function Distribution({ col }: { col: OverviewColumn }) {
+  const ct = useChartTheme();
+  const ACCENT = ct.accent;
+  const GRID = ct.grid;
   const d = col.distribution;
   if (!d) {
     const highCard = col.approx_unique != null && col.approx_unique > 100;
@@ -61,7 +64,7 @@ function Distribution({ col }: { col: OverviewColumn }) {
   return (
     <div className="h-28">
       <Bar
-        data={{ labels, datasets: [{ data, backgroundColor: labels.map((l) => (l === 'Other' ? '#52525b' : withAlpha(ACCENT, 0.85))), borderColor: '#18181b', borderWidth: 1, borderRadius: 3, borderSkipped: horizontal ? 'left' : 'bottom', categoryPercentage: d.kind === 'histogram' ? 1 : 0.8, barPercentage: d.kind === 'histogram' ? 0.95 : 0.9 }] }}
+        data={{ labels, datasets: [{ data, backgroundColor: labels.map((l) => (l === 'Other' ? ct.muted : withAlpha(ACCENT, 0.85))), borderColor: ct.border, borderWidth: 1, borderRadius: 3, borderSkipped: horizontal ? 'left' : 'bottom', categoryPercentage: d.kind === 'histogram' ? 1 : 0.8, barPercentage: d.kind === 'histogram' ? 0.95 : 0.9 }] }}
         options={{
           indexAxis: horizontal ? 'y' : 'x',
           responsive: true,

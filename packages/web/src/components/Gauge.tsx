@@ -10,9 +10,9 @@ export function Gauge({ value, label, primary, secondary, tone }: { value: numbe
   return (
     <div className="flex flex-col items-center rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 pb-3 pt-4">
       <svg viewBox="0 0 140 80" className="w-full max-w-[200px]">
-        <path d="M 16 70 A 54 54 0 0 1 124 70" fill="none" stroke="#27272a" strokeWidth="10" strokeLinecap="round" />
+        <path d="M 16 70 A 54 54 0 0 1 124 70" fill="none" stroke="var(--color-zinc-800)" strokeWidth="10" strokeLinecap="round" />
         <path d="M 16 70 A 54 54 0 0 1 124 70" fill="none" stroke={color} strokeWidth="10" strokeLinecap="round" strokeDasharray={`${dash} ${c}`} style={{ transition: 'stroke-dasharray 400ms ease, stroke 400ms ease' }} />
-        <text x="70" y="62" textAnchor="middle" fill="#fafafa" fontSize="20" fontWeight="600" fontFamily="Inter, system-ui, sans-serif">
+        <text x="70" y="62" textAnchor="middle" fill="var(--color-zinc-50)" fontSize="20" fontWeight="600" fontFamily="var(--font-sans)">
           {pct.toFixed(0)}%
         </text>
       </svg>

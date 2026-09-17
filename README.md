@@ -9,7 +9,8 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │                  schema pane · tabs · saved-query library · .sql import/export│
 │ #/dashboards     BI builder: drag-and-drop grid, KPI/chart/table/markdown,   │
 │                  auto-refresh                                                 │
-│ #/settings       live gauges · engine tuning · cloud connections · users      │
+│ #/settings       categorised: appearance · layout · hardware · engine ·     │
+│                  storage · copilot · account · users                          │
 │ #/mcp            tokens · client snippets · live agent inspector             │
 │ DuckCopilot      dockable AI drawer (Anthropic · OpenAI · Ollama, BYOK)       │
 └──────────────┬───────────────────────────────────────────────────────────────┘
@@ -134,6 +135,14 @@ Every region resizes like an IDE: drag the splitters between the side bar and th
 
 Any component can be removed to declutter: hover a panel header and click its ×. Hidden components are listed under **Layout** in the header (with a count badge) for one-click restore, and Settings → Layout has a checklist of every component per page. Sizes and hidden components are remembered per browser.
 
+## Themes
+
+Six built-in themes decide both the colour system and the typeface — three dark (**Midnight** zinc/violet · **Graphite** neutral/blue · **Fjord** Nord-style teal) and three light (**Daylight** violet · **Professional** navy on grey with IBM Plex, for corporate/print contexts · **Paper** warm off-white with orange). Switch from the header quick-menu or Settings → Appearance, where you can also override the sans/mono fonts and the UI scale independently of the theme. Every colour in the app (surfaces, tones, status, code editor, chart series/grid/tooltips) resolves through runtime CSS variables set on `<html>` — Tailwind's `@theme` tokens reference them, so opacity variants like `bg-zinc-800/60` re-theme too. Chart palettes are validated per theme for colour-vision-deficiency separation and contrast against each surface. Preference is stored in the browser (`duckview.theme`); `prefers-color-scheme` picks Midnight or Daylight on first load.
+
+## Settings
+
+Settings is split into categories in a left-hand nav (deep-linkable as `#/settings/<category>`): **Appearance** (themes, fonts, scale) · **Layout** (show/hide components) · **Hardware** (live gauges, resources, warm engines) · **Engine** (memory, threads, timeout, sandbox) · **Storage** (cloud connections, data connections) · **Copilot** (provider status) · **Account** · **Users** (admin).
+
 ## DuckCopilot
 
 An in-app assistant docked beside the workbench and the dashboard builder. Every turn is hydrated automatically with the workspace's tables/views (columns + types), the data files in the jail, the configured cloud buckets, the SQL in the active tab, and — for selected files/tables — `SUMMARIZE` statistics (min/max/distinct/null %). Providers: **Anthropic** (official SDK, streaming, default `claude-opus-5`), **OpenAI** (`gpt-4o`) and **Ollama** (local, OpenAI-compatible endpoint). Keys are server-managed (`copilot.*`) or bring-your-own from the drawer's settings (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query* (sends the failing SQL + DuckDB error), *Suggest questions* (top analytical questions for a selected dataset). Conversations persist in `chat_history` with the context snapshot of each turn.
@@ -226,7 +235,8 @@ packages/server/src
 packages/web/src
   features/overview   drop zone · KPI badges · null-ratio bars · Chart.js distributions · sample grid
   features/workspace  schema tree (click-to-insert) · tabs with per-tab Stop · editor (cursor persisted) · streaming grid · chart · plan · profile
-  features/settings   SVG gauges (host RAM, DuckDB allocation, CPU, scratch) · engine tuning · connections · users · account
+  features/settings   categorised left-nav: appearance (themes/fonts/scale) · layout · hardware gauges · engine tuning · storage · copilot · account · users
+  theme/              theme definitions (ramps, accents, tones, chart series, fonts) · store/theme.ts applies them as CSS variables
   features/mcp        tokens · Claude Desktop / Cursor / Claude Code snippets · live inspector (WS)
 ```
 

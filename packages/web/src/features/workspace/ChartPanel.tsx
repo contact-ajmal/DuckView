@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Bar, Line, Scatter, Doughnut } from 'react-chartjs-2';
 import type { ChartOptions } from 'chart.js';
 import '../../lib/chart';
-import { SERIES, MAX_SERIES, withAlpha, GRID } from '../../lib/chart';
+import { MAX_SERIES, withAlpha, useChartTheme } from '../../lib/chart';
 import type { ChartConfig, ColumnSchema } from '../../api/client';
 import { Label, Select, Empty } from '../../components/ui';
 import { BarChart3 } from 'lucide-react';
@@ -10,6 +10,9 @@ import { BarChart3 } from 'lucide-react';
 const MAX_POINTS = 2000;
 
 export function ChartPanel({ columns, rows, config, onChange }: { columns: ColumnSchema[]; rows: unknown[][]; config: ChartConfig; onChange: (c: ChartConfig) => void }) {
+  const ct = useChartTheme();
+  const SERIES = ct.series;
+  const GRID = ct.grid;
   const numeric = columns.filter((c) => c.kind === 'number').map((c) => c.name);
   const dims = columns.map((c) => c.name);
   const x = config.x && dims.includes(config.x) ? config.x : dims[0];
@@ -56,7 +59,7 @@ export function ChartPanel({ columns, rows, config, onChange }: { columns: Colum
         const xi = columns.findIndex((c) => c.name === x);
         const yi = columns.findIndex((c) => c.name === ys[0]);
         const pts = rows.slice(0, MAX_POINTS).map((r) => ({ x: Number(r[xi]), y: Number(r[yi]) })).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-        return <Scatter data={{ datasets: [{ label: `${ys[0]} vs ${x}`, data: pts, backgroundColor: withAlpha(SERIES[0]!, 0.7), borderColor: '#18181b', borderWidth: 1, pointRadius: 4, pointHoverRadius: 6 }] }} options={{ ...(base as ChartOptions<'scatter'>), scales: { x: { type: 'linear', grid: { color: GRID }, title: { display: true, text: x } }, y: { grid: { color: GRID }, title: { display: true, text: ys[0] } } }, plugins: { legend: { display: false } } }} />;
+        return <Scatter data={{ datasets: [{ label: `${ys[0]} vs ${x}`, data: pts, backgroundColor: withAlpha(SERIES[0]!, 0.7), borderColor: ct.border, borderWidth: 1, pointRadius: 4, pointHoverRadius: 6 }] }} options={{ ...(base as ChartOptions<'scatter'>), scales: { x: { type: 'linear', grid: { color: GRID }, title: { display: true, text: x } }, y: { grid: { color: GRID }, title: { display: true, text: ys[0] } } }, plugins: { legend: { display: false } } }} />;
       }
       case 'pie': {
         const s = series[0]!;
@@ -64,10 +67,10 @@ export function ChartPanel({ columns, rows, config, onChange }: { columns: Colum
         const head = pairs.slice(0, MAX_SERIES - 1);
         const rest = pairs.slice(MAX_SERIES - 1).reduce((a, p) => a + p.v, 0);
         const slices = rest > 0 ? [...head, { l: 'Other', v: rest }] : head;
-        return <Doughnut data={{ labels: slices.map((p) => p.l), datasets: [{ data: slices.map((p) => p.v), backgroundColor: slices.map((_p, i) => SERIES[i]), borderColor: '#18181b', borderWidth: 2, hoverOffset: 6 }] }} options={{ responsive: true, maintainAspectRatio: false, cutout: '55%', plugins: { legend: { position: 'right' } } }} />;
+        return <Doughnut data={{ labels: slices.map((p) => p.l), datasets: [{ data: slices.map((p) => p.v), backgroundColor: slices.map((_p, i) => SERIES[i]), borderColor: ct.border, borderWidth: 2, hoverOffset: 6 }] }} options={{ responsive: true, maintainAspectRatio: false, cutout: '55%', plugins: { legend: { position: 'right' } } }} />;
       }
       default:
-        return <Bar data={{ labels, datasets: series.map((s, i) => ({ label: s.name, data: s.values, backgroundColor: SERIES[i], borderColor: '#18181b', borderWidth: 1, borderRadius: config.stacked ? 0 : 4, borderSkipped: 'bottom', maxBarThickness: 48 })) }} options={base} />;
+        return <Bar data={{ labels, datasets: series.map((s, i) => ({ label: s.name, data: s.values, backgroundColor: SERIES[i], borderColor: ct.border, borderWidth: 1, borderRadius: config.stacked ? 0 : 4, borderSkipped: 'bottom', maxBarThickness: 48 })) }} options={base} />;
     }
   };
 
@@ -102,7 +105,7 @@ export function ChartPanel({ columns, rows, config, onChange }: { columns: Colum
               const i = ys.indexOf(n);
               return (
                 <button key={n} onClick={() => toggleY(n)} className={`flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${i >= 0 ? 'border-zinc-600 bg-zinc-800 text-zinc-100' : 'border-zinc-800 text-zinc-400 hover:bg-zinc-800'}`}>
-                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: i >= 0 ? SERIES[i] : '#3f3f46' }} />
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: i >= 0 ? SERIES[i] : ct.tooltipBorder }} />
                   {n}
                 </button>
               );

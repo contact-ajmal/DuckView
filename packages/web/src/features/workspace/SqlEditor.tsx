@@ -4,6 +4,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import { Prec } from '@codemirror/state';
 import { sql, PostgreSQL } from '@codemirror/lang-sql';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { useTheme } from '../../store/theme';
 
 export interface SqlEditorHandle {
   /** Inserts text at the cursor (replacing any selection) and focuses the editor. */
@@ -24,6 +25,7 @@ interface Props {
 export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({ value, initialCursor, onChange, onCursorChange, onRun, schema }, ref) {
   const cm = useRef<ReactCodeMirrorRef>(null);
   const lastCursor = useRef<number>(initialCursor ?? 0);
+  const kind = useTheme((t) => t.theme.kind);
 
   useImperativeHandle(ref, () => ({
     insert(text) {
@@ -63,7 +65,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({
           onCursorChange?.(head);
         }
       }),
-      EditorView.theme({ '&': { backgroundColor: '#09090b' }, '.cm-scroller': { fontFamily: 'var(--font-mono)' } }),
+      EditorView.theme({ '&': { backgroundColor: 'var(--color-zinc-950)' }, '.cm-scroller': { fontFamily: 'var(--font-mono)' } }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [schema, onRun, onCursorChange],
@@ -74,7 +76,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({
       ref={cm}
       value={value}
       height="100%"
-      theme={oneDark}
+      theme={kind === 'dark' ? oneDark : 'light'}
       extensions={extensions}
       basicSetup={{ foldGutter: false, highlightActiveLine: true, autocompletion: true, bracketMatching: true, closeBrackets: true }}
       onChange={(v, viewUpdate) => {

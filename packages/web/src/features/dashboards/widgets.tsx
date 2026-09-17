@@ -5,7 +5,7 @@ import { Bar, Line, Scatter, Doughnut } from 'react-chartjs-2';
 import type { ChartOptions } from 'chart.js';
 import { ArrowUpRight, ArrowDownRight, Loader2, RefreshCw, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
 import '../../lib/chart';
-import { SERIES, MAX_SERIES, withAlpha, GRID, compactNumber } from '../../lib/chart';
+import { MAX_SERIES, withAlpha, compactNumber, useChartTheme } from '../../lib/chart';
 import { api, type DashboardWidget, type ColumnSchema, type WidgetChartConfig } from '../../api/client';
 import { cn } from '../../components/ui';
 
@@ -134,6 +134,9 @@ function buildSeries(data: WidgetData, config: WidgetChartConfig) {
 }
 
 export function ChartWidget({ data, config }: { data: WidgetData; config: WidgetChartConfig }) {
+  const ct = useChartTheme();
+  const SERIES = ct.series;
+  const GRID = ct.grid;
   const { labels, series } = useMemo(() => buildSeries(data, config), [data, config]);
   const type = config.chart ?? 'bar';
   const base: ChartOptions<'bar'> = {
@@ -160,10 +163,10 @@ export function ChartWidget({ data, config }: { data: WidgetData; config: Widget
       const head = pairs.slice(0, MAX_SERIES - 1);
       const rest = pairs.slice(MAX_SERIES - 1).reduce((a, p) => a + p.v, 0);
       const slices = rest > 0 ? [...head, { l: 'Other', v: rest }] : head;
-      return <Doughnut data={{ labels: slices.map((p) => p.l), datasets: [{ data: slices.map((p) => p.v), backgroundColor: slices.map((_p, i) => color(i)), borderColor: '#18181b', borderWidth: 2 }] }} options={{ responsive: true, maintainAspectRatio: false, cutout: '55%', plugins: { legend: { position: 'right', labels: { boxWidth: 8, boxHeight: 8, font: { size: 10 } } } } }} />;
+      return <Doughnut data={{ labels: slices.map((p) => p.l), datasets: [{ data: slices.map((p) => p.v), backgroundColor: slices.map((_p, i) => color(i)), borderColor: ct.border, borderWidth: 2 }] }} options={{ responsive: true, maintainAspectRatio: false, cutout: '55%', plugins: { legend: { position: 'right', labels: { boxWidth: 8, boxHeight: 8, font: { size: 10 } } } } }} />;
     }
     default:
-      return <Bar data={{ labels, datasets: series.map((s, i) => ({ label: s.name, data: s.values, backgroundColor: color(i), borderColor: '#18181b', borderWidth: 1, borderRadius: config.stacked ? 0 : 3, borderSkipped: 'bottom', maxBarThickness: 40 })) }} options={base} />;
+      return <Bar data={{ labels, datasets: series.map((s, i) => ({ label: s.name, data: s.values, backgroundColor: color(i), borderColor: ct.border, borderWidth: 1, borderRadius: config.stacked ? 0 : 3, borderSkipped: 'bottom', maxBarThickness: 40 })) }} options={base} />;
   }
 }
 
