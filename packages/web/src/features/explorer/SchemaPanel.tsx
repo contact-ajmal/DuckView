@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Play, ScanSearch, Bot, Loader2, Table2, FileSearch } from 'lucide-react';
-import { api, formatBytes, type InspectResult } from '../../api/client';
+import { api, formatBytes, type InspectResult, type RemoteInspect } from '../../api/client';
 import { TypePill } from '../../components/layout';
 import { Button, Empty, cn } from '../../components/ui';
 
 /** Inline schema preview for the results pane (bottom) — DESCRIBE … LIMIT 0, no data scan. */
-export function SchemaPanel({ workspaceId, target, onQuery, onProfile, onAskCopilot }: { workspaceId: string; target: string | null; onQuery: (sql: string, title: string) => void; onProfile?: (target: string) => void; onAskCopilot?: (target: string) => void }) {
+export function SchemaPanel({ workspaceId, target, remoteConnectionId, onQuery, onProfile, onAskCopilot }: { workspaceId: string; target: string | null; /** Lakehouse connection id when the target is a remote (non-attached) table — metadata comes from the catalog API. */ remoteConnectionId?: string | null; onQuery: (sql: string, title: string) => void; onProfile?: (target: string) => void; onAskCopilot?: (target: string) => void }) {
   const [result, setResult] = useState<InspectResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -18,15 +18,17 @@ export function SchemaPanel({ workspaceId, target, onQuery, onProfile, onAskCopi
     setError(null);
     setResult(null);
     setActiveTable(0);
-    api
-      .post<InspectResult>('/api/storage/inspect', { workspace_id: workspaceId, target })
+    const req = remoteConnectionId
+      ? api.get<RemoteInspect>(`/api/lakehouse/${remoteConnectionId}/inspect?table=${encodeURIComponent(target)}`).then((r): InspectResult => ({ target: r.target, kind: 'remote', columns: r.columns, row_count: null, row_count_source: null, size_bytes: null, suggested_sql: r.suggested_sql }))
+      : api.post<InspectResult>('/api/storage/inspect', { workspace_id: workspaceId, target });
+    req
       .then((r) => alive && setResult(r))
       .catch((e) => alive && setError((e as Error).message))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
-  }, [workspaceId, target]);
+  }, [workspaceId, target, remoteConnectionId]);
 
   if (!target) return <Empty icon={<FileSearch className="h-8 w-8" />} title="Select a file to preview its schema" hint="Click any file or table in the Explorer. The preview reads only headers/footers — no data is scanned." />;
   const columns = result?.tables?.length ? result.tables[activeTable]?.columns ?? [] : result?.columns ?? [];
@@ -89,12 +91,12 @@ export function SchemaPanel({ workspaceId, target, onQuery, onProfile, onAskCopi
       </div>
       {result && (
         <aside className="flex w-80 shrink-0 flex-col gap-2 border-l border-zinc-800 p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Query this file</div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{remoteConnectionId ? 'Query on the SQL warehouse' : 'Query this file'}</div>
           <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-2 font-mono text-[11px] text-zinc-300">{suggested}</pre>
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" size="sm" onClick={() => onQuery(suggested, title)}><Play className="h-3.5 w-3.5" /> Query this file</Button>
-            {onProfile && result.kind !== 'database' && <Button size="sm" onClick={() => onProfile(result.target)}><ScanSearch className="h-3.5 w-3.5" /> Profile</Button>}
-            {onAskCopilot && result.kind !== 'database' && <Button size="sm" onClick={() => onAskCopilot(result.target)}><Bot className="h-3.5 w-3.5" /> Ask Copilot</Button>}
+            <Button variant="primary" size="sm" onClick={() => onQuery(suggested, title)}><Play className="h-3.5 w-3.5" /> {remoteConnectionId ? 'Run on warehouse' : 'Query this file'}</Button>
+            {onProfile && result.kind !== 'database' && !remoteConnectionId && <Button size="sm" onClick={() => onProfile(result.target)}><ScanSearch className="h-3.5 w-3.5" /> Profile</Button>}
+            {onAskCopilot && result.kind !== 'database' && !remoteConnectionId && <Button size="sm" onClick={() => onAskCopilot(result.target)}><Bot className="h-3.5 w-3.5" /> Ask Copilot</Button>}
           </div>
         </aside>
       )}

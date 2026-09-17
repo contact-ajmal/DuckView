@@ -169,17 +169,30 @@ export class AuthService {
     const rec = rows[0];
     if (!rec) return null;
     if (rec.expires_at && rec.expires_at.getTime() < Date.now()) return null;
-    const user = await this.findById(rec.user_id);
-    if (!user) return null;
     this.db
       .update(this.s.apiTokens)
       .set({ last_used_at: new Date() })
       .where(eq(this.s.apiTokens.id, rec.id))
       .then(() => undefined)
       .catch(() => undefined);
-    // Effective scopes = token scopes ∩ role capabilities
+    return this.principalFromTokenRecord(rec, ip);
+  }
+
+  async getTokenRecord(tokenId: string): Promise<ApiToken | null> {
+    const rows = await this.db.select().from(this.s.apiTokens).where(eq(this.s.apiTokens.id, tokenId)).limit(1);
+    return rows[0] ?? null;
+  }
+
+  /** Principal for a stored token (effective scopes = token scopes ∩ role capabilities). */
+  async principalFromTokenRecord(rec: ApiToken, ip?: string): Promise<Principal | null> {
+    const user = await this.findById(rec.user_id);
+    if (!user) return null;
     const roleScopes = this.principalFromUser(user, 'token').scopes;
     const scopes = rec.scopes.filter((s) => roleScopes.includes(s));
     return { userId: user.id, email: user.email, role: user.role, via: 'token', scopes, tokenId: rec.id, workspaceScope: rec.workspace_id, actorType: 'AGENT', ip };
+  }
+
+  async setTokenScopes(tokenId: string, scopes: TokenScope[]): Promise<void> {
+    await this.db.update(this.s.apiTokens).set({ scopes }).where(eq(this.s.apiTokens.id, tokenId));
   }
 }

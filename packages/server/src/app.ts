@@ -23,6 +23,8 @@ import { storageRoutes } from './routes/storage.js';
 import { exportRoutes } from './routes/exports.js';
 import { biRoutes } from './routes/bi.js';
 import { copilotRoutes } from './routes/copilot.js';
+import { lakehouseRoutes } from './routes/lakehouse.js';
+import { agentRoutes } from './routes/agent.js';
 import { registerMcpHttp, McpSessionRegistry } from './mcp/http.js';
 import { logger } from './observability/logger.js';
 
@@ -106,6 +108,8 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   await app.register(async (r) => exportRoutes(r, ctx));
   await app.register(async (r) => biRoutes(r, ctx));
   await app.register(async (r) => copilotRoutes(r, ctx));
+  await app.register(async (r) => lakehouseRoutes(r, ctx));
+  await app.register(async (r) => agentRoutes(r, ctx));
   await app.register(async (r) => registerMcpHttp(r, ctx, mcpSessions));
 
   // Static SPA (built web bundle), with history fallback for non-API GETs.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Bot, Wrench, FolderOpen, PanelLeft } from 'lucide-react';
-import { useWorkspace } from '../../store/workspace';
+import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Bot, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap } from 'lucide-react';
+import { useWorkspace, lakehouseEngine, engineConnectionId } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { useCopilot } from '../../store/copilot';
 import { api, exportAndDownload, tabsToSql, sqlToTabs, type ChartConfig, type SavedQuery } from '../../api/client';
@@ -15,6 +15,7 @@ import { Explorer, type ExplorerNode } from '../explorer/Explorer';
 import { SchemaPanel } from '../explorer/SchemaPanel';
 import { FolderPicker } from '../explorer/FolderPicker';
 import { CloudWizard } from '../explorer/CloudWizard';
+import { LakehouseWizard } from '../explorer/LakehouseWizard';
 import { registerCopilotHost } from '../copilot/CopilotDrawer';
 import { Eyebrow, PageTitle, Panel, TypePill } from '../../components/layout';
 import { SplitPane, StackedPanes, usePersisted } from '../../components/panes';
@@ -46,7 +47,10 @@ export function WorkspacePage() {
   const [exporting, setExporting] = useState<string | null>(null);
   const [dropping, setDropping] = useState(false);
   const [inspect, setInspect] = useState<string | null>(null);
+  const [inspectRemote, setInspectRemote] = useState<string | null>(null);
   const [wizard, setWizard] = useState(false);
+  const [lakeWizard, setLakeWizard] = useState(false);
+  const [materialize, setMaterialize] = useState<{ open: boolean; connectionId: string; connectionName: string; sql: string; table: string; busy: boolean; error: string | null; done: string | null }>({ open: false, connectionId: '', connectionName: '', sql: '', table: '', busy: false, error: null, done: null });
   const [picker, setPicker] = useState(false);
   const [explorerKey, setExplorerKey] = useState(0);
   const [saved, setSaved] = useState<SavedQuery[]>([]);
@@ -196,15 +200,31 @@ export function WorkspacePage() {
       onInspect: (n: ExplorerNode) => {
         if (!n.target) return;
         setInspect(n.target);
+        setInspectRemote(n.kind === 'lh-table' && n.lakehouse?.engine === 'remote' ? n.lakehouse.connectionId : null);
         setView('schema');
       },
-      onQuery: (n: ExplorerNode) => n.target && void ws.addTab({ title: n.name, sql: n.kind === 'object' || n.fileKind !== 'duckdb' ? `SELECT *\nFROM '${n.target}'\nLIMIT 100;` : `ATTACH '${n.target}' AS attached_db (READ_ONLY);\nSHOW ALL TABLES;` }),
+      onQuery: (n: ExplorerNode) => {
+        if (!n.target) return;
+        if (n.kind === 'lh-table') return void ws.addTab({ title: n.name, sql: `SELECT *\nFROM ${n.target}\nLIMIT 100;` });
+        void ws.addTab({ title: n.name, sql: n.kind === 'object' || n.fileKind !== 'duckdb' ? `SELECT *\nFROM '${n.target}'\nLIMIT 100;` : `ATTACH '${n.target}' AS attached_db (READ_ONLY);\nSHOW ALL TABLES;` });
+      },
+      onQueryRemote: (n: ExplorerNode) => {
+        if (!n.target || !n.lakehouse) return;
+        void ws.addTab({ title: n.name, sql: `SELECT *\nFROM ${n.target}\nLIMIT 100;`, engine: lakehouseEngine(n.lakehouse.connectionId) });
+        void ws.loadRemoteEngines();
+      },
+      onMaterialize: (n: ExplorerNode) => {
+        if (!n.target || !n.lakehouse) return;
+        const remoteName = n.lakehouse.engine === 'duckdb' ? `${n.lakehouse.catalog ?? ''}.${n.lakehouse.schema ?? ''}.${n.name}`.replace(/^\./, '') : n.target;
+        setMaterialize({ open: true, connectionId: n.lakehouse.connectionId, connectionName: n.lakehouse.alias, sql: `SELECT * FROM ${remoteName}`, table: n.name.replace(/[^A-Za-z0-9_]/g, '_'), busy: false, error: null, done: null });
+      },
       onInsert: (text: string) => editor.current?.insert(text),
       onAskCopilot: (n: ExplorerNode) => {
         if (n.target) cp.setTargets([n.target]);
         cp.toggle(true);
       },
       onAddConnection: () => setWizard(true),
+      onAddLakehouse: () => setLakeWizard(true),
       onAddFolder: () => setPicker(true),
       onRemoveFolder: async (path: string) => {
         if (!workspace || !confirm(`Remove ${path} from this workspace? Files are not deleted.`)) return;
@@ -218,6 +238,22 @@ export function WorkspacePage() {
   );
 
   useEffect(() => setPlan(null), [tab?.id]);
+  useEffect(() => {
+    void ws.loadRemoteEngines();
+  }, [wsId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tabEngine = tab ? engineConnectionId(tab.engine) : null;
+  const tabEngineConn = tabEngine ? ws.remoteEngines.find((c) => c.id === tabEngine) ?? null : null;
+  const runMaterialize = async () => {
+    if (!wsId) return;
+    setMaterialize((m) => ({ ...m, busy: true, error: null, done: null }));
+    try {
+      const r = await api.post<{ table: string; rows: number; truncated: boolean; duration_ms: number }>(`/api/lakehouse/${materialize.connectionId}/materialize`, { sql: materialize.sql, table: materialize.table, workspace_id: wsId });
+      setMaterialize((m) => ({ ...m, busy: false, done: `Created table ${r.table} with ${r.rows.toLocaleString()} rows in ${r.duration_ms} ms${r.truncated ? ' (row cap reached)' : ''}.` }));
+      void ws.loadCatalog(true);
+    } catch (e) {
+      setMaterialize((m) => ({ ...m, busy: false, error: (e as Error).message }));
+    }
+  };
   if (!workspace) return <Empty title="No workspace" hint="Create a workspace from the switcher in the top bar." />;
 
   const executed = result?.status === 'done';
@@ -366,9 +402,16 @@ export function WorkspacePage() {
             <Square className="h-3.5 w-3.5" /> Stop
           </button>
         ) : (
-          <button onClick={() => run(null)} disabled={!sql.trim()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-accent-600/70 bg-accent-600/25 px-3 text-xs font-medium text-accent-100 hover:bg-accent-600/40 disabled:opacity-40">
-            <Play className="h-3.5 w-3.5" /> Run <kbd className="ml-1 rounded border border-zinc-700 bg-zinc-900 px-1 font-mono text-[10px] text-zinc-400">⌘↵</kbd>
+          <button onClick={() => run(null)} disabled={!sql.trim()} className={cn('inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium disabled:opacity-40', tabEngine ? 'border-amber-700/70 bg-amber-600/20 text-amber-100 hover:bg-amber-600/30' : 'border-accent-600/70 bg-accent-600/25 text-accent-100 hover:bg-accent-600/40')} title={tabEngineConn ? `Runs on ${tabEngineConn.name} (Databricks SQL warehouse)` : 'Runs in DuckDB'}>
+            <Play className="h-3.5 w-3.5" /> {tabEngineConn ? `Run on ${tabEngineConn.name}` : 'Run'} <kbd className="ml-1 rounded border border-zinc-700 bg-zinc-900 px-1 font-mono text-[10px] text-zinc-400">⌘↵</kbd>
           </button>
+        )}
+        {(ws.remoteEngines.length > 0 || tabEngine) && tab && (
+          <Select value={tab.engine ?? ''} onChange={(e) => void ws.setTabEngine(tab.id, e.target.value || null)} className="h-7 text-[11px]" title="Which engine executes this tab">
+            <option value="">DuckDB (local)</option>
+            {ws.remoteEngines.map((c) => <option key={c.id} value={lakehouseEngine(c.id)}>Databricks · {c.name}</option>)}
+            {tabEngine && !tabEngineConn && <option value={tab.engine ?? ''}>remote (connection removed)</option>}
+          </Select>
         )}
         <button onClick={() => run(null)} disabled={!sql.trim() || result?.status === 'running'} className="text-xs text-zinc-300 hover:text-zinc-50 disabled:opacity-40">Run all</button>
         <button onClick={() => replaceSql('')} className="text-xs text-zinc-300 hover:text-zinc-50">Clear</button>
@@ -379,7 +422,13 @@ export function WorkspacePage() {
             <span>
               <span className="text-emerald-400">●</span> <span className="text-zinc-200">{result.durationMs} ms</span> · <span className="text-zinc-200">{result.rowCount.toLocaleString()}</span> rows · <span className="text-zinc-200">{result.columns.length}</span> cols
               {result.truncated && <span className="text-amber-300"> · capped at {ws.maxRows.toLocaleString()}</span>}
+              {result.engine === 'databricks' && <Badge tone="amber" className="ml-1.5">databricks</Badge>}
               {result.statements.map((s, i) => <Badge key={i} tone={s.class === 'read' ? 'zinc' : s.class === 'destructive' ? 'red' : 'violet'} className="ml-1.5">{s.verb}</Badge>)}
+              {result.engine === 'databricks' && result.connectionId && canWrite && (
+                <button onClick={() => setMaterialize({ open: true, connectionId: result.connectionId!, connectionName: tabEngineConn?.name ?? 'warehouse', sql: result.sql ?? sql, table: (tab?.title ?? 'remote').replace(/[^A-Za-z0-9_]/g, '_').toLowerCase() || 'remote_result', busy: false, error: null, done: null })} className="ml-2 inline-flex items-center gap-1 rounded border border-fuchsia-800 bg-fuchsia-950/40 px-1.5 py-0.5 text-[10px] text-fuchsia-200 hover:bg-fuchsia-900/50" title="Run this query on the warehouse and store the result as a DuckDB table you can join with local data">
+                  <DatabaseZap className="h-3 w-3" /> Materialise into DuckDB
+                </button>
+              )}
             </span>
           )}
           {result?.status === 'error' && (
@@ -454,7 +503,8 @@ export function WorkspacePage() {
           <SchemaPanel
             workspaceId={workspace.id}
             target={inspect}
-            onQuery={(s, title) => { void ws.addTab({ title, sql: s }); setView('table'); }}
+            remoteConnectionId={inspectRemote}
+            onQuery={(s, title) => { void ws.addTab({ title, sql: s, engine: inspectRemote ? lakehouseEngine(inspectRemote) : null }); if (inspectRemote) void ws.loadRemoteEngines(); setView('table'); }}
             onProfile={(t) => void doProfile(t)}
             onAskCopilot={(t) => { cp.setTargets([t]); cp.toggle(true); }}
           />
@@ -529,6 +579,30 @@ export function WorkspacePage() {
       />
 
       <CloudWizard open={wizard} onClose={() => setWizard(false)} onCreated={() => setExplorerKey((k) => k + 1)} />
+      <LakehouseWizard open={lakeWizard} onClose={() => setLakeWizard(false)} onCreated={() => { setExplorerKey((k) => k + 1); void ws.loadRemoteEngines(); }} />
+      <Modal open={materialize.open} onClose={() => setMaterialize((m) => ({ ...m, open: false }))} title="Materialise into DuckDB">
+        <div className="space-y-3">
+          <p className="text-xs text-zinc-400">Runs the statement on <b className="text-zinc-200">{materialize.connectionName}</b> (Databricks SQL warehouse) and stores the rows as a DuckDB table in this workspace, so you can join them with local files and tables.</p>
+          <div>
+            <Label>Table name</Label>
+            <Input value={materialize.table} onChange={(e) => setMaterialize((m) => ({ ...m, table: e.target.value }))} className="font-mono" />
+          </div>
+          <div>
+            <Label>SQL (Databricks dialect)</Label>
+            <textarea value={materialize.sql} onChange={(e) => setMaterialize((m) => ({ ...m, sql: e.target.value }))} rows={5} className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-100 focus:border-accent-500 focus:outline-none" />
+          </div>
+          {materialize.error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-200">{materialize.error}</div>}
+          {materialize.done && <div className="rounded-md border border-emerald-900 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">{materialize.done}</div>}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setMaterialize((m) => ({ ...m, open: false }))}>{materialize.done ? 'Close' : 'Cancel'}</Button>
+            {materialize.done ? (
+              <Button variant="primary" onClick={() => { void ws.addTab({ title: materialize.table, sql: `SELECT * FROM ${materialize.table} LIMIT 100;` }); setMaterialize((m) => ({ ...m, open: false })); }}><Layers className="h-3.5 w-3.5" /> Query it</Button>
+            ) : (
+              <Button variant="primary" onClick={runMaterialize} loading={materialize.busy} disabled={!materialize.table.trim() || !materialize.sql.trim()}><DatabaseZap className="h-3.5 w-3.5" /> Materialise</Button>
+            )}
+          </div>
+        </div>
+      </Modal>
       <FolderPicker
         open={picker}
         workspaceId={workspace.id}

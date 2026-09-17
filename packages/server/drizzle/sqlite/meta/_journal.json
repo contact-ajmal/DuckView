@@ -29,6 +29,20 @@
       "when": 1789629654223,
       "tag": "0003_workspace_folders",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789653987671,
+      "tag": "0004_lakehouse",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789654622906,
+      "tag": "0005_agents",
+      "breakpoints": true
     }
   ]
 }

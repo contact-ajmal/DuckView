@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Bot, X, Send, Square, Settings2, Sparkles, Wrench, PlayCircle, FilePlus2, ArrowDownToLine, Trash2, History, ChevronDown, KeyRound, Loader2 } from 'lucide-react';
 import { useCopilot } from '../../store/copilot';
 import { useWorkspace } from '../../store/workspace';
-import { api } from '../../api/client';
+import { api, type AgentRecord } from '../../api/client';
 import { Button, Input, Label, Select, cn } from '../../components/ui';
 
 export interface CopilotHost {
@@ -23,7 +23,8 @@ export function registerCopilotHost(h: CopilotHost | null) {
   host = h;
 }
 
-const PROVIDER_LABEL: Record<string, string> = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI', ollama: 'Ollama (local)' };
+const PROVIDER_LABEL: Record<string, string> = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI', ollama: 'Ollama (local)', bedrock: 'Amazon Bedrock (Claude)', bedrock_agent: 'Amazon Bedrock Agent', agentcore: 'Bedrock AgentCore runtime' };
+const AWS = new Set(['bedrock', 'bedrock_agent', 'agentcore']);
 
 function SqlBlock({ sql, onInsert, onNewTab, onRun, busy }: { sql: string; onInsert: () => void; onNewTab: () => void; onRun: () => void; busy: boolean }) {
   return (
@@ -54,12 +55,20 @@ export function CopilotDrawer() {
   const [models, setModels] = useState<string[]>([]);
   const [modelsBusy, setModelsBusy] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
+  const [invokable, setInvokable] = useState<AgentRecord[]>([]);
   const scroller = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
 
   useEffect(() => {
     void cp.loadConfig();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!showSettings) return;
+    api
+      .get<{ agents: AgentRecord[] }>('/api/agents')
+      .then((r) => setInvokable(r.agents.filter((a) => a.can_invoke)))
+      .catch(() => setInvokable([]));
+  }, [showSettings]);
   useEffect(() => {
     if (wsId && cp.open) void cp.loadConversations(wsId);
   }, [wsId, cp.open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -71,7 +80,17 @@ export function CopilotDrawer() {
   const cfg = cp.config;
   const usingByok = !!(cfg?.allow_byok && cp.settings.provider);
   const effectiveProvider = usingByok ? cp.settings.provider : cfg?.server_provider ?? null;
-  const effectiveModel = usingByok ? cp.settings.model || cfg?.default_models[cp.settings.provider] : cfg?.server_model;
+  const effectiveModel = usingByok
+    ? cp.settings.provider === 'agentcore'
+      ? cp.settings.runtimeArn?.split('/').pop() || 'runtime'
+      : cp.settings.provider === 'bedrock_agent'
+        ? cp.settings.agentId || 'agent'
+        : cp.settings.model || cfg?.default_models[cp.settings.provider]
+    : cfg?.server_provider === 'agentcore'
+      ? cfg.server_aws?.runtime_arn?.split('/').pop() ?? cfg.server_model
+      : cfg?.server_provider === 'bedrock_agent'
+        ? cfg.server_aws?.agent_id ?? cfg.server_model
+        : cfg?.server_model;
   const ready = !!cfg?.enabled && !!effectiveProvider;
 
   const submit = (action?: 'chat' | 'fix' | 'suggest' | 'explain') => {
@@ -107,7 +126,7 @@ export function CopilotDrawer() {
     if (!cp.settings.provider) return;
     setModelsBusy(true);
     try {
-      const r = await api.post<{ models: string[] }>('/api/copilot/models', { provider: cp.settings.provider, api_key: cp.settings.apiKey || undefined, base_url: cp.settings.baseUrl || undefined });
+      const r = await api.post<{ models: string[] }>('/api/copilot/models', { provider: cp.settings.provider, api_key: cp.settings.apiKey || undefined, base_url: cp.settings.baseUrl || undefined, region: cp.settings.region || undefined, agent_id: cp.settings.agentId || undefined, agent_alias_id: cp.settings.agentAliasId || undefined, runtime_arn: cp.settings.runtimeArn || undefined });
       setModels(r.models);
     } catch (e) {
       alert((e as Error).message);
@@ -201,13 +220,74 @@ export function CopilotDrawer() {
           </div>
           <Select value={cp.settings.provider} onChange={(e) => { cp.setSettings({ provider: e.target.value as typeof cp.settings.provider, model: '' }); setModels([]); }} className="h-8 w-full text-xs" disabled={!cfg.allow_byok}>
             <option value="">{cfg.server_provider ? `Server-managed: ${PROVIDER_LABEL[cfg.server_provider]} (${cfg.server_model})` : 'Server-managed: none configured'}</option>
-            {cfg.allow_byok && (['anthropic', 'openai', 'ollama'] as const).map((p) => (
+            {cfg.allow_byok && (['anthropic', 'openai', 'ollama', 'bedrock', 'bedrock_agent', 'agentcore'] as const).map((p) => (
               <option key={p} value={p}>
                 Bring your own: {PROVIDER_LABEL[p]}
               </option>
             ))}
           </Select>
-          {cp.settings.provider && (
+          {cp.settings.provider && AWS.has(cp.settings.provider) && (
+            <div className="space-y-2">
+              <p className="text-[11px] text-zinc-500">Uses the DuckView server's AWS credentials (default credential chain). {cp.settings.provider === 'bedrock_agent' && 'Bedrock Agents Classic is closed to new customers — prefer AgentCore for new agents.'}</p>
+              {invokable.length > 0 && (
+                <div>
+                  <Label>Registered agents</Label>
+                  <Select
+                    value=""
+                    onChange={(e) => {
+                      const a = invokable.find((x) => x.id === e.target.value);
+                      if (!a) return;
+                      if (a.framework === 'bedrock_agent') cp.setSettings({ provider: 'bedrock_agent', region: a.config.region ?? '', agentId: a.config.agent_id ?? '', agentAliasId: a.config.agent_alias_id ?? '', model: '' });
+                      else cp.setSettings({ provider: 'agentcore', region: a.config.region ?? '', runtimeArn: a.config.runtime_arn ?? '', model: '' });
+                    }}
+                    className="h-8 w-full text-xs"
+                  >
+                    <option value="">Pick from the Agent hub…</option>
+                    {invokable.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} · {a.framework === 'bedrock_agent' ? 'Bedrock Agent' : 'AgentCore'}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+              <div>
+                <Label>AWS region</Label>
+                <Input value={cp.settings.region ?? ''} onChange={(e) => cp.setSettings({ region: e.target.value })} className="h-8 font-mono text-xs" placeholder={cfg.server_aws?.region ?? 'us-east-1'} />
+              </div>
+              {cp.settings.provider === 'bedrock_agent' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label>Agent id</Label>
+                    <Input value={cp.settings.agentId ?? ''} onChange={(e) => cp.setSettings({ agentId: e.target.value })} className="h-8 font-mono text-xs" />
+                  </div>
+                  <div>
+                    <Label>Alias id</Label>
+                    <Input value={cp.settings.agentAliasId ?? ''} onChange={(e) => cp.setSettings({ agentAliasId: e.target.value })} className="h-8 font-mono text-xs" />
+                  </div>
+                </div>
+              )}
+              {cp.settings.provider === 'agentcore' && (
+                <div>
+                  <Label>Runtime ARN</Label>
+                  <Input value={cp.settings.runtimeArn ?? ''} onChange={(e) => cp.setSettings({ runtimeArn: e.target.value })} className="h-8 font-mono text-xs" placeholder="arn:aws:bedrock-agentcore:…:runtime/…" />
+                </div>
+              )}
+              {cp.settings.provider === 'bedrock' && (
+                <div>
+                  <Label>Model / inference profile</Label>
+                  <div className="flex gap-1">
+                    <Input list="copilot-models" value={cp.settings.model} onChange={(e) => cp.setSettings({ model: e.target.value })} className="h-8 font-mono text-xs" placeholder={cfg.default_models.bedrock} />
+                    <datalist id="copilot-models">{[...new Set([...(cfg.suggested_models.bedrock ?? []), ...models])].map((m) => <option key={m} value={m} />)}</datalist>
+                    <Button size="sm" onClick={fetchModels} loading={modelsBusy} title="List Anthropic models and inference profiles in the region">
+                      Fetch
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {cp.settings.provider && !AWS.has(cp.settings.provider) && (
             <>
               {cp.settings.provider !== 'ollama' && (
                 <div>
@@ -240,7 +320,7 @@ export function CopilotDrawer() {
       <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-3 py-3 text-[13px] text-zinc-200">
         {!ready && (
           <div className="rounded-md border border-amber-900 bg-amber-950/40 p-3 text-xs text-amber-200">
-            {cfg?.enabled === false ? 'DuckCopilot is disabled on this server.' : 'No LLM provider configured. Open settings to bring your own key (Anthropic, OpenAI or a local Ollama), or ask your administrator to set copilot.provider.'}
+            {cfg?.enabled === false ? 'DuckCopilot is disabled on this server.' : 'No LLM provider configured. Open settings to bring your own key (Anthropic, OpenAI, a local Ollama) or point at Amazon Bedrock / a Bedrock Agent / an AgentCore runtime, or ask your administrator to set copilot.provider.'}
           </div>
         )}
         {ready && cp.messages.length === 0 && (

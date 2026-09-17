@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { api, copilotChat, type CopilotConfig, type ChatMsg } from '../api/client';
 
-export interface CopilotSettings { provider: 'anthropic' | 'openai' | 'ollama' | ''; model: string; apiKey: string; baseUrl: string }
+export interface CopilotSettings { provider: 'anthropic' | 'openai' | 'ollama' | 'bedrock' | 'bedrock_agent' | 'agentcore' | ''; model: string; apiKey: string; baseUrl: string; region?: string; agentId?: string; agentAliasId?: string; runtimeArn?: string }
 export interface LiveMessage { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean; error?: string; sqlBlocks?: string[]; meta?: { model?: string; provider?: string; tables?: number; files?: number; targets?: string[]; duration_ms?: number } }
 
 const SETTINGS_KEY = 'duckview.copilot.settings';
@@ -99,7 +99,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     const abort = new AbortController();
     set({ streaming: true, abort, messages: [...get().messages, { id: userId, role: 'user', content: shown }, { id: asstId, role: 'assistant', content: '', streaming: true }] });
     const upd = (patch: Partial<LiveMessage>) => set({ messages: get().messages.map((m) => (m.id === asstId ? { ...m, ...patch } : m)) });
-    const byok = config?.allow_byok && settings.provider ? { provider: settings.provider, model: settings.model || undefined, api_key: settings.apiKey || undefined, base_url: settings.baseUrl || undefined } : {};
+    const byok = config?.allow_byok && settings.provider ? { provider: settings.provider, model: settings.model || undefined, api_key: settings.apiKey || undefined, base_url: settings.baseUrl || undefined, region: settings.region || undefined, agent_id: settings.agentId || undefined, agent_alias_id: settings.agentAliasId || undefined, runtime_arn: settings.runtimeArn || undefined } : {};
     try {
       for await (const ev of copilotChat({ workspace_id: input.workspaceId, conversation_id: get().conversationId ?? undefined, message: input.message, action: input.action, active_sql: input.activeSql ?? null, error_message: input.errorMessage ?? null, result_preview: input.resultPreview ?? null, targets: input.targets ?? get().targets, ...byok }, abort.signal)) {
         if (ev.type === 'context') {

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, ChevronDown, Folder, FolderOpen, FileSpreadsheet, FileJson, Database, Box, File, Cloud, Plus, RefreshCw, Search, HardDrive, Loader2, Layers, FolderPlus } from 'lucide-react';
-import { api, formatBytes, getToken, type TreeEntry, type CloudEntry, type CloudConnection, type LocalListing } from '../../api/client';
+import { ChevronRight, ChevronDown, Folder, FolderOpen, FileSpreadsheet, FileJson, Database, Box, File, Cloud, Plus, RefreshCw, Search, HardDrive, Loader2, Layers, FolderPlus, Table2 } from 'lucide-react';
+import { api, formatBytes, getToken, type TreeEntry, type CloudEntry, type CloudConnection, type LocalListing, type LakehouseConnection, type LakehouseBrowse } from '../../api/client';
 import { cn } from '../../components/ui';
 
 export interface ExplorerNode {
   id: string;
   name: string;
-  kind: 'local-root' | 'folder-root' | 'dir' | 'file' | 'table_dir' | 'cloud-root' | 'connection' | 'bucket' | 'prefix' | 'object';
+  kind: 'local-root' | 'folder-root' | 'dir' | 'file' | 'table_dir' | 'cloud-root' | 'connection' | 'bucket' | 'prefix' | 'object' | 'lakehouse-root' | 'lakehouse' | 'lh-catalog' | 'lh-schema' | 'lh-table';
   fileKind?: string;
   /** Query target: relative local path or cloud URI. */
   target?: string;
@@ -23,6 +23,8 @@ export interface ExplorerNode {
   loading?: boolean;
   error?: string;
   truncated?: boolean;
+  /** Lakehouse position: which connection / catalog / schema this node sits in, and how a table is queried. */
+  lakehouse?: { connectionId: string; alias: string; providerId: string; catalog?: string | null; schema?: string | null; engine?: 'duckdb' | 'remote'; format?: string | null; status?: string; attached?: boolean; remoteSql?: boolean };
 }
 
 export interface ExplorerActions {
@@ -31,6 +33,10 @@ export interface ExplorerActions {
   onInsert(text: string): void;
   onAskCopilot?(node: ExplorerNode): void;
   onAddConnection(): void;
+  onAddLakehouse(): void;
+  /** Table on a remote SQL warehouse (Databricks): open a tab bound to that engine. */
+  onQueryRemote?(node: ExplorerNode): void;
+  onMaterialize?(node: ExplorerNode): void;
   onAddFolder(): void;
   onRemoveFolder(path: string): void;
   onDeleted?(): void;
@@ -68,7 +74,7 @@ function cloudEntryToNode(e: CloudEntry, connectionId: string, bucket: string, p
 
 export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { workspaceId: string; actions: ExplorerActions; refreshKey?: number; selected?: string | null }) {
   const [roots, setRoots] = useState<ExplorerNode[]>([]);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['local-root', 'cloud-root']));
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['local-root', 'cloud-root', 'lakehouse-root']));
   const [filter, setFilter] = useState('');
   const [menu, setMenu] = useState<{ x: number; y: number; node: ExplorerNode } | null>(null);
   const [mode, setMode] = useState<'sandboxed' | 'full'>('sandboxed');
@@ -99,6 +105,22 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
           const r = await api.get<{ entries: CloudEntry[]; next_token: string | null }>(`/api/storage/cloud?connection_id=${node.connectionId}&bucket=${encodeURIComponent(node.bucket!)}&prefix=${encodeURIComponent(node.prefix ?? '')}`);
           children = r.entries.map((e) => cloudEntryToNode(e, node.connectionId!, node.bucket!, node.provider ?? ''));
           truncated = !!r.next_token;
+        } else if (node.kind === 'lakehouse-root') {
+          const r = await api.get<{ connections: LakehouseConnection[] }>('/api/lakehouse-connections');
+          children = r.connections.map((c) => ({ id: `lh:${c.id}`, name: c.name, kind: 'lakehouse', provider: c.provider, lakehouse: { connectionId: c.id, alias: c.alias, providerId: c.provider, status: c.status, attached: c.attached, remoteSql: c.remote_sql }, children: [], loaded: false }));
+        } else if (node.kind === 'lakehouse' || node.kind === 'lh-catalog' || node.kind === 'lh-schema') {
+          const lh = node.lakehouse!;
+          const q = new URLSearchParams({ connection_id: lh.connectionId, workspace_id: workspaceId });
+          if (lh.catalog) q.set('catalog', lh.catalog);
+          if (lh.schema) q.set('schema', lh.schema);
+          const r = await api.get<LakehouseBrowse>(`/api/lakehouse/browse?${q}`);
+          if (r.attach_error && r.entries.length === 0) throw new Error(r.attach_error);
+          children = r.entries.map((e) => {
+            const base = { connectionId: lh.connectionId, alias: lh.alias, providerId: lh.providerId, attached: lh.attached, remoteSql: lh.remoteSql };
+            if (e.type === 'catalog') return { id: `${node.id}:${e.name}`, name: e.name, kind: 'lh-catalog' as const, lakehouse: { ...base, catalog: e.name }, children: [], loaded: false };
+            if (e.type === 'schema') return { id: `${node.id}:${e.name}`, name: e.name, kind: 'lh-schema' as const, lakehouse: { ...base, catalog: r.catalog, schema: e.name }, children: [], loaded: false };
+            return { id: `${node.id}:${e.name}`, name: e.name, kind: 'lh-table' as const, fileKind: e.type === 'view' ? 'view' : 'iceberg', target: e.qualified, queryable: !!e.engine, lakehouse: { ...base, catalog: r.catalog, schema: r.schema, engine: e.engine, format: e.format } };
+          });
         }
         patch(node.id, (n) => ({ ...n, children, loaded: true, loading: false, truncated }));
       } catch (e) {
@@ -120,12 +142,14 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
         /* ignore */
       }
       const cloud: ExplorerNode = { id: 'cloud-root', name: 'Cloud storage', kind: 'cloud-root', children: [], loaded: false };
+      const lake: ExplorerNode = { id: 'lakehouse-root', name: 'Lakehouse', kind: 'lakehouse-root', children: [], loaded: false };
       if (!alive) return;
-      setRoots([local, ...folderRoots, cloud]);
+      setRoots([local, ...folderRoots, cloud, lake]);
       setExpanded((e) => new Set([...e, ...folderRoots.map((f) => f.id)]));
       void loadChildren(local);
       for (const f of folderRoots) void loadChildren(f);
       void loadChildren(cloud);
+      void loadChildren(lake);
     })();
     return () => {
       alive = false;
@@ -183,6 +207,11 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
       node.kind === 'cloud-root' ? <Cloud className="h-3.5 w-3.5 text-zinc-400" /> :
       node.kind === 'connection' ? <Cloud className="h-3.5 w-3.5 text-sky-300" /> :
       node.kind === 'bucket' ? <Database className="h-3.5 w-3.5 text-sky-300" /> :
+      node.kind === 'lakehouse-root' ? <Layers className="h-3.5 w-3.5 text-zinc-400" /> :
+      node.kind === 'lakehouse' ? <Layers className={cn('h-3.5 w-3.5', node.lakehouse?.status === 'error' ? 'text-red-300' : 'text-fuchsia-300')} /> :
+      node.kind === 'lh-catalog' ? <Database className="h-3.5 w-3.5 text-fuchsia-300/80" /> :
+      node.kind === 'lh-schema' ? (open ? <FolderOpen className="h-3.5 w-3.5 text-fuchsia-300/70" /> : <Folder className="h-3.5 w-3.5 text-fuchsia-300/70" />) :
+      node.kind === 'lh-table' ? <Table2 className={cn('h-3.5 w-3.5', node.lakehouse?.engine === 'remote' ? 'text-amber-300' : 'text-fuchsia-300')} /> :
       node.kind === 'dir' || node.kind === 'prefix' ? (open ? <FolderOpen className="h-3.5 w-3.5 text-amber-300/80" /> : <Folder className="h-3.5 w-3.5 text-amber-300/80" />) :
       fileIcon(node.fileKind);
     return (
@@ -191,7 +220,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
           className={cn('group flex cursor-pointer items-center gap-1 rounded py-[3px] pr-1 text-xs hover:bg-zinc-800/70', isSelected && 'bg-accent-600/15')}
           style={{ paddingLeft: 4 + depth * 14 }}
           onClick={() => (isBranch ? toggle(node) : actions.onInspect(node))}
-          onDoubleClick={() => !isBranch && node.queryable && actions.onQuery(node)}
+          onDoubleClick={() => !isBranch && node.queryable && (node.kind === 'lh-table' && node.lakehouse?.engine === 'remote' && actions.onQueryRemote ? actions.onQueryRemote(node) : actions.onQuery(node))}
           onContextMenu={(e) => {
             e.preventDefault();
             setMenu({ x: e.clientX, y: e.clientY, node });
@@ -204,8 +233,11 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
             <span className="w-3.5" />
           )}
           {icon}
-          <span className={cn('min-w-0 flex-1 truncate', node.kind === 'local-root' || node.kind === 'cloud-root' || node.kind === 'folder-root' ? 'font-semibold uppercase tracking-wider text-[10px] text-zinc-400' : 'text-zinc-200')} title={node.localPath ?? node.name}>{node.name}</span>
+          <span className={cn('min-w-0 flex-1 truncate', node.kind === 'local-root' || node.kind === 'cloud-root' || node.kind === 'folder-root' || node.kind === 'lakehouse-root' ? 'font-semibold uppercase tracking-wider text-[10px] text-zinc-400' : 'text-zinc-200')} title={node.localPath ?? node.name}>{node.name}</span>
           {node.kind === 'connection' && <span className="rounded border border-sky-900 bg-sky-950/40 px-1 font-mono text-[9px] text-sky-300">{node.provider}</span>}
+          {node.kind === 'lakehouse' && <span className="rounded border border-fuchsia-900 bg-fuchsia-950/40 px-1 font-mono text-[9px] text-fuchsia-300" title={node.lakehouse?.attached ? `attached as ${node.lakehouse.alias}` : 'remote SQL'}>{node.provider === 'AWS_GLUE' ? 'GLUE' : node.provider === 'AWS_S3_TABLES' ? 'S3T' : node.provider === 'DATABRICKS' ? 'DBX' : 'IRC'}</span>}
+          {node.kind === 'lh-table' && node.lakehouse?.engine === 'remote' && <span className="rounded border border-amber-900 bg-amber-950/40 px-1 font-mono text-[9px] text-amber-300" title="Runs on the SQL warehouse">remote</span>}
+          {node.kind === 'lh-table' && node.lakehouse?.format && node.lakehouse.engine !== 'remote' && <span className="font-mono text-[9px] text-zinc-600">{node.lakehouse.format.toLowerCase()}</span>}
           {node.size != null && <span className="font-mono text-[10px] text-zinc-500">{formatBytes(node.size)}</span>}
           {node.kind === 'cloud-root' && (
             <button
@@ -219,7 +251,19 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
               <Plus className="h-3.5 w-3.5" />
             </button>
           )}
-          {isBranch && node.kind !== 'cloud-root' && (
+          {node.kind === 'lakehouse-root' && (
+            <button
+              className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-accent-300 group-hover:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                actions.onAddLakehouse();
+              }}
+              title="Connect a lakehouse (AWS Glue · S3 Tables · Databricks · Iceberg REST)"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {isBranch && node.kind !== 'cloud-root' && node.kind !== 'lakehouse-root' && (
             <button
               className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-zinc-200 group-hover:opacity-100"
               onClick={(e) => {
@@ -240,6 +284,10 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
                 {node.kind === 'cloud-root' ? (
                   <button className="text-accent-300 hover:underline" onClick={actions.onAddConnection}>
                     + connect S3 / R2 / GCS / Azure
+                  </button>
+                ) : node.kind === 'lakehouse-root' ? (
+                  <button className="text-accent-300 hover:underline" onClick={actions.onAddLakehouse}>
+                    + connect AWS Glue / S3 Tables / Databricks / Iceberg
                   </button>
                 ) : (
                   'empty'
@@ -274,6 +322,19 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
       if (n.kind === 'dir') items.push({ label: 'Insert glob (*.parquet)', run: () => actions.onInsert(`'${n.localPath}/*.parquet'`) });
       if (n.kind === 'prefix' && n.target === undefined) items.push({ label: 'Insert glob (*.parquet)', run: () => actions.onInsert(`'${n.uriScheme ?? (n.provider === 'R2' ? 'r2' : n.provider === 'GCS' ? 'gs' : n.provider === 'AZURE' ? 'az' : 's3')}://${n.bucket}/${n.prefix}*.parquet'`) });
     }
+    if (n.kind === 'lh-table') {
+      const lh = n.lakehouse!;
+      items.push({ label: 'Inspect schema', run: () => actions.onInspect(n) });
+      if (lh.engine === 'duckdb') items.push({ label: 'Query in DuckDB', run: () => actions.onQuery(n) });
+      if (lh.engine === 'remote' && actions.onQueryRemote) items.push({ label: 'Run on SQL warehouse', run: () => actions.onQueryRemote!(n) });
+      if (lh.remoteSql && actions.onMaterialize) items.push({ label: 'Materialise into DuckDB…', run: () => actions.onMaterialize!(n) });
+      items.push({ label: 'Insert name at cursor', run: () => actions.onInsert(n.target ?? n.name) });
+      items.push({ label: 'Copy qualified name', run: () => void navigator.clipboard.writeText(n.target ?? '') });
+      if (actions.onAskCopilot && lh.engine === 'duckdb') items.push({ label: 'Ask DuckCopilot about this', run: () => actions.onAskCopilot!(n) });
+    }
+    if (n.kind === 'lakehouse' || n.kind === 'lh-catalog' || n.kind === 'lh-schema') items.push({ label: 'Refresh', run: () => void loadChildren(n) });
+    if (n.kind === 'lakehouse' && n.lakehouse?.attached) items.push({ label: 'Insert alias at cursor', run: () => actions.onInsert(`${n.lakehouse!.alias}.`) });
+    if (n.kind === 'lakehouse-root') items.push({ label: 'Connect a lakehouse…', run: actions.onAddLakehouse });
     if (n.kind === 'local-root' || n.kind === 'folder-root') items.push({ label: 'Add folder to workspace…', run: actions.onAddFolder });
     if (n.kind === 'folder-root') items.push({ label: 'Copy folder path', run: () => void navigator.clipboard.writeText(n.localPath ?? '') }, { label: 'Remove folder from workspace', run: () => actions.onRemoveFolder(n.localPath!), danger: true });
     if (n.kind === 'cloud-root') items.push({ label: 'Add cloud connection', run: actions.onAddConnection });

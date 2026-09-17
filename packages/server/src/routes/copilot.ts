@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { serializeError } from './query.js';
 
-const Provider = z.enum(['anthropic', 'openai', 'ollama']);
+const Provider = z.enum(['anthropic', 'openai', 'ollama', 'bedrock', 'bedrock_agent', 'agentcore']);
+const AwsFields = { region: z.string().max(40).optional(), agent_id: z.string().max(120).optional(), agent_alias_id: z.string().max(120).optional(), runtime_arn: z.string().max(400).optional() };
 
 export async function copilotRoutes(app: FastifyInstance, ctx: AppContext) {
   app.addHook('preHandler', app.authenticate);
@@ -12,8 +13,8 @@ export async function copilotRoutes(app: FastifyInstance, ctx: AppContext) {
 
   // Model discovery for the settings panel (BYOK keys are used for this call only and never stored).
   app.post('/api/copilot/models', async (req) => {
-    const body = z.object({ provider: Provider, api_key: z.string().optional(), base_url: z.string().optional() }).parse(req.body ?? {});
-    return { models: await ctx.copilot.listModels({ provider: body.provider, apiKey: body.api_key, baseUrl: body.base_url }) };
+    const body = z.object({ provider: Provider, api_key: z.string().optional(), base_url: z.string().optional(), ...AwsFields }).parse(req.body ?? {});
+    return { models: await ctx.copilot.listModels({ provider: body.provider, apiKey: body.api_key, baseUrl: body.base_url, region: body.region, agentId: body.agent_id, agentAliasId: body.agent_alias_id, runtimeArn: body.runtime_arn }) };
   });
 
   app.get('/api/copilot/conversations', async (req) => {
@@ -50,6 +51,7 @@ export async function copilotRoutes(app: FastifyInstance, ctx: AppContext) {
         model: z.string().max(120).optional(),
         api_key: z.string().max(400).optional(),
         base_url: z.string().max(500).optional(),
+        ...AwsFields,
       })
       .parse(req.body);
 
@@ -75,6 +77,10 @@ export async function copilotRoutes(app: FastifyInstance, ctx: AppContext) {
         model: body.model,
         apiKey: body.api_key,
         baseUrl: body.base_url,
+        region: body.region,
+        agentId: body.agent_id,
+        agentAliasId: body.agent_alias_id,
+        runtimeArn: body.runtime_arn,
         signal: ac.signal,
       })) {
         send(ev.type, ev);

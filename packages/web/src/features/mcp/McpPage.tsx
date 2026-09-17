@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bot, KeyRound, Radio, Trash2, ShieldCheck, Terminal, Wrench, Activity, Pause, Play } from 'lucide-react';
-import { api, timeAgo, type ApiToken, type McpSession, type AuditEvent, type Workspace } from '../../api/client';
+import { api, timeAgo, type ApiToken, type McpSession, type AuditEvent, type Workspace, type AgentRecord, type AgentFramework, type FrameworkMeta } from '../../api/client';
+import { AgentsCard, FrameworksCard } from './AgentsPanel';
 import { subscribeLiveEvents, type LiveEvent } from '../../lib/liveEvents';
 import { Button, Badge, Card, CopyButton, Input, Label, Modal, Select, Stat, cn } from '../../components/ui';
 import { useAuth } from '../../store/auth';
@@ -10,7 +11,7 @@ import { HideButton } from '../../components/LayoutMenu';
 
 interface McpInfo { transports: { sse: string; streamable_http: string; stdio: string }; tools: string[]; resources: string[]; prompts: string[]; limits: { default_page_size: number; max_page_size: number; max_cell_chars: number }; hitl_enabled: boolean; snippets: Record<string, string> }
 
-type Feed = { id: string; at: string; kind: 'tool' | 'query' | 'audit' | 'session'; title: string; detail?: string; status: string; user?: string; ms?: number };
+type Feed = { id: string; at: string; kind: 'tool' | 'query' | 'audit' | 'session'; title: string; detail?: string; status: string; user?: string; ms?: number; agent?: string; via?: string };
 
 const SNIPPETS: { id: string; label: string; file: string }[] = [
   { id: 'claude_desktop', label: 'Claude Desktop', file: 'claude_desktop_config.json' },
@@ -20,7 +21,7 @@ const SNIPPETS: { id: string; label: string; file: string }[] = [
 ];
 
 function toFeed(e: LiveEvent): Feed | null {
-  if (e.type === 'mcp_tool') return { id: `${e.at}-${Math.random()}`, at: e.at, kind: 'tool', title: e.tool, detail: e.summary, status: e.status, user: e.user, ms: e.duration_ms };
+  if (e.type === 'mcp_tool') return { id: `${e.at}-${Math.random()}`, at: e.at, kind: 'tool', title: e.tool, detail: e.summary, status: e.status, user: e.user, ms: e.duration_ms, agent: e.agent?.name, via: e.via };
   if (e.type === 'mcp_session') return { id: `${e.at}-${e.session_id}`, at: e.at, kind: 'session', title: `${e.action} · ${e.transport}`, status: e.action === 'connect' ? 'ok' : 'info', user: e.user };
   if (e.type === 'audit') {
     const a = e.event;
@@ -48,16 +49,20 @@ export function McpPage() {
   const [form, setForm] = useState({ name: '', scopes: ['read', 'mcp'] as string[], workspace_id: '', expires_in_days: 90 });
   const [snippet, setSnippet] = useState('claude_desktop');
   const [error, setError] = useState<string | null>(null);
+  const [agents, setAgents] = useState<AgentRecord[]>([]);
+  const [frameworks, setFrameworks] = useState<Record<AgentFramework, FrameworkMeta> | null>(null);
   const hidden = useLayout((l) => l.hidden);
 
   const refresh = async () => {
-    const [t, s] = await Promise.all([api.get<{ tokens: ApiToken[] }>('/api/tokens'), api.get<{ sessions: McpSession[] }>('/api/mcp/sessions')]);
+    const [t, s, a] = await Promise.all([api.get<{ tokens: ApiToken[] }>('/api/tokens'), api.get<{ sessions: McpSession[] }>('/api/mcp/sessions'), api.get<{ agents: AgentRecord[] }>('/api/agents')]);
     setTokens(t.tokens);
     setSessions(s.sessions);
+    setAgents(a.agents);
   };
 
   useEffect(() => {
     api.get<McpInfo>('/api/mcp/info').then(setInfo).catch(() => undefined);
+    api.get<{ frameworks: Record<AgentFramework, FrameworkMeta> }>('/api/agents/frameworks').then((r) => setFrameworks(r.frameworks)).catch(() => undefined);
     api.get<{ workspaces: Workspace[] }>('/api/workspaces').then((r) => setWorkspaces(r.workspaces)).catch(() => undefined);
     api
       .get<{ events: AuditEvent[] }>('/api/audit?limit=60')
@@ -98,19 +103,20 @@ export function McpPage() {
     <div className="mx-auto max-w-[1400px] space-y-5 p-5">
       <div className="flex items-center justify-between">
         <div>
-          <Eyebrow>AI agents · Model Context Protocol</Eyebrow>
+          <Eyebrow>AI agents · MCP · Bedrock AgentCore</Eyebrow>
           <PageTitle className="flex items-center gap-2">
             <Bot className="h-6 w-6 text-accent-400" /> Agent & MCP hub
           </PageTitle>
-          <p className="mt-1 text-xs text-zinc-500">Connect Claude Desktop, Cursor or Claude Code to your sandboxed DuckDB workspaces and watch what they do in real time.</p>
+          <p className="mt-1 text-xs text-zinc-500">Connect Claude Desktop, Cursor, Claude Code and your own Strands / LangGraph / LangChain / CrewAI agents — locally, on AgentCore or behind Bedrock — to your DuckDB workspaces and lakehouse catalogs, and watch what they do in real time.</p>
         </div>
-        <Button variant="primary" onClick={() => setCreating(true)}>
+        <Button onClick={() => setCreating(true)} className="shrink-0 whitespace-nowrap">
           <KeyRound className="h-4 w-4" /> New API token
         </Button>
       </div>
 
-      {!hidden['mcp.stats'] && <div className="group/st relative grid grid-cols-2 gap-3 md:grid-cols-4">
+      {!hidden['mcp.stats'] && <div className="group/st relative grid grid-cols-2 gap-3 md:grid-cols-5">
         <HideButton id="mcp.stats" className="absolute -top-5 right-0 opacity-0 group-hover/st:opacity-100" />
+        <Stat label="Registered agents" value={agents.length} sub={`${agents.filter((a) => a.can_invoke).length} invokable from DuckView`} />
         <Stat label="Live sessions" value={sessions.length} sub="SSE + streamable HTTP" />
         <Stat label="Tokens" value={tokens.length} sub={`${tokens.filter((t) => t.expires_at && new Date(t.expires_at) < new Date()).length} expired`} />
         <Stat label="Agent activity (feed)" value={feed.filter((f) => f.kind === 'tool' || f.title.startsWith('agent')).length} sub={`${feed.filter((f) => f.status === 'approval_required' || f.status === 'blocked').length} awaiting approval / blocked`} />
@@ -118,6 +124,8 @@ export function McpPage() {
       </div>}
 
       <div className="grid gap-6 lg:grid-cols-5">
+        {!hidden['mcp.agents'] && <AgentsCard agents={agents} workspaces={workspaces} frameworks={frameworks} onChanged={refresh} onToken={(t) => setLastToken(t)} hideId="mcp.agents" />}
+        {!hidden['mcp.frameworks'] && <FrameworksCard frameworks={frameworks} workspaceId={workspaces[0]?.id ?? null} token={lastToken} hideId="mcp.frameworks" />}
         {!hidden['mcp.connect'] && <Card
           title="Connect a client"
           className="lg:col-span-2"
@@ -200,6 +208,8 @@ export function McpPage() {
                   {f.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 text-accent-300" /> : f.kind === 'session' ? <Radio className="h-3.5 w-3.5 text-sky-300" /> : <Activity className="h-3.5 w-3.5 text-zinc-500" />}
                   <span className="font-mono text-zinc-200">{f.title}</span>
                   <Badge tone={f.status === 'ok' ? 'green' : f.status === 'approval_required' || f.status === 'blocked' ? 'amber' : f.status === 'info' ? 'blue' : 'red'}>{f.status}</Badge>
+                  {f.agent && <Badge tone="violet">{f.agent}</Badge>}
+                  {f.via === 'rest' && <span className="rounded border border-zinc-700 px-1 font-mono text-[9px] text-zinc-400">REST</span>}
                   {f.user && <span className="truncate text-[10px] text-zinc-500">{f.user}</span>}
                   <span className="ml-auto shrink-0 text-[10px] text-zinc-500">
                     {f.ms != null && `${Math.round(f.ms)} ms · `}

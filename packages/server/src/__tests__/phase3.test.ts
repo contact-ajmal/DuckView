@@ -225,8 +225,8 @@ describe('MCP: browse_storage, inspect_schema, list_dashboards, create_dashboard
     client = new Client({ name: 't', version: '0' });
     await client.connect(ct);
   });
-  it('exposes nine tools', async () => {
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_storage', 'create_dashboard_widget', 'execute_query', 'explain_query', 'inspect_schema', 'list_accessible_data', 'list_dashboards', 'profile_dataset', 'save_dataset']);
+  it('exposes ten tools', async () => {
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_storage', 'create_dashboard_widget', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'profile_dataset', 'save_dataset']);
   });
   it('browse_storage local + cloud connection listing', async () => {
     const local = await client.callTool({ name: 'browse_storage', arguments: {} });

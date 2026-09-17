@@ -2,7 +2,7 @@
  * Metadata store schema — PostgreSQL dialect (enterprise mode via DATABASE_URL).
  * Mirrors ./sqlite.ts exactly (names, nullability, JSON shapes).
  */
-import { pgTable, text, integer, timestamp, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, timestamp, jsonb, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import type { EngineSettings, ChartConfig, TokenScope, WorkspaceFolder } from './sqlite.js';
 import { AUTH_PROVIDERS, USER_ROLES, CONNECTION_TYPES, ACTOR_TYPES } from './sqlite.js';
 
@@ -48,6 +48,7 @@ export const sessionTabs = pgTable(
     chart_config: jsonb('chart_config').$type<ChartConfig>().notNull().default({ type: 'none' }),
     order_index: integer('order_index').notNull().default(0),
     cursor_position: integer('cursor_position').notNull().default(0),
+    engine: text('engine'),
     updated_at: ts('updated_at').notNull(),
   },
   (t) => [index('session_tabs_workspace_idx').on(t.workspace_id)],
@@ -106,7 +107,7 @@ export const auditLogs = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, CLOUD_PROVIDERS, CHAT_ROLES, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot } from './sqlite.js';
+import { WIDGET_TYPES, CLOUD_PROVIDERS, CHAT_ROLES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -175,6 +176,48 @@ export const cloudConnections = pgTable(
     updated_at: ts('updated_at').notNull(),
   },
   (t) => [index('cloud_connections_user_idx').on(t.user_id)],
+);
+
+export const lakehouseConnections = pgTable(
+  'lakehouse_connections',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    provider: text('provider', { enum: LAKEHOUSE_PROVIDERS }).notNull(),
+    alias: text('alias').notNull(),
+    config: jsonb('config').$type<LakehouseConfig>().notNull().default({}),
+    encrypted_credentials: text('encrypted_credentials').notNull(),
+    iv: text('iv').notNull(),
+    tag: text('tag').notNull(),
+    status: text('status', { enum: LAKEHOUSE_STATUSES }).notNull().default('unknown'),
+    last_error: text('last_error'),
+    last_tested_at: ts('last_tested_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('lakehouse_connections_user_idx').on(t.user_id), uniqueIndex('lakehouse_connections_alias_idx').on(t.user_id, t.alias)],
+);
+
+export const agents = pgTable(
+  'agents',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    framework: text('framework', { enum: AGENT_FRAMEWORKS }).notNull(),
+    description: text('description'),
+    workspace_id: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    token_id: text('token_id').references(() => apiTokens.id, { onDelete: 'set null' }),
+    allow_mutations: boolean('allow_mutations').notNull().default(false),
+    config: jsonb('config').$type<AgentConfig>().notNull().default({}),
+    call_count: integer('call_count').notNull().default(0),
+    error_count: integer('error_count').notNull().default(0),
+    last_seen_at: ts('last_seen_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('agents_user_idx').on(t.user_id), index('agents_token_idx').on(t.token_id)],
 );
 
 export const chatHistory = pgTable(

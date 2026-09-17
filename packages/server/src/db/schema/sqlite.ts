@@ -81,6 +81,8 @@ export const sessionTabs = sqliteTable(
     chart_config: text('chart_config', { mode: 'json' }).$type<ChartConfig>().notNull().default({ type: 'none' }),
     order_index: integer('order_index').notNull().default(0),
     cursor_position: integer('cursor_position').notNull().default(0),
+    /** null = DuckDB (local). "lakehouse:<connection_id>" runs the tab on a remote SQL engine (e.g. a Databricks SQL warehouse). */
+    engine: text('engine'),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (t) => [index('session_tabs_workspace_idx').on(t.workspace_id)],
@@ -149,9 +151,54 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 
 export const WIDGET_TYPES = ['KPI', 'CHART', 'TABLE', 'MARKDOWN'] as const;
 export const CLOUD_PROVIDERS = ['S3', 'R2', 'GCS', 'AZURE'] as const;
+export const LAKEHOUSE_PROVIDERS = ['AWS_GLUE', 'AWS_S3_TABLES', 'ICEBERG_REST', 'DATABRICKS'] as const;
+export const LAKEHOUSE_STATUSES = ['unknown', 'ok', 'error'] as const;
+export const AGENT_FRAMEWORKS = ['strands', 'langgraph', 'langchain', 'crewai', 'agentcore_runtime', 'agentcore_gateway', 'bedrock_agent', 'custom'] as const;
 export const CHAT_ROLES = ['user', 'assistant', 'system'] as const;
 export type WidgetType = (typeof WIDGET_TYPES)[number];
 export type CloudProvider = (typeof CLOUD_PROVIDERS)[number];
+export type LakehouseProvider = (typeof LAKEHOUSE_PROVIDERS)[number];
+export type LakehouseStatus = (typeof LAKEHOUSE_STATUSES)[number];
+export type AgentFramework = (typeof AGENT_FRAMEWORKS)[number];
+
+/** Per-agent settings; the AWS fields let DuckView invoke the agent (Copilot "ask my agent", test button). */
+export interface AgentConfig {
+  region?: string;
+  /** Bedrock Agents (Classic) */
+  agent_id?: string;
+  agent_alias_id?: string;
+  /** AgentCore Runtime */
+  runtime_arn?: string;
+  qualifier?: string;
+  /** AgentCore Gateway (informational) */
+  gateway_url?: string;
+  notes?: string;
+}
+
+/** Non-secret connection settings; which keys apply depends on the provider (see services/lakehouse.ts). */
+export interface LakehouseConfig {
+  /** AWS Glue / SageMaker Lakehouse / S3 Tables */
+  region?: string;
+  account_id?: string;
+  /** Glue sub-catalog (e.g. "s3tablescatalog/my-table-bucket" or a federated catalog id). Empty = the account's default catalog. */
+  catalog?: string;
+  table_bucket_arn?: string;
+  aws_auth?: 'keys' | 'credential_chain';
+  /** Generic Iceberg REST catalog (Polaris, Lakekeeper, Nessie, Snowflake Open Catalog, Unity Catalog IRC …) */
+  endpoint?: string;
+  warehouse?: string;
+  auth?: 'bearer' | 'oauth2' | 'none';
+  oauth2_server_uri?: string;
+  oauth2_scope?: string;
+  nested_namespaces?: boolean;
+  /** Databricks */
+  host?: string;
+  warehouse_id?: string;
+  unity_catalog?: string;
+  databricks_auth?: 'pat' | 'oauth_m2m';
+  /** Attach the Unity Catalog Iceberg REST endpoint so UniForm/Iceberg tables are queryable in DuckDB directly. */
+  attach_iceberg?: boolean;
+}
 export type ChatRole = (typeof CHAT_ROLES)[number];
 
 /** Grid position of a widget (react-grid-layout semantics: 12-column grid). */
@@ -263,6 +310,51 @@ export const cloudConnections = sqliteTable(
   (t) => [index('cloud_connections_user_idx').on(t.user_id)],
 );
 
+export const lakehouseConnections = sqliteTable(
+  'lakehouse_connections',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    provider: text('provider', { enum: LAKEHOUSE_PROVIDERS }).notNull(),
+    /** DuckDB catalog alias the lakehouse is attached as (query as alias.schema.table). */
+    alias: text('alias').notNull(),
+    config: text('config', { mode: 'json' }).$type<LakehouseConfig>().notNull().default({}),
+    encrypted_credentials: text('encrypted_credentials').notNull(),
+    iv: text('iv').notNull(),
+    tag: text('tag').notNull(),
+    status: text('status', { enum: LAKEHOUSE_STATUSES }).notNull().default('unknown'),
+    last_error: text('last_error'),
+    last_tested_at: integer('last_tested_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('lakehouse_connections_user_idx').on(t.user_id), uniqueIndex('lakehouse_connections_alias_idx').on(t.user_id, t.alias)],
+);
+
+export const agents = sqliteTable(
+  'agents',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    framework: text('framework', { enum: AGENT_FRAMEWORKS }).notNull(),
+    description: text('description'),
+    /** Default workspace for the agent's tool calls (also the token's workspace scope). */
+    workspace_id: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    /** The API token minted for this agent; revoking it disables the agent. */
+    token_id: text('token_id').references(() => apiTokens.id, { onDelete: 'set null' }),
+    allow_mutations: integer('allow_mutations', { mode: 'boolean' }).notNull().default(false),
+    config: text('config', { mode: 'json' }).$type<AgentConfig>().notNull().default({}),
+    call_count: integer('call_count').notNull().default(0),
+    error_count: integer('error_count').notNull().default(0),
+    last_seen_at: integer('last_seen_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('agents_user_idx').on(t.user_id), index('agents_token_idx').on(t.token_id)],
+);
+
 export const chatHistory = sqliteTable(
   'chat_history',
   {
@@ -282,4 +374,6 @@ export type SavedQuery = typeof savedQueries.$inferSelect;
 export type Dashboard = typeof dashboards.$inferSelect;
 export type DashboardWidget = typeof dashboardWidgets.$inferSelect;
 export type CloudConnection = typeof cloudConnections.$inferSelect;
+export type LakehouseConnection = typeof lakehouseConnections.$inferSelect;
+export type Agent = typeof agents.$inferSelect;
 export type ChatMessage = typeof chatHistory.$inferSelect;

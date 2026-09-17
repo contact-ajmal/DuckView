@@ -48,7 +48,7 @@ export const ConfigSchema = z.object({
        */
       filesystem_mode: z.enum(['sandboxed', 'full']).default('full'),
       allow_arbitrary_extensions: z.coerce.boolean().default(false),
-      allowed_extensions: z.array(z.string()).default(['parquet', 'json', 'icu', 'httpfs', 'iceberg', 'delta', 'motherduck', 'postgres', 'spatial', 'excel']),
+      allowed_extensions: z.array(z.string()).default(['parquet', 'json', 'icu', 'httpfs', 'aws', 'azure', 'iceberg', 'delta', 'motherduck', 'postgres', 'spatial', 'excel']),
       blocked_extensions: z.array(z.string()).default(['shellfs', 'python', 'jemalloc']),
       enable_external_access: z.coerce.boolean().default(false),
       lock_configuration: z.coerce.boolean().default(true),
@@ -110,15 +110,32 @@ export const ConfigSchema = z.object({
       sse_heartbeat_seconds: z.coerce.number().int().min(5).default(25),
     })
     .default({}),
+  lakehouse: z
+    .object({
+      enabled: z.coerce.boolean().default(true),
+      /** Remote statement (Databricks SQL warehouse) wall-clock limit before cancellation. */
+      statement_timeout_seconds: z.coerce.number().int().min(5).default(120),
+      poll_interval_ms: z.coerce.number().int().min(100).default(1000),
+      /** Row cap for interactive remote queries shown in the grid. */
+      max_rows: z.coerce.number().int().min(1).default(10_000),
+      /** Row cap when materialising a remote result into a DuckDB table. */
+      materialize_max_rows: z.coerce.number().int().min(1).default(2_000_000),
+    })
+    .default({}),
   copilot: z
     .object({
       enabled: z.coerce.boolean().default(true),
       /** Server-managed default provider. Users may still bring their own key when allow_byok is true. */
-      provider: z.enum(['anthropic', 'openai', 'ollama', 'none']).default('none'),
+      provider: z.enum(['anthropic', 'openai', 'ollama', 'bedrock', 'bedrock_agent', 'agentcore', 'none']).default('none'),
       model: z.string().optional(),
       api_key: z.string().optional(),
       /** OpenAI-compatible or Ollama base URL (e.g. http://ollama:11434). */
       base_url: z.string().optional(),
+      /** AWS providers (bedrock, bedrock_agent, agentcore) — credentials come from the default AWS credential chain. */
+      aws_region: z.string().optional(),
+      bedrock_agent_id: z.string().optional(),
+      bedrock_agent_alias_id: z.string().optional(),
+      agentcore_runtime_arn: z.string().optional(),
       allow_byok: z.coerce.boolean().default(true),
       max_context_tables: z.coerce.number().int().min(1).default(40),
       include_summaries: z.coerce.boolean().default(true),
@@ -242,6 +259,12 @@ const WELL_KNOWN_ENV: Record<string, string[]> = {
   COPILOT_API_KEY: ['copilot', 'api_key'],
   COPILOT_BASE_URL: ['copilot', 'base_url'],
   ANTHROPIC_API_KEY: ['copilot', 'api_key'],
+  COPILOT_AWS_REGION: ['copilot', 'aws_region'],
+  COPILOT_BEDROCK_AGENT_ID: ['copilot', 'bedrock_agent_id'],
+  COPILOT_BEDROCK_AGENT_ALIAS_ID: ['copilot', 'bedrock_agent_alias_id'],
+  COPILOT_AGENTCORE_RUNTIME_ARN: ['copilot', 'agentcore_runtime_arn'],
+  LAKEHOUSE_STATEMENT_TIMEOUT_SECONDS: ['lakehouse', 'statement_timeout_seconds'],
+  LAKEHOUSE_MAX_ROWS: ['lakehouse', 'max_rows'],
   OTEL_EXPORTER_OTLP_ENDPOINT: ['observability', 'otel', 'exporter_otlp_endpoint'],
   OTEL_SERVICE_NAME: ['observability', 'otel', 'service_name'],
   DUCKVIEW_OTEL_ENABLED: ['observability', 'otel', 'enabled'],

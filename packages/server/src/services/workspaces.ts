@@ -7,6 +7,7 @@ import { newId } from '../security/crypto.js';
 import { EngineManager, type WorkspaceEngine } from '../engine/duckdb.js';
 import type { ConnectionService } from './connections.js';
 import type { CloudConnectionService } from './cloud.js';
+import type { LakehouseService } from './lakehouse.js';
 import type { Principal } from './principal.js';
 import { isAdmin, assertWorkspaceScope } from './principal.js';
 import { badRequest, notFound } from './errors.js';
@@ -24,6 +25,9 @@ SELECT
 FROM range(90);`;
 
 export class WorkspaceService {
+  /** Set after construction (the lakehouse service needs this service for engine access, so the dependency is two-way). */
+  lakehouse: LakehouseService | null = null;
+
   constructor(private readonly store: MetadataStore, private readonly engines: EngineManager, private readonly connections: ConnectionService, private readonly cloud: CloudConnectionService) {}
   private get db() {
     return this.store.db;
@@ -177,8 +181,9 @@ export class WorkspaceService {
   async engine(p: Principal, workspaceId: string): Promise<{ workspace: Workspace; engine: WorkspaceEngine }> {
     const workspace = await this.get(p, workspaceId);
     // Workspace-linked data connections + every cloud storage connection the owner has configured.
-    const secrets = [...(await this.connections.resolveSecrets(workspace.user_id, workspace.engine_settings.connection_ids ?? [])), ...(await this.cloud.resolveSecrets(workspace.user_id))];
-    const engine = await this.engines.get({ workspaceId: workspace.id, dbPath: workspace.active_db_path, settings: workspace.engine_settings, secrets });
+    const lake = this.lakehouse ? await this.lakehouse.resolveEngineBits(workspace.user_id) : { secrets: [], attachments: [] };
+    const secrets = [...(await this.connections.resolveSecrets(workspace.user_id, workspace.engine_settings.connection_ids ?? [])), ...(await this.cloud.resolveSecrets(workspace.user_id)), ...lake.secrets];
+    const engine = await this.engines.get({ workspaceId: workspace.id, dbPath: workspace.active_db_path, settings: workspace.engine_settings, secrets, attachments: lake.attachments });
     return { workspace, engine };
   }
 
@@ -189,7 +194,7 @@ export class WorkspaceService {
     return this.db.select().from(this.s.sessionTabs).where(eq(this.s.sessionTabs.workspace_id, workspaceId)).orderBy(asc(this.s.sessionTabs.order_index), asc(this.s.sessionTabs.updated_at));
   }
 
-  async createTab(p: Principal, workspaceId: string, input: { title?: string; sql_content?: string; chart_config?: ChartConfig }): Promise<SessionTab> {
+  async createTab(p: Principal, workspaceId: string, input: { title?: string; sql_content?: string; chart_config?: ChartConfig; engine?: string | null }): Promise<SessionTab> {
     await this.get(p, workspaceId);
     const existing = await this.db.select({ order_index: this.s.sessionTabs.order_index }).from(this.s.sessionTabs).where(eq(this.s.sessionTabs.workspace_id, workspaceId));
     const order = existing.reduce((m, r) => Math.max(m, r.order_index + 1), 0);
@@ -201,13 +206,14 @@ export class WorkspaceService {
       chart_config: input.chart_config ?? { type: 'none' },
       order_index: order,
       cursor_position: 0,
+      engine: input.engine ?? null,
       updated_at: new Date(),
     };
     await this.db.insert(this.s.sessionTabs).values(tab);
     return tab;
   }
 
-  async updateTab(p: Principal, workspaceId: string, tabId: string, patch: { title?: string; sql_content?: string; chart_config?: ChartConfig; order_index?: number; cursor_position?: number }): Promise<SessionTab> {
+  async updateTab(p: Principal, workspaceId: string, tabId: string, patch: { title?: string; sql_content?: string; chart_config?: ChartConfig; order_index?: number; cursor_position?: number; engine?: string | null }): Promise<SessionTab> {
     await this.get(p, workspaceId);
     const set: Partial<SessionTab> = { updated_at: new Date() };
     if (patch.title !== undefined) set.title = patch.title.trim().slice(0, 120) || 'Untitled';
@@ -215,6 +221,7 @@ export class WorkspaceService {
     if (patch.chart_config !== undefined) set.chart_config = patch.chart_config;
     if (patch.order_index !== undefined) set.order_index = Math.max(0, Math.floor(patch.order_index));
     if (patch.cursor_position !== undefined) set.cursor_position = Math.max(0, Math.floor(patch.cursor_position));
+    if (patch.engine !== undefined) set.engine = patch.engine || null;
     const rows = await this.db
       .update(this.s.sessionTabs)
       .set(set)

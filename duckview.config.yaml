@@ -60,12 +60,22 @@ mcp:
   require_confirmation_for_mutations: true   # HITL: agents must pass dry_run=false for DROP/DELETE/ALTER/UPDATE/…
   sse_heartbeat_seconds: 25
 
+lakehouse:                               # AWS Glue / S3 Tables / Iceberg REST / Databricks connectors
+  enabled: true
+  statement_timeout_seconds: ${LAKEHOUSE_STATEMENT_TIMEOUT_SECONDS:-120}   # Databricks SQL warehouse statements
+  max_rows: ${LAKEHOUSE_MAX_ROWS:-10000}                                   # rows returned to the grid from a warehouse
+  materialize_max_rows: 2000000                                            # rows pulled into a DuckDB table
+
 copilot:                                 # DuckCopilot — in-app AI assistant
   enabled: true
-  provider: "${COPILOT_PROVIDER:-none}"   # anthropic | openai | ollama | none (users may bring their own key)
-  model: "${COPILOT_MODEL:-}"             # e.g. claude-sonnet-4-5, gpt-4o, llama3.1
+  provider: "${COPILOT_PROVIDER:-none}"   # anthropic | openai | ollama | bedrock | bedrock_agent | agentcore | none
+  model: "${COPILOT_MODEL:-}"             # e.g. claude-sonnet-4-5, gpt-4o, llama3.1, us.anthropic.claude-sonnet-4-5-20250929-v1:0
   api_key: "${COPILOT_API_KEY:-${ANTHROPIC_API_KEY:-}}"
   base_url: "${COPILOT_BASE_URL:-}"       # Ollama / OpenAI-compatible endpoint
+  aws_region: "${COPILOT_AWS_REGION:-}"   # AWS providers use the server's default credential chain
+  bedrock_agent_id: "${COPILOT_BEDROCK_AGENT_ID:-}"
+  bedrock_agent_alias_id: "${COPILOT_BEDROCK_AGENT_ALIAS_ID:-}"
+  agentcore_runtime_arn: "${COPILOT_AGENTCORE_RUNTIME_ARN:-}"
   allow_byok: true
   max_context_tables: 40
   include_summaries: true

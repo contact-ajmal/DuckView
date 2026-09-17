@@ -101,6 +101,23 @@ const wdata = widget.data.widget ? await json('POST', `/api/dashboards/${dash.da
 ok('widget data executes', wdata.status === 200 && wdata.data.rows?.[0]?.[0] === 3);
 const cc = await json('GET', '/api/cloud-connections/providers', undefined, jwt);
 ok('cloud provider catalogue', cc.status === 200 && Object.keys(cc.data.providers ?? {}).length === 4);
+const lp = await json('GET', '/api/lakehouse/providers', undefined, jwt);
+ok('lakehouse provider catalogue', lp.status === 200 && Object.keys(lp.data.providers ?? {}).sort().join() === 'AWS_GLUE,AWS_S3_TABLES,DATABRICKS,ICEBERG_REST');
+const lhBad = await json('POST', '/api/lakehouse-connections', { name: 'x', provider: 'AWS_GLUE', config: { region: 'us-east-1', account_id: 'nope' }, credentials: { access_key_id: 'a', secret_access_key: 'b' } }, jwt);
+ok('lakehouse config validation', lhBad.status === 400);
+const fw = await json('GET', '/api/agents/frameworks', undefined, jwt);
+ok('agent framework catalogue', fw.status === 200 && Object.keys(fw.data.frameworks ?? {}).length === 8);
+const oapi = await json('GET', '/api/agent/openapi.json', undefined, jwt);
+ok('OpenAPI document for agent tools', oapi.status === 200 && oapi.data.openapi === '3.0.3' && Object.keys(oapi.data.paths ?? {}).length === 11);
+const reg = await json('POST', '/api/agents', { name: 'smoke-strands', framework: 'strands', workspace_id: ws.id }, jwt);
+ok('agent registered with token', reg.status === 200 && String(reg.data.token).startsWith('dv_'));
+const restTools = await json('GET', '/api/agent/v1/tools', undefined, reg.data.token);
+ok('REST tool façade lists tools for the agent token', restTools.status === 200 && restTools.data.tools?.length === 10);
+const restCall = await json('POST', '/api/agent/v1/tools/execute_query', { sql: 'SELECT 42 AS answer' }, reg.data.token);
+ok('REST tool façade executes SQL', restCall.status === 200 && restCall.data.structured?.rows?.[0]?.[0] === 42, JSON.stringify(restCall.data).slice(0, 200));
+const selfTest = await json('POST', `/api/agents/${reg.data.agent?.id}/test`, {}, jwt);
+ok('agent self-test', selfTest.status === 200 && selfTest.data.ok === true);
+await json('DELETE', `/api/agents/${reg.data.agent?.id}`, undefined, jwt);
 
 const tok = await json('POST', '/api/tokens', { name: 'smoke-agent', scopes: ['read', 'write', 'mcp'], workspace_id: ws.id }, jwt);
 ok('API token minted', tok.status === 200 && String(tok.data.token).startsWith('dv_'));
@@ -123,7 +140,7 @@ const init = await mcp({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { 
 ok('MCP initialize', init.status === 200 && init.data?.result?.serverInfo?.name === 'duckview', init.data?.error?.message);
 await mcp({ jsonrpc: '2.0', method: 'notifications/initialized' }, init.sessionId);
 const tools = await mcp({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, init.sessionId);
-ok('MCP tools/list has 9 tools', tools.data?.result?.tools?.length === 9);
+ok('MCP tools/list has 10 tools', tools.data?.result?.tools?.length === 10);
 const cop = await json('GET', '/api/copilot/config', undefined, jwt);
 ok('copilot config endpoint', cop.status === 200 && typeof cop.data.allow_byok === 'boolean');
 const call = await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'execute_query', arguments: { sql: 'SELECT count(*) AS n FROM smoke_t' } } }, init.sessionId);

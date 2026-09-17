@@ -72,14 +72,14 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post('/api/workspaces/:id/tabs', async (req) => {
     requireWrite(req.principal!);
     const { id } = req.params as { id: string };
-    const body = z.object({ title: z.string().max(120).optional(), sql_content: z.string().optional(), chart_config: ChartConfig.optional() }).parse(req.body ?? {});
+    const body = z.object({ title: z.string().max(120).optional(), sql_content: z.string().optional(), chart_config: ChartConfig.optional(), engine: z.string().max(120).nullable().optional() }).parse(req.body ?? {});
     return { tab: await ctx.workspaces.createTab(req.principal!, id, body) };
   });
 
   app.patch('/api/workspaces/:id/tabs/:tabId', async (req) => {
     requireWrite(req.principal!);
     const { id, tabId } = req.params as { id: string; tabId: string };
-    const body = z.object({ title: z.string().max(120).optional(), sql_content: z.string().optional(), chart_config: ChartConfig.optional(), order_index: z.number().int().optional(), cursor_position: z.number().int().min(0).optional() }).parse(req.body ?? {});
+    const body = z.object({ title: z.string().max(120).optional(), sql_content: z.string().optional(), chart_config: ChartConfig.optional(), order_index: z.number().int().optional(), cursor_position: z.number().int().min(0).optional(), engine: z.string().max(120).nullable().optional() }).parse(req.body ?? {});
     return { tab: await ctx.workspaces.updateTab(req.principal!, id, tabId, body) };
   });
 

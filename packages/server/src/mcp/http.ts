@@ -11,7 +11,7 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { AppContext } from '../context.js';
 import type { Principal } from '../services/principal.js';
-import { buildMcpServer } from './server.js';
+import { buildMcpServer, agentRef } from './server.js';
 import { metrics } from '../observability/metrics.js';
 import { logger } from '../observability/logger.js';
 import { liveEvents } from '../observability/events.js';
@@ -101,7 +101,7 @@ export async function registerMcpHttp(app: FastifyInstance, ctx: AppContext, reg
     const res = reply.raw;
     res.setHeader('X-Accel-Buffering', 'no');
     const transport = new SSEServerTransport('/mcp/messages', res);
-    const server = buildMcpServer(ctx, principal, { defaultWorkspaceId: workspaceId });
+    const server = buildMcpServer(ctx, principal, { defaultWorkspaceId: workspaceId ?? (await ctx.agents.byTokenId(principal.tokenId))?.workspace_id ?? null, agent: await agentRef(ctx, principal) });
     const id = transport.sessionId;
     const heartbeat = setInterval(() => {
       try {
@@ -172,7 +172,7 @@ export async function registerMcpHttp(app: FastifyInstance, ctx: AppContext, reg
           ctx.audit.log({ userId: principal.userId, actorType: 'AGENT', action: 'mcp.disconnect', resource: 'transport:streamable-http', ip: req.ip });
         },
       });
-      const server = buildMcpServer(ctx, principal, { defaultWorkspaceId: workspaceId });
+      const server = buildMcpServer(ctx, principal, { defaultWorkspaceId: workspaceId ?? (await ctx.agents.byTokenId(principal.tokenId))?.workspace_id ?? null, agent: await agentRef(ctx, principal) });
       let closed = false;
       t.onclose = () => {
         if (closed) return;

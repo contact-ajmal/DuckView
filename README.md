@@ -1,18 +1,21 @@
 # DuckView Enterprise
 
-A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces with a polished dark UI, and an enterprise-grade **Model Context Protocol (MCP)** server so autonomous agents (Claude, Cursor, …) can query the same sandboxed engines with human-in-the-loop safety.
+A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces with a polished UI, lakehouse connectors (AWS Glue / SageMaker Lakehouse, S3 Tables, Iceberg REST, Databricks), and an enterprise-grade **Model Context Protocol (MCP)** server plus REST/OpenAPI façade so autonomous agents (Claude, Cursor, Strands, LangGraph, LangChain, CrewAI, Bedrock AgentCore, …) can query the same sandboxed engines with human-in-the-loop safety.
 
 ```
 ┌──────────────── React + Vite + Tailwind v4 (zinc/violet) + Chart.js ─────────┐
 │ #/  Overview     drag-and-drop ingestion · KPIs · null bars · distributions   │
-│ #/query          VS Code-style explorer (any local folder + S3/R2/GCS/Azure) │
-│                  schema pane · tabs · saved-query library · .sql import/export│
+│ #/query          VS Code-style explorer (any local folder + S3/R2/GCS/Azure  │
+│                  + lakehouse catalogs) · schema pane · tabs · engine picker  │
+│                  (DuckDB / Databricks warehouse) · saved queries · .sql io   │
 │ #/dashboards     BI builder: drag-and-drop grid, KPI/chart/table/markdown,   │
 │                  auto-refresh                                                 │
 │ #/settings       categorised: appearance · layout · hardware · engine ·     │
 │                  storage · copilot · account · users                          │
-│ #/mcp            tokens · client snippets · live agent inspector             │
-│ DuckCopilot      dockable AI drawer (Anthropic · OpenAI · Ollama, BYOK)       │
+│ #/mcp            registered agents · framework snippets · OpenAPI · tokens  │
+│                  · live agent inspector                                       │
+│ DuckCopilot      dockable AI drawer (Anthropic · OpenAI · Ollama · Bedrock ·  │
+│                  Bedrock Agent · AgentCore runtime, BYOK)                     │
 └──────────────┬───────────────────────────────────────────────────────────────┘
                │ REST · WS (rows, live events) · SSE (copilot, MCP) · Streamable HTTP
 ┌──────────────▼───────────────────────────────────────────────────────────────┐
@@ -22,15 +25,19 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Storage: jailed tree · S3/Azure SDK listings · DESCRIBE-based inspection     │
 │  Exports: COPY … TO (parquet/csv/json) + streaming Arrow IPC writer          │
 │  Copilot: schema/SUMMARIZE/active-SQL context → provider bridge (SSE)        │
-│  MCP: 9 tools · 3 resources · 2 prompts  (stdio | /mcp/sse | /mcp)           │
+│  Lakehouse: Iceberg ATTACH (Glue/S3 Tables/REST/UC) · Databricks SQL API     │
+│  Agent tools: one registry → MCP (10 tools · 3 resources · 2 prompts)        │
+│               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
 │  filesystem jail (Node) + allowed_directories/enable_external_access=off     │
-│  + lock_configuration (DuckDB) · httpfs/azure secrets hot-applied            │
+│  + lock_configuration (DuckDB) · httpfs/azure/iceberg secrets + ATTACHed     │
+│  lakehouse catalogs hot-applied                                              │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ Metadata store (Drizzle): SQLite by default · PostgreSQL via DATABASE_URL    │
 │  users · workspaces · session_tabs · saved_queries · dashboards · widgets    │
-│  cloud_connections · data_connections (AES-256-GCM) · chat_history · tokens  │
+│  cloud_connections · lakehouse_connections · data_connections (AES-256-GCM) │
+│  · agents · chat_history · tokens                                            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -143,9 +150,40 @@ Six built-in themes decide both the colour system and the typeface — three dar
 
 Settings is split into categories in a left-hand nav (deep-linkable as `#/settings/<category>`): **Appearance** (themes, fonts, scale) · **Layout** (show/hide components) · **Hardware** (live gauges, resources, warm engines) · **Engine** (memory, threads, timeout, sandbox) · **Storage** (cloud connections, data connections) · **Copilot** (provider status) · **Account** · **Users** (admin).
 
+## Lakehouse connectors
+
+Connect catalogs from **Settings → Storage → Lakehouse connections** or the **Lakehouse** root of the explorer (`+`). Credentials are AES-256-GCM encrypted; secrets and `ATTACH` statements are hot-applied to your running engines (in-memory tables survive), and attached catalogs are queried as `alias.schema.table` from SQL, dashboards, Copilot and agents alike. Browsing is lazy (namespaces/tables from the REST catalog; table metadata only on `DESCRIBE`).
+
+| Provider | How it works | Auth |
+|---|---|---|
+| **AWS Glue / SageMaker Lakehouse** | `ATTACH '<account>[:catalog]' (TYPE ICEBERG, ENDPOINT_TYPE glue)` — Glue's Iceberg REST endpoint, SigV4-signed. Sub-catalogs such as `s3tablescatalog/<bucket>` cover SageMaker Lakehouse / federated catalogs. | Access keys, or the server's default credential chain (IAM role, SSO profile) |
+| **Amazon S3 Tables** | `ATTACH 'arn:aws:s3tables:…:bucket/<name>' (TYPE ICEBERG, ENDPOINT_TYPE s3_tables)` | same |
+| **Iceberg REST catalog** | Polaris, Lakekeeper, Nessie, Snowflake Open Catalog, Tabular, Unity Catalog IRC … `ATTACH '<warehouse>' (TYPE ICEBERG, ENDPOINT …)` | Bearer token · OAuth2 client credentials (`OAUTH2_SERVER_URI`, scope) · none |
+| **Databricks** | Unity Catalog REST for browsing (catalog → schema → table, formats, UniForm flag); the **SQL Statement Execution API** for running SQL on a SQL warehouse (polling, chunk paging, cancellation, typed rows); optional `ATTACH` of the catalog through the Unity Catalog Iceberg REST endpoint so UniForm/Iceberg tables run natively in DuckDB. | PAT or OAuth M2M service principal (`/oidc/v1/token`, `all-apis`) |
+
+In the workbench a tab's **engine picker** switches between *DuckDB (local)* and any Databricks SQL warehouse; remote results land in the same grid and can be **materialised into DuckDB** (rows stream through NDJSON into a typed `CREATE TABLE`, so you can join them with local files). Agents get the same through `browse_storage(provider=lakehouse)`, `execute_query` on attached catalogs, `lakehouse_query(connection_id, sql)` for warehouses and `inspect_schema(…, connection_id)` for non-attached Databricks tables. Non-read statements sent to a warehouse by an agent are held for human approval exactly like local SQL. In `filesystem_mode: sandboxed` (external access off) catalogs can be configured but not attached; Databricks warehouses still work.
+
+`GET /api/lakehouse/providers` · `GET/POST/PATCH/DELETE /api/lakehouse-connections[/:id]` · `POST /api/lakehouse-connections/:id/test` · `GET /api/lakehouse/browse?connection_id&workspace_id[&catalog][&schema]` · `GET /api/lakehouse/:id/inspect?table=` · `POST /api/lakehouse/:id/query {sql, max_rows?, dry_run?}` · `POST /api/lakehouse/:id/materialize {sql, table, workspace_id}`. Config: `lakehouse.statement_timeout_seconds`, `lakehouse.max_rows`, `lakehouse.materialize_max_rows`.
+
+## Agent integrations
+
+The **Agent & MCP hub** (`#/mcp`) registers the agents that call DuckView and gives each one a dedicated, workspace-scoped token (`read + mcp`, optionally `write` — mutations are still held for approval). Every tool call is attributed to the agent (call/error counters, "last seen", the live inspector shows the agent name and whether it came over MCP or REST). Copy-paste snippets are generated per framework with the token substituted:
+
+| Framework | Integration |
+|---|---|
+| **Strands Agents** | `MCPClient(lambda: streamablehttp_client(url, headers=…))` → `Agent(tools=…)` |
+| **LangGraph** / **LangChain** | `langchain-mcp-adapters` `MultiServerMCPClient` → `create_react_agent` / `create_agent` |
+| **CrewAI** | `MCPServerAdapter({url, transport: "streamable-http", headers})` |
+| **AgentCore Runtime** | `BedrockAgentCoreApp` entrypoint (Strands + DuckView MCP) deployable with the starter toolkit; DuckView can **invoke it back** (`InvokeAgentRuntime`, SSE or JSON) from the hub or as a Copilot backend |
+| **AgentCore Gateway** | `create_gateway_target` with DuckView as an **MCP server target** or an **OpenAPI target** (API-key credential provider holding the DuckView token) |
+| **Bedrock Agents (Classic)** | Action group from the generated **OpenAPI 3.0** document + a Lambda forwarder to the REST façade; invocation (`InvokeAgent`) from the hub / Copilot. Bedrock Agents Classic is closed to new customers — prefer AgentCore for new builds. |
+| **Custom / HTTP** | `curl`, Python `requests`, or any MCP client config |
+
+Both surfaces share one tool registry (`packages/server/src/agent/tools.ts`): the **MCP server** and the **REST façade** — `GET /api/agent/v1/tools` (names, descriptions, JSON-schema inputs) and `POST /api/agent/v1/tools/<tool>` (returns `{text, structured, is_error}`; invalid arguments → 400) — plus `GET /api/agent/openapi.json`. Registered-agent endpoints: `GET/POST /api/agents`, `GET/PATCH/DELETE /api/agents/:id`, `POST /api/agents/:id/rotate-token`, `GET /api/agents/:id/snippets`, `POST /api/agents/:id/test` (runs `list_accessible_data` as the agent), `POST /api/agents/:id/invoke` (SSE `delta*` → `done`), `GET /api/agents/discover?kind=bedrock_agents|agentcore_runtimes|bedrock_models&region=` (pickers, server AWS credentials), `GET /api/agents/frameworks`, `GET /api/agents/snippets?framework=`.
+
 ## DuckCopilot
 
-An in-app assistant docked beside the workbench and the dashboard builder. Every turn is hydrated automatically with the workspace's tables/views (columns + types), the data files in the jail, the configured cloud buckets, the SQL in the active tab, and — for selected files/tables — `SUMMARIZE` statistics (min/max/distinct/null %). Providers: **Anthropic** (official SDK, streaming, default `claude-opus-5`), **OpenAI** (`gpt-4o`) and **Ollama** (local, OpenAI-compatible endpoint). Keys are server-managed (`copilot.*`) or bring-your-own from the drawer's settings (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query* (sends the failing SQL + DuckDB error), *Suggest questions* (top analytical questions for a selected dataset). Conversations persist in `chat_history` with the context snapshot of each turn.
+An in-app assistant docked beside the workbench and the dashboard builder. Every turn is hydrated automatically with the workspace's tables/views (columns + types), the data files in the jail, the configured cloud buckets, the SQL in the active tab, and — for selected files/tables — `SUMMARIZE` statistics (min/max/distinct/null %). Providers: **Anthropic** (official SDK, streaming, default `claude-opus-5`), **OpenAI** (`gpt-4o`), **Ollama** (local, OpenAI-compatible endpoint), **Amazon Bedrock** (Converse streaming — Claude on Bedrock, model/inference-profile picker), **Bedrock Agent** (`InvokeAgent`, one session per conversation) and **AgentCore runtime** (`InvokeAgentRuntime`; the workspace context is sent as `payload.context` so your own Strands/LangGraph/CrewAI agent can use it). AWS providers use the server's default credential chain (`copilot.aws_region`, `copilot.bedrock_agent_*`, `copilot.agentcore_runtime_arn`, or bring-your-own from the drawer — including a one-click pick of any registered invokable agent). Keys are server-managed (`copilot.*`) or bring-your-own from the drawer's settings (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query* (sends the failing SQL + DuckDB error), *Suggest questions* (top analytical questions for a selected dataset). Conversations persist in `chat_history` with the context snapshot of each turn.
 
 `POST /api/copilot/chat` streams SSE events (`context` → `delta`* → `done` | `error`); `GET /api/copilot/config`, `POST /api/copilot/models`, `GET /api/copilot/conversations`, `GET /api/copilot/messages`, `DELETE /api/copilot/conversations/:id`.
 
@@ -172,10 +210,11 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `execute_query(sql, workspace_id?, page_size?, page?, dry_run?)` | Runs SQL; returns a Markdown table + typed JSON (`columns`, `rows`, `total_rows`, `truncated`, `rows_changed`). Hard cap 200 rows/call, long strings truncated. Mutations need `dry_run=false`. |
 | `profile_dataset(table_or_path, workspace_id?)` | `SUMMARIZE` stats: types, min/max, approx distinct, null %, quartiles, row count, footprint. |
 | `explain_query(sql, workspace_id?, analyze?)` | Physical plan as JSON tree + ASCII with cardinality estimates; `analyze=true` adds measured timings (read-only SQL only). |
-| `list_accessible_data(workspace_id?)` | Workspaces, tables/views with columns, and every data file/Delta/Iceberg table in the jail. |
+| `list_accessible_data(workspace_id?)` | Workspaces, tables/views with columns, every data file/Delta/Iceberg table in the jail, and the attached lakehouse catalogs (with attach status). |
 | `save_dataset(sql, output_format, target_filename, workspace_id?, dry_run?)` | `COPY (sql) TO` parquet/csv/json inside the jail (`exports/` by default). |
-| `browse_storage(provider?, path?, connection_id?, bucket?)` | One level of the data directory, or cloud connections → buckets → objects (S3/R2/GCS/Azure). |
-| `inspect_schema(file_path_or_table)` | Columns/types/nullability for tables, files, remote objects, `.duckdb` files or a SELECT — no scan. |
+| `browse_storage(provider?, path?, connection_id?, bucket?, catalog?, schema?)` | One level of the data directory, cloud connections → buckets → objects (S3/R2/GCS/Azure), or lakehouse connections → schemas → tables (with the engine each table runs on). |
+| `inspect_schema(file_path_or_table, connection_id?)` | Columns/types/nullability for tables, files, remote objects, `.duckdb` files, attached lakehouse tables or a SELECT — no scan; `connection_id` reads Unity Catalog metadata for non-attached Databricks tables. |
+| `lakehouse_query(connection_id, sql, page_size?, dry_run?)` | Runs SQL on a Databricks SQL warehouse; non-read statements need `dry_run=false` after approval. |
 | `list_dashboards(workspace_id?)` | Dashboards with their widgets and layouts. |
 | `create_dashboard_widget(dashboard_id | dashboard_name, title, sql, widget_type, chart_config?, refresh_interval_sec?)` | Builds dashboards autonomously; the SQL is validated read-only and dry-run first. |
 
@@ -196,7 +235,8 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Data | `POST /api/workspaces/:id/files` (multipart upload into the jail) · `DELETE /api/workspaces/:id/files?path=` · `POST /api/workspaces/:id/overview` (KPIs, null ratios, sample, distributions) · `GET /api/workspaces/:id/catalog` |
 | Query | `POST /api/workspaces/:id/query` · `/explain` · `/profile` · `/save` · `WS /api/ws/query` (auth → run/cancel; schema → rows* → done) |
 | Live | `WS /api/ws/events` — audit rows, MCP tool invocations and session events in real time (admins: all; others: own) · `GET /api/system/live` — CPU %, RAM, `duckdb_memory()` per engine, scratch/data disk usage |
-| Agents | `GET/POST/DELETE /api/tokens` · `GET /api/mcp/sessions` · `GET /api/mcp/info` (Claude Desktop / Cursor / Claude Code snippets) |
+| Agents | `GET/POST/DELETE /api/tokens` · `GET /api/mcp/sessions` · `GET /api/mcp/info` (Claude Desktop / Cursor / Claude Code snippets) · `/api/agents…` (registered agents, snippets, self-test, invoke, discovery) · `GET /api/agent/openapi.json` · `GET/POST /api/agent/v1/tools[/:tool]` (REST façade) |
+| Lakehouse | `GET /api/lakehouse/providers` · `/api/lakehouse-connections…` · `GET /api/lakehouse/browse` · `GET /api/lakehouse/:id/inspect` · `POST /api/lakehouse/:id/query` · `POST /api/lakehouse/:id/materialize` |
 | Connections | `GET /api/connections/types` · `GET/POST/DELETE /api/connections` |
 | Ops | `GET /api/system` · `GET /api/audit` · `GET/POST/PATCH/DELETE /api/admin/users` · `GET /api/admin/engines` · `POST /api/admin/engines/:id/evict` · `GET /api/admin/config` |
 | Probes | `GET /healthz` · `GET /readyz` · `GET /metrics` |
@@ -228,8 +268,10 @@ packages/server/src
   db/            Drizzle schemas (sqlite + pg), store factory, migrations in ../drizzle
   engine/        sandbox (DataJail), sql-guard (lexer/classifier/rewriter), duckdb (engines, overview, memory stats), results
   security/      AES-256-GCM, scrypt, token hashing
-  services/      audit, auth/tokens, connections, files (uploads), workspaces/tabs, query (authz + HITL)
-  mcp/           server (tools/resources/prompts), stdio, http (SSE + Streamable HTTP)
+  services/      audit, auth/tokens, connections, files (uploads), workspaces/tabs, query (authz + HITL),
+                 lakehouse (Iceberg ATTACH + Databricks), databricks (UC + Statement Execution client), agents, aws (Bedrock/AgentCore bridge)
+  agent/         tool registry (shared by MCP + REST), OpenAPI generator, framework snippets
+  mcp/           server (registry → tools, resources, prompts), stdio, http (SSE + Streamable HTTP)
   routes/        auth (local + OIDC), workspaces, query (REST + WS), files, events (WS), connections, tokens, admin, system
   observability/ pino, prom-client, OpenTelemetry, live event bus, CPU sampler
 packages/web/src
@@ -237,14 +279,17 @@ packages/web/src
   features/workspace  schema tree (click-to-insert) · tabs with per-tab Stop · editor (cursor persisted) · streaming grid · chart · plan · profile
   features/settings   categorised left-nav: appearance (themes/fonts/scale) · layout · hardware gauges · engine tuning · storage · copilot · account · users
   theme/              theme definitions (ramps, accents, tones, chart series, fonts) · store/theme.ts applies them as CSS variables
-  features/mcp        tokens · Claude Desktop / Cursor / Claude Code snippets · live inspector (WS)
+  features/mcp        registered agents (tokens, self-test, chat) · framework snippets + OpenAPI · client snippets · live inspector (WS)
+  features/explorer   VS Code-style tree (data dir, folders, cloud, lakehouse) · schema panel · cloud & lakehouse wizards
 ```
 
 ## Tests
 
 ```bash
-pnpm test        # 107 tests: jail, SQL guard, crypto, config, and an integration suite that boots real DuckDB
+pnpm test        # 147 tests: jail, SQL guard, crypto, config, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
-                 # the live event feed, the HTTP API and WebSocket streaming
+                 # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
+                 # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +
+                 # Statement Execution API) and the agent façade / AWS providers against a fake AWS bridge
 node scripts/smoke.mjs http://localhost:4200 admin@example.com <password>   # against a running instance
 ```

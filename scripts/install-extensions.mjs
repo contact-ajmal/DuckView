@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const { DuckDBInstance } = require(path.resolve('packages/server/node_modules/@duckdb/node-api'));
 
 const [dir = '/app/.duckdb/extensions', ...rest] = process.argv.slice(2);
-const exts = rest.length ? rest : ['httpfs', 'azure', 'arrow', 'iceberg', 'delta', 'excel'];
+const exts = rest.length ? rest : ['httpfs', 'aws', 'azure', 'arrow', 'iceberg', 'delta', 'excel'];
 fs.mkdirSync(dir, { recursive: true });
 const inst = await DuckDBInstance.create(':memory:', { extension_directory: dir });
 const c = await inst.connect();

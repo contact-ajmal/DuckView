@@ -14,6 +14,9 @@ import { ExportService } from './services/exports.js';
 import { SavedQueryService, DashboardService } from './services/bi.js';
 import { ChatHistoryService } from './services/chat.js';
 import { CopilotService } from './services/copilot.js';
+import { LakehouseService } from './services/lakehouse.js';
+import { AgentService } from './services/agents.js';
+import type { AwsBridge } from './services/aws.js';
 import type { ProviderFactory } from './services/llm.js';
 import { logger } from './observability/logger.js';
 
@@ -35,11 +38,13 @@ export interface AppContext {
   dashboards: DashboardService;
   chat: ChatHistoryService;
   copilot: CopilotService;
+  lakehouse: LakehouseService;
+  agents: AgentService;
   startedAt: Date;
   shutdown(): Promise<void>;
 }
 
-export async function createContext(cfg: DuckViewConfig, opts: { providerFactory?: ProviderFactory } = {}): Promise<AppContext> {
+export async function createContext(cfg: DuckViewConfig, opts: { providerFactory?: ProviderFactory; awsBridge?: AwsBridge } = {}): Promise<AppContext> {
   const store = await createMetadataStore(cfg.database.metadata_url);
   if (cfg.database.run_migrations) {
     await store.migrate();
@@ -52,6 +57,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const connections = new ConnectionService(store, cipher);
   const cloud = new CloudConnectionService(store, cipher);
   const workspaces = new WorkspaceService(store, engines, connections, cloud);
+  const lakehouse = new LakehouseService(cfg, store, cipher, engines);
+  lakehouse.bind(workspaces, audit);
   const queries = new QueryService(cfg, workspaces, audit);
   const files = new FileService(cfg, workspaces, audit);
   const storage = new StorageService(cfg, workspaces, cloud, audit);
@@ -59,7 +66,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const savedQueries = new SavedQueryService(store, workspaces);
   const dashboards = new DashboardService(store, workspaces);
   const chat = new ChatHistoryService(store, workspaces);
-  const copilot = new CopilotService(cfg, workspaces, queries, cloud, chat, audit, opts.providerFactory);
+  const copilot = new CopilotService(cfg, workspaces, queries, cloud, chat, audit, opts.providerFactory, opts.awsBridge);
+  const agents = new AgentService(cfg, store, auth, workspaces, audit, opts.awsBridge);
   await auth.bootstrapAdmin();
   if (cfg.security.filesystem_mode === 'full') {
     logger().warn({ dataDir: cfg.security.data_jail_directory }, 'filesystem_mode=full: users can mount any local folder and DuckDB may read anywhere this process can. Set security.filesystem_mode=sandboxed for multi-tenant deployments.');
@@ -67,7 +75,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   if (cfg.ephemeralSecrets) {
     logger().warn('JWT_SECRET / ENCRYPTION_KEY not configured — using ephemeral secrets. Sessions and stored credentials will NOT survive a restart. Set them before production use.');
   }
-  return {
+  const ctx: AppContext = {
     cfg,
     store,
     engines,
@@ -85,11 +93,16 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     dashboards,
     chat,
     copilot,
+    lakehouse,
+    agents,
     startedAt: new Date(),
     async shutdown() {
+      await agents.flush();
       exportsSvc.close();
       engines.closeAll();
       await store.close();
     },
   };
+  agents.bind(ctx);
+  return ctx;
 }

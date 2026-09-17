@@ -5,6 +5,7 @@ import { TOKEN_SCOPES } from '../db/schema/sqlite.js';
 import { forbidden } from '../services/errors.js';
 import type { McpSessionRegistry } from '../mcp/http.js';
 import { isAdmin } from '../services/principal.js';
+import { TOOL_NAMES } from '../agent/tools.js';
 
 export async function tokenRoutes(app: FastifyInstance, ctx: AppContext, registry: McpSessionRegistry) {
   app.addHook('preHandler', app.authenticate);
@@ -50,7 +51,9 @@ export async function tokenRoutes(app: FastifyInstance, ctx: AppContext, registr
         streamable_http: `${base}/mcp`,
         stdio: 'duckview mcp --token <token> [--workspace <id>]',
       },
-      tools: ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'list_dashboards', 'create_dashboard_widget'],
+      tools: [...TOOL_NAMES],
+      rest_tools: `${base}/api/agent/v1/tools`,
+      openapi: `${base}/api/agent/openapi.json`,
       resources: ['duckdb://workspaces', 'duckdb://schemas/{workspace_id}', 'duckdb://system/resources'],
       prompts: ['data_quality_audit', 'sql_optimization'],
       limits: { default_page_size: ctx.cfg.mcp.default_page_size, max_page_size: ctx.cfg.mcp.max_page_size, max_cell_chars: ctx.cfg.mcp.max_cell_chars },

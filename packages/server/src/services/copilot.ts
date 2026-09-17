@@ -10,7 +10,8 @@ import type { AuditService } from './audit.js';
 import type { Principal } from './principal.js';
 import { requireScope } from './principal.js';
 import type { ChatContextSnapshot } from '../db/schema/sqlite.js';
-import { defaultProviderFactory, mapProviderError, DEFAULT_MODELS, SUGGESTED_MODELS, type ProviderFactory, type ProviderId, type LlmMessage, type LlmUsage } from './llm.js';
+import { defaultProviderFactory, mapProviderError, DEFAULT_MODELS, SUGGESTED_MODELS, AWS_PROVIDERS, type ProviderFactory, type ProviderId, type LlmMessage, type LlmUsage } from './llm.js';
+import type { AwsBridge } from './aws.js';
 import { HttpError, badRequest } from './errors.js';
 import { newId } from '../security/crypto.js';
 import { metrics } from '../observability/metrics.js';
@@ -33,6 +34,11 @@ export interface CopilotRequest {
   model?: string;
   apiKey?: string;
   baseUrl?: string;
+  /** AWS providers, bring-your-own */
+  region?: string;
+  agentId?: string;
+  agentAliasId?: string;
+  runtimeArn?: string;
   signal?: AbortSignal;
 }
 
@@ -121,7 +127,13 @@ export class CopilotService {
     private readonly chat: ChatHistoryService,
     private readonly audit: AuditService,
     private readonly providers: ProviderFactory = defaultProviderFactory,
+    private readonly aws?: AwsBridge,
   ) {}
+
+  /** Workspace context as text (tables, files, buckets, active SQL) — for external agents and the "ask my agent" flow. */
+  renderContextText(snapshot: ChatContextSnapshot): string {
+    return renderContext(snapshot, this.cfg);
+  }
 
   config(p?: Principal) {
     const c = this.cfg.copilot;
@@ -130,8 +142,10 @@ export class CopilotService {
       allow_byok: c.allow_byok,
       server_provider: c.provider === 'none' ? null : c.provider,
       server_model: c.provider === 'none' ? null : (c.model ?? DEFAULT_MODELS[c.provider]),
-      has_server_key: !!c.api_key || c.provider === 'ollama',
+      has_server_key: !!c.api_key || c.provider === 'ollama' || AWS_PROVIDERS.includes(c.provider as ProviderId),
       server_base_url: c.provider === 'ollama' ? (c.base_url ?? 'http://localhost:11434') : null,
+      server_aws: AWS_PROVIDERS.includes(c.provider as ProviderId) ? { region: c.aws_region ?? null, agent_id: c.bedrock_agent_id ?? null, agent_alias_id: c.bedrock_agent_alias_id ?? null, runtime_arn: c.agentcore_runtime_arn ?? null } : null,
+      aws_providers: AWS_PROVIDERS,
       default_models: DEFAULT_MODELS,
       suggested_models: SUGGESTED_MODELS,
       include_summaries: c.include_summaries,
@@ -143,17 +157,21 @@ export class CopilotService {
   private resolveProvider(req: CopilotRequest) {
     const c = this.cfg.copilot;
     if (!c.enabled) throw new HttpError(403, 'DuckCopilot is disabled in the server configuration', 'COPILOT_DISABLED');
-    const byok = c.allow_byok && (req.apiKey || req.baseUrl || (req.provider && req.provider !== c.provider));
+    const byok = c.allow_byok && (req.apiKey || req.baseUrl || req.region || req.agentId || req.runtimeArn || (req.provider && req.provider !== c.provider));
     const provider: ProviderId | 'none' = byok && req.provider ? req.provider : req.provider ?? c.provider;
     if (provider === 'none') throw new HttpError(409, 'No LLM provider configured. Set copilot.provider on the server or bring your own key.', 'COPILOT_NOT_CONFIGURED');
     const serverManaged = provider === c.provider;
     const apiKey = byok && req.apiKey ? req.apiKey : serverManaged ? c.api_key : undefined;
     const baseUrl = byok && req.baseUrl ? req.baseUrl : serverManaged ? c.base_url : undefined;
     const model = req.model || (serverManaged ? c.model : undefined) || DEFAULT_MODELS[provider];
-    return { provider, instance: this.providers(provider, { apiKey, baseUrl, model }) };
+    const region = (byok && req.region) || (serverManaged ? c.aws_region : undefined) || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+    const agentId = (byok && req.agentId) || (serverManaged ? c.bedrock_agent_id : undefined);
+    const agentAliasId = (byok && req.agentAliasId) || (serverManaged ? c.bedrock_agent_alias_id : undefined);
+    const runtimeArn = (byok && req.runtimeArn) || (serverManaged ? c.agentcore_runtime_arn : undefined);
+    return { provider, instance: this.providers(provider, { apiKey, baseUrl, model, region, agentId, agentAliasId, runtimeArn, aws: this.aws }) };
   }
 
-  async listModels(req: { provider: ProviderId; apiKey?: string; baseUrl?: string }): Promise<string[]> {
+  async listModels(req: { provider: ProviderId; apiKey?: string; baseUrl?: string; region?: string; agentId?: string; agentAliasId?: string; runtimeArn?: string }): Promise<string[]> {
     const { instance } = this.resolveProvider({ workspaceId: '', message: '', ...req });
     try {
       return await instance.listModels();
@@ -237,7 +255,7 @@ export class CopilotService {
     const stop = metrics.copilotDuration.startTimer({ provider });
     const span = tracer().startSpan('copilot.chat', { attributes: { 'duckview.provider': provider, 'duckview.model': instance.model, 'duckview.action': action, 'duckview.workspace_id': req.workspaceId } });
     try {
-      const gen = instance.stream({ system, messages: llmMessages, model: instance.model, maxTokens: this.cfg.copilot.max_output_tokens, temperature: this.cfg.copilot.temperature, signal: req.signal });
+      const gen = instance.stream({ system, messages: llmMessages, model: instance.model, maxTokens: this.cfg.copilot.max_output_tokens, temperature: this.cfg.copilot.temperature, signal: req.signal, context: renderContext(snapshot, this.cfg), conversationId });
       let next = await gen.next();
       while (!next.done) {
         text += next.value;

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, queryStream, ApiError, type Workspace, type SessionTab, type ColumnSchema, type ChartConfig, type ApprovalChallenge, type CatalogObject, type JailEntry } from '../api/client';
+import { api, queryStream, ApiError, type Workspace, type SessionTab, type ColumnSchema, type ChartConfig, type ApprovalChallenge, type CatalogObject, type JailEntry, type QueryResult, type LakehouseConnection } from '../api/client';
 
 export interface TabResult {
   status: 'idle' | 'running' | 'done' | 'error' | 'approval';
@@ -14,9 +14,18 @@ export interface TabResult {
   statements: { verb: string; class: string }[];
   startedAt: number | null;
   cancel?: () => void;
+  /** Where the rows came from: DuckDB (default) or a remote lakehouse SQL engine. */
+  engine?: 'duckdb' | 'databricks';
+  /** Lakehouse connection the remote result was produced by (enables "Materialise into DuckDB"). */
+  connectionId?: string;
+  sql?: string;
 }
 
 const emptyResult = (): TabResult => ({ status: 'idle', columns: [], rows: [], rowCount: 0, durationMs: null, truncated: false, error: null, errorCode: null, challenge: null, statements: [], startedAt: null });
+
+/** Tab engine values: null → DuckDB; "lakehouse:<connection id>" → remote SQL warehouse. */
+export const lakehouseEngine = (connectionId: string) => `lakehouse:${connectionId}`;
+export const engineConnectionId = (engine: string | null | undefined) => (engine?.startsWith('lakehouse:') ? engine.slice('lakehouse:'.length) : null);
 
 export type SidePanel = 'catalog' | 'profile' | 'plan' | 'chart' | 'settings' | null;
 
@@ -46,13 +55,17 @@ interface WorkspaceState {
   clearHistory(): void;
   sidePanel: SidePanel;
   maxRows: number;
+  /** Lakehouse connections that can run SQL remotely (engine picker). */
+  remoteEngines: LakehouseConnection[];
+  loadRemoteEngines(): Promise<void>;
+  setTabEngine(id: string, engine: string | null): Promise<void>;
   loadWorkspaces(): Promise<void>;
   selectWorkspace(id: string): Promise<void>;
   createWorkspace(input: { name: string; active_db_path?: string }): Promise<Workspace>;
   updateWorkspace(id: string, patch: Partial<Pick<Workspace, 'name' | 'active_db_path' | 'engine_settings'>>): Promise<void>;
   deleteWorkspace(id: string): Promise<void>;
   loadTabs(): Promise<void>;
-  addTab(input?: { title?: string; sql?: string }): Promise<SessionTab | undefined>;
+  addTab(input?: { title?: string; sql?: string; engine?: string | null }): Promise<SessionTab | undefined>;
   selectTab(id: string): void;
   closeTab(id: string): Promise<void>;
   renameTab(id: string, title: string): Promise<void>;
@@ -132,7 +145,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   async addTab(input) {
     const ws = get().activeId;
     if (!ws) return undefined;
-    const r = await api.post<{ tab: SessionTab }>(`/api/workspaces/${ws}/tabs`, { title: input?.title?.slice(0, 120) || `Query ${get().tabs.length + 1}`, sql_content: input?.sql ?? '' });
+    const r = await api.post<{ tab: SessionTab }>(`/api/workspaces/${ws}/tabs`, { title: input?.title?.slice(0, 120) || `Query ${get().tabs.length + 1}`, sql_content: input?.sql ?? '', engine: input?.engine ?? null });
     set({ tabs: [...get().tabs, r.tab], activeTabId: r.tab.id });
     localStorage.setItem(`duckview.tab.${ws}`, r.tab.id);
     return r.tab;
@@ -193,7 +206,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const ws = get().activeId;
     if (!ws || !sql.trim()) return;
     get().results[tabId]?.cancel?.();
-    const base: TabResult = { ...emptyResult(), status: 'running', startedAt: Date.now() };
+    const remote = engineConnectionId(get().tabs.find((t) => t.id === tabId)?.engine);
+    const base: TabResult = { ...emptyResult(), status: 'running', startedAt: Date.now(), engine: remote ? 'databricks' : 'duckdb', connectionId: remote ?? undefined, sql };
     set({ results: { ...get().results, [tabId]: base } });
     const update = (patch: Partial<TabResult>) => set({ results: { ...get().results, [tabId]: { ...(get().results[tabId] ?? base), ...patch } } });
     const pushHistory = (h: { sql: string; durationMs: number; rows: number; status: 'ok' | 'error' }) => {
@@ -207,6 +221,24 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         /* quota */
       }
     };
+    if (remote) {
+      // Remote SQL warehouse: one round trip through the Statement Execution API (polling happens server-side).
+      const ac = new AbortController();
+      update({ cancel: () => ac.abort() });
+      try {
+        const r = await api.post<QueryResult & { engine: 'databricks' }>(`/api/lakehouse/${remote}/query`, { sql, workspace_id: ws, max_rows: get().maxRows, dry_run: opts.dryRun }, { signal: ac.signal });
+        update({ status: 'done', columns: r.columns, rows: r.rows, rowCount: r.rowCount, durationMs: r.durationMs, truncated: r.truncated, statements: [{ verb: r.statementClass, class: r.statementClass === 'SELECT' ? 'read' : 'write' }], cancel: undefined });
+        pushHistory({ sql, durationMs: r.durationMs, rows: r.rowCount, status: 'ok' });
+      } catch (err) {
+        const e = err as ApiError;
+        if (e.code === 'APPROVAL_REQUIRED') update({ status: 'approval', challenge: null, error: e.message, errorCode: e.code, cancel: undefined });
+        else {
+          update({ status: 'error', error: e.message ?? String(err), errorCode: e.code ?? 'ERROR', cancel: undefined });
+          pushHistory({ sql, durationMs: Date.now() - (base.startedAt ?? Date.now()), rows: 0, status: 'error' });
+        }
+      }
+      return;
+    }
     let buffered: unknown[][] = [];
     let flushScheduled = false;
     const flush = () => {
@@ -254,6 +286,21 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
   cancelQuery(tabId) {
     get().results[tabId]?.cancel?.();
+  },
+  remoteEngines: [],
+  async loadRemoteEngines() {
+    try {
+      const r = await api.get<{ connections: LakehouseConnection[] }>('/api/lakehouse-connections');
+      set({ remoteEngines: r.connections.filter((c) => c.remote_sql) });
+    } catch {
+      set({ remoteEngines: [] });
+    }
+  },
+  async setTabEngine(id, engine) {
+    const ws = get().activeId;
+    if (!ws) return;
+    set({ tabs: get().tabs.map((t) => (t.id === id ? { ...t, engine } : t)) });
+    await api.patch(`/api/workspaces/${ws}/tabs/${id}`, { engine }).catch(() => undefined);
   },
   async loadCatalog(force = false) {
     const ws = get().activeId;

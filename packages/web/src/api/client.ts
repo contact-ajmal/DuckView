@@ -30,12 +30,12 @@ export function setToken(t: string | null) {
   }
 }
 
-async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, url: string, body?: unknown, opts: { signal?: AbortSignal } = {}): Promise<T> {
   const headers: Record<string, string> = { accept: 'application/json' };
   if (body !== undefined) headers['content-type'] = 'application/json';
   const token = getToken();
   if (token) headers.authorization = `Bearer ${token}`;
-  const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: opts.signal });
   const text = await res.text();
   let json: Record<string, unknown> = {};
   try {
@@ -55,7 +55,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 export const api = {
   get: <T>(url: string) => request<T>('GET', url),
-  post: <T>(url: string, body?: unknown) => request<T>('POST', url, body ?? {}),
+  post: <T>(url: string, body?: unknown, opts?: { signal?: AbortSignal }) => request<T>('POST', url, body ?? {}, opts),
   patch: <T>(url: string, body?: unknown) => request<T>('PATCH', url, body ?? {}),
   del: <T>(url: string) => request<T>('DELETE', url),
 };
@@ -65,7 +65,7 @@ export interface User { id: string; email: string; role: 'ADMIN' | 'USER' | 'REA
 export interface EngineSettings { memory_limit?: string; threads?: number | 'auto'; query_timeout_seconds?: number; temp_directory?: string; extensions?: string[]; connection_ids?: string[] }
 export interface Workspace { id: string; user_id: string; name: string; active_db_path: string; engine_settings: EngineSettings; created_at: string; updated_at: string }
 export interface ChartConfig { type: 'bar' | 'line' | 'area' | 'scatter' | 'pie' | 'none'; x?: string; y?: string[]; stacked?: boolean }
-export interface SessionTab { id: string; workspace_id: string; title: string; sql_content: string; chart_config: ChartConfig; order_index: number; cursor_position: number; updated_at: string }
+export interface SessionTab { id: string; workspace_id: string; title: string; sql_content: string; chart_config: ChartConfig; order_index: number; cursor_position: number; engine?: string | null; updated_at: string }
 export interface ColumnSchema { name: string; type: string; kind: 'number' | 'string' | 'boolean' | 'temporal' | 'json' | 'binary' | 'null' }
 export interface QueryResult { columns: ColumnSchema[]; rows: unknown[][]; rowCount: number; totalRows: number | null; truncated: boolean; rowsChanged: number | null; durationMs: number; statementCount: number; statementClass: string; statements?: { verb: string; class: string }[] }
 export interface CatalogObject { database: string; schema: string; name: string; type: 'TABLE' | 'VIEW'; estimated_rows: number | null; column_count: number; sql: string | null; columns: { name: string; type: string; nullable: boolean }[] }
@@ -227,7 +227,62 @@ export interface WidgetChartConfig { chart?: 'bar' | 'line' | 'area' | 'scatter'
 export interface DashboardWidget { id: string; dashboard_id: string; title: string; widget_type: 'KPI' | 'CHART' | 'TABLE' | 'MARKDOWN'; saved_query_id: string | null; custom_sql: string | null; chart_config: WidgetChartConfig; refresh_interval_sec: number; order_index: number; created_at: string; updated_at: string }
 export interface Dashboard { id: string; workspace_id: string; user_id: string; name: string; description: string | null; layout: LayoutItem[]; created_at: string; updated_at: string; widgets?: DashboardWidget[] }
 export interface ExportRecord { id: string; name: string; format: 'parquet' | 'csv' | 'json' | 'arrow'; content_type: string; rows: number; size_bytes: number; engine: string; duration_ms: number; created_at: string; expires_at: string; download_url: string }
-export interface CopilotConfig { enabled: boolean; allow_byok: boolean; server_provider: 'anthropic' | 'openai' | 'ollama' | null; server_model: string | null; has_server_key: boolean; server_base_url: string | null; default_models: Record<string, string>; suggested_models: Record<string, string[]>; can_use: boolean }
+export type CopilotProvider = 'anthropic' | 'openai' | 'ollama' | 'bedrock' | 'bedrock_agent' | 'agentcore';
+export interface CopilotConfig { enabled: boolean; allow_byok: boolean; server_provider: CopilotProvider | null; server_model: string | null; has_server_key: boolean; server_base_url: string | null; server_aws: { region: string | null; agent_id: string | null; agent_alias_id: string | null; runtime_arn: string | null } | null; aws_providers: CopilotProvider[]; default_models: Record<string, string>; suggested_models: Record<string, string[]>; can_use: boolean }
+
+// ---- lakehouse
+export type LakehouseProvider = 'AWS_GLUE' | 'AWS_S3_TABLES' | 'ICEBERG_REST' | 'DATABRICKS';
+export interface LakehouseConfig { region?: string; account_id?: string; catalog?: string; table_bucket_arn?: string; aws_auth?: 'keys' | 'credential_chain'; endpoint?: string; warehouse?: string; auth?: 'bearer' | 'oauth2' | 'none'; oauth2_server_uri?: string; oauth2_scope?: string; nested_namespaces?: boolean; host?: string; warehouse_id?: string; unity_catalog?: string; databricks_auth?: 'pat' | 'oauth_m2m'; attach_iceberg?: boolean }
+export interface LakehouseConnection { id: string; name: string; provider: LakehouseProvider; alias: string; config: LakehouseConfig; status: 'unknown' | 'ok' | 'error'; last_error: string | null; last_tested_at: string | null; credential_fields: string[]; attached: boolean; remote_sql: boolean; example_sql: string; created_at: string; updated_at: string }
+export interface LakehouseProviderMeta { title: string; blurb: string; docs: string; attachable: boolean; remote_sql: boolean }
+export interface LakehouseEntry { name: string; type: 'catalog' | 'schema' | 'table' | 'view'; qualified?: string; engine?: 'duckdb' | 'remote'; format?: string | null; comment?: string | null }
+export interface LakehouseBrowse { connection: { id: string; name: string; provider: LakehouseProvider; alias: string }; level: 'catalogs' | 'schemas' | 'tables'; catalog: string | null; schema: string | null; entries: LakehouseEntry[]; attach_error: string | null }
+export interface RemoteInspect { target: string; kind: 'remote'; engine: 'remote'; format: string | null; table_type: string | null; iceberg_readable: boolean; columns: { name: string; type: string; nullable: boolean }[]; row_count: null; suggested_sql: string }
+
+// ---- agents
+export type AgentFramework = 'strands' | 'langgraph' | 'langchain' | 'crewai' | 'agentcore_runtime' | 'agentcore_gateway' | 'bedrock_agent' | 'custom';
+export interface AgentConfig { region?: string; agent_id?: string; agent_alias_id?: string; runtime_arn?: string; qualifier?: string; gateway_url?: string; notes?: string }
+export interface AgentRecord { id: string; name: string; framework: AgentFramework; framework_title: string; description: string | null; workspace_id: string | null; token_id: string | null; token_prefix: string | null; token_scopes: string[]; token_revoked: boolean; allow_mutations: boolean; config: AgentConfig; call_count: number; error_count: number; last_seen_at: string | null; can_invoke: boolean; created_at: string; updated_at: string }
+export interface FrameworkMeta { title: string; blurb: string; transport: 'mcp' | 'rest' | 'both'; docs: string }
+export interface Snippet { id: string; label: string; file: string; language: 'python' | 'bash' | 'json'; code: string; notes?: string }
+export type AgentInvokeEvent = { type: 'delta'; text: string } | { type: 'done'; session_id: string; duration_ms: number } | { type: 'error'; code: string; message: string };
+
+/** Streams an agent reply (Bedrock Agent / AgentCore runtime) as SSE events. */
+export async function* agentInvoke(agentId: string, body: Record<string, unknown>, signal?: AbortSignal): AsyncGenerator<AgentInvokeEvent> {
+  const res = await fetch(`/api/agents/${agentId}/invoke`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${getToken()}` }, body: JSON.stringify(body), signal });
+  if (!res.ok || !res.body) {
+    let msg = res.statusText;
+    try {
+      msg = ((await res.json()) as { message?: string }).message ?? msg;
+    } catch {
+      /* ignore */
+    }
+    yield { type: 'error', code: `HTTP_${res.status}`, message: msg };
+    return;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const ev = /^event: (.*)$/m.exec(block)?.[1];
+      const data = /^data: (.*)$/m.exec(block)?.[1];
+      if (ev && data) {
+        try {
+          yield { type: ev, ...(JSON.parse(data) as Record<string, unknown>) } as AgentInvokeEvent;
+        } catch {
+          /* ignore malformed frame */
+        }
+      }
+    }
+  }
+}
 export interface ChatMsg { id: string; role: 'user' | 'assistant' | 'system'; content: string; timestamp: string; context: { tables: number; files: number; model?: string; provider?: string; targets: string[] } | null }
 
 export type CopilotEvent =

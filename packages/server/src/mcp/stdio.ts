@@ -4,7 +4,7 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { AppContext } from '../context.js';
 import type { Principal } from '../services/principal.js';
-import { buildMcpServer } from './server.js';
+import { buildMcpServer, agentRef } from './server.js';
 import { metrics } from '../observability/metrics.js';
 import { logger } from '../observability/logger.js';
 
@@ -45,7 +45,7 @@ export async function runStdio(ctx: AppContext, opts: StdioOptions): Promise<voi
     const ws = await ctx.workspaces.ensureDefault(principal);
     workspaceId = ws.id;
   }
-  const server = buildMcpServer(ctx, principal, { defaultWorkspaceId: workspaceId });
+  const server = buildMcpServer(ctx, principal, { defaultWorkspaceId: workspaceId ?? (await ctx.agents.byTokenId(principal.tokenId))?.workspace_id ?? null, agent: await agentRef(ctx, principal) });
   const transport = new StdioServerTransport();
   metrics.mcpConnections.inc({ transport: 'stdio' });
   ctx.audit.log({ userId: principal.userId, actorType: 'AGENT', action: 'mcp.connect', resource: 'transport:stdio', ip: 'stdio' });

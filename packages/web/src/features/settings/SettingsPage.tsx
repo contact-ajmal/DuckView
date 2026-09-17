@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, ChevronRight } from 'lucide-react';
-import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type CloudConnection, type CopilotConfig } from '../../api/client';
+import { Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, ChevronRight, Layers, Pencil } from 'lucide-react';
+import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type CloudConnection, type CopilotConfig, type LakehouseConnection } from '../../api/client';
 import { Gauge } from '../../components/Gauge';
 import { Eyebrow, PageTitle, SideCard, Panel, KvRows, Tag } from '../../components/layout';
 import { Button, Badge, Card, Input, Label, Modal, Select, cn } from '../../components/ui';
@@ -10,6 +10,7 @@ import { useLayout } from '../../store/layout';
 import { useCopilot } from '../../store/copilot';
 import { HideButton, LayoutSettings } from '../../components/LayoutMenu';
 import { CloudWizard } from '../explorer/CloudWizard';
+import { LakehouseWizard } from '../explorer/LakehouseWizard';
 import { EngineSettingsForm } from './EngineSettingsForm';
 import { AppearanceSettings } from './Appearance';
 
@@ -19,7 +20,7 @@ const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.Reac
   { id: 'layout', label: 'Layout', blurb: 'Show or hide components', icon: <LayoutTemplate className="h-4 w-4" /> },
   { id: 'hardware', label: 'Hardware', blurb: 'Live resources & engines', icon: <Cpu className="h-4 w-4" /> },
   { id: 'engine', label: 'Engine', blurb: 'Memory, threads, timeout', icon: <Database className="h-4 w-4" /> },
-  { id: 'storage', label: 'Storage', blurb: 'Cloud & data connections', icon: <Cloud className="h-4 w-4" /> },
+  { id: 'storage', label: 'Storage', blurb: 'Lakehouse, cloud & data connections', icon: <Cloud className="h-4 w-4" /> },
   { id: 'copilot', label: 'Copilot', blurb: 'AI provider', icon: <Bot className="h-4 w-4" /> },
   { id: 'account', label: 'Account', blurb: 'Password & identity', icon: <UserRound className="h-4 w-4" /> },
   { id: 'users', label: 'Users', blurb: 'Roles & access', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
@@ -50,7 +51,9 @@ export function SettingsPage() {
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [connections, setConnections] = useState<PublicConnection[]>([]);
   const [cloud, setCloud] = useState<CloudConnection[]>([]);
+  const [lakehouses, setLakehouses] = useState<LakehouseConnection[]>([]);
   const [wizard, setWizard] = useState(false);
+  const [lakeWizard, setLakeWizard] = useState<{ open: boolean; edit: LakehouseConnection | null }>({ open: false, edit: null });
   const [testing, setTesting] = useState<Record<string, string>>({});
   const [connTypes, setConnTypes] = useState<Record<string, { required: string[]; optional: string[] }>>({});
   const [externalAccess, setExternalAccess] = useState(false);
@@ -65,6 +68,7 @@ export function SettingsPage() {
     const [c, ct] = await Promise.all([api.get<{ connections: PublicConnection[] }>('/api/connections'), api.get<{ types: Record<string, { required: string[]; optional: string[] }>; external_access_enabled: boolean }>('/api/connections/types')]);
     setConnections(c.connections);
     setCloud((await api.get<{ connections: CloudConnection[] }>('/api/cloud-connections')).connections);
+    setLakehouses((await api.get<{ connections: LakehouseConnection[] }>('/api/lakehouse-connections')).connections);
     setConnTypes(ct.types);
     setExternalAccess(ct.external_access_enabled);
     if (isAdmin) setUsers((await api.get<{ users: User[] }>('/api/admin/users')).users);
@@ -239,6 +243,45 @@ export function SettingsPage() {
 
           {cat === 'storage' && (
             <div className="space-y-5">
+              <Card
+                title="Lakehouse connections"
+                actions={<Button size="sm" onClick={() => setLakeWizard({ open: true, edit: null })}><Layers className="h-3.5 w-3.5" /> Connect</Button>}
+              >
+                {lakehouses.length === 0 ? (
+                  <p className="text-xs text-zinc-500">Attach Iceberg catalogs — AWS Glue / SageMaker Lakehouse, Amazon S3 Tables, any Iceberg REST catalog (Polaris, Lakekeeper, Nessie, Snowflake Open Catalog) — so their tables are queryable in DuckDB as <span className="font-mono">alias.schema.table</span>, or connect Databricks to browse Unity Catalog, run SQL on a warehouse and materialise results locally.</p>
+                ) : (
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {lakehouses.map((c) => (
+                      <div key={c.id} className="flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
+                        <Badge tone="violet">{c.provider === 'AWS_GLUE' ? 'GLUE' : c.provider === 'AWS_S3_TABLES' ? 'S3 TABLES' : c.provider === 'DATABRICKS' ? 'DATABRICKS' : 'ICEBERG REST'}</Badge>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 text-zinc-200">
+                            {c.name}
+                            <span className={cn('h-1.5 w-1.5 rounded-full', c.status === 'ok' ? 'bg-emerald-400' : c.status === 'error' ? 'bg-red-400' : 'bg-zinc-600')} title={c.status === 'error' ? c.last_error ?? 'error' : c.status} />
+                          </div>
+                          <div className="truncate font-mono text-[10px] text-zinc-500">
+                            {c.attached ? `attached as ${c.alias}` : 'remote SQL only'}
+                            {c.remote_sql ? ' · SQL warehouse' : ''}
+                            {c.config.region ? ` · ${c.config.region}` : ''}
+                            {c.config.host ? ` · ${c.config.host.replace(/^https?:\/\//, '')}` : ''}
+                            {c.config.endpoint ? ` · ${c.config.endpoint.replace(/^https?:\/\//, '')}` : ''}
+                          </div>
+                          {c.status === 'error' && c.last_error && !testing[c.id] && <div className="truncate font-mono text-[10px] text-red-300" title={c.last_error}>{c.last_error}</div>}
+                          {testing[c.id] && <div className="truncate font-mono text-[10px] text-amber-200">{testing[c.id]}</div>}
+                        </div>
+                        <Button size="sm" variant="ghost" onClick={async () => { setTesting({ ...testing, [c.id]: 'testing…' }); try { const r = await api.post<{ message: string }>(`/api/lakehouse-connections/${c.id}/test`); setTesting({ ...testing, [c.id]: r.message }); } catch (e) { setTesting({ ...testing, [c.id]: (e as Error).message }); } await refresh(); }}>Test</Button>
+                        <button className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200" title="Edit" onClick={() => setLakeWizard({ open: true, edit: c })}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" title="Delete" onClick={async () => { if (confirm(`Delete lakehouse connection "${c.name}"? The catalog is detached from your engines.`)) { await api.del(`/api/lakehouse-connections/${c.id}`); await refresh(); } }}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <LakehouseWizard open={lakeWizard.open} initial={lakeWizard.edit} onClose={() => setLakeWizard({ open: false, edit: null })} onCreated={() => void refresh()} />
+              </Card>
               <Card
                 title="Cloud storage"
                 actions={<Button size="sm" onClick={() => setWizard(true)}><Cloud className="h-3.5 w-3.5" /> Connect</Button>}

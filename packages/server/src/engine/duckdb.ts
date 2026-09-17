@@ -44,8 +44,18 @@ export class QueryCancelledError extends Error {
 
 export interface SecretSpec {
   name: string;
-  type: 'MOTHERDUCK' | 'S3' | 'R2' | 'POSTGRES' | 'GCS' | 'AZURE' | 'HTTP';
+  type: 'MOTHERDUCK' | 'S3' | 'R2' | 'POSTGRES' | 'GCS' | 'AZURE' | 'HTTP' | 'ICEBERG';
   values: Record<string, string>;
+}
+
+/** A catalog attached to the engine (ATTACH … AS alias (TYPE ICEBERG, …)) — lakehouse connections. */
+export interface AttachSpec {
+  alias: string;
+  target: string;
+  /** ATTACH options; booleans render bare, strings are quoted. TYPE is always ICEBERG for now. */
+  options: Record<string, string | boolean>;
+  /** Extensions that must be loaded before attaching (iceberg, httpfs, aws…). */
+  extensions: string[];
 }
 
 export type ExportFormat = 'parquet' | 'csv' | 'json' | 'arrow';
@@ -70,6 +80,8 @@ export interface EngineSpec {
   dbPath: string;
   settings: EngineSettings;
   secrets: SecretSpec[];
+  /** Lakehouse catalogs to attach (hot-applied like secrets). */
+  attachments?: AttachSpec[];
 }
 
 export interface ExecuteOptions {
@@ -102,7 +114,7 @@ export interface EngineResources {
   engines_active: number;
 }
 
-function sqlString(v: string): string {
+export function sqlString(v: string): string {
   return `'${v.replace(/'/g, "''")}'`;
 }
 
@@ -192,6 +204,18 @@ export function fingerprint(spec: EngineSpec): string {
 export function secretsFingerprint(secrets: SecretSpec[]): string {
   return JSON.stringify(secrets.map((s) => [s.name, s.type, Object.entries(s.values).sort()]));
 }
+export function attachmentsFingerprint(attachments: AttachSpec[] | undefined): string {
+  return JSON.stringify((attachments ?? []).map((a) => [a.alias, a.target, Object.entries(a.options).sort()]));
+}
+
+/** Renders ATTACH for a lakehouse catalog. Exported for tests. */
+export function attachToSql(a: AttachSpec, ifNotExists = true): string {
+  const alias = a.alias.replace(/[^A-Za-z0-9_]/g, '_');
+  const opts = Object.entries(a.options)
+    .filter(([, v]) => v !== undefined && v !== '' && v !== false)
+    .map(([k, v]) => (v === true ? `${k.toUpperCase()} true` : k.toUpperCase() === 'SECRET' ? `SECRET ${String(v).replace(/[^A-Za-z0-9_]/g, '_')}` : `${k.toUpperCase()} ${sqlString(String(v))}`));
+  return `ATTACH${ifNotExists ? ' IF NOT EXISTS' : ''} ${sqlString(a.target)} AS ${alias} (TYPE ICEBERG${opts.length ? ', ' + opts.join(', ') : ''})`;
+}
 
 export class WorkspaceEngine {
   private instance!: DuckDBInstance;
@@ -201,6 +225,9 @@ export class WorkspaceEngine {
   readonly externalAccess: boolean;
   readonly fingerprint: string;
   secretsFingerprint: string;
+  attachmentsFingerprint: string;
+  /** alias → last ATTACH error (empty when attached fine). Surfaced by the lakehouse explorer. */
+  readonly attachErrors = new Map<string, string>();
   lastUsed = Date.now();
   readonly createdAt = Date.now();
   private closed = false;
@@ -213,6 +240,7 @@ export class WorkspaceEngine {
     this.externalAccess = cfg.security.enable_external_access || cfg.security.filesystem_mode === 'full';
     this.fingerprint = fingerprint(spec);
     this.secretsFingerprint = secretsFingerprint(spec.secrets);
+    this.attachmentsFingerprint = attachmentsFingerprint(spec.attachments);
   }
 
   static async open(spec: EngineSpec, cfg: DuckViewConfig, jail: DataJail): Promise<WorkspaceEngine> {
@@ -264,6 +292,9 @@ export class WorkspaceEngine {
       if (this.externalAccess) {
         if (this.spec.secrets.some((x) => x.type === 'S3' || x.type === 'R2' || x.type === 'GCS' || x.type === 'HTTP')) implied.push('httpfs');
         if (this.spec.secrets.some((x) => x.type === 'AZURE')) implied.push('azure');
+        if (this.spec.secrets.some((x) => x.type === 'ICEBERG')) implied.push('iceberg');
+        if (this.spec.secrets.some((x) => x.type === 'S3' && x.values.provider === 'credential_chain')) implied.push('aws');
+        for (const a of this.spec.attachments ?? []) implied.push(...a.extensions);
       }
       const wanted = [...new Set([...this.cfg.duckdb.preload_extensions, ...(this.spec.settings.extensions ?? []), ...implied])];
       for (const ext of wanted) {
@@ -294,6 +325,8 @@ export class WorkspaceEngine {
           }
         }
       }
+      // lakehouse catalogs (need the iceberg extension + secrets above)
+      for (const a of this.spec.attachments ?? []) await this.attachOne(conn, a);
       // 3–5. hardening
       if (!this.externalAccess) {
         const allowed = [this.jail.root, this.tempDirectory, ...(this.cfg.duckdb.extension_directory ? [this.cfg.duckdb.extension_directory] : [])].map(sqlString).join(', ');
@@ -319,10 +352,14 @@ export class WorkspaceEngine {
     if (mdChanged) return false;
     const needsHttpfs = this.externalAccess && secrets.some((x) => x.type === 'S3' || x.type === 'R2' || x.type === 'GCS' || x.type === 'HTTP');
     const needsAzure = this.externalAccess && secrets.some((x) => x.type === 'AZURE');
+    const needsIceberg = this.externalAccess && secrets.some((x) => x.type === 'ICEBERG');
+    const needsAws = this.externalAccess && secrets.some((x) => x.type === 'S3' && x.values.provider === 'credential_chain');
     try {
       await this.withConnection(async (conn) => {
         if (needsHttpfs && !(await this.hasExtension('httpfs'))) await conn.run('LOAD httpfs');
         if (needsAzure && !(await this.hasExtension('azure'))) await conn.run('LOAD azure');
+        if (needsIceberg && !(await this.hasExtension('iceberg'))) await conn.run('LOAD iceberg');
+        if (needsAws && !(await this.hasExtension('aws'))) await conn.run('LOAD aws');
         const keep = new Set(secrets.map((x) => x.name.replace(/[^A-Za-z0-9_]/g, '_')));
         for (const old of before) {
           const n = old.name.replace(/[^A-Za-z0-9_]/g, '_');
@@ -341,6 +378,77 @@ export class WorkspaceEngine {
     (this.spec as { secrets: SecretSpec[] }).secrets = secrets;
     this.secretsFingerprint = secretsFingerprint(secrets);
     return true;
+  }
+
+  private async attachOne(conn: DuckDBConnection, a: AttachSpec): Promise<void> {
+    if (!this.externalAccess) {
+      this.attachErrors.set(a.alias, 'security.enable_external_access is false: lakehouse catalogs cannot be attached in sandboxed mode');
+      logger().warn({ alias: a.alias, workspace: this.spec.workspaceId }, 'Lakehouse attachment skipped: external access disabled');
+      return;
+    }
+    try {
+      for (const ext of a.extensions) {
+        if (!(await this.hasExtension(ext))) await conn.run(`LOAD ${ext}`).catch(async () => { await conn.run(`INSTALL ${ext}`); await conn.run(`LOAD ${ext}`); });
+      }
+      await conn.run(attachToSql(a));
+      this.attachErrors.delete(a.alias);
+    } catch (err) {
+      const msg = (err as Error).message.split('\n')[0] ?? String(err);
+      this.attachErrors.set(a.alias, msg);
+      logger().warn({ alias: a.alias, err: msg, workspace: this.spec.workspaceId }, 'Failed to attach lakehouse catalog');
+    }
+  }
+
+  /** Attaches/detaches lakehouse catalogs on the running instance; false when a restart is needed. */
+  async applyAttachments(attachments: AttachSpec[]): Promise<boolean> {
+    const before = this.spec.attachments ?? [];
+    const key = (a: AttachSpec) => JSON.stringify([a.alias, a.target, Object.entries(a.options).sort()]);
+    const nextKeys = new Set(attachments.map(key));
+    const prevKeys = new Set(before.map(key));
+    try {
+      await this.withConnection(async (conn) => {
+        for (const old of before) if (!nextKeys.has(key(old))) {
+          await conn.run(`DETACH DATABASE IF EXISTS ${old.alias.replace(/[^A-Za-z0-9_]/g, '_')}`).catch(() => undefined);
+          this.attachErrors.delete(old.alias);
+        }
+        for (const a of attachments) if (!prevKeys.has(key(a))) await this.attachOne(conn, a);
+      }, 60_000);
+    } catch (err) {
+      logger().warn({ err: (err as Error).message, workspace: this.spec.workspaceId }, 'Could not hot-apply lakehouse attachments; engine will restart');
+      return false;
+    }
+    (this.spec as { attachments?: AttachSpec[] }).attachments = attachments;
+    this.attachmentsFingerprint = attachmentsFingerprint(attachments);
+    return true;
+  }
+
+  /** Re-tries a failed attachment (e.g. after credentials were fixed). Returns the error message or null. */
+  async retryAttachment(alias: string): Promise<string | null> {
+    const a = (this.spec.attachments ?? []).find((x) => x.alias === alias);
+    if (!a) return 'not configured on this engine';
+    await this.withConnection((conn) => this.attachOne(conn, a), 60_000);
+    return this.attachErrors.get(alias) ?? null;
+  }
+
+  /**
+   * Runs trusted, server-generated SQL (no guard) and returns rows as JSON objects. Used for catalog
+   * introspection of attached lakehouses and materialisation into temp-dir files — never for user SQL.
+   */
+  async runInternal(sql: string, timeoutMs = 60_000): Promise<Record<string, unknown>[]> {
+    return this.withConnection(async (conn) => (await conn.runAndReadAll(sql)).getRowObjectsJson() as Record<string, unknown>[], timeoutMs);
+  }
+
+  /** Schemas and tables of an attached lakehouse catalog (lazy on the REST side: no table metadata is loaded). */
+  async lakehouseTree(alias: string, schema?: string): Promise<{ schemas: string[]; tables: { schema: string; name: string }[] }> {
+    const a = alias.replace(/[^A-Za-z0-9_]/g, '_');
+    const err = this.attachErrors.get(alias);
+    if (err) throw new Error(`Catalog "${alias}" is not attached: ${err}`);
+    return this.withConnection(async (conn) => {
+      const schemas = (await conn.runAndReadAll(`SELECT schema_name FROM duckdb_schemas() WHERE database_name = ${sqlString(a)} AND NOT internal ORDER BY 1`)).getRowObjectsJson().map((r) => String(r.schema_name));
+      if (schema === undefined) return { schemas, tables: [] };
+      const tables = (await conn.runAndReadAll(`SELECT schema_name, table_name FROM duckdb_tables() WHERE database_name = ${sqlString(a)} AND schema_name = ${sqlString(schema)} AND NOT internal ORDER BY 2`)).getRowObjectsJson().map((r) => ({ schema: String(r.schema_name), name: String(r.table_name) }));
+      return { schemas, tables };
+    }, 60_000);
   }
 
   /** Guard + rewrite SQL for this engine's jail. Throws SandboxViolation. */
@@ -841,15 +949,19 @@ export class WorkspaceEngine {
   }
 
   async catalog(): Promise<CatalogObject[]> {
+    // Attached lakehouse catalogs are browsed lazily elsewhere (lakehouseTree); listing their columns here would
+    // fetch remote table metadata for every table.
+    const excluded = (this.spec.attachments ?? []).map((a) => sqlString(a.alias.replace(/[^A-Za-z0-9_]/g, '_')));
+    const notLakehouse = excluded.length ? ` AND database_name NOT IN (${excluded.join(', ')})` : '';
     return this.withConnection(async (conn) => {
       const t = await conn.runAndReadAll(`
         SELECT database_name, schema_name, table_name AS name, 'TABLE' AS type, estimated_size, column_count, sql
-        FROM duckdb_tables() WHERE NOT internal
+        FROM duckdb_tables() WHERE NOT internal${notLakehouse}
         UNION ALL
         SELECT database_name, schema_name, view_name AS name, 'VIEW' AS type, NULL, column_count, sql
-        FROM duckdb_views() WHERE NOT internal
+        FROM duckdb_views() WHERE NOT internal${notLakehouse}
         ORDER BY 1, 2, 3`);
-      const c = await conn.runAndReadAll(`SELECT database_name, schema_name, table_name, column_name, data_type, is_nullable, column_index FROM duckdb_columns() WHERE NOT internal ORDER BY column_index`);
+      const c = await conn.runAndReadAll(`SELECT database_name, schema_name, table_name, column_name, data_type, is_nullable, column_index FROM duckdb_columns() WHERE NOT internal${notLakehouse} ORDER BY column_index`);
       const cols = new Map<string, CatalogObject['columns']>();
       for (const row of c.getRowObjectsJson()) {
         const key = `${row.database_name}.${row.schema_name}.${row.table_name}`;
@@ -918,6 +1030,15 @@ export function secretToSql(secret: SecretSpec): string | null {
   };
   switch (secret.type) {
     case 'S3': {
+      if (v.provider === 'credential_chain') {
+        // aws extension: env vars, ~/.aws profiles, instance/task roles (SSO, STS) — no static keys stored.
+        const extra = kv([
+          ['REGION', v.region],
+          ['CHAIN', v.chain],
+          ['PROFILE', v.profile],
+        ]);
+        return `CREATE OR REPLACE SECRET ${name} (TYPE S3, PROVIDER credential_chain${extra ? ', ' + extra : ''}${scope})`;
+      }
       const ep = endpoint(v.endpoint);
       const urlStyle = v.url_style ?? (ep.host ? 'path' : undefined);
       const ssl = v.use_ssl !== undefined ? v.use_ssl !== 'false' : ep.ssl;
@@ -945,6 +1066,15 @@ export function secretToSql(secret: SecretSpec): string | null {
       return `CREATE OR REPLACE SECRET ${name} (TYPE AZURE, ${kv([['CONNECTION_STRING', v.connection_string]])}${scope})`;
     case 'HTTP':
       return `CREATE OR REPLACE SECRET ${name} (TYPE HTTP, ${kv([['BEARER_TOKEN', v.bearer_token]])}${scope})`;
+    case 'ICEBERG':
+      // Bearer token (PATs, Unity Catalog, Lakekeeper…) or OAuth2 client credentials (Polaris, Snowflake Open Catalog, Databricks M2M).
+      if (v.token) return `CREATE OR REPLACE SECRET ${name} (TYPE ICEBERG, ${kv([['TOKEN', v.token]])})`;
+      return `CREATE OR REPLACE SECRET ${name} (TYPE ICEBERG, ${kv([
+        ['CLIENT_ID', v.client_id],
+        ['CLIENT_SECRET', v.client_secret],
+        ['OAUTH2_SERVER_URI', v.oauth2_server_uri],
+        ['OAUTH2_SCOPE', v.oauth2_scope],
+      ])})`;
     case 'POSTGRES':
       return `CREATE OR REPLACE SECRET ${name} (TYPE POSTGRES, ${kv([
         ['HOST', v.host],
@@ -979,7 +1109,9 @@ export class EngineManager {
     if (existing) {
       if (existing.fingerprint === fingerprint(spec)) {
         existing.lastUsed = Date.now();
-        if (existing.secretsFingerprint === secretsFingerprint(spec.secrets) || (await existing.applySecrets(spec.secrets))) return existing;
+        const secretsOk = existing.secretsFingerprint === secretsFingerprint(spec.secrets) || (await existing.applySecrets(spec.secrets));
+        const attachOk = secretsOk && (existing.attachmentsFingerprint === attachmentsFingerprint(spec.attachments) || (await existing.applyAttachments(spec.attachments ?? [])));
+        if (secretsOk && attachOk) return existing;
       }
       this.evict(spec.workspaceId);
     }
@@ -998,6 +1130,10 @@ export class EngineManager {
 
   peek(workspaceId: string): WorkspaceEngine | undefined {
     return this.engines.get(workspaceId);
+  }
+
+  all(): WorkspaceEngine[] {
+    return [...this.engines.values()];
   }
 
   evict(workspaceId: string): void {
