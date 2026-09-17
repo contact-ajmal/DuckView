@@ -96,7 +96,12 @@ function startMockDatabricks(): Promise<{ url: string; close: () => void; statem
         if (!full.endsWith('.orders')) return json(404, { error_code: 'TABLE_DOES_NOT_EXIST', message: `Table '${full}' does not exist.` });
         return json(200, { name: 'orders', full_name: full, table_type: 'MANAGED', data_source_format: 'DELTA', properties: { 'delta.universalFormat.enabledFormats': 'iceberg' }, columns });
       }
-      if (url.pathname.startsWith('/api/2.0/sql/warehouses/')) return json(200, { id: url.pathname.split('/').pop(), name: 'Serverless XS', state: 'RUNNING' });
+      if (url.pathname === '/api/2.0/sql/warehouses') return json(200, { warehouses: [{ id: 'abc123def4567890', name: 'Serverless Starter Warehouse', state: 'STOPPED', cluster_size: '2X-Small', enable_serverless_compute: true }, { id: 'wh-123', name: 'Serverless XS', state: 'RUNNING', cluster_size: 'X-Small', warehouse_type: 'PRO' }] });
+      if (url.pathname.startsWith('/api/2.0/sql/warehouses/')) {
+        const id = url.pathname.split('/').pop()!;
+        if (/^\d+$/.test(id)) return json(400, { error_code: 'INVALID_PARAMETER_VALUE', message: `${id} is not a valid endpoint id.` });
+        return json(200, { id, name: 'Serverless XS', state: 'RUNNING' });
+      }
       if (url.pathname === '/api/2.0/sql/statements' && req.method === 'POST') {
         let body = '';
         req.on('data', (c) => (body += c));
@@ -448,6 +453,28 @@ describe('Databricks connector (mock Unity Catalog + Statement Execution API)', 
     const cats = await api('GET', `/api/lakehouse/browse?connection_id=${id}&workspace_id=${wsId}`);
     expect(cats.json.level).toBe('catalogs');
     expect((cats.json.entries as { name: string }[]).map((e) => e.name)).toEqual(['main', 'sales']);
+  });
+
+  it('finds warehouses for the wizard (unsaved credentials or a saved connection) and rejects workspace ids', async () => {
+    const found = await api('POST', '/api/lakehouse/databricks/warehouses', { host: dbx.url, databricks_auth: 'pat', credentials: { token: 'dapi-good' } });
+    expect(found.status).toBe(200);
+    expect((found.json.warehouses as { id: string; name: string; type?: string }[]).map((w) => [w.id, w.name, w.type])).toEqual([
+      ['abc123def4567890', 'Serverless Starter Warehouse', 'serverless'],
+      ['wh-123', 'Serverless XS', 'pro'],
+    ]);
+    const saved = await api('POST', '/api/lakehouse/databricks/warehouses', { connection_id: connId });
+    expect((saved.json.warehouses as unknown[]).length).toBe(2);
+    const denied = await api('POST', '/api/lakehouse/databricks/warehouses', { host: dbx.url, credentials: { token: 'nope' } });
+    expect(denied.status).toBe(403);
+    // The numeric ?o= workspace id is a classic mistake: rejected on save with a pointer to the right value.
+    const bad = await api('POST', '/api/lakehouse-connections', { name: 'x', provider: 'DATABRICKS', config: { host: dbx.url, warehouse_id: '686071845769782' }, credentials: { token: 'dapi-good' } });
+    expect(bad.status).toBe(400);
+    expect(String(bad.json.message)).toMatch(/workspace id/);
+    // A pasted HTTP path is reduced to the id.
+    const pathy = await api('POST', '/api/lakehouse-connections', { name: 'Pathy', provider: 'DATABRICKS', config: { host: dbx.url, warehouse_id: '/sql/1.0/warehouses/abc123def4567890' }, credentials: { token: 'dapi-good' } });
+    expect(pathy.status).toBe(200);
+    expect((pathy.json.connection as { config: { warehouse_id: string } }).config.warehouse_id).toBe('abc123def4567890');
+    await api('DELETE', `/api/lakehouse-connections/${(pathy.json.connection as { id: string }).id}`);
   });
 
   it('rejects bad credentials with 403', async () => {

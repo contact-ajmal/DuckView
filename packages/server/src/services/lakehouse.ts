@@ -126,11 +126,14 @@ function validateConfig(provider: LakehouseProvider, c: LakehouseConfig): Lakeho
     case 'DATABRICKS': {
       const host = str('host').replace(/\/+$/, '');
       out.host = /^https?:\/\//i.test(host) ? host : host ? `https://${host}` : '';
-      out.warehouse_id = str('warehouse_id');
+      // Accept a pasted HTTP path (/sql/1.0/warehouses/<id>) and reduce it to the id.
+      out.warehouse_id = str('warehouse_id').replace(/^.*\/warehouses\//, '').trim();
       out.unity_catalog = str('unity_catalog');
       out.databricks_auth = c.databricks_auth === 'oauth_m2m' ? 'oauth_m2m' : 'pat';
       out.attach_iceberg = !!c.attach_iceberg && !!out.unity_catalog;
       if (!/^https?:\/\/[^\s/]+$/i.test(out.host)) throw badRequest('host must be the workspace URL, e.g. https://dbc-1234-abcd.cloud.databricks.com');
+      if (/^\d{10,}$/.test(out.warehouse_id)) throw badRequest(`"${out.warehouse_id}" looks like the numeric workspace id (the ?o=… value in Databricks URLs), not a SQL warehouse id. Use the 16-character hex id from the warehouse's Connection details (last segment of /sql/1.0/warehouses/<id>), or click Find.`);
+      if (out.warehouse_id && !/^[A-Za-z0-9_-]{4,64}$/.test(out.warehouse_id)) throw badRequest(`"${out.warehouse_id}" is not a valid SQL warehouse id`);
       if (!out.warehouse_id && !out.attach_iceberg) throw badRequest('Provide a SQL warehouse id, or a Unity Catalog name with "attach Iceberg" to query natively');
       break;
     }
@@ -445,6 +448,25 @@ export class LakehouseService {
     const tree = await engine.lakehouseTree(c.alias, opts.schema ?? undefined);
     if (!opts.schema) return { ...base, level: 'schemas', catalog: c.alias, schema: null, entries: tree.schemas.map((name) => ({ name, type: 'schema' })), attach_error: null };
     return { ...base, level: 'tables', catalog: c.alias, schema: opts.schema, entries: tree.tables.map((t) => ({ name: t.name, type: 'table', qualified: `${c.alias}.${quoteIdent(t.schema)}.${quoteIdent(t.name)}`, engine: 'duckdb', format: 'ICEBERG' })), attach_error: null };
+  }
+
+  /**
+   * Lists SQL warehouses so the wizard can pick one. Credentials come from a saved connection (id) or are passed
+   * once for a connection being created (never stored).
+   */
+  async listWarehouses(userId: string, input: { connection_id?: string; host?: string; databricks_auth?: 'pat' | 'oauth_m2m'; credentials?: Record<string, string> }) {
+    let client: DatabricksClient;
+    if (input.connection_id) {
+      const c = await this.getOwned(userId, input.connection_id);
+      if (c.provider !== 'DATABRICKS') throw badRequest('Not a Databricks connection');
+      client = this.databricks(c);
+    } else {
+      const host = (input.host ?? '').trim();
+      if (!host) throw badRequest('host is required');
+      const creds = input.credentials ?? {};
+      client = new DatabricksClient(host, input.databricks_auth === 'oauth_m2m' ? { client_id: creds.client_id, client_secret: creds.client_secret } : { token: creds.token }, { timeoutMs: 30_000 });
+    }
+    return { warehouses: await client.listWarehouses() };
   }
 
   /** Column list for a Databricks table that is not attached in DuckDB (Unity Catalog metadata). */

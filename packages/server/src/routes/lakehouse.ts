@@ -70,6 +70,12 @@ export async function lakehouseRoutes(app: FastifyInstance, ctx: AppContext) {
     return ctx.lakehouse.test(req.principal!.userId, id);
   });
 
+  /** Databricks SQL warehouses for the wizard picker (credentials used once, never stored, unless connection_id). */
+  app.post('/api/lakehouse/databricks/warehouses', async (req) => {
+    const body = z.object({ connection_id: z.string().optional(), host: z.string().optional(), databricks_auth: z.enum(['pat', 'oauth_m2m']).optional(), credentials: z.record(z.string(), z.string()).optional() }).parse(req.body ?? {});
+    return ctx.lakehouse.listWarehouses(req.principal!.userId, body);
+  });
+
   /** Lazy tree: ?connection_id&workspace_id[&catalog][&schema] → catalogs | schemas | tables. */
   app.get('/api/lakehouse/browse', async (req) => {
     const q = z.object({ connection_id: z.string(), workspace_id: z.string(), catalog: z.string().optional(), schema: z.string().optional() }).parse(req.query);

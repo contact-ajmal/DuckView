@@ -215,7 +215,19 @@ export class DatabricksClient {
   }
 
   async warehouse(id: string): Promise<{ id: string; name?: string; state?: string }> {
-    return this.request('GET', `/api/2.0/sql/warehouses/${encodeURIComponent(id)}`);
+    try {
+      return await this.request('GET', `/api/2.0/sql/warehouses/${encodeURIComponent(id)}`);
+    } catch (err) {
+      if (err instanceof HttpError && /not a valid endpoint id|does not exist|RESOURCE_DOES_NOT_EXIST/i.test(err.message)) {
+        throw new HttpError(404, `SQL warehouse "${id}" not found. Use the 16-character hex id from the warehouse's Connection details (the last segment of /sql/1.0/warehouses/<id>) — the numeric ?o=… value in Databricks URLs is the workspace id, not a warehouse.`, 'LAKEHOUSE_WAREHOUSE_NOT_FOUND');
+      }
+      throw err;
+    }
+  }
+
+  async listWarehouses(): Promise<{ id: string; name: string; state?: string; size?: string; type?: string }[]> {
+    const r = await this.request<{ warehouses?: { id: string; name: string; state?: string; cluster_size?: string; warehouse_type?: string; enable_serverless_compute?: boolean }[] }>('GET', '/api/2.0/sql/warehouses');
+    return (r.warehouses ?? []).map((w) => ({ id: w.id, name: w.name, state: w.state, size: w.cluster_size, type: w.enable_serverless_compute ? 'serverless' : w.warehouse_type?.toLowerCase() }));
   }
 
   // ---------------------------------------------------------------- Statement Execution API

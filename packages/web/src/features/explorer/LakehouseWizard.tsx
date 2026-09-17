@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Layers, CheckCircle2, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
+import { Layers, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Search } from 'lucide-react';
 import { api, type LakehouseConnection, type LakehouseProvider, type LakehouseProviderMeta, type LakehouseConfig } from '../../api/client';
 import { Button, Input, Label, Modal, Select, cn } from '../../components/ui';
 
@@ -25,6 +25,25 @@ export function LakehouseWizard({ open, onClose, onCreated, initial }: { open: b
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<LakehouseConnection | null>(null);
   const [test, setTest] = useState<{ ok: boolean; message: string; example_sql?: string } | null>(null);
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string; state?: string; type?: string }[] | null>(null);
+  const [findingWh, setFindingWh] = useState(false);
+  const [whError, setWhError] = useState<string | null>(null);
+
+  const findWarehouses = async () => {
+    setFindingWh(true);
+    setWhError(null);
+    try {
+      const body = initial && !creds.token && !creds.client_id ? { connection_id: initial.id } : { host: cfg.host, databricks_auth: cfg.databricks_auth ?? 'pat', credentials: creds };
+      const r = await api.post<{ warehouses: { id: string; name: string; state?: string; type?: string }[] }>('/api/lakehouse/databricks/warehouses', body);
+      setWarehouses(r.warehouses);
+      if (r.warehouses.length === 1 && !cfg.warehouse_id) set({ warehouse_id: r.warehouses[0]!.id });
+      if (r.warehouses.length === 0) setWhError('No SQL warehouses visible with these credentials.');
+    } catch (e) {
+      setWhError((e as Error).message);
+    } finally {
+      setFindingWh(false);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -33,6 +52,8 @@ export function LakehouseWizard({ open, onClose, onCreated, initial }: { open: b
     setCreated(null);
     setTest(null);
     setCreds({});
+    setWarehouses(null);
+    setWhError(null);
     setProvider(initial?.provider ?? 'AWS_GLUE');
     setName(initial?.name ?? '');
     setAlias(initial?.alias ?? '');
@@ -208,8 +229,28 @@ export function LakehouseWizard({ open, onClose, onCreated, initial }: { open: b
           {provider === 'DATABRICKS' && (
             <>
               <div className="grid grid-cols-2 gap-3">
-                {field('Workspace URL', <Input value={cfg.host ?? ''} onChange={(e) => set({ host: e.target.value })} placeholder="https://dbc-1234-abcd.cloud.databricks.com" className="font-mono" />)}
-                {field('SQL warehouse id', <Input value={cfg.warehouse_id ?? ''} onChange={(e) => set({ warehouse_id: e.target.value })} placeholder="1234abcd5678efgh" className="font-mono" />, 'SQL Warehouses → your warehouse → Connection details. Needed to run SQL remotely and to materialise tables.')}
+                {field('Workspace URL', <Input value={cfg.host ?? ''} onChange={(e) => set({ host: e.target.value })} placeholder="https://dbc-1234-abcd.cloud.databricks.com" className="font-mono" />, 'The address in your browser bar, without the path or ?o= parameter.')}
+                {field(
+                  'SQL warehouse id',
+                  <div className="flex gap-1">
+                    {warehouses && warehouses.length > 0 ? (
+                      <Select value={cfg.warehouse_id ?? ''} onChange={(e) => set({ warehouse_id: e.target.value })} className="min-w-0 flex-1 font-mono">
+                        <option value="">— none (browse only) —</option>
+                        {warehouses.map((w) => (
+                          <option key={w.id} value={w.id}>
+                            {w.name} · {w.id}{w.state ? ` · ${w.state.toLowerCase()}` : ''}{w.type ? ` · ${w.type}` : ''}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <Input value={cfg.warehouse_id ?? ''} onChange={(e) => set({ warehouse_id: e.target.value })} placeholder="1234abcd5678efgh" className="min-w-0 flex-1 font-mono" />
+                    )}
+                    <Button onClick={() => void findWarehouses()} loading={findingWh} disabled={!cfg.host || (!initial && !creds.token && !creds.client_secret)} title="List the SQL warehouses this token can see" className="shrink-0">
+                      <Search className="h-3.5 w-3.5" /> Find
+                    </Button>
+                  </div>,
+                  whError ?? 'Enter the URL and token below, then Find — or paste the 16-character hex id from the warehouse\'s Connection details (the numeric ?o=… in URLs is the workspace id, not a warehouse). Needed to run SQL remotely and to materialise tables.',
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {field('Unity Catalog (optional)', <Input value={cfg.unity_catalog ?? ''} onChange={(e) => set({ unity_catalog: e.target.value })} placeholder="main" className="font-mono" />, 'Pins the explorer to one catalog; required for attaching UniForm tables.')}
