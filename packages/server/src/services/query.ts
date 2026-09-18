@@ -5,10 +5,11 @@
  */
 import path from 'node:path';
 import type { DuckViewConfig } from '../config/index.js';
+import type { WorkspaceRole } from '../db/schema/sqlite.js';
 import type { WorkspaceService } from './workspaces.js';
 import type { AuditService } from './audit.js';
 import type { Principal } from './principal.js';
-import { canWrite, requireScope } from './principal.js';
+import { canWrite, requireScope, roleAtLeast } from './principal.js';
 import { SandboxViolation, type JailEntry } from '../engine/sandbox.js';
 import { analyzeSql, stripTrailingSemicolon, type SqlAnalysis } from '../engine/sql-guard.js';
 import { QueryTimeoutError, type CatalogObject } from '../engine/duckdb.js';
@@ -57,12 +58,13 @@ export function buildChallenge(analysis: SqlAnalysis): ApprovalChallenge {
 export class QueryService {
   constructor(private readonly cfg: DuckViewConfig, private readonly workspaces: WorkspaceService, private readonly audit: AuditService) {}
 
-  private authorize(p: Principal, analysis: SqlAnalysis, opts: RunOptions): void {
+  private authorize(p: Principal, analysis: SqlAnalysis, opts: RunOptions, role: WorkspaceRole): void {
     requireScope(p, 'read');
     if (analysis.isMutating) {
       if (!canWrite(p)) {
         throw forbidden(p.role === 'READ_ONLY' ? 'Read-only users cannot run mutating SQL' : 'This token lacks the write scope required for mutating SQL');
       }
+      if (!roleAtLeast(role, 'EDITOR')) throw forbidden('You have view-only access to this workspace; mutating SQL needs edit access');
       if (analysis.overall === 'admin' && p.actorType === 'AGENT' && !p.scopes.includes('admin')) {
         throw forbidden('Administrative statements (SET/PRAGMA/ATTACH/INSTALL/LOAD/CALL) require an admin-scoped token');
       }
@@ -79,7 +81,9 @@ export class QueryService {
     const start = performance.now();
     const actor = p.actorType === 'AGENT' ? 'agent' : 'user';
     try {
-      this.authorize(p, analysis, opts);
+      // Cheap access check first so a forbidden or HITL-blocked statement never spins up an engine.
+      const { role } = await this.workspaces.get(p, workspaceId);
+      this.authorize(p, analysis, opts, role);
       const { engine } = await this.workspaces.engine(p, workspaceId);
       const result = await engine.execute(sql, { maxRows: opts.maxRows, page: opts.page, countTotal: opts.countTotal, signal: opts.signal, timeoutMs: opts.timeoutMs, actor });
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'query.execute', resource: `workspace:${workspaceId}`, queryText: sql, durationMs: result.durationMs, ip: p.ip, status: 'ok' });
@@ -101,7 +105,8 @@ export class QueryService {
     const analysis = analyzeSql(sql);
     const start = performance.now();
     try {
-      this.authorize(p, analysis, opts);
+      const { role } = await this.workspaces.get(p, workspaceId);
+      this.authorize(p, analysis, opts, role);
       const { engine } = await this.workspaces.engine(p, workspaceId);
       const out = await engine.stream(sql, handlers, { maxRows: opts.maxRows, signal: opts.signal, timeoutMs: opts.timeoutMs, actor: 'user' });
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'query.stream', resource: `workspace:${workspaceId}`, queryText: sql, durationMs: out.durationMs, ip: p.ip, status: 'ok' });
@@ -172,6 +177,7 @@ export class QueryService {
     let target = input.target.trim().replace(/\\/g, '/');
     if (!target) throw badRequest('target_filename is required');
     if (!path.posix.extname(target)) target += `.${fmt}`;
+    await this.workspaces.get(p, workspaceId, 'EDITOR');
     const { engine } = await this.workspaces.engine(p, workspaceId);
     const resolved = engine.jail.resolve(target); // SandboxViolation on escape
     const exportsDir = path.posix.join('exports');

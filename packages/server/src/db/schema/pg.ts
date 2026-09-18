@@ -4,7 +4,7 @@
  */
 import { pgTable, text, integer, timestamp, jsonb, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import type { EngineSettings, ChartConfig, TokenScope, WorkspaceFolder } from './sqlite.js';
-import { AUTH_PROVIDERS, USER_ROLES, CONNECTION_TYPES, ACTOR_TYPES } from './sqlite.js';
+import { AUTH_PROVIDERS, USER_ROLES, CONNECTION_TYPES, ACTOR_TYPES, WORKSPACE_ROLES, GROUP_MEMBER_ROLES, MEMBER_SUBJECT_TYPES } from './sqlite.js';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -43,6 +43,7 @@ export const sessionTabs = pgTable(
   {
     id: text('id').primaryKey(),
     workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     sql_content: text('sql_content').notNull().default(''),
     chart_config: jsonb('chart_config').$type<ChartConfig>().notNull().default({ type: 'none' }),
@@ -51,7 +52,7 @@ export const sessionTabs = pgTable(
     engine: text('engine'),
     updated_at: ts('updated_at').notNull(),
   },
-  (t) => [index('session_tabs_workspace_idx').on(t.workspace_id)],
+  (t) => [index('session_tabs_workspace_idx').on(t.workspace_id), index('session_tabs_user_idx').on(t.workspace_id, t.user_id)],
 );
 
 export const dataConnections = pgTable(
@@ -102,6 +103,49 @@ export const auditLogs = pgTable(
     timestamp: ts('timestamp').notNull(),
   },
   (t) => [index('audit_logs_ts_idx').on(t.timestamp), index('audit_logs_user_idx').on(t.user_id)],
+);
+
+// ---------------------------------------------------------------------------
+// Teams and workspace sharing
+// ---------------------------------------------------------------------------
+
+export const groups = pgTable(
+  'groups',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    external_id: text('external_id'),
+    created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('groups_name_idx').on(t.name), uniqueIndex('groups_external_idx').on(t.external_id)],
+);
+
+export const groupMembers = pgTable(
+  'group_members',
+  {
+    group_id: text('group_id').notNull().references(() => groups.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: GROUP_MEMBER_ROLES }).notNull().default('MEMBER'),
+    added_at: ts('added_at').notNull(),
+  },
+  (t) => [uniqueIndex('group_members_pk').on(t.group_id, t.user_id), index('group_members_user_idx').on(t.user_id)],
+);
+
+export const workspaceMembers = pgTable(
+  'workspace_members',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    subject_type: text('subject_type', { enum: MEMBER_SUBJECT_TYPES }).notNull(),
+    subject_id: text('subject_id').notNull(),
+    role: text('role', { enum: WORKSPACE_ROLES }).notNull().default('VIEWER'),
+    added_by: text('added_by').references(() => users.id, { onDelete: 'set null' }),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('workspace_members_subject_idx').on(t.workspace_id, t.subject_type, t.subject_id), index('workspace_members_lookup_idx').on(t.subject_type, t.subject_id)],
 );
 
 // ---------------------------------------------------------------------------

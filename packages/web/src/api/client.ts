@@ -57,13 +57,27 @@ export const api = {
   get: <T>(url: string) => request<T>('GET', url),
   post: <T>(url: string, body?: unknown, opts?: { signal?: AbortSignal }) => request<T>('POST', url, body ?? {}, opts),
   patch: <T>(url: string, body?: unknown) => request<T>('PATCH', url, body ?? {}),
+  put: <T>(url: string, body?: unknown) => request<T>('PUT', url, body ?? {}),
   del: <T>(url: string) => request<T>('DELETE', url),
 };
 
 // ------------------------------------------------------------------ types
 export interface User { id: string; email: string; role: 'ADMIN' | 'USER' | 'READ_ONLY'; auth_provider: string; display_name: string | null; created_at: string }
 export interface EngineSettings { memory_limit?: string; threads?: number | 'auto'; query_timeout_seconds?: number; temp_directory?: string; extensions?: string[]; connection_ids?: string[] }
-export interface Workspace { id: string; user_id: string; name: string; active_db_path: string; engine_settings: EngineSettings; created_at: string; updated_at: string }
+export type WorkspaceRole = 'OWNER' | 'EDITOR' | 'VIEWER';
+export interface Workspace {
+  id: string; user_id: string; name: string; active_db_path: string; engine_settings: EngineSettings; created_at: string; updated_at: string;
+  /** The caller's effective role (primary owner, direct grant or team grant — highest wins; admins are OWNER everywhere). */
+  role: WorkspaceRole;
+  owner: { id: string; email: string; display_name: string | null };
+  /** true when the workspace belongs to someone else and reached the caller through sharing. */
+  shared: boolean;
+  member_count: number;
+}
+export interface WorkspaceMember { id: string; workspace_id: string; subject_type: 'user' | 'group'; subject_id: string; role: WorkspaceRole; added_by: string | null; created_at: string; name: string; email: string | null; external: boolean }
+export interface Group { id: string; name: string; description: string | null; external_id: string | null; created_by: string | null; created_at: string; updated_at: string; member_count: number; my_role: 'MANAGER' | 'MEMBER' | null }
+export interface GroupMember { group_id: string; user_id: string; role: 'MANAGER' | 'MEMBER'; added_at: string; email: string; display_name: string | null }
+export interface DirectoryUser { id: string; email: string; display_name: string | null; role: User['role'] }
 export interface ChartConfig { type: 'bar' | 'line' | 'area' | 'scatter' | 'pie' | 'none'; x?: string; y?: string[]; stacked?: boolean }
 export interface SessionTab { id: string; workspace_id: string; title: string; sql_content: string; chart_config: ChartConfig; order_index: number; cursor_position: number; engine?: string | null; updated_at: string }
 export interface ColumnSchema { name: string; type: string; kind: 'number' | 'string' | 'boolean' | 'temporal' | 'json' | 'binary' | 'null' }

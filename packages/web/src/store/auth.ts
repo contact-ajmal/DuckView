@@ -3,9 +3,12 @@ import { api, getToken, setToken, type User } from '../api/client';
 
 interface AuthConfig { strategy: 'local' | 'oidc'; registration_enabled: boolean; oidc_login_url: string | null; needs_bootstrap: boolean }
 
+export interface MyGroup { id: string; name: string; external: boolean }
+
 interface AuthState {
   user: User | null;
   scopes: string[];
+  groups: MyGroup[];
   config: AuthConfig | null;
   loading: boolean;
   init(): Promise<void>;
@@ -18,6 +21,7 @@ interface AuthState {
 export const useAuth = create<AuthState>((set, get) => ({
   user: null,
   scopes: [],
+  groups: [],
   config: null,
   loading: true,
   async init() {
@@ -25,8 +29,8 @@ export const useAuth = create<AuthState>((set, get) => ({
       const config = await api.get<AuthConfig>('/api/auth/config');
       set({ config });
       if (getToken()) {
-        const me = await api.get<{ user: User; principal: { scopes: string[] } }>('/api/auth/me');
-        set({ user: me.user, scopes: me.principal.scopes });
+        const me = await api.get<{ user: User; groups: MyGroup[]; principal: { scopes: string[] } }>('/api/auth/me');
+        set({ user: me.user, scopes: me.principal.scopes, groups: me.groups ?? [] });
       }
     } catch {
       setToken(null);
@@ -34,7 +38,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     } finally {
       set({ loading: false });
     }
-    window.addEventListener('duckview:unauthorized', () => set({ user: null, scopes: [] }));
+    window.addEventListener('duckview:unauthorized', () => set({ user: null, scopes: [], groups: [] }));
   },
   async login(email, password) {
     const r = await api.post<{ token: string; user: User }>('/api/auth/login', { email, password });
@@ -53,6 +57,6 @@ export const useAuth = create<AuthState>((set, get) => ({
   logout() {
     api.post('/api/auth/logout').catch(() => undefined);
     setToken(null);
-    set({ user: null, scopes: [] });
+    set({ user: null, scopes: [], groups: [] });
   },
 }));

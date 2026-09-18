@@ -1,4 +1,4 @@
-import type { TokenScope, UserRole } from '../db/schema/sqlite.js';
+import type { TokenScope, UserRole, WorkspaceRole } from '../db/schema/sqlite.js';
 import { forbidden } from './errors.js';
 
 export interface Principal {
@@ -29,4 +29,21 @@ export function requireWrite(p: Principal) {
 }
 export function assertWorkspaceScope(p: Principal, workspaceId: string) {
   if (p.workspaceScope && p.workspaceScope !== workspaceId) throw forbidden('Token is scoped to a different workspace');
+}
+
+// ---------- Workspace roles (sharing) ----------
+
+const WORKSPACE_ROLE_RANK: Record<WorkspaceRole, number> = { VIEWER: 0, EDITOR: 1, OWNER: 2 };
+
+export const roleAtLeast = (have: WorkspaceRole, need: WorkspaceRole) => WORKSPACE_ROLE_RANK[have] >= WORKSPACE_ROLE_RANK[need];
+export const maxWorkspaceRole = (roles: WorkspaceRole[]): WorkspaceRole | null => roles.reduce<WorkspaceRole | null>((best, r) => (best === null || WORKSPACE_ROLE_RANK[r] > WORKSPACE_ROLE_RANK[best] ? r : best), null);
+
+/** Admins signed in through the UI act as OWNER on every workspace (tokens never inherit that). */
+export const isPlatformAdmin = (p: Principal) => isAdmin(p) && p.via !== 'token';
+
+const ROLE_LABEL: Record<WorkspaceRole, string> = { VIEWER: 'view', EDITOR: 'edit', OWNER: 'owner' };
+export function requireWorkspaceRole(have: WorkspaceRole, need: WorkspaceRole) {
+  if (roleAtLeast(have, need)) return;
+  if (need === 'OWNER') throw forbidden(`Only workspace owners can manage settings and sharing (you have ${ROLE_LABEL[have]} access)`);
+  throw forbidden(`This needs edit access to the workspace (you have ${ROLE_LABEL[have]} access)`);
 }

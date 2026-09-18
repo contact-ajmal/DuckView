@@ -527,6 +527,7 @@ export class LakehouseService {
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(table)) throw badRequest('table must be a simple identifier (letters, digits, underscores)');
     const text = input.sql.trim();
     if (!READ_ONLY_RE.test(text)) throw badRequest('Only SELECT statements can be materialised');
+    await this.workspaces.get(p, workspaceId, 'EDITOR');
     const { engine } = await this.workspaces.engine(p, workspaceId);
     const started = performance.now();
     const rowLimit = Math.max(1, Math.min(input.maxRows ?? this.cfg.lakehouse.materialize_max_rows, this.cfg.lakehouse.materialize_max_rows));

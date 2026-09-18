@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LogOut, Plus, ChevronDown } from 'lucide-react';
+import { LogOut, Plus, ChevronDown, Users, Eye } from 'lucide-react';
 import { useAuth } from './store/auth';
 import { useWorkspace } from './store/workspace';
 import { LoginPage } from './features/auth/LoginPage';
@@ -9,6 +9,7 @@ import { SettingsPage } from './features/settings/SettingsPage';
 import { McpPage } from './features/mcp/McpPage';
 import { DashboardsPage } from './features/dashboards/DashboardsPage';
 import { CopilotDrawer } from './features/copilot/CopilotDrawer';
+import { ShareDialog } from './features/workspace/ShareDialog';
 import { useCopilot } from './store/copilot';
 import { Bot } from 'lucide-react';
 import { LayoutMenu } from './components/LayoutMenu';
@@ -44,6 +45,7 @@ export default function App() {
   const [newName, setNewName] = useState('');
   const [newPath, setNewPath] = useState(':memory:');
   const [wsMenu, setWsMenu] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     const on = () => setRoute(parseRoute());
@@ -97,33 +99,64 @@ export default function App() {
           </button>
           <div className="relative">
             <button onClick={() => setWsMenu(!wsMenu)} className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/70 px-2.5 py-1 text-xs hover:bg-zinc-800">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
+              <span className={cn('h-1.5 w-1.5 rounded-full', active?.shared ? 'bg-sky-400' : 'bg-accent-400')} />
               <span className="font-medium text-zinc-100">{active?.name ?? 'Workspace'}</span>
+              {active?.shared && (
+                <span className="inline-flex items-center gap-1 rounded border border-zinc-700 px-1 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400" title={`Shared by ${active.owner.display_name ?? active.owner.email} — you are ${active.role.toLowerCase()}`}>
+                  {active.role === 'VIEWER' ? <Eye className="h-3 w-3" /> : <Users className="h-3 w-3" />} {active.role.toLowerCase()}
+                </span>
+              )}
               <span className="hidden font-mono text-[11px] text-zinc-500 xl:inline">{active?.active_db_path}</span>
               <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
             </button>
             {wsMenu && (
-              <div className="absolute right-0 top-full z-40 mt-1 w-72 rounded-lg border border-zinc-800 bg-zinc-900 p-1 shadow-xl" onMouseLeave={() => setWsMenu(false)}>
-                {ws.workspaces.map((w) => (
+              <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-lg border border-zinc-800 bg-zinc-900 p-1 shadow-xl" onMouseLeave={() => setWsMenu(false)}>
+                {(
+                  [
+                    ['Your workspaces', ws.workspaces.filter((w) => !w.shared)],
+                    ['Shared with you', ws.workspaces.filter((w) => w.shared)],
+                  ] as const
+                ).map(([label, items]) =>
+                  items.length === 0 ? null : (
+                    <div key={label}>
+                      <div className="px-2 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{label}</div>
+                      {items.map((w) => (
+                        <button
+                          key={w.id}
+                          onClick={() => {
+                            setWsMenu(false);
+                            void ws.selectWorkspace(w.id);
+                          }}
+                          className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-zinc-800', w.id === ws.activeId && 'bg-zinc-800/70')}
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm text-zinc-100">{w.name}</span>
+                            <span className="block truncate font-mono text-[10px] text-zinc-500">{w.shared ? `${w.owner.display_name ?? w.owner.email} · ${w.role.toLowerCase()}` : w.member_count > 0 ? `${w.active_db_path} · shared with ${w.member_count}` : w.active_db_path}</span>
+                          </span>
+                          {w.shared ? <Users className="h-3.5 w-3.5 shrink-0 text-sky-400" /> : w.member_count > 0 ? <Users className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : null}
+                        </button>
+                      ))}
+                    </div>
+                  ),
+                )}
+                {active && (
                   <button
-                    key={w.id}
                     onClick={() => {
                       setWsMenu(false);
-                      void ws.selectWorkspace(w.id);
+                      setSharing(true);
                     }}
-                    className={cn('flex w-full flex-col rounded-md px-2 py-1.5 text-left hover:bg-zinc-800', w.id === ws.activeId && 'bg-zinc-800/70')}
+                    className="mt-1 flex w-full items-center gap-2 rounded-md border-t border-zinc-800 px-2 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
                   >
-                    <span className="text-sm text-zinc-100">{w.name}</span>
-                    <span className="font-mono text-[10px] text-zinc-500">{w.active_db_path}</span>
+                    <Users className="h-3.5 w-3.5" /> {active.role === 'OWNER' && auth.user.role !== 'READ_ONLY' ? `Share “${active.name}”…` : `Who has access to “${active.name}”`}
                   </button>
-                ))}
+                )}
                 {auth.user.role !== 'READ_ONLY' && (
                   <button
                     onClick={() => {
                       setWsMenu(false);
                       setCreating(true);
                     }}
-                    className="mt-1 flex w-full items-center gap-2 rounded-md border-t border-zinc-800 px-2 py-2 text-left text-xs text-accent-300 hover:bg-zinc-800"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-accent-300 hover:bg-zinc-800"
                   >
                     <Plus className="h-3.5 w-3.5" /> New workspace
                   </button>
@@ -151,6 +184,8 @@ export default function App() {
         </main>
         <CopilotDrawer />
       </div>
+
+      <ShareDialog open={sharing} onClose={() => setSharing(false)} workspace={active ?? null} />
 
       <Modal open={creating} onClose={() => setCreating(false)} title="New workspace">
         <div className="space-y-3">

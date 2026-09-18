@@ -75,6 +75,12 @@ export const ConfigSchema = z.object({
           redirect_uri: z.string().optional(),
           scopes: z.string().default('openid email profile'),
           admin_emails: z.array(z.string()).default([]),
+          /** ID-token / userinfo claim carrying the user's IdP groups (Okta "groups", Entra "groups" or "roles", Keycloak "groups"). */
+          groups_claim: z.string().default('groups'),
+          /** IdP groups whose members are promoted to ADMIN on login (never demotes). */
+          admin_groups: z.array(z.string()).default([]),
+          /** Mirror IdP groups into DuckView teams (external_id = claim value) so workspaces can be shared with them. */
+          sync_groups: z.coerce.boolean().default(true),
         })
         .default({}),
       bootstrap_admin: z
@@ -245,6 +251,7 @@ const WELL_KNOWN_ENV: Record<string, string[]> = {
   OIDC_CLIENT_ID: ['auth', 'oidc', 'client_id'],
   OIDC_CLIENT_SECRET: ['auth', 'oidc', 'client_secret'],
   OIDC_REDIRECT_URI: ['auth', 'oidc', 'redirect_uri'],
+  OIDC_GROUPS_CLAIM: ['auth', 'oidc', 'groups_claim'],
   DUCKVIEW_ADMIN_EMAIL: ['auth', 'bootstrap_admin', 'email'],
   DUCKVIEW_ADMIN_PASSWORD: ['auth', 'bootstrap_admin', 'password'],
   DUCKDB_MEMORY_LIMIT: ['duckdb', 'default_memory_limit'],

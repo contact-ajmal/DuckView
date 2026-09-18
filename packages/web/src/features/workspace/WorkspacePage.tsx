@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Bot, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap } from 'lucide-react';
-import { useWorkspace, lakehouseEngine, engineConnectionId } from '../../store/workspace';
-import { useAuth } from '../../store/auth';
+import { useWorkspace, useWorkspaceAccess, lakehouseEngine, engineConnectionId } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
 import { api, exportAndDownload, tabsToSql, sqlToTabs, type ChartConfig, type SavedQuery } from '../../api/client';
 import { SqlEditor, type SqlEditorHandle } from './SqlEditor';
@@ -27,7 +26,6 @@ type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile';
 
 export function WorkspacePage() {
   const ws = useWorkspace();
-  const auth = useAuth();
   const cp = useCopilot();
   const workspace = ws.workspaces.find((w) => w.id === ws.activeId) ?? null;
   const tab = ws.tabs.find((t) => t.id === ws.activeTabId) ?? null;
@@ -56,7 +54,7 @@ export function WorkspacePage() {
   const [saved, setSaved] = useState<SavedQuery[]>([]);
   const [saveModal, setSaveModal] = useState<{ open: boolean; name: string; folder: string; tags: string; description: string; existing?: SavedQuery }>({ open: false, name: '', folder: '', tags: '', description: '' });
   const importInput = useRef<HTMLInputElement>(null);
-  const canWrite = auth.user?.role !== 'READ_ONLY';
+  const { canEdit: canWrite } = useWorkspaceAccess();
   const wsId = workspace?.id;
 
   const loadSaved = useCallback(async () => {
@@ -270,7 +268,7 @@ export function WorkspacePage() {
           <RefreshCw className="h-3 w-3" />
         </button>
       ),
-      content: <Explorer workspaceId={workspace.id} actions={explorerActions} refreshKey={explorerKey} selected={inspect} />,
+      content: <Explorer workspaceId={workspace.id} actions={explorerActions} refreshKey={explorerKey} selected={inspect} readOnly={!canWrite} />,
     },
     {
       key: 'tables',
@@ -370,19 +368,15 @@ export function WorkspacePage() {
                   <span className="truncate">{t.title}</span>
                 )}
                 {r?.status === 'done' && r.durationMs != null && <span className="font-mono text-[10px] text-zinc-500">{r.durationMs} ms</span>}
-                {canWrite && (
-                  <button className="rounded p-0.5 opacity-0 hover:bg-zinc-700 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); void ws.closeTab(t.id); }} title="Close tab">
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
+                <button className="rounded p-0.5 opacity-0 hover:bg-zinc-700 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); void ws.closeTab(t.id); }} title="Close tab">
+                  <X className="h-3 w-3" />
+                </button>
               </div>
             );
           })}
-          {canWrite && (
-            <button className="flex items-center gap-1 px-3 text-xs text-zinc-500 hover:text-zinc-200" onClick={() => void ws.addTab()}>
-              <Plus className="h-3.5 w-3.5" /> New tab
-            </button>
-          )}
+          <button className="flex items-center gap-1 px-3 text-xs text-zinc-500 hover:text-zinc-200" onClick={() => void ws.addTab()}>
+            <Plus className="h-3.5 w-3.5" /> New tab
+          </button>
         </div>
       </div>
 

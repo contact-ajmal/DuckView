@@ -26,7 +26,7 @@ export class FileService {
   /** Streams an upload to `<jail>/<dir>/<filename>`. Writes to a temp file first, then renames atomically. */
   async upload(p: Principal, workspaceId: string, input: { filename: string; dir?: string; stream: Readable; overwrite?: boolean }): Promise<JailEntry> {
     requireWrite(p);
-    await this.workspaces.get(p, workspaceId);
+    await this.workspaces.get(p, workspaceId, 'EDITOR');
     const base = path.posix.basename(input.filename.replace(/\\/g, '/')).replace(/[^\w.\-+@ ]/g, '_').trim();
     if (!base || base.startsWith('.')) throw badRequest('Invalid filename');
     this.checkExtension(base);
@@ -49,7 +49,7 @@ export class FileService {
 
   async remove(p: Principal, workspaceId: string, relPath: string): Promise<void> {
     requireWrite(p);
-    await this.workspaces.get(p, workspaceId);
+    await this.workspaces.get(p, workspaceId, 'EDITOR');
     const target = this.workspaces.jail.resolve(relPath);
     if (!target.exists) throw notFound('File');
     const stat = fs.statSync(target.absolute);

@@ -105,8 +105,13 @@ describe('engine + query service', () => {
     const ws = await ctx.workspaces.ensureDefault(admin);
     const ro = await ctx.auth.createLocalUser({ email: 'ro@test.local', password: 'readonly-pass', role: 'READ_ONLY' });
     const roP = ctx.auth.principalFromUser(ro, 'jwt');
+    // Not a member: the workspace does not exist as far as they are concerned, whatever the statement.
+    await expect(ctx.queries.run(roP, ws.id, 'DROP TABLE t1')).rejects.toThrow(/not found/);
+    await expect(ctx.queries.run(roP, ws.id, 'SELECT 1')).rejects.toThrow(/not found/);
+    // Shared with them (even as EDITOR): the READ_ONLY platform role still forbids mutations.
+    await ctx.workspaces.setMember(admin, ws.id, { subject_type: 'user', subject_id: ro.id, role: 'EDITOR' });
     await expect(ctx.queries.run(roP, ws.id, 'DROP TABLE t1')).rejects.toThrow(/read-only/i);
-    await expect(ctx.queries.run(roP, ws.id, 'SELECT 1')).rejects.toThrow(/not found/); // not their workspace
+    expect((await ctx.queries.run(roP, ws.id, 'SELECT 1')).rows).toEqual([[1]]);
     const agent: Principal = { ...admin, via: 'token', actorType: 'AGENT', scopes: ['read', 'write', 'mcp'] };
     await expect(ctx.queries.run(agent, ws.id, 'DELETE FROM t1 WHERE id < 10')).rejects.toBeInstanceOf(HitlBlocked);
     const ok = await ctx.queries.run(agent, ws.id, 'DELETE FROM t1 WHERE id < 10', { dryRun: false });

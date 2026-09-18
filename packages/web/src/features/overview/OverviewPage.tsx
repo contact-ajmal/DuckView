@@ -5,8 +5,7 @@ import { FolderPicker } from '../explorer/FolderPicker';
 import '../../lib/chart';
 import { withAlpha, compactNumber, useChartTheme } from '../../lib/chart';
 import { api, uploadFiles, formatBytes, type OverviewResult, type OverviewColumn, type JailEntry } from '../../api/client';
-import { useWorkspace } from '../../store/workspace';
-import { useAuth } from '../../store/auth';
+import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { ResultsGrid } from '../workspace/ResultsGrid';
 import { Eyebrow, PageTitle, SideCard, Panel, TypePill, Tag } from '../../components/layout';
 import { SplitPane } from '../../components/panes';
@@ -97,8 +96,7 @@ function Distribution({ col }: { col: OverviewColumn }) {
 
 export function OverviewPage() {
   const ws = useWorkspace();
-  const auth = useAuth();
-  const canWrite = auth.user?.role !== 'READ_ONLY';
+  const { canEdit: canWrite } = useWorkspaceAccess();
   const [target, setTarget] = useState<string | null>(null);
   const [overview, setOverview] = useState<OverviewResult | null>(null);
   const [loading, setLoading] = useState(false);

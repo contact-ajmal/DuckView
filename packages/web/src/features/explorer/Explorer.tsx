@@ -72,7 +72,7 @@ function cloudEntryToNode(e: CloudEntry, connectionId: string, bucket: string, p
   return { id: `cloud:${connectionId}:${bucket}:${e.path}`, name: e.name, kind: 'object', fileKind: e.kind, target: e.uri, connectionId, bucket, prefix: e.path, provider, size: e.size_bytes, queryable: e.queryable };
 }
 
-export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { workspaceId: string; actions: ExplorerActions; refreshKey?: number; selected?: string | null }) {
+export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readOnly = false }: { workspaceId: string; actions: ExplorerActions; refreshKey?: number; selected?: string | null; /** Viewer of a shared workspace: no delete / add-folder / remove-folder. */ readOnly?: boolean }) {
   const [roots, setRoots] = useState<ExplorerNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['local-root', 'cloud-root', 'lakehouse-root']));
   const [filter, setFilter] = useState('');
@@ -315,7 +315,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
       items.push({ label: n.kind === 'object' ? 'Copy URI' : 'Copy path', run: () => void navigator.clipboard.writeText(n.target ?? '') });
       if (actions.onAskCopilot && n.queryable) items.push({ label: 'Ask DuckCopilot about this', run: () => actions.onAskCopilot!(n) });
       if (n.kind === 'file') items.push({ label: 'Download', run: () => void download(n) });
-      if (n.kind === 'file' || n.kind === 'table_dir') items.push({ label: 'Delete', run: () => void remove(n), danger: true });
+      if ((n.kind === 'file' || n.kind === 'table_dir') && !readOnly) items.push({ label: 'Delete', run: () => void remove(n), danger: true });
     }
     if (n.kind === 'dir' || n.kind === 'prefix' || n.kind === 'bucket' || n.kind === 'local-root' || n.kind === 'folder-root' || n.kind === 'connection') {
       items.push({ label: 'Refresh', run: () => void loadChildren(n) });
@@ -335,18 +335,19 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected }: { w
     if (n.kind === 'lakehouse' || n.kind === 'lh-catalog' || n.kind === 'lh-schema') items.push({ label: 'Refresh', run: () => void loadChildren(n) });
     if (n.kind === 'lakehouse' && n.lakehouse?.attached) items.push({ label: 'Insert alias at cursor', run: () => actions.onInsert(`${n.lakehouse!.alias}.`) });
     if (n.kind === 'lakehouse-root') items.push({ label: 'Connect a lakehouse…', run: actions.onAddLakehouse });
-    if (n.kind === 'local-root' || n.kind === 'folder-root') items.push({ label: 'Add folder to workspace…', run: actions.onAddFolder });
-    if (n.kind === 'folder-root') items.push({ label: 'Copy folder path', run: () => void navigator.clipboard.writeText(n.localPath ?? '') }, { label: 'Remove folder from workspace', run: () => actions.onRemoveFolder(n.localPath!), danger: true });
+    if ((n.kind === 'local-root' || n.kind === 'folder-root') && !readOnly) items.push({ label: 'Add folder to workspace…', run: actions.onAddFolder });
+    if (n.kind === 'folder-root') items.push({ label: 'Copy folder path', run: () => void navigator.clipboard.writeText(n.localPath ?? '') });
+    if (n.kind === 'folder-root' && !readOnly) items.push({ label: 'Remove folder from workspace', run: () => actions.onRemoveFolder(n.localPath!), danger: true });
     if (n.kind === 'cloud-root') items.push({ label: 'Add cloud connection', run: actions.onAddConnection });
     return items;
-  }, [menu, actions, loadChildren]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [menu, actions, loadChildren, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={ref} className="flex h-full flex-col">
       <div className="flex items-center gap-1.5 border-b border-zinc-800 px-2 py-1.5">
         <Search className="h-3 w-3 text-zinc-500" />
         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter files…" className="h-6 min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none" />
-        <button onClick={actions.onAddFolder} className="rounded p-1 text-zinc-500 hover:text-accent-300" title={mode === 'full' ? 'Add folder to workspace…' : 'Add a folder inside the data directory'}><FolderPlus className="h-3.5 w-3.5" /></button>
+        {!readOnly && <button onClick={actions.onAddFolder} className="rounded p-1 text-zinc-500 hover:text-accent-300" title={mode === 'full' ? 'Add folder to workspace…' : 'Add a folder inside the data directory'}><FolderPlus className="h-3.5 w-3.5" /></button>}
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-1">
         {roots.map((r) => (

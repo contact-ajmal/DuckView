@@ -4,8 +4,7 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { LayoutDashboard, Plus, Pencil, Trash2, RefreshCw, GripVertical, Settings2, Check, ArrowLeft, Bot, Lock, Unlock } from 'lucide-react';
 import { api, type Dashboard, type DashboardWidget, type LayoutItem, type SavedQuery } from '../../api/client';
-import { useWorkspace } from '../../store/workspace';
-import { useAuth } from '../../store/auth';
+import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
 import { WidgetBody } from './widgets';
 import { WidgetEditor, type WidgetDraft } from './WidgetEditor';
@@ -32,7 +31,7 @@ export function DashboardsPage() {
 
 function DashboardList() {
   const ws = useWorkspace();
-  const auth = useAuth();
+  const access = useWorkspaceAccess();
   const [list, setList] = useState<Dashboard[]>([]);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
@@ -51,7 +50,7 @@ function DashboardList() {
           <PageTitle>Dashboards</PageTitle>
           <p className="mt-1 text-xs text-zinc-500">KPI cards, charts, tables and notes on a drag-and-drop grid, bound to saved queries or SQL, with auto-refresh.</p>
         </div>
-        {auth.user?.role !== 'READ_ONLY' && (
+        {access.canEdit && (
           <Button variant="primary" onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New dashboard</Button>
         )}
       </div>
@@ -88,7 +87,6 @@ function DashboardList() {
 }
 
 function DashboardCanvas({ id }: { id: string }) {
-  const auth = useAuth();
   const cp = useCopilot();
   const [dash, setDash] = useState<(Dashboard & { widgets: DashboardWidget[] }) | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +97,7 @@ function DashboardCanvas({ id }: { id: string }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState('');
   const layoutTimer = useRef<number | null>(null);
-  const canWrite = auth.user?.role !== 'READ_ONLY';
+  const { canEdit: canWrite } = useWorkspaceAccess();
 
   const load = useCallback(async () => {
     try {

@@ -43,6 +43,13 @@
       "when": 1789654622906,
       "tag": "0005_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789747949409,
+      "tag": "0006_sharing",
+      "breakpoints": true
     }
   ]
 }

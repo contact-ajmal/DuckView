@@ -34,8 +34,11 @@ auth:
     client_id: "${OIDC_CLIENT_ID}"
     client_secret: "${OIDC_CLIENT_SECRET}"
     redirect_uri: "${OIDC_REDIRECT_URI:-}"
-    scopes: "openid email profile"
+    scopes: "openid email profile"       # add "groups" if your IdP needs it to emit the groups claim
     admin_emails: []
+    groups_claim: "${OIDC_GROUPS_CLAIM:-groups}"   # claim carrying the user's IdP groups (Entra: "groups" or "roles")
+    admin_groups: []                     # IdP groups whose members become ADMIN on login
+    sync_groups: true                    # mirror IdP groups into DuckView teams for workspace sharing
   bootstrap_admin:                       # created on first start when no users exist
     email: "${DUCKVIEW_ADMIN_EMAIL:-}"
     password: "${DUCKVIEW_ADMIN_PASSWORD:-}"

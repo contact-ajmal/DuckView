@@ -22,7 +22,8 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
                │ REST · WS (rows, live events) · SSE (copilot, MCP) · Streamable HTTP
 ┌──────────────▼───────────────────────────────────────────────────────────────┐
 │ Fastify 5 (TypeScript strict)                                                │
-│  auth: local (scrypt) · OIDC+PKCE · API tokens (sha256, scoped)              │
+│  auth: local (scrypt) · OIDC+PKCE (+group→team sync) · API tokens (scoped)   │
+│  Sharing: workspace roles OWNER/EDITOR/VIEWER for users and teams            │
 │  QueryService ─ single choke point: authz → SQL guard → HITL → audit         │
 │  Storage: jailed tree · S3/Azure SDK listings · DESCRIBE-based inspection     │
 │  Exports: COPY … TO (parquet/csv/json) + streaming Arrow IPC writer          │
@@ -37,7 +38,8 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  lakehouse catalogs hot-applied                                              │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ Metadata store (Drizzle): SQLite by default · PostgreSQL via DATABASE_URL    │
-│  users · workspaces · session_tabs · saved_queries · dashboards · widgets    │
+│  users · groups · group_members · workspaces · workspace_members            │
+│  session_tabs (per user) · saved_queries · dashboards · widgets              │
 │  cloud_connections · lakehouse_connections · data_connections (AES-256-GCM) │
 │  · agents · chat_history · tokens                                            │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -119,6 +121,7 @@ Key settings:
 | | `jwt_secret`, `encryption_key` | Required in `NODE_ENV=production`; ephemeral (with a warning) in dev. |
 | `database` | `metadata_url` | `sqlite://duckview_meta.db` or `postgres://…`; migrations run at start. |
 | `auth` | `strategy` | `local` or `oidc` (Authorization Code + PKCE, stateless signed `state`). `oidc.admin_emails` promotes SSO users to ADMIN. |
+| | `oidc.groups_claim`, `oidc.admin_groups`, `oidc.sync_groups` | Claim carrying the user's IdP groups (default `groups`; Entra may use `roles`). Members of any `admin_groups` entry become ADMIN on login (never demoted). With `sync_groups` (default on) IdP groups are mirrored into DuckView **teams** and the user's membership is rewritten on every login, so workspaces can be shared with `okta:finance` directly. |
 | `security` | `filesystem_mode` | `full` (default, VS Code-like): add any local folder to the explorer, query files anywhere on the host, cloud sources on. `sandboxed` (multi-tenant): everything confined to `data_jail_directory`, external access off unless enabled. Relative paths always anchor to the data directory. |
 | `duckdb` | `extension_directory` | Where `httpfs`/`azure`/`arrow`/`iceberg`/`delta` are installed. The image ships them pre-installed at `/app/duckdb-extensions` (`scripts/install-extensions.mjs`). |
 | | `export_ttl_seconds`, `export_max_rows` | Server-side export files expire after the TTL. |
@@ -137,6 +140,7 @@ Key settings:
 4. **Human-in-the-loop for agents.** Any mutating statement from an MCP/API-token actor is blocked with an `approval_required` challenge (the verbs, per-statement previews, and how to proceed) until it is re-issued with `dry_run: false`. `save_dataset` is gated the same way.
 5. **Secrets.** Stored S3/GCS/Azure/HTTP/Postgres/MotherDuck credentials are AES-256-GCM encrypted (unique IV, auth tag, row-id as AAD) and applied via `CREATE SECRET` / `motherduck_token` only for the owning user's engine. Passwords use scrypt; API tokens are `dv_…` random strings stored as SHA-256 hashes and shown once.
 6. **Isolation & limits.** One DuckDB instance per workspace, a fresh connection per query (so `interrupt()` on timeout/cancel is query-scoped), row caps, cell truncation, rate limiting, and a full audit trail (`actor_type` USER/AGENT, action, SQL, duration, IP, status).
+7. **Workspace authorization.** Every workspace access resolves an effective role — the creator and platform admins (UI sessions only, never tokens) are OWNER; otherwise the highest of the user's direct grant and their teams' grants. Inaccessible workspaces are `404` (no existence leak); insufficient role is `403`. See [Sharing & teams](#sharing--teams).
 
 ## Layout
 
@@ -151,6 +155,26 @@ Six built-in themes decide both the colour system and the typeface — three dar
 ## Settings
 
 Settings is split into categories in a left-hand nav (deep-linkable as `#/settings/<category>`): **Appearance** (themes, fonts, scale) · **Layout** (show/hide components) · **Hardware** (live gauges, resources, warm engines) · **Engine** (memory, threads, timeout, sandbox) · **Storage** (cloud connections, data connections) · **Copilot** (provider status) · **Account** · **Users** (admin).
+
+## Sharing & teams
+
+Workspaces are private to their creator until shared. Share with individual people or with **teams** (groups) from the workspace switcher (**Share …**); each grant carries a role, and the highest role a person holds through any path wins. Platform admins signed in through the UI act as OWNER on every workspace; API tokens never inherit that.
+
+| Role | Can |
+|---|---|
+| **Viewer** | Run read-only SQL (including attached lakehouse catalogs), view dashboards and saved queries, profile data, export results, use Copilot, keep their own tabs. |
+| **Editor** | Everything a viewer can, plus mutating SQL, uploads and file deletion, workspace folders, saved queries, dashboards and widgets, `save_dataset`, materialising remote results. |
+| **Owner** | Everything an editor can, plus rename / engine settings / database path, restart the engine, manage members, delete. The creator is the *primary* owner and can transfer the workspace. |
+
+The platform role still applies on top: a `READ_ONLY` user never mutates even as an editor, and tokens are limited by their scopes. Things worth knowing:
+
+- **Tabs are personal.** Each member has their own tabs in a shared workspace (`session_tabs.user_id`); saved queries and dashboards are the shared artefacts.
+- **Members query through the owner's connections.** Secrets, cloud buckets and lakehouse catalogs are resolved from the workspace owner, so sharing a workspace shares access to what its engine can reach. Transferring a workspace rebuilds its engine with the new owner's connections.
+- **Files in the data directory are workspace-wide** (and, in `filesystem_mode: full`, so are mounted folders). Per-user data isolation is on the roadmap.
+- **Teams** are created by admins (Settings → Teams); admins and team **managers** manage membership, and anyone can leave a team. Teams mirrored from SSO (`external_id`) are re-synced on every login. Deleting a user or a team removes its grants.
+- **Agents** see shared workspaces through `list_accessible_data` / `duckdb://workspaces` and get the member's role — a viewer's token cannot mutate even after a human "approves" with `dry_run=false`.
+
+`GET /api/workspaces` (each entry carries `role`, `owner`, `shared`, `member_count`) · `GET /api/workspaces/:id/members` · `PUT /api/workspaces/:id/members {subject_type: user|group, subject_id, role}` · `DELETE /api/workspaces/:id/members/:memberId` · `POST /api/workspaces/:id/leave` · `POST /api/workspaces/:id/transfer {user_id}` · `GET /api/users/directory?q=` · `GET/POST /api/groups` · `PATCH/DELETE /api/groups/:id` · `GET/PUT /api/groups/:id/members` · `DELETE /api/groups/:id/members/:userId`. `GET /api/auth/me` lists the caller's teams.
 
 ## Lakehouse connectors
 
@@ -229,7 +253,8 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/auth/login` · `POST /api/auth/register` · `GET /api/auth/me` · `POST /api/auth/password` · `GET /api/auth/oidc/login` · `GET /api/auth/oidc/callback` |
-| Workspaces | `GET/POST /api/workspaces` · `GET/PATCH/DELETE /api/workspaces/:id` · `POST /api/workspaces/:id/restart` · `…/tabs` CRUD (`sql_content`, `chart_config`, `cursor_position`, `order_index`) |
+| Workspaces | `GET/POST /api/workspaces` · `GET/PATCH/DELETE /api/workspaces/:id` · `POST /api/workspaces/:id/restart` · `…/tabs` CRUD (per user; `sql_content`, `chart_config`, `cursor_position`, `order_index`) |
+| Sharing | `GET/PUT /api/workspaces/:id/members` · `DELETE …/members/:memberId` · `POST …/leave` · `POST …/transfer` · `GET /api/users/directory` · `GET/POST /api/groups` · `PATCH/DELETE /api/groups/:id` · `GET/PUT /api/groups/:id/members` · `DELETE …/members/:userId` |
 | Storage explorer | `GET/POST/DELETE /api/workspaces/:id/folders` (workspace folders) · `GET /api/storage/browse?workspace_id&path` (folder picker) · `GET /api/storage/local?workspace_id&path` (tree, one level) · `GET /api/storage/cloud?connection_id[&bucket&prefix]` (buckets / objects with folders via S3 `ListObjectsV2` delimiter or Azure hierarchy) · `POST /api/storage/inspect {workspace_id,target}` (`DESCRIBE … LIMIT 0` for files, `s3://`/`r2://`/`gs://`/`az://` objects, tables, `.duckdb` files, subqueries; Parquet row counts from the footer) |
 | Cloud connections | `GET /api/cloud-connections/providers` · `GET/POST/PATCH/DELETE /api/cloud-connections` (S3 · R2 · GCS · Azure, AES-256-GCM at rest, applied as DuckDB `CREATE SECRET` to every engine of the owner) · `POST /api/cloud-connections/:id/test` |
 | Exports | `POST /api/workspaces/:id/export {sql, format: parquet\|csv\|json\|arrow}` (native `COPY … TO` on disk, Arrow IPC via a streaming writer) · `GET /api/exports` · `GET /api/exports/:id/download` (streamed with `Content-Length`) · `DELETE /api/exports/:id` |
@@ -243,7 +268,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Ops | `GET /api/system` · `GET /api/audit` · `GET/POST/PATCH/DELETE /api/admin/users` · `GET /api/admin/engines` · `POST /api/admin/engines/:id/evict` · `GET /api/admin/config` |
 | Probes | `GET /healthz` · `GET /readyz` · `GET /metrics` |
 
-Errors are uniform JSON: `{ error, message, request_id, challenge? }` — `403 SANDBOX_VIOLATION`, `409 APPROVAL_REQUIRED` (with the HITL challenge), `408 QUERY_TIMEOUT`, `400 SQL_ERROR` (DuckDB parser/binder errors), `429 RATE_LIMITED`.
+Errors are uniform JSON: `{ error, message, request_id, challenge? }` — `403 SANDBOX_VIOLATION`, `403 FORBIDDEN` (role or scope too low), `404 NOT_FOUND` (also for workspaces the caller has no grant on), `409 APPROVAL_REQUIRED` (with the HITL challenge), `408 QUERY_TIMEOUT`, `400 SQL_ERROR` (DuckDB parser/binder errors), `429 RATE_LIMITED`.
 
 ## CLI
 
@@ -270,16 +295,18 @@ packages/server/src
   db/            Drizzle schemas (sqlite + pg), store factory, migrations in ../drizzle
   engine/        sandbox (DataJail), sql-guard (lexer/classifier/rewriter), duckdb (engines, overview, memory stats), results
   security/      AES-256-GCM, scrypt, token hashing
-  services/      audit, auth/tokens, connections, files (uploads), workspaces/tabs, query (authz + HITL),
+  services/      audit, auth/tokens, groups (teams + SSO sync), workspaces (membership/roles, tabs), query (authz + HITL),
+                 connections, files (uploads),
                  lakehouse (Iceberg ATTACH + Databricks), databricks (UC + Statement Execution client), agents, aws (Bedrock/AgentCore bridge)
   agent/         tool registry (shared by MCP + REST), OpenAPI generator, framework snippets
   mcp/           server (registry → tools, resources, prompts), stdio, http (SSE + Streamable HTTP)
-  routes/        auth (local + OIDC), workspaces, query (REST + WS), files, events (WS), connections, tokens, admin, system
+  routes/        auth (local + OIDC), workspaces (+ members), groups, query (REST + WS), files, events (WS), connections, tokens, admin, system
   observability/ pino, prom-client, OpenTelemetry, live event bus, CPU sampler
 packages/web/src
   features/overview   drop zone · KPI badges · null-ratio bars · Chart.js distributions · sample grid
   features/workspace  schema tree (click-to-insert) · tabs with per-tab Stop · editor (cursor persisted) · streaming grid · chart · plan · profile
-  features/settings   categorised left-nav: appearance (themes/fonts/scale) · layout · hardware gauges · engine tuning · storage · copilot · account · users
+  features/settings   categorised left-nav: appearance (themes/fonts/scale) · layout · hardware gauges · engine tuning · storage · copilot · account · teams · users
+  features/workspace  ShareDialog (members, roles, transfer, leave) next to the workbench
   theme/              theme definitions (ramps, accents, tones, chart series, fonts) · store/theme.ts applies them as CSS variables
   features/mcp        registered agents (tokens, self-test, chat) · framework snippets + OpenAPI · client snippets · live inspector (WS)
   features/explorer   VS Code-style tree (data dir, folders, cloud, lakehouse) · schema panel · cloud & lakehouse wizards
@@ -288,7 +315,7 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 147 tests: jail, SQL guard, crypto, config, and integration suites that boot real DuckDB
+pnpm test        # 163 tests: jail, SQL guard, crypto, config, sharing/teams, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +

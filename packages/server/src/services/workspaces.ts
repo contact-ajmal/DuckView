@@ -1,17 +1,36 @@
-import { eq, and, asc, desc } from 'drizzle-orm';
+import { eq, and, or, asc, desc, inArray } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Workspace, SessionTab, EngineSettings, ChartConfig, WorkspaceFolder } from '../db/schema/sqlite.js';
+import type { Workspace, SessionTab, EngineSettings, ChartConfig, WorkspaceFolder, WorkspaceRole, WorkspaceMember, MemberSubjectType } from '../db/schema/sqlite.js';
+import { WORKSPACE_ROLES, MEMBER_SUBJECT_TYPES } from '../db/schema/sqlite.js';
 import { newId } from '../security/crypto.js';
 import { EngineManager, type WorkspaceEngine } from '../engine/duckdb.js';
 import type { ConnectionService } from './connections.js';
 import type { CloudConnectionService } from './cloud.js';
 import type { LakehouseService } from './lakehouse.js';
+import type { GroupService } from './groups.js';
 import type { Principal } from './principal.js';
-import { isAdmin, assertWorkspaceScope } from './principal.js';
-import { badRequest, notFound } from './errors.js';
+import { assertWorkspaceScope, isPlatformAdmin, maxWorkspaceRole, requireWorkspaceRole } from './principal.js';
+import { badRequest, forbidden, notFound } from './errors.js';
 import { isRemoteUri } from '../engine/sandbox.js';
+
+/** A workspace together with the caller's effective role on it. */
+export type WorkspaceAccess = Workspace & { role: WorkspaceRole };
+
+/** Listing shape: adds who owns it and whether it reached the caller through sharing. */
+export interface WorkspaceListing extends WorkspaceAccess {
+  owner: { id: string; email: string; display_name: string | null };
+  shared: boolean;
+  member_count: number;
+}
+
+export interface WorkspaceMemberView extends WorkspaceMember {
+  /** Resolved display data for the subject (user email/name or group name). */
+  name: string;
+  email: string | null;
+  external: boolean;
+}
 
 const STARTER_SQL = `-- Welcome to DuckView. Query files in your data directory directly:
 --   SELECT * FROM 'sales.parquet' LIMIT 100;
@@ -28,7 +47,7 @@ export class WorkspaceService {
   /** Set after construction (the lakehouse service needs this service for engine access, so the dependency is two-way). */
   lakehouse: LakehouseService | null = null;
 
-  constructor(private readonly store: MetadataStore, private readonly engines: EngineManager, private readonly connections: ConnectionService, private readonly cloud: CloudConnectionService) {}
+  constructor(private readonly store: MetadataStore, private readonly engines: EngineManager, private readonly connections: ConnectionService, private readonly cloud: CloudConnectionService, private readonly groups: GroupService) {}
   private get db() {
     return this.store.db;
   }
@@ -39,20 +58,162 @@ export class WorkspaceService {
     return this.engines.jail;
   }
 
-  async list(p: Principal): Promise<Workspace[]> {
-    const q = this.db.select().from(this.s.workspaces).orderBy(desc(this.s.workspaces.updated_at));
-    const rows = isAdmin(p) && p.via !== 'token' ? await q : await q.where(eq(this.s.workspaces.user_id, p.userId));
-    return p.workspaceScope ? rows.filter((w) => w.id === p.workspaceScope) : rows;
+  // ---------- Access resolution ----------
+
+  /** Membership grants for the caller: direct user grants plus grants to any group they belong to. */
+  private async grantsFor(p: Principal, workspaceId?: string): Promise<WorkspaceMember[]> {
+    const groupIds = await this.groups.groupIdsFor(p.userId);
+    const subject = or(
+      and(eq(this.s.workspaceMembers.subject_type, 'user'), eq(this.s.workspaceMembers.subject_id, p.userId)),
+      groupIds.length ? and(eq(this.s.workspaceMembers.subject_type, 'group'), inArray(this.s.workspaceMembers.subject_id, groupIds)) : undefined,
+    );
+    const where = workspaceId ? and(eq(this.s.workspaceMembers.workspace_id, workspaceId), subject) : subject;
+    return this.db.select().from(this.s.workspaceMembers).where(where);
   }
 
-  /** Loads a workspace the principal may access (owner, or admin via UI session). */
-  async get(p: Principal, id: string): Promise<Workspace> {
+  /** Effective role: primary owner and platform admins (UI sessions) are OWNER; otherwise the best grant, or null. */
+  private async resolveRole(p: Principal, w: Workspace, grants?: WorkspaceMember[]): Promise<WorkspaceRole | null> {
+    if (w.user_id === p.userId || isPlatformAdmin(p)) return 'OWNER';
+    const g = grants ?? (await this.grantsFor(p, w.id));
+    return maxWorkspaceRole(g.filter((m) => m.workspace_id === w.id).map((m) => m.role));
+  }
+
+  /** Workspaces the principal may use: own, shared with them (directly or via a team), or all for platform admins. */
+  async list(p: Principal): Promise<WorkspaceListing[]> {
+    const grants = await this.grantsFor(p);
+    const sharedIds = [...new Set(grants.map((g) => g.workspace_id))];
+    const where = isPlatformAdmin(p) ? undefined : sharedIds.length ? or(eq(this.s.workspaces.user_id, p.userId), inArray(this.s.workspaces.id, sharedIds)) : eq(this.s.workspaces.user_id, p.userId);
+    const q = this.db.select().from(this.s.workspaces).orderBy(desc(this.s.workspaces.updated_at));
+    let rows = where ? await q.where(where) : await q;
+    if (p.workspaceScope) rows = rows.filter((w) => w.id === p.workspaceScope);
+    return this.decorate(p, rows, grants);
+  }
+
+  private async decorate(p: Principal, rows: Workspace[], grants: WorkspaceMember[]): Promise<WorkspaceListing[]> {
+    if (rows.length === 0) return [];
+    const ownerIds = [...new Set(rows.map((w) => w.user_id))];
+    const owners = await this.db.select({ id: this.s.users.id, email: this.s.users.email, display_name: this.s.users.display_name }).from(this.s.users).where(inArray(this.s.users.id, ownerIds));
+    const ownerMap = new Map(owners.map((o) => [o.id, o]));
+    const counts = await this.db.select({ workspace_id: this.s.workspaceMembers.workspace_id }).from(this.s.workspaceMembers).where(inArray(this.s.workspaceMembers.workspace_id, rows.map((w) => w.id)));
+    const countMap = new Map<string, number>();
+    for (const c of counts) countMap.set(c.workspace_id, (countMap.get(c.workspace_id) ?? 0) + 1);
+    const out: WorkspaceListing[] = [];
+    for (const w of rows) {
+      const role = (await this.resolveRole(p, w, grants)) ?? 'VIEWER';
+      const owner = ownerMap.get(w.user_id) ?? { id: w.user_id, email: 'unknown', display_name: null };
+      out.push({ ...w, role, owner, shared: w.user_id !== p.userId, member_count: countMap.get(w.id) ?? 0 });
+    }
+    return out;
+  }
+
+  /**
+   * Loads a workspace the principal may access and enforces a minimum role. Unknown or inaccessible workspaces
+   * are reported as 404 (no existence leak); insufficient role is a 403 naming the required level.
+   */
+  async get(p: Principal, id: string, minRole: WorkspaceRole = 'VIEWER'): Promise<WorkspaceAccess> {
     assertWorkspaceScope(p, id);
     const rows = await this.db.select().from(this.s.workspaces).where(eq(this.s.workspaces.id, id)).limit(1);
     const w = rows[0];
     if (!w) throw notFound('Workspace');
-    if (w.user_id !== p.userId && !(isAdmin(p) && p.via !== 'token')) throw notFound('Workspace');
-    return w;
+    const role = await this.resolveRole(p, w);
+    if (!role) throw notFound('Workspace');
+    requireWorkspaceRole(role, minRole);
+    return { ...w, role };
+  }
+
+  /** Full listing entry (owner, member count) for one workspace. */
+  async describe(p: Principal, id: string): Promise<WorkspaceListing> {
+    const w = await this.get(p, id);
+    const [d] = await this.decorate(p, [w], await this.grantsFor(p, id));
+    return d!;
+  }
+
+  // ---------- Sharing ----------
+
+  async listMembers(p: Principal, id: string): Promise<WorkspaceMemberView[]> {
+    await this.get(p, id); // any member may see who else has access
+    const rows = await this.db.select().from(this.s.workspaceMembers).where(eq(this.s.workspaceMembers.workspace_id, id)).orderBy(asc(this.s.workspaceMembers.created_at));
+    const userIds = rows.filter((r) => r.subject_type === 'user').map((r) => r.subject_id);
+    const groupIds = rows.filter((r) => r.subject_type === 'group').map((r) => r.subject_id);
+    const users = userIds.length ? await this.db.select({ id: this.s.users.id, email: this.s.users.email, display_name: this.s.users.display_name }).from(this.s.users).where(inArray(this.s.users.id, userIds)) : [];
+    const groups = await this.groups.byIds(groupIds);
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const groupMap = new Map(groups.map((g) => [g.id, g]));
+    const out: WorkspaceMemberView[] = [];
+    for (const r of rows) {
+      if (r.subject_type === 'user') {
+        const u = userMap.get(r.subject_id);
+        if (!u) continue; // user deleted — stale grant, hidden
+        out.push({ ...r, name: u.display_name ?? u.email, email: u.email, external: false });
+      } else {
+        const g = groupMap.get(r.subject_id);
+        if (!g) continue;
+        out.push({ ...r, name: g.name, email: null, external: !!g.external_id });
+      }
+    }
+    return out;
+  }
+
+  /** Grants (or changes) a role for a user or team. Owners only; the primary owner cannot be granted a lesser role. */
+  async setMember(p: Principal, id: string, input: { subject_type: MemberSubjectType; subject_id: string; role: WorkspaceRole }): Promise<WorkspaceMemberView[]> {
+    const w = await this.get(p, id, 'OWNER');
+    if (!(MEMBER_SUBJECT_TYPES as readonly string[]).includes(input.subject_type)) throw badRequest('subject_type must be user or group');
+    if (!(WORKSPACE_ROLES as readonly string[]).includes(input.role)) throw badRequest(`role must be one of ${WORKSPACE_ROLES.join(', ')}`);
+    if (input.subject_type === 'user') {
+      if (input.subject_id === w.user_id) throw badRequest('The workspace owner already has full access');
+      const u = await this.db.select({ id: this.s.users.id }).from(this.s.users).where(eq(this.s.users.id, input.subject_id)).limit(1);
+      if (!u[0]) throw notFound('User');
+    } else if (!(await this.groups.byId(input.subject_id))) throw notFound('Team');
+    const existing = await this.db
+      .select()
+      .from(this.s.workspaceMembers)
+      .where(and(eq(this.s.workspaceMembers.workspace_id, id), eq(this.s.workspaceMembers.subject_type, input.subject_type), eq(this.s.workspaceMembers.subject_id, input.subject_id)))
+      .limit(1);
+    if (existing[0]) await this.db.update(this.s.workspaceMembers).set({ role: input.role }).where(eq(this.s.workspaceMembers.id, existing[0].id));
+    else await this.db.insert(this.s.workspaceMembers).values({ id: newId(), workspace_id: id, subject_type: input.subject_type, subject_id: input.subject_id, role: input.role, added_by: p.userId, created_at: new Date() });
+    await this.db.update(this.s.workspaces).set({ updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    return this.listMembers(p, id);
+  }
+
+  async removeMember(p: Principal, id: string, memberId: string): Promise<WorkspaceMemberView[]> {
+    await this.get(p, id, 'OWNER');
+    const r = await this.db.delete(this.s.workspaceMembers).where(and(eq(this.s.workspaceMembers.id, memberId), eq(this.s.workspaceMembers.workspace_id, id))).returning({ id: this.s.workspaceMembers.id });
+    if (r.length === 0) throw notFound('Member');
+    return this.listMembers(p, id);
+  }
+
+  /** A directly-granted member may remove their own access. Group-based access is left via the team. */
+  async leave(p: Principal, id: string): Promise<void> {
+    const w = await this.get(p, id);
+    if (w.user_id === p.userId) throw badRequest('The owner cannot leave their own workspace — delete it or transfer it instead');
+    const r = await this.db
+      .delete(this.s.workspaceMembers)
+      .where(and(eq(this.s.workspaceMembers.workspace_id, id), eq(this.s.workspaceMembers.subject_type, 'user'), eq(this.s.workspaceMembers.subject_id, p.userId)))
+      .returning({ id: this.s.workspaceMembers.id });
+    if (r.length === 0) throw forbidden('Your access comes from a team; leave the team to lose it');
+    // The user's own tabs in that workspace are theirs alone; drop them so a later re-share starts clean.
+    await this.db.delete(this.s.sessionTabs).where(and(eq(this.s.sessionTabs.workspace_id, id), eq(this.s.sessionTabs.user_id, p.userId)));
+  }
+
+  /** Hands the workspace to another user (they become the primary owner; the previous owner keeps OWNER via a grant). */
+  async transfer(p: Principal, id: string, newOwnerId: string): Promise<WorkspaceListing> {
+    const w = await this.get(p, id, 'OWNER');
+    if (w.user_id !== p.userId && !isPlatformAdmin(p)) throw forbidden('Only the current owner or an administrator can transfer a workspace');
+    if (newOwnerId === w.user_id) return this.describe(p, id);
+    const u = await this.db.select({ id: this.s.users.id, role: this.s.users.role }).from(this.s.users).where(eq(this.s.users.id, newOwnerId)).limit(1);
+    if (!u[0]) throw notFound('User');
+    if (u[0].role === 'READ_ONLY') throw badRequest('A read-only user cannot own a workspace');
+    await this.db.update(this.s.workspaces).set({ user_id: newOwnerId, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    await this.db.delete(this.s.workspaceMembers).where(and(eq(this.s.workspaceMembers.workspace_id, id), eq(this.s.workspaceMembers.subject_type, 'user'), eq(this.s.workspaceMembers.subject_id, newOwnerId)));
+    await this.db.insert(this.s.workspaceMembers).values({ id: newId(), workspace_id: id, subject_type: 'user', subject_id: w.user_id, role: 'OWNER', added_by: p.userId, created_at: new Date() });
+    // Secrets and lakehouse catalogs are resolved from the owner — the engine must be rebuilt for the new one.
+    this.engines.evict(id);
+    return this.describe(p, id);
+  }
+
+  /** Drops the grants of a deleted user (polymorphic subject — no FK cascade). Called by the admin user-delete path. */
+  async purgeUserGrants(userId: string): Promise<void> {
+    await this.db.delete(this.s.workspaceMembers).where(and(eq(this.s.workspaceMembers.subject_type, 'user'), eq(this.s.workspaceMembers.subject_id, userId)));
   }
 
   validateSettings(settings: EngineSettings): EngineSettings {
@@ -106,7 +267,7 @@ export class WorkspaceService {
   }
 
   async update(p: Principal, id: string, patch: { name?: string; active_db_path?: string; engine_settings?: EngineSettings }): Promise<Workspace> {
-    const w = await this.get(p, id);
+    const w = await this.get(p, id, 'OWNER');
     const set: Partial<Workspace> = { updated_at: new Date() };
     if (patch.name !== undefined) set.name = patch.name.trim() || w.name;
     if (patch.active_db_path !== undefined) set.active_db_path = this.validateDbPath(patch.active_db_path);
@@ -121,7 +282,7 @@ export class WorkspaceService {
 
   /** Adds an absolute folder to the explorer. In sandboxed mode the folder must live inside the data directory. */
   async addFolder(p: Principal, id: string, folderPath: string, name?: string): Promise<WorkspaceFolder[]> {
-    const w = await this.get(p, id);
+    const w = await this.get(p, id, 'EDITOR');
     const raw = (folderPath ?? '').trim();
     if (!raw) throw badRequest('path is required');
     const resolved = this.engines.jail.resolve(raw); // SandboxViolation outside the jail (sandboxed mode)
@@ -141,7 +302,7 @@ export class WorkspaceService {
   }
 
   async removeFolder(p: Principal, id: string, folderPath: string): Promise<WorkspaceFolder[]> {
-    const w = await this.get(p, id);
+    const w = await this.get(p, id, 'EDITOR');
     const folders = w.folders.filter((f) => f.path !== folderPath);
     if (folders.length === w.folders.length) throw notFound('Folder');
     await this.db.update(this.s.workspaces).set({ folders, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
@@ -166,7 +327,7 @@ export class WorkspaceService {
   }
 
   async remove(p: Principal, id: string): Promise<void> {
-    await this.get(p, id);
+    await this.get(p, id, 'OWNER');
     this.engines.evict(id);
     await this.db.delete(this.s.workspaces).where(eq(this.s.workspaces.id, id));
   }
@@ -177,30 +338,38 @@ export class WorkspaceService {
     return this.create(p, { name: 'Scratchpad' });
   }
 
-  /** Resolves (and lazily starts) the DuckDB engine for a workspace. */
-  async engine(p: Principal, workspaceId: string): Promise<{ workspace: Workspace; engine: WorkspaceEngine }> {
+  /**
+   * Resolves (and lazily starts) the DuckDB engine for a workspace. Secrets and lakehouse catalogs always come from
+   * the workspace *owner*, so members of a shared workspace query through the owner's connections.
+   */
+  async engine(p: Principal, workspaceId: string): Promise<{ workspace: WorkspaceAccess; engine: WorkspaceEngine; role: WorkspaceRole }> {
     const workspace = await this.get(p, workspaceId);
     // Workspace-linked data connections + every cloud storage connection the owner has configured.
     const lake = this.lakehouse ? await this.lakehouse.resolveEngineBits(workspace.user_id) : { secrets: [], attachments: [] };
     const secrets = [...(await this.connections.resolveSecrets(workspace.user_id, workspace.engine_settings.connection_ids ?? [])), ...(await this.cloud.resolveSecrets(workspace.user_id)), ...lake.secrets];
     const engine = await this.engines.get({ workspaceId: workspace.id, dbPath: workspace.active_db_path, settings: workspace.engine_settings, secrets, attachments: lake.attachments });
-    return { workspace, engine };
+    return { workspace, engine, role: workspace.role };
   }
 
-  // ---------- Tabs ----------
+  // ---------- Tabs (per user, inside a possibly shared workspace) ----------
 
   async listTabs(p: Principal, workspaceId: string): Promise<SessionTab[]> {
     await this.get(p, workspaceId);
-    return this.db.select().from(this.s.sessionTabs).where(eq(this.s.sessionTabs.workspace_id, workspaceId)).orderBy(asc(this.s.sessionTabs.order_index), asc(this.s.sessionTabs.updated_at));
+    return this.db
+      .select()
+      .from(this.s.sessionTabs)
+      .where(and(eq(this.s.sessionTabs.workspace_id, workspaceId), eq(this.s.sessionTabs.user_id, p.userId)))
+      .orderBy(asc(this.s.sessionTabs.order_index), asc(this.s.sessionTabs.updated_at));
   }
 
   async createTab(p: Principal, workspaceId: string, input: { title?: string; sql_content?: string; chart_config?: ChartConfig; engine?: string | null }): Promise<SessionTab> {
     await this.get(p, workspaceId);
-    const existing = await this.db.select({ order_index: this.s.sessionTabs.order_index }).from(this.s.sessionTabs).where(eq(this.s.sessionTabs.workspace_id, workspaceId));
+    const existing = await this.db.select({ order_index: this.s.sessionTabs.order_index }).from(this.s.sessionTabs).where(and(eq(this.s.sessionTabs.workspace_id, workspaceId), eq(this.s.sessionTabs.user_id, p.userId)));
     const order = existing.reduce((m, r) => Math.max(m, r.order_index + 1), 0);
     const tab: SessionTab = {
       id: newId(),
       workspace_id: workspaceId,
+      user_id: p.userId,
       title: (input.title ?? '').trim() || `Query ${order + 1}`,
       sql_content: input.sql_content ?? '',
       chart_config: input.chart_config ?? { type: 'none' },
@@ -225,7 +394,7 @@ export class WorkspaceService {
     const rows = await this.db
       .update(this.s.sessionTabs)
       .set(set)
-      .where(and(eq(this.s.sessionTabs.id, tabId), eq(this.s.sessionTabs.workspace_id, workspaceId)))
+      .where(and(eq(this.s.sessionTabs.id, tabId), eq(this.s.sessionTabs.workspace_id, workspaceId), eq(this.s.sessionTabs.user_id, p.userId)))
       .returning();
     if (!rows[0]) throw notFound('Tab');
     await this.db.update(this.s.workspaces).set({ updated_at: new Date() }).where(eq(this.s.workspaces.id, workspaceId));
@@ -236,7 +405,7 @@ export class WorkspaceService {
     await this.get(p, workspaceId);
     const r = await this.db
       .delete(this.s.sessionTabs)
-      .where(and(eq(this.s.sessionTabs.id, tabId), eq(this.s.sessionTabs.workspace_id, workspaceId)))
+      .where(and(eq(this.s.sessionTabs.id, tabId), eq(this.s.sessionTabs.workspace_id, workspaceId), eq(this.s.sessionTabs.user_id, p.userId)))
       .returning({ id: this.s.sessionTabs.id });
     if (r.length === 0) throw notFound('Tab');
   }

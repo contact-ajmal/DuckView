@@ -9,12 +9,19 @@ export const AUTH_PROVIDERS = ['local', 'oidc', 'saml'] as const;
 export const CONNECTION_TYPES = ['MOTHERDUCK', 'S3', 'POSTGRES', 'GCS', 'AZURE', 'HTTP'] as const;
 export const TOKEN_SCOPES = ['read', 'write', 'admin', 'mcp'] as const;
 export const ACTOR_TYPES = ['USER', 'AGENT', 'SYSTEM'] as const;
+/** Access level on a shared workspace. OWNER manages sharing/settings, EDITOR mutates data, VIEWER runs read-only SQL. */
+export const WORKSPACE_ROLES = ['OWNER', 'EDITOR', 'VIEWER'] as const;
+export const GROUP_MEMBER_ROLES = ['MANAGER', 'MEMBER'] as const;
+export const MEMBER_SUBJECT_TYPES = ['user', 'group'] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
 export type AuthProvider = (typeof AUTH_PROVIDERS)[number];
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 export type TokenScope = (typeof TOKEN_SCOPES)[number];
 export type ActorType = (typeof ACTOR_TYPES)[number];
+export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
+export type GroupMemberRole = (typeof GROUP_MEMBER_ROLES)[number];
+export type MemberSubjectType = (typeof MEMBER_SUBJECT_TYPES)[number];
 
 export interface EngineSettings {
   memory_limit?: string; // e.g. "8GB" | "50%"
@@ -76,6 +83,8 @@ export const sessionTabs = sqliteTable(
   {
     id: text('id').primaryKey(),
     workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Tabs are per user inside a (possibly shared) workspace. Backfilled to the workspace owner for pre-sharing rows. */
+    user_id: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     sql_content: text('sql_content').notNull().default(''),
     chart_config: text('chart_config', { mode: 'json' }).$type<ChartConfig>().notNull().default({ type: 'none' }),
@@ -85,7 +94,7 @@ export const sessionTabs = sqliteTable(
     engine: text('engine'),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
-  (t) => [index('session_tabs_workspace_idx').on(t.workspace_id)],
+  (t) => [index('session_tabs_workspace_idx').on(t.workspace_id), index('session_tabs_user_idx').on(t.workspace_id, t.user_id)],
 );
 
 export const dataConnections = sqliteTable(
@@ -138,8 +147,57 @@ export const auditLogs = sqliteTable(
   (t) => [index('audit_logs_ts_idx').on(t.timestamp), index('audit_logs_user_idx').on(t.user_id)],
 );
 
+// ---------------------------------------------------------------------------
+// Teams and workspace sharing
+// ---------------------------------------------------------------------------
+
+export const groups = sqliteTable(
+  'groups',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** Identity-provider group name/id when the group is mirrored from an OIDC `groups` claim (managed by SSO sync). */
+    external_id: text('external_id'),
+    created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [uniqueIndex('groups_name_idx').on(t.name), uniqueIndex('groups_external_idx').on(t.external_id)],
+);
+
+export const groupMembers = sqliteTable(
+  'group_members',
+  {
+    group_id: text('group_id').notNull().references(() => groups.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: GROUP_MEMBER_ROLES }).notNull().default('MEMBER'),
+    added_at: integer('added_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [uniqueIndex('group_members_pk').on(t.group_id, t.user_id), index('group_members_user_idx').on(t.user_id)],
+);
+
+/** A grant on a workspace for a user or a group. The workspace's `user_id` is always its primary OWNER. */
+export const workspaceMembers = sqliteTable(
+  'workspace_members',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    subject_type: text('subject_type', { enum: MEMBER_SUBJECT_TYPES }).notNull(),
+    /** users.id or groups.id (polymorphic — cleaned up by the services when the subject is deleted). */
+    subject_id: text('subject_id').notNull(),
+    role: text('role', { enum: WORKSPACE_ROLES }).notNull().default('VIEWER'),
+    added_by: text('added_by').references(() => users.id, { onDelete: 'set null' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [uniqueIndex('workspace_members_subject_idx').on(t.workspace_id, t.subject_type, t.subject_id), index('workspace_members_lookup_idx').on(t.subject_type, t.subject_id)],
+);
+
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
+export type Group = typeof groups.$inferSelect;
+export type GroupMember = typeof groupMembers.$inferSelect;
+export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
 export type SessionTab = typeof sessionTabs.$inferSelect;
 export type DataConnection = typeof dataConnections.$inferSelect;
 export type ApiToken = typeof apiTokens.$inferSelect;

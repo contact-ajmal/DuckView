@@ -65,12 +65,18 @@ export class AuthService {
     return user;
   }
 
-  async upsertOidcUser(input: { email: string; externalId: string; displayName?: string | null }): Promise<User> {
+  /**
+   * Creates or refreshes an SSO user. `groups` is the IdP group claim: membership of any `auth.oidc.admin_groups`
+   * entry (or an `admin_emails` match) promotes to ADMIN. Promotion is one-way — nothing here demotes.
+   */
+  async upsertOidcUser(input: { email: string; externalId: string; displayName?: string | null; groups?: string[] }): Promise<User> {
     const email = input.email.toLowerCase().trim();
     const existing = await this.findByEmail(email);
     const adminEmails = this.cfg.auth.oidc.admin_emails.map((e) => e.toLowerCase());
+    const adminGroups = new Set(this.cfg.auth.oidc.admin_groups);
+    const promoted = adminEmails.includes(email) || (input.groups ?? []).some((g) => adminGroups.has(g));
     if (existing) {
-      const role: UserRole = adminEmails.includes(email) ? 'ADMIN' : existing.role;
+      const role: UserRole = promoted ? 'ADMIN' : existing.role;
       await this.db.update(this.s.users).set({ external_id: input.externalId, display_name: input.displayName ?? existing.display_name, auth_provider: 'oidc', role }).where(eq(this.s.users.id, existing.id));
       return { ...existing, external_id: input.externalId, auth_provider: 'oidc', role };
     }
@@ -80,7 +86,7 @@ export class AuthService {
       email,
       password_hash: null,
       auth_provider: 'oidc',
-      role: isFirst || adminEmails.includes(email) ? 'ADMIN' : 'USER',
+      role: isFirst || promoted ? 'ADMIN' : 'USER',
       display_name: input.displayName ?? null,
       external_id: input.externalId,
       created_at: new Date(),

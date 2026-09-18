@@ -16,6 +16,7 @@ import { ChatHistoryService } from './services/chat.js';
 import { CopilotService } from './services/copilot.js';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
+import { GroupService } from './services/groups.js';
 import type { AwsBridge } from './services/aws.js';
 import type { ProviderFactory } from './services/llm.js';
 import { logger } from './observability/logger.js';
@@ -40,6 +41,7 @@ export interface AppContext {
   copilot: CopilotService;
   lakehouse: LakehouseService;
   agents: AgentService;
+  groups: GroupService;
   startedAt: Date;
   shutdown(): Promise<void>;
 }
@@ -56,7 +58,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const auth = new AuthService(store, cfg);
   const connections = new ConnectionService(store, cipher);
   const cloud = new CloudConnectionService(store, cipher);
-  const workspaces = new WorkspaceService(store, engines, connections, cloud);
+  const groups = new GroupService(store);
+  const workspaces = new WorkspaceService(store, engines, connections, cloud, groups);
   const lakehouse = new LakehouseService(cfg, store, cipher, engines);
   lakehouse.bind(workspaces, audit);
   const queries = new QueryService(cfg, workspaces, audit);
@@ -95,6 +98,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     copilot,
     lakehouse,
     agents,
+    groups,
     startedAt: new Date(),
     async shutdown() {
       await agents.flush();

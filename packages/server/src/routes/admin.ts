@@ -46,6 +46,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext) {
     const { id } = req.params as { id: string };
     if (id === req.principal!.userId) throw badRequest('You cannot delete yourself');
     await ctx.auth.deleteUser(id);
+    await ctx.workspaces.purgeUserGrants(id);
     ctx.audit.log({ userId: req.principal!.userId, actorType: 'USER', action: 'admin.user_delete', resource: `user:${id}`, ip: req.ip });
     return { ok: true };
   });

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { api, queryStream, ApiError, type Workspace, type SessionTab, type ColumnSchema, type ChartConfig, type ApprovalChallenge, type CatalogObject, type JailEntry, type QueryResult, type LakehouseConnection } from '../api/client';
+import { api, queryStream, ApiError, type Workspace, type SessionTab, type ColumnSchema, type ChartConfig, type ApprovalChallenge, type CatalogObject, type JailEntry, type QueryResult, type LakehouseConnection, type WorkspaceRole } from '../api/client';
+import { useAuth } from './auth';
 
 export interface TabResult {
   status: 'idle' | 'running' | 'done' | 'error' | 'approval';
@@ -122,7 +123,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
   async updateWorkspace(id, patch) {
     const r = await api.patch<{ workspace: Workspace }>(`/api/workspaces/${id}`, patch);
-    set({ workspaces: get().workspaces.map((w) => (w.id === id ? r.workspace : w)) });
+    set({ workspaces: get().workspaces.map((w) => (w.id === id ? { ...w, ...r.workspace } : w)) });
   },
   async deleteWorkspace(id) {
     await api.del(`/api/workspaces/${id}`);
@@ -322,3 +323,16 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({ maxRows: n });
   },
 }));
+
+/**
+ * What the signed-in user may do in the active workspace. Combines the platform role (READ_ONLY never edits)
+ * with the workspace role from sharing (VIEWER never edits, only OWNER manages settings and members).
+ * Tabs are personal and are not gated here.
+ */
+export function useWorkspaceAccess(): { workspace: Workspace | null; role: WorkspaceRole; canEdit: boolean; canManage: boolean; shared: boolean } {
+  const platformRole = useAuth((s) => s.user?.role);
+  const workspace = useWorkspace((s) => s.workspaces.find((w) => w.id === s.activeId) ?? null);
+  const role: WorkspaceRole = workspace?.role ?? 'OWNER';
+  const readOnlyUser = platformRole === 'READ_ONLY';
+  return { workspace, role, canEdit: !readOnlyUser && role !== 'VIEWER', canManage: !readOnlyUser && role === 'OWNER', shared: !!workspace?.shared };
+}

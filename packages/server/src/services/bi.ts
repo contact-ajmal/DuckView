@@ -3,7 +3,7 @@
  */
 import { eq, and, asc, desc } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
-import type { SavedQuery, Dashboard, DashboardWidget, LayoutItem, WidgetChartConfig, WidgetType } from '../db/schema/sqlite.js';
+import type { SavedQuery, Dashboard, DashboardWidget, LayoutItem, WidgetChartConfig, WidgetType, WorkspaceRole } from '../db/schema/sqlite.js';
 import { WIDGET_TYPES } from '../db/schema/sqlite.js';
 import { newId } from '../security/crypto.js';
 import type { WorkspaceService } from './workspaces.js';
@@ -56,7 +56,7 @@ export class SavedQueryService {
 
   async create(p: Principal, workspaceId: string, input: { name: string; folder?: string; description?: string | null; sql_text: string; tags?: string[] }): Promise<SavedQuery> {
     requireWrite(p);
-    await this.workspaces.get(p, workspaceId);
+    await this.workspaces.get(p, workspaceId, 'EDITOR');
     const now = new Date();
     const n = this.normalise(input);
     const q: SavedQuery = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name: n.name!, folder: n.folder ?? '', description: n.description ?? null, sql_text: n.sql_text!, tags: n.tags ?? [], created_at: now, updated_at: now };
@@ -66,6 +66,7 @@ export class SavedQueryService {
 
   async update(p: Principal, workspaceId: string, id: string, patch: { name?: string; folder?: string; description?: string | null; sql_text?: string; tags?: string[] }): Promise<SavedQuery> {
     requireWrite(p);
+    await this.workspaces.get(p, workspaceId, 'EDITOR');
     const existing = await this.get(p, workspaceId, id);
     const set = { ...this.normalise(patch), updated_at: new Date() };
     await this.db.update(this.s.savedQueries).set(set).where(eq(this.s.savedQueries.id, id));
@@ -74,6 +75,7 @@ export class SavedQueryService {
 
   async remove(p: Principal, workspaceId: string, id: string): Promise<void> {
     requireWrite(p);
+    await this.workspaces.get(p, workspaceId, 'EDITOR');
     await this.get(p, workspaceId, id);
     await this.db.delete(this.s.savedQueries).where(eq(this.s.savedQueries.id, id));
   }
@@ -103,19 +105,19 @@ export class DashboardService {
     return this.db.select().from(this.s.dashboards).where(eq(this.s.dashboards.workspace_id, workspaceId)).orderBy(desc(this.s.dashboards.updated_at));
   }
 
-  /** Loads a dashboard the principal may access (through its workspace). */
-  async get(p: Principal, id: string): Promise<Dashboard & { widgets: DashboardWidget[] }> {
+  /** Loads a dashboard the principal may access (through its workspace); `minRole` gates edits to EDITOR+. */
+  async get(p: Principal, id: string, minRole: WorkspaceRole = 'VIEWER'): Promise<Dashboard & { widgets: DashboardWidget[] }> {
     const rows = await this.db.select().from(this.s.dashboards).where(eq(this.s.dashboards.id, id)).limit(1);
     const d = rows[0];
     if (!d) throw notFound('Dashboard');
-    await this.workspaces.get(p, d.workspace_id); // authorisation via workspace ownership / admin
+    await this.workspaces.get(p, d.workspace_id, minRole); // authorisation via workspace membership / admin
     const widgets = await this.db.select().from(this.s.dashboardWidgets).where(eq(this.s.dashboardWidgets.dashboard_id, id)).orderBy(asc(this.s.dashboardWidgets.order_index), asc(this.s.dashboardWidgets.created_at));
     return { ...d, widgets };
   }
 
   async create(p: Principal, workspaceId: string, input: { name: string; description?: string | null }): Promise<Dashboard> {
     requireWrite(p);
-    await this.workspaces.get(p, workspaceId);
+    await this.workspaces.get(p, workspaceId, 'EDITOR');
     const now = new Date();
     const d: Dashboard = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name: (input.name ?? '').trim().slice(0, 160) || 'Untitled dashboard', description: input.description?.trim().slice(0, 2000) || null, layout: [], created_at: now, updated_at: now };
     await this.db.insert(this.s.dashboards).values(d);
@@ -124,7 +126,7 @@ export class DashboardService {
 
   async update(p: Principal, id: string, patch: { name?: string; description?: string | null; layout?: LayoutItem[] }): Promise<Dashboard> {
     requireWrite(p);
-    const d = await this.get(p, id);
+    const d = await this.get(p, id, 'EDITOR');
     const set: Partial<Dashboard> = { updated_at: new Date() };
     if (patch.name !== undefined) set.name = patch.name.trim().slice(0, 160) || d.name;
     if (patch.description !== undefined) set.description = patch.description?.trim().slice(0, 2000) || null;
@@ -143,7 +145,7 @@ export class DashboardService {
 
   async remove(p: Principal, id: string): Promise<void> {
     requireWrite(p);
-    await this.get(p, id);
+    await this.get(p, id, 'EDITOR');
     await this.db.delete(this.s.dashboards).where(eq(this.s.dashboards.id, id));
   }
 
@@ -174,7 +176,7 @@ export class DashboardService {
 
   async addWidget(p: Principal, dashboardId: string, input: WidgetInput & { title: string; widget_type: WidgetType }): Promise<{ widget: DashboardWidget; layout: LayoutItem[] }> {
     requireWrite(p);
-    const d = await this.get(p, dashboardId);
+    const d = await this.get(p, dashboardId, 'EDITOR');
     if (input.saved_query_id) {
       const q = await this.db.select({ id: this.s.savedQueries.id }).from(this.s.savedQueries).where(and(eq(this.s.savedQueries.id, input.saved_query_id), eq(this.s.savedQueries.workspace_id, d.workspace_id))).limit(1);
       if (!q[0]) throw badRequest('saved_query_id does not belong to this workspace');
@@ -205,7 +207,7 @@ export class DashboardService {
 
   async updateWidget(p: Principal, dashboardId: string, widgetId: string, patch: WidgetInput): Promise<DashboardWidget> {
     requireWrite(p);
-    const d = await this.get(p, dashboardId);
+    const d = await this.get(p, dashboardId, 'EDITOR');
     const existing = d.widgets.find((w) => w.id === widgetId);
     if (!existing) throw notFound('Widget');
     if (patch.saved_query_id) {
@@ -220,7 +222,7 @@ export class DashboardService {
 
   async removeWidget(p: Principal, dashboardId: string, widgetId: string): Promise<LayoutItem[]> {
     requireWrite(p);
-    const d = await this.get(p, dashboardId);
+    const d = await this.get(p, dashboardId, 'EDITOR');
     if (!d.widgets.some((w) => w.id === widgetId)) throw notFound('Widget');
     await this.db.delete(this.s.dashboardWidgets).where(eq(this.s.dashboardWidgets.id, widgetId));
     const layout = d.layout.filter((l) => l.i !== widgetId);

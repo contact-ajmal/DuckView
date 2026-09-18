@@ -6,6 +6,15 @@ import { badRequest, forbidden, HttpError } from '../services/errors.js';
 import { logger } from '../observability/logger.js';
 
 const LoginBody = z.object({ email: z.string().email(), password: z.string().min(1) });
+
+/** Reads a groups claim as a string array; null when the claim is absent (vs. present but empty). Accepts a scalar too. */
+export function extractGroups(claims: Record<string, unknown> | undefined, claim: string): string[] | null {
+  const v = claims?.[claim];
+  if (v === undefined || v === null) return null;
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+  if (typeof v === 'string') return v.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  return null;
+}
 const RegisterBody = z.object({ email: z.string().email(), password: z.string().min(1), display_name: z.string().max(120).optional() });
 
 export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
@@ -40,7 +49,8 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     const p = req.principal!;
     const user = await ctx.auth.findById(p.userId);
     if (!user) throw new HttpError(401, 'User no longer exists', 'UNAUTHORIZED');
-    return { user: toPublicUser(user), principal: { via: p.via, scopes: p.scopes, workspace_scope: p.workspaceScope ?? null } };
+    const groups = (await ctx.groups.byIds(await ctx.groups.groupIdsFor(p.userId))).map((g) => ({ id: g.id, name: g.name, external: !!g.external_id }));
+    return { user: toPublicUser(user), groups, principal: { via: p.via, scopes: p.scopes, workspace_scope: p.workspaceScope ?? null } };
   });
 
   app.post('/api/auth/password', { preHandler: app.authenticate }, async (req) => {
@@ -99,17 +109,25 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       if (!claims?.sub) throw badRequest('ID token missing subject');
       let email = typeof claims.email === 'string' ? claims.email : undefined;
       let name = typeof claims.name === 'string' ? claims.name : undefined;
-      if (!email) {
+      let groups = extractGroups(claims, o.groups_claim);
+      // Many IdPs only put groups (and sometimes email) in userinfo, not in the ID token.
+      if (!email || groups === null) {
         try {
           const info = await oidc.fetchUserInfo(config, tokens.access_token, claims.sub);
-          email = info.email;
+          email = email ?? info.email;
           name = name ?? info.name;
+          if (groups === null) groups = extractGroups(info as Record<string, unknown>, o.groups_claim);
         } catch (err) {
           logger().warn({ err }, 'OIDC userinfo fetch failed');
         }
       }
       if (!email) throw badRequest('OIDC provider did not return an email claim');
-      const user = await ctx.auth.upsertOidcUser({ email, externalId: claims.sub, displayName: name ?? null });
+      const user = await ctx.auth.upsertOidcUser({ email, externalId: claims.sub, displayName: name ?? null, groups: groups ?? [] });
+      // Mirror IdP groups into teams only when the claim was actually present (an absent claim must not wipe memberships).
+      if (o.sync_groups && groups !== null) {
+        const sync = await ctx.groups.syncExternal(user.id, groups);
+        if (sync.created) logger().info({ email, created: sync.created }, 'SSO login created new teams');
+      }
       ctx.audit.log({ userId: user.id, actorType: 'USER', action: 'auth.login_oidc', ip: req.ip });
       const token = signSession(user);
       return reply.redirect(`/#/auth/callback?token=${encodeURIComponent(token)}`);
