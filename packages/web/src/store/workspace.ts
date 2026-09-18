@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { api, queryStream, ApiError, type Workspace, type SessionTab, type ColumnSchema, type ChartConfig, type ApprovalChallenge, type CatalogObject, type JailEntry, type QueryResult, type LakehouseConnection, type WorkspaceRole } from '../api/client';
 import { useAuth } from './auth';
+import { resultCache, cacheId } from '../lib/resultCache';
+import { subscribeLiveEvents } from '../lib/liveEvents';
+
+/** Rows above this are not persisted per tab; the grid re-runs the query instead. */
+const TAB_RESULT_MAX_BYTES = 2 * 1024 * 1024;
 
 export interface TabResult {
   status: 'idle' | 'running' | 'done' | 'error' | 'approval';
@@ -15,6 +20,8 @@ export interface TabResult {
   statements: { verb: string; class: string }[];
   startedAt: number | null;
   cancel?: () => void;
+  /** Set when the rows were restored from this browser's cache after a reload — not re-run. */
+  restoredAt?: string;
   /** Where the rows came from: DuckDB (default) or a remote lakehouse SQL engine. */
   engine?: 'duckdb' | 'databricks';
   /** Lakehouse connection the remote result was produced by (enables "Materialise into DuckDB"). */
@@ -33,6 +40,14 @@ export type SidePanel = 'catalog' | 'profile' | 'plan' | 'chart' | 'settings' | 
 export interface HistoryEntry { id: string; sql: string; at: string; durationMs: number; rows: number; tabTitle: string; status: 'ok' | 'error' }
 
 const historyKey = (ws: string) => `duckview.history.${ws}`;
+const overviewKey = (ws: string) => `duckview.overview.${ws}`;
+function loadOverviewTarget(ws: string): string | null {
+  try {
+    return localStorage.getItem(overviewKey(ws));
+  } catch {
+    return null;
+  }
+}
 function loadHistory(ws: string | null): HistoryEntry[] {
   if (!ws) return [];
   try {
@@ -79,6 +94,13 @@ interface WorkspaceState {
   loadCatalog(force?: boolean): Promise<void>;
   setSidePanel(p: SidePanel): void;
   setMaxRows(n: number): void;
+  /** Dataset selected on the Overview page, per workspace — survives navigating away and reloads. */
+  overviewTarget: Record<string, string | null>;
+  setOverviewTarget(workspaceId: string, target: string | null): void;
+  /** Applies a new data epoch (own mutation or a teammate's, via the live feed) so cached views revalidate. */
+  setDataVersion(workspaceId: string, version: number): void;
+  /** Subscribes to the live feed for epoch events; idempotent. Returns an unsubscribe. */
+  startLiveInvalidation(): () => void;
 }
 
 const flushTimers: Record<string, number> = {};
@@ -101,6 +123,16 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
   sidePanel: 'catalog',
   maxRows: 1000,
+  overviewTarget: {},
+  setOverviewTarget(workspaceId, target) {
+    set({ overviewTarget: { ...get().overviewTarget, [workspaceId]: target } });
+    try {
+      if (target) localStorage.setItem(overviewKey(workspaceId), target);
+      else localStorage.removeItem(overviewKey(workspaceId));
+    } catch {
+      /* ignore */
+    }
+  },
 
   async loadWorkspaces() {
     const r = await api.get<{ workspaces: Workspace[] }>('/api/workspaces');
@@ -111,7 +143,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
   async selectWorkspace(id) {
     localStorage.setItem('duckview.workspace', id);
-    set({ activeId: id, tabs: [], activeTabId: null, catalog: null, history: loadHistory(id) });
+    const overviewTarget = { ...get().overviewTarget };
+    if (!(id in overviewTarget)) overviewTarget[id] = loadOverviewTarget(id);
+    set({ activeId: id, tabs: [], activeTabId: null, catalog: null, history: loadHistory(id), overviewTarget });
     await get().loadTabs();
     void get().loadCatalog(true);
   },
@@ -127,6 +161,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
   async deleteWorkspace(id) {
     await api.del(`/api/workspaces/${id}`);
+    void resultCache.clearWorkspace(id);
     const remaining = get().workspaces.filter((w) => w.id !== id);
     set({ workspaces: remaining });
     if (get().activeId === id) {
@@ -142,6 +177,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const active = r.tabs.find((t) => t.id === remembered) ?? r.tabs[0] ?? null;
     set({ tabs: r.tabs, activeTabId: active?.id ?? null });
     if (r.tabs.length === 0) await get().addTab();
+    // Bring back each tab's last result so a reload shows numbers instead of an empty grid. Clearly marked as
+    // restored (with its time) and never treated as current — a re-run replaces it.
+    const userId = useAuth.getState().user?.id;
+    if (!userId) return;
+    const restored: Record<string, TabResult> = {};
+    await Promise.all(
+      r.tabs.map(async (t) => {
+        const e = await resultCache.get<Omit<TabResult, 'status' | 'cancel'> & { sql: string }>(cacheId(userId, ws, 'tab', t.id));
+        if (e && get().activeId === ws && !get().results[t.id]) restored[t.id] = { ...emptyResult(), ...e.payload, status: 'done', restoredAt: e.computed_at, cancel: undefined };
+      }),
+    );
+    if (Object.keys(restored).length && get().activeId === ws) set({ results: { ...restored, ...get().results } });
   },
   async addTab(input) {
     const ws = get().activeId;
@@ -160,6 +207,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const ws = get().activeId;
     if (!ws) return;
     await api.del(`/api/workspaces/${ws}/tabs/${id}`);
+    const uid = useAuth.getState().user?.id;
+    if (uid) void resultCache.remove(cacheId(uid, ws, 'tab', id));
     const tabs = get().tabs.filter((t) => t.id !== id);
     const results = { ...get().results };
     delete results[id];
@@ -228,8 +277,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       update({ cancel: () => ac.abort() });
       try {
         const r = await api.post<QueryResult & { engine: 'databricks' }>(`/api/lakehouse/${remote}/query`, { sql, workspace_id: ws, max_rows: get().maxRows, dry_run: opts.dryRun }, { signal: ac.signal });
-        update({ status: 'done', columns: r.columns, rows: r.rows, rowCount: r.rowCount, durationMs: r.durationMs, truncated: r.truncated, statements: [{ verb: r.statementClass, class: r.statementClass === 'SELECT' ? 'read' : 'write' }], cancel: undefined });
+        update({ status: 'done', columns: r.columns, rows: r.rows, rowCount: r.rowCount, durationMs: r.durationMs, truncated: r.truncated, statements: [{ verb: r.statementClass, class: r.statementClass === 'SELECT' ? 'read' : 'write' }], cancel: undefined, restoredAt: undefined });
         pushHistory({ sql, durationMs: r.durationMs, rows: r.rowCount, status: 'ok' });
+        persistTabResult(ws, tabId, get().results[tabId]);
       } catch (err) {
         const e = err as ApiError;
         if (e.code === 'APPROVAL_REQUIRED') update({ status: 'approval', challenge: null, error: e.message, errorCode: e.code, cancel: undefined });
@@ -265,9 +315,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
           },
           onDone: (info) => {
             flush();
-            update({ status: 'done', durationMs: info.duration_ms, truncated: info.truncated, statements: info.statements, cancel: undefined });
+            update({ status: 'done', durationMs: info.duration_ms, truncated: info.truncated, statements: info.statements, cancel: undefined, restoredAt: undefined });
             if (info.statements.some((s) => s.class !== 'read')) void get().loadCatalog(true);
+            if (info.data_version !== undefined) get().setDataVersion(ws, info.data_version);
             pushHistory({ sql, durationMs: info.duration_ms, rows: get().results[tabId]?.rowCount ?? 0, status: 'ok' });
+            persistTabResult(ws, tabId, get().results[tabId]);
           },
           onError: (err) => {
             flush();
@@ -322,7 +374,48 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   setMaxRows(n) {
     set({ maxRows: n });
   },
+  setDataVersion(workspaceId, version) {
+    const cur = get().workspaces.find((w) => w.id === workspaceId);
+    if (!cur || cur.data_version >= version) return;
+    set({ workspaces: get().workspaces.map((w) => (w.id === workspaceId ? { ...w, data_version: version } : w)) });
+  },
+  startLiveInvalidation() {
+    if (liveUnsubscribe) return liveUnsubscribe;
+    liveUnsubscribe = subscribeLiveEvents((e) => {
+      if (e.type === 'workspace') get().setDataVersion(e.workspace_id, e.data_version);
+    });
+    return () => {
+      liveUnsubscribe?.();
+      liveUnsubscribe = null;
+    };
+  },
 }));
+
+let liveUnsubscribe: (() => void) | null = null;
+
+/** Persists a finished tab result (rows capped by size) so it can be restored after a reload. */
+function persistTabResult(workspaceId: string, tabId: string, r: TabResult | undefined) {
+  const userId = useAuth.getState().user?.id;
+  if (!userId || !r || r.status !== 'done') return;
+  const { cancel: _c, status: _s, restoredAt: _r, ...payload } = r;
+  let bytes = 0;
+  try {
+    bytes = JSON.stringify(payload.rows).length;
+  } catch {
+    return;
+  }
+  const id = cacheId(userId, workspaceId, 'tab', tabId);
+  if (bytes > TAB_RESULT_MAX_BYTES) {
+    void resultCache.remove(id);
+    return;
+  }
+  void resultCache.set({ id, user_id: userId, workspace_id: workspaceId, kind: 'tab', etag: null, computed_at: new Date().toISOString(), payload });
+}
+
+/** Wipes every cached result in this browser — on logout and on session loss. */
+export function clearBrowserCache() {
+  return resultCache.clearAll();
+}
 
 /**
  * What the signed-in user may do in the active workspace. Combines the platform role (READ_ONLY never edits)

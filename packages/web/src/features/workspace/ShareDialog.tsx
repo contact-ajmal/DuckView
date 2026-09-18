@@ -4,6 +4,7 @@ import { api, type Workspace, type WorkspaceMember, type WorkspaceRole, type Gro
 import { Button, Badge, Input, Label, Modal, Select, cn } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
+import { resultCache } from '../../lib/resultCache';
 
 const ROLE_HELP: Record<WorkspaceRole, string> = {
   VIEWER: 'Run read-only SQL, view dashboards and saved queries, keep their own tabs.',
@@ -91,6 +92,7 @@ export function ShareDialog({ open, onClose, workspace }: { open: boolean; onClo
     run(async () => {
       if (!workspace || !confirm(`Leave "${workspace.name}"? Your tabs in it are discarded.`)) return;
       await api.post(`/api/workspaces/${workspace.id}/leave`);
+      void resultCache.clearWorkspace(workspace.id);
       onClose();
       await ws.loadWorkspaces();
     });

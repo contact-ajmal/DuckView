@@ -98,6 +98,8 @@ function DashboardCanvas({ id }: { id: string }) {
   const [name, setName] = useState('');
   const layoutTimer = useRef<number | null>(null);
   const { canEdit: canWrite } = useWorkspaceAccess();
+  // Epoch of the dashboard's workspace (may differ from the active one when opened by link): drives revalidation.
+  const dataVersion = useWorkspace((s) => s.workspaces.find((w) => w.id === dash?.workspace_id)?.data_version);
 
   const load = useCallback(async () => {
     try {
@@ -187,7 +189,7 @@ function DashboardCanvas({ id }: { id: string }) {
                   </span>
                 )}
               </header>
-              <div className="min-h-0 flex-1"><WidgetBody dashboardId={id} widget={w} tick={tick} /></div>
+              <div className="min-h-0 flex-1"><WidgetBody dashboardId={id} widget={w} tick={tick} workspaceId={dash.workspace_id} version={dataVersion} /></div>
             </div>
           ))}
         </Grid>

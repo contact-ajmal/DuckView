@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
 import { UploadCloud, Table2, Eye, FileSpreadsheet, FileJson, Database, Box, Folder, FolderPlus, FolderOpen, Trash2, ArrowRight, ArrowUpRight, RefreshCw, ChevronDown, ChevronRight, X } from 'lucide-react';
 import { FolderPicker } from '../explorer/FolderPicker';
 import '../../lib/chart';
 import { withAlpha, compactNumber, useChartTheme } from '../../lib/chart';
 import { api, uploadFiles, formatBytes, type OverviewResult, type OverviewColumn, type JailEntry } from '../../api/client';
+import { useCached } from '../../lib/useCached';
+import { CacheChip } from '../../components/CacheChip';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { ResultsGrid } from '../workspace/ResultsGrid';
 import { Eyebrow, PageTitle, SideCard, Panel, TypePill, Tag } from '../../components/layout';
@@ -97,10 +99,6 @@ function Distribution({ col }: { col: OverviewColumn }) {
 export function OverviewPage() {
   const ws = useWorkspace();
   const { canEdit: canWrite } = useWorkspaceAccess();
-  const [target, setTarget] = useState<string | null>(null);
-  const [overview, setOverview] = useState<OverviewResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [uploads, setUploads] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const [picker, setPicker] = useState(false);
@@ -108,36 +106,30 @@ export function OverviewPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const wsId = ws.activeId;
   const hidden = useLayout((l) => l.hidden);
+  const dataVersion = ws.workspaces.find((w) => w.id === wsId)?.data_version;
+  // The selection lives in the store (persisted per workspace): moving to Query and back keeps the same dataset on
+  // screen, and the profile only changes when a different file is picked (or its data actually changes).
+  const target = wsId ? ws.overviewTarget[wsId] ?? null : null;
+  const setTarget = (t: string | null) => wsId && ws.setOverviewTarget(wsId, t);
 
-  const load = useCallback(
-    async (t: string) => {
-      if (!wsId) return;
-      setLoading(true);
-      setError(null);
-      try {
-        setOverview(await api.post<OverviewResult>(`/api/workspaces/${wsId}/overview`, { target: t }));
-      } catch (e) {
-        setOverview(null);
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [wsId],
-  );
+  // Cached in this browser and on the server; a hit paints instantly and is confirmed with a 304 behind the scenes.
+  const ov = useCached<OverviewResult>({ workspaceId: wsId, kind: 'overview', target, url: `/api/workspaces/${wsId}/overview`, body: { target }, version: dataVersion });
+  const overview = ov.data;
+  const loading = ov.state === 'loading' || ov.state === 'restoring' || ov.state === 'revalidating';
+  const error = ov.state === 'error' ? ov.error : null;
 
   useEffect(() => {
-    if (!ws.catalog || target) return;
+    if (!ws.catalog || !wsId) return;
     const first = ws.catalog.files[0]?.path ?? ws.catalog.objects[0]?.name ?? null;
-    if (first) setTarget(first);
-  }, [ws.catalog, target]);
-  useEffect(() => {
-    setTarget(null);
-    setOverview(null);
-  }, [wsId]);
-  useEffect(() => {
-    if (target) void load(target);
-  }, [target, load]);
+    if (!target) {
+      if (first) setTarget(first);
+      return;
+    }
+    // A remembered selection that no longer exists (file deleted, folder removed, table dropped) falls back to the first dataset.
+    const isQuery = /^(select|with|from)\b/i.test(target);
+    const exists = isQuery || ws.catalog.files.some((f) => f.path === target) || ws.catalog.objects.some((o) => o.name === target || `${o.schema}.${o.name}` === target);
+    if (!exists) setTarget(first);
+  }, [ws.catalog, target, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onFiles = async (files: File[]) => {
     if (!wsId || !files.length) return;
@@ -386,6 +378,7 @@ export function OverviewPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-[11px] text-zinc-500">overview suite finished in {overview.duration_ms} ms</span>
+                  <CacheChip state={ov.state} computedAt={ov.computedAt} fromCache={ov.fromCache} serverCached={ov.serverCached} onRefresh={ov.refresh} verb="profiled" />
                   <button onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)} className="inline-flex items-center gap-1.5 rounded-md border border-accent-600/60 bg-accent-600/20 px-3 py-1.5 text-xs font-medium text-accent-100 hover:bg-accent-600/30">
                     Open Query tool <ArrowRight className="h-3.5 w-3.5" />
                   </button>

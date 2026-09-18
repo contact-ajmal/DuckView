@@ -53,6 +53,41 @@ async function request<T>(method: string, url: string, body?: unknown, opts: { s
   return json as T;
 }
 
+/** Cache provenance the server attaches to cacheable results. */
+export interface CacheMeta { etag: string | null; cached: boolean; computed_at: string }
+
+export type ConditionalResult<T> = { status: 304; etag: string } | { status: 200; data: T & CacheMeta; etag: string | null };
+
+/**
+ * POST with `If-None-Match` support for cacheable endpoints (overview, profile, explain, inspect, widget data, query).
+ * A 304 means the caller's copy is current; `refresh` recomputes on the server even when it would match.
+ */
+export async function postConditional<T>(url: string, body: Record<string, unknown>, opts: { etag?: string | null; refresh?: boolean; signal?: AbortSignal } = {}): Promise<ConditionalResult<T>> {
+  const headers: Record<string, string> = { accept: 'application/json', 'content-type': 'application/json' };
+  const token = getToken();
+  if (token) headers.authorization = `Bearer ${token}`;
+  if (opts.etag && !opts.refresh) headers['if-none-match'] = opts.etag.startsWith('"') ? opts.etag : `"${opts.etag}"`;
+  if (opts.refresh) headers['x-duckview-refresh'] = '1';
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(opts.refresh ? { ...body, refresh: true } : body), signal: opts.signal });
+  const etag = (res.headers.get('etag') ?? '').replace(/^W\//, '').replace(/"/g, '') || null;
+  if (res.status === 304) return { status: 304, etag: etag ?? opts.etag ?? '' };
+  const text = await res.text();
+  let json: Record<string, unknown> = {};
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { message: text };
+  }
+  if (!res.ok) {
+    if (res.status === 401 && getToken()) {
+      setToken(null);
+      window.dispatchEvent(new Event('duckview:unauthorized'));
+    }
+    throw new ApiError(res.status, String(json.error ?? 'ERROR'), String(json.message ?? res.statusText), json.challenge as ApprovalChallenge | undefined, json.details);
+  }
+  return { status: 200, data: json as T & CacheMeta, etag };
+}
+
 export const api = {
   get: <T>(url: string) => request<T>('GET', url),
   post: <T>(url: string, body?: unknown, opts?: { signal?: AbortSignal }) => request<T>('POST', url, body ?? {}, opts),
@@ -73,6 +108,8 @@ export interface Workspace {
   /** true when the workspace belongs to someone else and reached the caller through sharing. */
   shared: boolean;
   member_count: number;
+  /** Data epoch — moves on every mutation; cached results keyed on an older epoch are stale. */
+  data_version: number;
 }
 export interface WorkspaceMember { id: string; workspace_id: string; subject_type: 'user' | 'group'; subject_id: string; role: WorkspaceRole; added_by: string | null; created_at: string; name: string; email: string | null; external: boolean }
 export interface Group { id: string; name: string; description: string | null; external_id: string | null; created_by: string | null; created_at: string; updated_at: string; member_count: number; my_role: 'MANAGER' | 'MEMBER' | null }
@@ -108,6 +145,7 @@ export interface LiveStats {
   duckdb: { memory_limit_bytes: number; memory_usage_bytes: number; temp_bytes: number; threads: number; engines: { workspaceId: string; dbPath: string; memory_limit_bytes: number; memory_usage_bytes: number; temporary_storage_bytes: number; active_queries: number; threads: number }[] };
   scratch: { path: string; used_bytes: number; free_bytes: number | null; total_bytes: number | null };
   data: { path: string; used_bytes: number; free_bytes: number | null; total_bytes: number | null };
+  cache?: { enabled: boolean; entries: number; bytes: number; max_bytes: number; hits: number; misses: number };
 }
 
 /** Upload with progress (XHR — fetch has no upload progress events). */
@@ -142,7 +180,7 @@ export function uploadFiles(workspaceId: string, files: File[], opts: { dir?: st
 type StreamHandlers = {
   onSchema: (columns: ColumnSchema[]) => void;
   onRows: (rows: unknown[][]) => void;
-  onDone: (info: { row_count: number; duration_ms: number; truncated: boolean; statements: { verb: string; class: string }[] }) => void;
+  onDone: (info: { row_count: number; duration_ms: number; truncated: boolean; statements: { verb: string; class: string }[]; data_version?: number }) => void;
   onError: (err: ApiError) => void;
 };
 

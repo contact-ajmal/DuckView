@@ -107,6 +107,20 @@ export const ConfigSchema = z.object({
       export_max_rows: z.coerce.number().int().min(1).default(50_000_000),
     })
     .default({}),
+  cache: z
+    .object({
+      /** Server-side result cache for profiles, schema inspection, plans, widget data and read-only queries. */
+      enabled: z.coerce.boolean().default(true),
+      /** Total budget for cached results (LRU by bytes of JSON). */
+      max_bytes: z.coerce.number().int().min(0).default(256 * 1024 * 1024),
+      /** Results larger than this are never cached. */
+      max_entry_bytes: z.coerce.number().int().min(1024).default(16 * 1024 * 1024),
+      /** Lifetime of entries whose inputs are versioned (local files + workspace data epoch). */
+      ttl_seconds: z.coerce.number().int().min(10).default(6 * 3600),
+      /** Lifetime of entries that touch remote/lakehouse sources (no version signal); 0 disables caching them. */
+      remote_ttl_seconds: z.coerce.number().int().min(0).default(60),
+    })
+    .default({}),
   mcp: z
     .object({
       default_page_size: z.coerce.number().int().min(1).default(50),

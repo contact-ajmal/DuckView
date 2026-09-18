@@ -8,6 +8,7 @@ import type { DuckViewConfig } from '../config/index.js';
 import type { WorkspaceRole } from '../db/schema/sqlite.js';
 import type { WorkspaceService } from './workspaces.js';
 import type { AuditService } from './audit.js';
+import { unwrap, type ResultCache, type CacheOutcome, type CacheMeta } from './cache.js';
 import type { Principal } from './principal.js';
 import { canWrite, requireScope, roleAtLeast } from './principal.js';
 import { SandboxViolation, type JailEntry } from '../engine/sandbox.js';
@@ -25,7 +26,14 @@ export interface RunOptions {
   dryRun?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Read-only, deterministic statements are served from the result cache unless `cache: false`. */
+  cache?: boolean;
+  /** Recompute even when a cached result exists (the fresh result is stored). */
+  refresh?: boolean;
+  /** Client ETag; when it still matches, `run` resolves to `{ notModified: true }` without executing anything. */
+  ifNoneMatch?: string | null;
 }
+
 
 export interface ApprovalChallenge {
   status: 'approval_required';
@@ -56,7 +64,12 @@ export function buildChallenge(analysis: SqlAnalysis): ApprovalChallenge {
 }
 
 export class QueryService {
-  constructor(private readonly cfg: DuckViewConfig, private readonly workspaces: WorkspaceService, private readonly audit: AuditService) {}
+  constructor(private readonly cfg: DuckViewConfig, private readonly workspaces: WorkspaceService, private readonly audit: AuditService, private readonly cache: ResultCache) {}
+
+  /** Any statement that is not a pure read moves the workspace's data epoch — even when it failed halfway. */
+  private async noteMutation(p: Principal, workspaceId: string, analysis: SqlAnalysis) {
+    if (analysis.isMutating) await this.workspaces.bumpVersion(workspaceId, `sql:${analysis.mutatingVerbs.join(',').toLowerCase() || 'admin'}`, p.userId).catch(() => undefined);
+  }
 
   private authorize(p: Principal, analysis: SqlAnalysis, opts: RunOptions, role: WorkspaceRole): void {
     requireScope(p, 'read');
@@ -75,7 +88,12 @@ export class QueryService {
     }
   }
 
-  async run(p: Principal, workspaceId: string, sql: string, opts: RunOptions = {}): Promise<QueryResult & { analysis: SqlAnalysis }> {
+  /**
+   * Executes SQL. Read-only, deterministic statements over local data are served from the result cache — the key
+   * embeds the files they read and the workspace epoch, so a hit is exact. Throws NotModified when `ifNoneMatch`
+   * still matches (HTTP layer → 304).
+   */
+  async run(p: Principal, workspaceId: string, sql: string, opts: RunOptions = {}): Promise<QueryResult & { analysis: SqlAnalysis } & CacheMeta> {
     if (!sql || !sql.trim()) throw badRequest('sql is required');
     const analysis = analyzeSql(sql);
     const start = performance.now();
@@ -84,10 +102,23 @@ export class QueryService {
       // Cheap access check first so a forbidden or HITL-blocked statement never spins up an engine.
       const { role } = await this.workspaces.get(p, workspaceId);
       this.authorize(p, analysis, opts, role);
-      const { engine } = await this.workspaces.engine(p, workspaceId);
-      const result = await engine.execute(sql, { maxRows: opts.maxRows, page: opts.page, countTotal: opts.countTotal, signal: opts.signal, timeoutMs: opts.timeoutMs, actor });
-      this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'query.execute', resource: `workspace:${workspaceId}`, queryText: sql, durationMs: result.durationMs, ip: p.ip, status: 'ok' });
-      return result;
+      const execute = async () => {
+        const { engine } = await this.workspaces.engine(p, workspaceId);
+        try {
+          return await engine.execute(sql, { maxRows: opts.maxRows, page: opts.page, countTotal: opts.countTotal, signal: opts.signal, timeoutMs: opts.timeoutMs, actor });
+        } finally {
+          await this.noteMutation(p, workspaceId, analysis);
+        }
+      };
+      const cacheable = opts.cache !== false && !analysis.isMutating;
+      const outcome: CacheOutcome<QueryResult & { analysis: SqlAnalysis; guardedSql: string }> = cacheable
+        ? await this.cache.through(p, workspaceId, 'query', sql, { maxRows: opts.maxRows ?? null, page: opts.page ?? 1, countTotal: !!opts.countTotal }, { ifNoneMatch: opts.ifNoneMatch, refresh: opts.refresh }, execute)
+        : { status: 'bypass', etag: null, value: await execute(), cached: false, computed_at: new Date().toISOString() };
+      const durationMs = outcome.status === 'not_modified' ? 0 : outcome.value.durationMs;
+      this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'query.execute', resource: `workspace:${workspaceId}`, queryText: sql, durationMs, ip: p.ip, status: 'ok' });
+      const out = unwrap(outcome);
+      // Cached values are shared objects — never hand callers a reference they could mutate.
+      return out.cached ? { ...out, rows: out.rows.map((r) => [...r]) } : out;
     } catch (err) {
       this.recordFailure(p, workspaceId, sql, start, err, actor);
       throw err;
@@ -108,7 +139,12 @@ export class QueryService {
       const { role } = await this.workspaces.get(p, workspaceId);
       this.authorize(p, analysis, opts, role);
       const { engine } = await this.workspaces.engine(p, workspaceId);
-      const out = await engine.stream(sql, handlers, { maxRows: opts.maxRows, signal: opts.signal, timeoutMs: opts.timeoutMs, actor: 'user' });
+      let out;
+      try {
+        out = await engine.stream(sql, handlers, { maxRows: opts.maxRows, signal: opts.signal, timeoutMs: opts.timeoutMs, actor: 'user' });
+      } finally {
+        await this.noteMutation(p, workspaceId, analysis);
+      }
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'query.stream', resource: `workspace:${workspaceId}`, queryText: sql, durationMs: out.durationMs, ip: p.ip, status: 'ok' });
       return out;
     } catch (err) {
@@ -117,42 +153,50 @@ export class QueryService {
     }
   }
 
-  async explain(p: Principal, workspaceId: string, sql: string, analyze = false) {
+  async explain(p: Principal, workspaceId: string, sql: string, analyze = false, opts: { refresh?: boolean; ifNoneMatch?: string | null } = {}) {
     requireScope(p, 'read');
-    const { engine } = await this.workspaces.engine(p, workspaceId);
     const start = performance.now();
     try {
-      const plan = await engine.explain(sql, { analyze });
+      const compute = async () => {
+        const { engine } = await this.workspaces.engine(p, workspaceId);
+        return engine.explain(sql, { analyze });
+      };
+      // EXPLAIN ANALYZE executes the query for timings — those are the point, so it is never cached.
+      const o = analyze ? { status: 'bypass' as const, etag: null, value: await compute(), cached: false, computed_at: new Date().toISOString() } : await this.cache.through(p, workspaceId, 'explain', sql, null, opts, compute);
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: analyze ? 'query.explain_analyze' : 'query.explain', resource: `workspace:${workspaceId}`, queryText: sql, durationMs: performance.now() - start, ip: p.ip });
-      return plan;
+      return unwrap(o);
     } catch (err) {
       this.recordFailure(p, workspaceId, sql, start, err, p.actorType === 'AGENT' ? 'agent' : 'user', 'query.explain');
       throw err;
     }
   }
 
-  async profile(p: Principal, workspaceId: string, target: string) {
+  async profile(p: Principal, workspaceId: string, target: string, opts: { refresh?: boolean; ifNoneMatch?: string | null } = {}) {
     requireScope(p, 'read');
-    const { engine } = await this.workspaces.engine(p, workspaceId);
     const start = performance.now();
     try {
-      const out = await engine.summarize(target);
-      this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'dataset.profile', resource: `workspace:${workspaceId}`, queryText: out.sql, durationMs: performance.now() - start, ip: p.ip });
-      return out;
+      const o = await this.cache.through(p, workspaceId, 'profile', target, null, opts, async () => {
+        const { engine } = await this.workspaces.engine(p, workspaceId);
+        return engine.summarize(target);
+      });
+      this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'dataset.profile', resource: `workspace:${workspaceId}`, queryText: o.status === 'not_modified' ? target : o.value.sql, durationMs: performance.now() - start, ip: p.ip });
+      return unwrap(o);
     } catch (err) {
       this.recordFailure(p, workspaceId, target, start, err, p.actorType === 'AGENT' ? 'agent' : 'user', 'dataset.profile');
       throw err;
     }
   }
 
-  async overview(p: Principal, workspaceId: string, target: string) {
+  async overview(p: Principal, workspaceId: string, target: string, opts: { refresh?: boolean; ifNoneMatch?: string | null } = {}) {
     requireScope(p, 'read');
-    const { engine } = await this.workspaces.engine(p, workspaceId);
     const start = performance.now();
     try {
-      const out = await engine.overview(target);
-      this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'dataset.overview', resource: `workspace:${workspaceId}`, queryText: target, durationMs: out.duration_ms, ip: p.ip });
-      return out;
+      const o = await this.cache.through(p, workspaceId, 'overview', target, null, opts, async () => {
+        const { engine } = await this.workspaces.engine(p, workspaceId);
+        return engine.overview(target);
+      });
+      this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'dataset.overview', resource: `workspace:${workspaceId}`, queryText: target, durationMs: o.status === 'not_modified' ? 0 : o.value.duration_ms, ip: p.ip });
+      return unwrap(o);
     } catch (err) {
       this.recordFailure(p, workspaceId, target, start, err, p.actorType === 'AGENT' ? 'agent' : 'user', 'dataset.overview');
       throw err;
@@ -197,6 +241,7 @@ export class QueryService {
       const { mkdirSync } = await import('node:fs');
       mkdirSync(path.dirname(finalAbs), { recursive: true });
       const res = await engine.execute(copySql, { maxRows: 1, actor: p.actorType === 'AGENT' ? 'agent' : 'user' });
+      await this.workspaces.bumpVersion(workspaceId, 'dataset_saved', p.userId).catch(() => undefined);
       const rowsWritten = Number(res.rows[0]?.[0] ?? res.rowsChanged ?? 0);
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'dataset.save', resource: `file:${finalRel}`, queryText: copySql, durationMs: res.durationMs, ip: p.ip });
       const { statSync } = await import('node:fs');

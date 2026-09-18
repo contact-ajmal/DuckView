@@ -6,44 +6,61 @@ import type { ChartOptions } from 'chart.js';
 import { ArrowUpRight, ArrowDownRight, Loader2, RefreshCw, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
 import '../../lib/chart';
 import { MAX_SERIES, withAlpha, compactNumber, useChartTheme } from '../../lib/chart';
-import { api, type DashboardWidget, type ColumnSchema, type WidgetChartConfig } from '../../api/client';
+import { type DashboardWidget, type ColumnSchema, type WidgetChartConfig } from '../../api/client';
 import { cn } from '../../components/ui';
+import { fetchCached } from '../../lib/useCached';
+import { useAuth } from '../../store/auth';
 
 export interface WidgetData { columns: ColumnSchema[]; rows: unknown[][]; rowCount: number; totalRows: number | null; durationMs: number }
 
-/** Fetches widget data on mount and on the configured interval. */
-export function useWidgetData(dashboardId: string, widget: DashboardWidget, tick: number) {
+/**
+ * Fetches widget data on mount and on the configured interval. The browser copy paints first; each load — including
+ * every interval tick — is a conditional request, so an unchanged workspace costs a 304 instead of a query.
+ * `tick` (the dashboard's Refresh button) forces a recompute.
+ */
+export function useWidgetData(dashboardId: string, widget: DashboardWidget, tick: number, workspaceId: string, version?: number) {
+  const userId = useAuth((s) => s.user?.id ?? '');
   const [data, setData] = useState<WidgetData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [at, setAt] = useState<number | null>(null);
+  const [fromCache, setFromCache] = useState(false);
   const timer = useRef<number | null>(null);
+  const lastTick = useRef(tick);
   useEffect(() => {
-    if (widget.widget_type === 'MARKDOWN') return;
+    if (widget.widget_type === 'MARKDOWN' || !userId) return;
     let alive = true;
-    const load = async () => {
+    const forced = tick !== lastTick.current;
+    lastTick.current = tick;
+    const load = async (refresh: boolean) => {
       setLoading(true);
       try {
-        const r = await api.post<WidgetData>(`/api/dashboards/${dashboardId}/widgets/${widget.id}/data`, {});
-        if (alive) {
-          setData(r);
-          setError(null);
-          setAt(Date.now());
-        }
+        // The widget's SQL is part of the identity so an edited widget never shows its predecessor's numbers.
+        await fetchCached<WidgetData>(
+          { userId, workspaceId, kind: 'widget', target: `${widget.id}|${widget.saved_query_id ?? ''}|${widget.custom_sql ?? ''}|${widget.widget_type}`, url: `/api/dashboards/${dashboardId}/widgets/${widget.id}/data`, body: {}, version },
+          (d, meta) => {
+            if (!alive) return;
+            setData(d);
+            setError(null);
+            setAt(Date.parse(meta.computedAt) || Date.now());
+            setFromCache(meta.fromCache);
+          },
+          { refresh },
+        );
       } catch (e) {
         if (alive) setError((e as Error).message);
       } finally {
         if (alive) setLoading(false);
       }
     };
-    void load();
-    if (widget.refresh_interval_sec > 0) timer.current = window.setInterval(load, widget.refresh_interval_sec * 1000);
+    void load(forced);
+    if (widget.refresh_interval_sec > 0) timer.current = window.setInterval(() => void load(false), widget.refresh_interval_sec * 1000);
     return () => {
       alive = false;
       if (timer.current) window.clearInterval(timer.current);
     };
-  }, [dashboardId, widget.id, widget.custom_sql, widget.saved_query_id, widget.refresh_interval_sec, widget.widget_type, tick]);
-  return { data, error, loading, at };
+  }, [dashboardId, widget.id, widget.custom_sql, widget.saved_query_id, widget.refresh_interval_sec, widget.widget_type, tick, userId, workspaceId, version]);
+  return { data, error, loading, at, fromCache };
 }
 
 const fmt = (v: unknown, format?: WidgetChartConfig['format']) => {
@@ -232,8 +249,8 @@ export function MarkdownWidget({ config }: { config: WidgetChartConfig }) {
   );
 }
 
-export function WidgetBody({ dashboardId, widget, tick }: { dashboardId: string; widget: DashboardWidget; tick: number }) {
-  const { data, error, loading, at } = useWidgetData(dashboardId, widget, tick);
+export function WidgetBody({ dashboardId, widget, tick, workspaceId, version }: { dashboardId: string; widget: DashboardWidget; tick: number; workspaceId: string; version?: number }) {
+  const { data, error, loading, at, fromCache } = useWidgetData(dashboardId, widget, tick, workspaceId, version);
   if (widget.widget_type === 'MARKDOWN') return <MarkdownWidget config={widget.chart_config} />;
   if (error) return <div className="m-3 rounded-md border border-red-900 bg-red-950/40 p-2 font-mono text-[11px] text-red-200">{error}</div>;
   if (!data) return <div className="flex h-full items-center justify-center text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /></div>;
@@ -243,7 +260,7 @@ export function WidgetBody({ dashboardId, widget, tick }: { dashboardId: string;
       {widget.widget_type === 'KPI' && <KpiWidget data={data} config={widget.chart_config} />}
       {widget.widget_type === 'CHART' && <div className="h-full p-2"><ChartWidget data={data} config={widget.chart_config} /></div>}
       {widget.widget_type === 'TABLE' && <TableWidget data={data} config={widget.chart_config} />}
-      {at && widget.refresh_interval_sec > 0 && <div className="absolute bottom-1 right-2 font-mono text-[9px] text-zinc-600">refreshed {new Date(at).toLocaleTimeString()}</div>}
+      {at && (widget.refresh_interval_sec > 0 || fromCache) && <div className="absolute bottom-1 right-2 font-mono text-[9px] text-zinc-600">{fromCache ? 'cached · ' : ''}computed {new Date(at).toLocaleTimeString()}</div>}
     </div>
   );
 }

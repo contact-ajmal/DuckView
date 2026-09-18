@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Bot, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess, lakehouseEngine, engineConnectionId } from '../../store/workspace';
+import { useAuth } from '../../store/auth';
+import { fetchCached } from '../../lib/useCached';
+import { CacheChip } from '../../components/CacheChip';
 import { useCopilot } from '../../store/copilot';
 import { api, exportAndDownload, tabsToSql, sqlToTabs, type ChartConfig, type SavedQuery } from '../../api/client';
 import { SqlEditor, type SqlEditorHandle } from './SqlEditor';
@@ -36,6 +39,7 @@ export function WorkspacePage() {
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [profile, setProfile] = useState<ProfileResult | null>(null);
+  const [profileMeta, setProfileMeta] = useState<{ fromCache: boolean; computedAt: string; serverCached: boolean; target: string } | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersisted<boolean>('duckview.pane.workbench.sidebar.collapsed', false);
@@ -106,24 +110,31 @@ export function WorkspacePage() {
     return () => registerCopilotHost(null);
   }, [tab, sql, result, ws]);
 
-  const explain = async (analyze: boolean) => {
+  const userId = useAuth((s) => s.user?.id ?? '');
+  const explain = async (analyze: boolean, refresh = false) => {
     if (!workspace || !sql.trim()) return;
     setPlanLoading(true);
     setView('plan');
     try {
-      setPlan(await api.post<PlanResult>(`/api/workspaces/${workspace.id}/explain`, { sql, analyze }));
+      if (analyze) setPlan(await api.post<PlanResult>(`/api/workspaces/${workspace.id}/explain`, { sql, analyze }));
+      else await fetchCached<PlanResult>({ userId, workspaceId: workspace.id, kind: 'explain', target: sql, url: `/api/workspaces/${workspace.id}/explain`, body: { sql }, version: workspace.data_version }, (data) => setPlan(data), { refresh });
     } catch (e) {
       setPlan({ format: 'text', plan: null, text: `Error: ${(e as Error).message}` });
     } finally {
       setPlanLoading(false);
     }
   };
-  const doProfile = async (target: string) => {
+  const doProfile = async (target: string, refresh = false) => {
     if (!workspace || !target.trim()) return;
     setProfileLoading(true);
+    setProfileMeta(null);
     setView('profile');
     try {
-      setProfile(await api.post<ProfileResult>(`/api/workspaces/${workspace.id}/profile`, { target }));
+      // Cached copy first (instant), then the server's answer — a 304 leaves it untouched.
+      await fetchCached<ProfileResult>({ userId, workspaceId: workspace.id, kind: 'profile', target, url: `/api/workspaces/${workspace.id}/profile`, body: { target }, version: workspace.data_version }, (data, meta) => {
+        setProfile(data);
+        setProfileMeta({ ...meta, target });
+      }, { refresh });
     } catch (e) {
       setProfile({ summary: [], rowCount: null, columnCount: 0, sizeBytes: null, sql: '' });
       alert((e as Error).message);
@@ -414,7 +425,8 @@ export function WorkspacePage() {
           {result?.status === 'running' && <span className="text-accent-300">● running… {result.rowCount > 0 && `${result.rowCount.toLocaleString()} rows`}</span>}
           {executed && (
             <span>
-              <span className="text-emerald-400">●</span> <span className="text-zinc-200">{result.durationMs} ms</span> · <span className="text-zinc-200">{result.rowCount.toLocaleString()}</span> rows · <span className="text-zinc-200">{result.columns.length}</span> cols
+              <span className={result.restoredAt ? 'text-zinc-500' : 'text-emerald-400'}>●</span> <span className="text-zinc-200">{result.durationMs} ms</span> · <span className="text-zinc-200">{result.rowCount.toLocaleString()}</span> rows · <span className="text-zinc-200">{result.columns.length}</span> cols
+              {result.restoredAt && <span className="text-zinc-500" title="Restored from this browser after a reload — press Run (⌘↵) to re-execute."> · result from {new Date(result.restoredAt).toLocaleTimeString()}, not re-run</span>}
               {result.truncated && <span className="text-amber-300"> · capped at {ws.maxRows.toLocaleString()}</span>}
               {result.engine === 'databricks' && <Badge tone="amber" className="ml-1.5">databricks</Badge>}
               {result.statements.map((s, i) => <Badge key={i} tone={s.class === 'read' ? 'zinc' : s.class === 'destructive' ? 'red' : 'violet'} className="ml-1.5">{s.verb}</Badge>)}
@@ -505,7 +517,15 @@ export function WorkspacePage() {
         )}
         {view === 'chart' && tab && (chartable ? <ChartPanel columns={result!.columns} rows={result!.rows} config={tab.chart_config} onChange={(c: ChartConfig) => void ws.setChart(tab.id, c)} /> : <Empty title="Run a query to chart it" />)}
         {view === 'plan' && <PlanView plan={plan} loading={planLoading} onExplain={() => void explain(false)} onAnalyze={() => void explain(true)} />}
-        {view === 'profile' && <ProfilePanel profile={profile} loading={profileLoading} onProfile={doProfile} defaultTarget={ws.catalog?.files[0]?.path ?? ws.catalog?.objects[0]?.name ?? ''} />}
+        {view === 'profile' && (
+          <ProfilePanel
+            profile={profile}
+            loading={profileLoading}
+            onProfile={doProfile}
+            defaultTarget={ws.catalog?.files[0]?.path ?? ws.catalog?.objects[0]?.name ?? ''}
+            provenance={profileMeta && <CacheChip state={profileLoading ? 'revalidating' : 'fresh'} computedAt={profileMeta.computedAt} fromCache={profileMeta.fromCache} serverCached={profileMeta.serverCached} onRefresh={() => void doProfile(profileMeta.target, true)} verb="profiled" />}
+          />
+        )}
       </div>
       {executed && result.columns.length > 0 && !isHidden('query.columns') && (
         <div className="group/cols flex shrink-0 flex-wrap gap-x-5 gap-y-1 border-t border-zinc-800 px-4 py-1.5 font-mono text-[11px]">

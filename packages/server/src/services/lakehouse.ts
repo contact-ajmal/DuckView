@@ -272,6 +272,7 @@ export class LakehouseService {
     const now = new Date();
     const record: LakehouseConnection = { id, user_id: userId, name, provider: input.provider, alias, config, encrypted_credentials: enc.ciphertext, iv: enc.iv, tag: enc.tag, status: 'unknown', last_error: null, last_tested_at: null, created_at: now, updated_at: now };
     await this.db.insert(this.s.lakehouseConnections).values(record);
+    await this.workspaces?.bumpOwnerWorkspaces(userId, 'lakehouse_added');
     return this.toPublic(record);
   }
 
@@ -298,6 +299,7 @@ export class LakehouseService {
       set.tag = enc.tag;
     }
     await this.db.update(this.s.lakehouseConnections).set(set).where(eq(this.s.lakehouseConnections.id, id));
+    await this.workspaces?.bumpOwnerWorkspaces(userId, 'lakehouse_changed');
     return this.toPublic({ ...existing, ...set });
   }
 
@@ -307,6 +309,8 @@ export class LakehouseService {
       .where(and(eq(this.s.lakehouseConnections.id, id), eq(this.s.lakehouseConnections.user_id, userId)))
       .returning({ id: this.s.lakehouseConnections.id });
     if (r.length === 0) throw notFound('Lakehouse connection');
+    // Results computed through the attached catalog (or its alias) must not outlive the connection.
+    await this.workspaces?.bumpOwnerWorkspaces(userId, 'lakehouse_removed');
   }
 
   /** Secrets + attachments for every connection the user owns (merged into each workspace engine spec). */
@@ -556,6 +560,7 @@ export class LakehouseService {
     }
     const durationMs = Math.round(performance.now() - started);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'lakehouse.materialize', resource: `table:${table}`, queryText: text.slice(0, 4000), durationMs, ip: p.ip });
+    await this.workspaces.bumpVersion(workspaceId, 'materialized', p.userId).catch(() => undefined);
     return { table, rows: r.rows.length, columns: r.columns.map((col) => ({ name: col.name, type: col.type })), truncated: r.truncated, duration_ms: durationMs };
   }
 }

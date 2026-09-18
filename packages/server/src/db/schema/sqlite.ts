@@ -72,6 +72,8 @@ export const workspaces = sqliteTable(
     active_db_path: text('active_db_path').notNull().default(':memory:'),
     engine_settings: text('engine_settings', { mode: 'json' }).$type<EngineSettings>().notNull().default({}),
     folders: text('folders', { mode: 'json' }).$type<WorkspaceFolder[]>().notNull().default([]),
+    /** Monotonic data epoch: bumped on every mutation, file/folder change and :memory: engine (re)start. Cache keys embed it. */
+    data_version: integer('data_version').notNull().default(0),
     created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },

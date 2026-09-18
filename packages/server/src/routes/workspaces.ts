@@ -63,8 +63,19 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
     const { id } = req.params as { id: string };
     await ctx.workspaces.get(req.principal!, id, 'OWNER'); // drops every member's in-memory tables
     ctx.engines.evict(id);
+    await ctx.workspaces.bumpVersion(id, 'engine_restart', req.principal!.userId);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.restart_engine', resource: `workspace:${id}`, ip: req.ip });
     return { ok: true };
+  });
+
+  /** Drops every cached result for the workspace (server side) and moves the epoch so browsers drop theirs too. */
+  app.delete('/api/workspaces/:id/cache', async (req) => {
+    const { id } = req.params as { id: string };
+    await ctx.workspaces.get(req.principal!, id, 'EDITOR');
+    const dropped = ctx.cache.invalidateWorkspace(id, { all: true });
+    const data_version = await ctx.workspaces.bumpVersion(id, 'cache_cleared', req.principal!.userId);
+    ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.cache_clear', resource: `workspace:${id}`, ip: req.ip });
+    return { dropped, data_version };
   });
 
   // ---- sharing ----

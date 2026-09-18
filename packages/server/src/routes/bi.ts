@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
+import { conditional } from './conditional.js';
 import { WIDGET_TYPES } from '../db/schema/sqlite.js';
 
 const ChartConfig = z
@@ -102,12 +103,14 @@ export async function biRoutes(app: FastifyInstance, ctx: AppContext) {
   });
 
   // Runs a widget's query (read-only, capped) — used by the dashboard renderer and auto-refresh loops.
-  app.post('/api/dashboards/:id/widgets/:wid/data', async (req) => {
+  app.post('/api/dashboards/:id/widgets/:wid/data', async (req, reply) => {
     const { id, wid } = req.params as { id: string; wid: string };
-    const body = z.object({ max_rows: z.number().int().min(1).max(5000).optional() }).parse(req.body ?? {});
+    const body = z.object({ max_rows: z.number().int().min(1).max(5000).optional(), refresh: z.boolean().optional() }).parse(req.body ?? {});
     const { sql, workspace_id, widget } = await ctx.dashboards.widgetSql(req.principal!, id, wid);
-    const result = await ctx.queries.run(req.principal!, workspace_id, sql, { maxRows: body.max_rows ?? (widget.widget_type === 'KPI' ? 10 : widget.widget_type === 'TABLE' ? 1000 : 2000), countTotal: widget.widget_type === 'TABLE' });
-    const { analysis: _a, guardedSql: _g, ...rest } = result as typeof result & { guardedSql?: string };
-    return { widget_id: wid, ...rest };
+    return conditional(req, reply, async (c) => {
+      const result = await ctx.queries.run(req.principal!, workspace_id, sql, { maxRows: body.max_rows ?? (widget.widget_type === 'KPI' ? 10 : widget.widget_type === 'TABLE' ? 1000 : 2000), countTotal: widget.widget_type === 'TABLE', refresh: c.refresh, ifNoneMatch: c.ifNoneMatch });
+      const { analysis: _a, guardedSql: _g, ...rest } = result as typeof result & { guardedSql?: string };
+      return { widget_id: wid, ...rest };
+    });
   });
 }

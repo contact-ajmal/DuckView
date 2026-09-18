@@ -32,6 +32,8 @@ export const workspaces = pgTable(
     active_db_path: text('active_db_path').notNull().default(':memory:'),
     engine_settings: jsonb('engine_settings').$type<EngineSettings>().notNull().default({}),
     folders: jsonb('folders').$type<WorkspaceFolder[]>().notNull().default([]),
+    /** Monotonic data epoch: bumped on every mutation, file/folder change and :memory: engine (re)start. Cache keys embed it. */
+    data_version: integer('data_version').notNull().default(0),
     created_at: ts('created_at').notNull(),
     updated_at: ts('updated_at').notNull(),
   },

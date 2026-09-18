@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
+import { conditional } from './conditional.js';
 import { requireWrite } from '../services/principal.js';
 import { CLOUD_PROVIDERS } from '../db/schema/sqlite.js';
 import { CLOUD_FIELDS } from '../services/cloud.js';
@@ -51,9 +52,9 @@ export async function storageRoutes(app: FastifyInstance, ctx: AppContext) {
   });
 
   // ---- instant schema inspection (DESCRIBE … LIMIT 0)
-  app.post('/api/storage/inspect', async (req) => {
-    const body = z.object({ workspace_id: z.string().min(1), target: z.string().min(1) }).parse(req.body);
-    return ctx.storage.inspect(req.principal!, body.workspace_id, body.target);
+  app.post('/api/storage/inspect', async (req, reply) => {
+    const body = z.object({ workspace_id: z.string().min(1), target: z.string().min(1), refresh: z.boolean().optional() }).parse(req.body);
+    return conditional(req, reply, (c) => ctx.storage.inspect(req.principal!, body.workspace_id, body.target, c));
   });
 
   // ---- cloud connection wizard backend

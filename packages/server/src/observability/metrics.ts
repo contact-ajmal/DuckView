@@ -55,6 +55,9 @@ export const metrics = {
   copilotDuration: new Histogram({ name: 'duckview_copilot_duration_seconds', help: 'DuckCopilot turn latency', labelNames: ['provider'] as const, buckets: [0.5, 1, 2, 5, 10, 20, 40, 80], registers: [registry] }),
   copilotTokens: new Counter({ name: 'duckview_copilot_tokens_total', help: 'LLM tokens consumed by DuckCopilot', labelNames: ['provider', 'direction'] as const, registers: [registry] }),
   auditEvents: new Counter({ name: 'duckview_audit_events_total', help: 'Audit log entries written', labelNames: ['action', 'actor'] as const, registers: [registry] }),
+  cacheLookups: new Counter({ name: 'duckview_cache_lookups_total', help: 'Result cache lookups by kind and outcome', labelNames: ['kind', 'result'] as const, registers: [registry] }),
+  cacheBytes: new Gauge({ name: 'duckview_cache_bytes', help: 'Bytes held by the server result cache', registers: [registry] }),
+  cacheEntries: new Gauge({ name: 'duckview_cache_entries', help: 'Entries held by the server result cache', registers: [registry] }),
 };
 
 metrics.hostMemoryBytes.set(os.totalmem());

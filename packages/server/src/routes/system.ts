@@ -65,6 +65,7 @@ export async function systemRoutes(app: FastifyInstance, ctx: AppContext) {
       duckdb: { memory_limit_bytes: live.duckdb_memory_limit_bytes, memory_usage_bytes: live.duckdb_memory_usage_bytes, temp_bytes: live.duckdb_temp_bytes, engines: live.engines, threads: r.duckdb.threads },
       scratch: { path: r.temp_disk.path, used_bytes: dirUsage(r.temp_disk.path), free_bytes: r.temp_disk.free_bytes, total_bytes: r.temp_disk.total_bytes },
       data: { path: r.data_jail.path, used_bytes: dirUsage(r.data_jail.path), free_bytes: r.data_jail.free_bytes, total_bytes: r.data_jail.total_bytes },
+      cache: ctx.cache.stats(),
     };
   });
 

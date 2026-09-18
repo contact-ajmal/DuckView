@@ -1,4 +1,4 @@
-import { eq, and, or, asc, desc, inArray } from 'drizzle-orm';
+import { eq, and, or, asc, desc, inArray, sql } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,6 +14,7 @@ import type { Principal } from './principal.js';
 import { assertWorkspaceScope, isPlatformAdmin, maxWorkspaceRole, requireWorkspaceRole } from './principal.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { isRemoteUri } from '../engine/sandbox.js';
+import { liveEvents } from '../observability/events.js';
 
 /** A workspace together with the caller's effective role on it. */
 export type WorkspaceAccess = Workspace & { role: WorkspaceRole };
@@ -46,8 +47,55 @@ FROM range(90);`;
 export class WorkspaceService {
   /** Set after construction (the lakehouse service needs this service for engine access, so the dependency is two-way). */
   lakehouse: LakehouseService | null = null;
+  private versionListeners: ((workspaceId: string, version: number) => void)[] = [];
 
-  constructor(private readonly store: MetadataStore, private readonly engines: EngineManager, private readonly connections: ConnectionService, private readonly cloud: CloudConnectionService, private readonly groups: GroupService) {}
+  constructor(private readonly store: MetadataStore, private readonly engines: EngineManager, private readonly connections: ConnectionService, private readonly cloud: CloudConnectionService, private readonly groups: GroupService) {
+    // A :memory: database loses every table when its engine is (re)created — idle eviction included — so
+    // results computed against those tables must not outlive the engine.
+    engines.onCreated = (spec) => {
+      if ((spec.dbPath?.trim() || ':memory:') === ':memory:') void this.bumpVersion(spec.workspaceId, 'engine_started').catch(() => undefined);
+    };
+  }
+
+  // ---------- Data epoch (cache invalidation) ----------
+
+  onVersion(fn: (workspaceId: string, version: number) => void) {
+    this.versionListeners.push(fn);
+  }
+
+  async versionOf(id: string): Promise<number> {
+    const rows = await this.db.select({ v: this.s.workspaces.data_version }).from(this.s.workspaces).where(eq(this.s.workspaces.id, id)).limit(1);
+    return rows[0]?.v ?? 0;
+  }
+
+  /**
+   * Moves the workspace's data epoch. Every mutating statement, upload/delete, folder change, transfer and :memory:
+   * engine start calls this; caches keyed on the epoch become unreachable and clients are told over the live feed.
+   */
+  async bumpVersion(id: string, reason: string, actorId: string | null = null): Promise<number> {
+    const rows = await this.db
+      .update(this.s.workspaces)
+      .set({ data_version: sql`${this.s.workspaces.data_version} + 1` })
+      .where(eq(this.s.workspaces.id, id))
+      .returning({ v: this.s.workspaces.data_version });
+    const v = rows[0]?.v;
+    if (v === undefined) return 0; // workspace gone
+    for (const fn of this.versionListeners) fn(id, v);
+    liveEvents.publish({ type: 'workspace', at: new Date().toISOString(), user_id: actorId, workspace_id: id, data_version: v, reason });
+    return v;
+  }
+
+  /** Moves the epoch of every workspace a user owns — their connections feed all of those engines. */
+  async bumpOwnerWorkspaces(ownerId: string, reason: string): Promise<void> {
+    const rows = await this.db.select({ id: this.s.workspaces.id }).from(this.s.workspaces).where(eq(this.s.workspaces.user_id, ownerId));
+    for (const r of rows) await this.bumpVersion(r.id, reason, ownerId);
+  }
+
+  /** Aliases of the owner's lakehouse catalogs — SQL naming one of them reads remote data the epoch cannot version. */
+  async lakehouseAliases(ownerId: string): Promise<string[]> {
+    if (!this.lakehouse) return [];
+    return (await this.lakehouse.list(ownerId)).map((c) => c.alias);
+  }
   private get db() {
     return this.store.db;
   }
@@ -208,6 +256,7 @@ export class WorkspaceService {
     await this.db.insert(this.s.workspaceMembers).values({ id: newId(), workspace_id: id, subject_type: 'user', subject_id: w.user_id, role: 'OWNER', added_by: p.userId, created_at: new Date() });
     // Secrets and lakehouse catalogs are resolved from the owner — the engine must be rebuilt for the new one.
     this.engines.evict(id);
+    await this.bumpVersion(id, 'transferred', p.userId);
     return this.describe(p, id);
   }
 
@@ -258,6 +307,7 @@ export class WorkspaceService {
       active_db_path: this.validateDbPath(input.active_db_path ?? ':memory:'),
       engine_settings: this.validateSettings(input.engine_settings ?? {}),
       folders: [],
+      data_version: 0,
       created_at: now,
       updated_at: now,
     };
@@ -274,7 +324,10 @@ export class WorkspaceService {
     if (patch.engine_settings !== undefined) set.engine_settings = this.validateSettings(patch.engine_settings);
     await this.db.update(this.s.workspaces).set(set).where(eq(this.s.workspaces.id, id));
     // Engine settings changed → the cached engine is stale; next query rebuilds it.
-    if (set.active_db_path !== undefined || set.engine_settings !== undefined) this.engines.evict(id);
+    if (set.active_db_path !== undefined || set.engine_settings !== undefined) {
+      this.engines.evict(id);
+      await this.bumpVersion(id, 'settings_changed', p.userId);
+    }
     return { ...w, ...set };
   }
 
@@ -298,6 +351,7 @@ export class WorkspaceService {
     if (w.folders.some((f) => f.path === abs)) return w.folders;
     const folders: WorkspaceFolder[] = [...w.folders, { path: abs, name: (name ?? '').trim() || path.basename(abs) || abs, added_at: new Date().toISOString() }];
     await this.db.update(this.s.workspaces).set({ folders, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    await this.bumpVersion(id, 'folder_added', p.userId);
     return folders;
   }
 
@@ -306,6 +360,7 @@ export class WorkspaceService {
     const folders = w.folders.filter((f) => f.path !== folderPath);
     if (folders.length === w.folders.length) throw notFound('Folder');
     await this.db.update(this.s.workspaces).set({ folders, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    await this.bumpVersion(id, 'folder_removed', p.userId);
     return folders;
   }
 

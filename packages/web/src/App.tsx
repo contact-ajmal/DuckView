@@ -62,7 +62,11 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (auth.user) void ws.loadWorkspaces();
+    if (!auth.user) return;
+    void ws.loadWorkspaces();
+    // Epoch events from teammates (and our own mutations elsewhere) keep cached views honest.
+    const stop = ws.startLiveInvalidation();
+    return stop;
   }, [auth.user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (auth.loading) {

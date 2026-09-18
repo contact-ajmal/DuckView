@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { api, getToken, setToken, type User } from '../api/client';
+import { resultCache } from '../lib/resultCache';
+import { clearCachedMemo } from '../lib/useCached';
 
 interface AuthConfig { strategy: 'local' | 'oidc'; registration_enabled: boolean; oidc_login_url: string | null; needs_bootstrap: boolean }
 
@@ -38,7 +40,11 @@ export const useAuth = create<AuthState>((set, get) => ({
     } finally {
       set({ loading: false });
     }
-    window.addEventListener('duckview:unauthorized', () => set({ user: null, scopes: [], groups: [] }));
+    window.addEventListener('duckview:unauthorized', () => {
+      set({ user: null, scopes: [], groups: [] });
+      clearCachedMemo();
+      void resultCache.clearAll(); // session gone → cached rows must not outlive it on a shared machine
+    });
   },
   async login(email, password) {
     const r = await api.post<{ token: string; user: User }>('/api/auth/login', { email, password });
@@ -58,5 +64,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     api.post('/api/auth/logout').catch(() => undefined);
     setToken(null);
     set({ user: null, scopes: [], groups: [] });
+    clearCachedMemo();
+    void resultCache.clearAll();
   },
 }));

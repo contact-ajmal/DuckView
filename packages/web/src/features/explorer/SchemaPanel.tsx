@@ -3,6 +3,9 @@ import { Play, ScanSearch, Bot, Loader2, Table2, FileSearch } from 'lucide-react
 import { api, formatBytes, type InspectResult, type RemoteInspect } from '../../api/client';
 import { TypePill } from '../../components/layout';
 import { Button, Empty, cn } from '../../components/ui';
+import { fetchCached } from '../../lib/useCached';
+import { useAuth } from '../../store/auth';
+import { useWorkspace } from '../../store/workspace';
 
 /** Inline schema preview for the results pane (bottom) — DESCRIBE … LIMIT 0, no data scan. */
 export function SchemaPanel({ workspaceId, target, remoteConnectionId, onQuery, onProfile, onAskCopilot }: { workspaceId: string; target: string | null; /** Lakehouse connection id when the target is a remote (non-attached) table — metadata comes from the catalog API. */ remoteConnectionId?: string | null; onQuery: (sql: string, title: string) => void; onProfile?: (target: string) => void; onAskCopilot?: (target: string) => void }) {
@@ -11,6 +14,8 @@ export function SchemaPanel({ workspaceId, target, remoteConnectionId, onQuery, 
   const [loading, setLoading] = useState(false);
   const [activeTable, setActiveTable] = useState(0);
 
+  const userId = useAuth((s) => s.user?.id ?? '');
+  const version = useWorkspace((s) => s.workspaces.find((w) => w.id === workspaceId)?.data_version);
   useEffect(() => {
     if (!target) return;
     let alive = true;
@@ -18,17 +23,17 @@ export function SchemaPanel({ workspaceId, target, remoteConnectionId, onQuery, 
     setError(null);
     setResult(null);
     setActiveTable(0);
+    // Local targets: browser copy first, then a conditional request (DESCRIBE never re-runs for an unchanged file).
     const req = remoteConnectionId
-      ? api.get<RemoteInspect>(`/api/lakehouse/${remoteConnectionId}/inspect?table=${encodeURIComponent(target)}`).then((r): InspectResult => ({ target: r.target, kind: 'remote', columns: r.columns, row_count: null, row_count_source: null, size_bytes: null, suggested_sql: r.suggested_sql }))
-      : api.post<InspectResult>('/api/storage/inspect', { workspace_id: workspaceId, target });
-    req
-      .then((r) => alive && setResult(r))
-      .catch((e) => alive && setError((e as Error).message))
-      .finally(() => alive && setLoading(false));
+      ? api.get<RemoteInspect>(`/api/lakehouse/${remoteConnectionId}/inspect?table=${encodeURIComponent(target)}`).then((r): void => {
+          if (alive) setResult({ target: r.target, kind: 'remote', columns: r.columns, row_count: null, row_count_source: null, size_bytes: null, suggested_sql: r.suggested_sql });
+        })
+      : fetchCached<InspectResult>({ userId, workspaceId, kind: 'inspect', target, url: '/api/storage/inspect', body: { workspace_id: workspaceId, target }, version }, (r) => alive && setResult(r));
+    req.catch((e) => alive && setError((e as Error).message)).finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
-  }, [workspaceId, target, remoteConnectionId]);
+  }, [workspaceId, target, remoteConnectionId, userId, version]);
 
   if (!target) return <Empty icon={<FileSearch className="h-8 w-8" />} title="Select a file to preview its schema" hint="Click any file or table in the Explorer. The preview reads only headers/footers — no data is scanned." />;
   const columns = result?.tables?.length ? result.tables[activeTable]?.columns ?? [] : result?.columns ?? [];

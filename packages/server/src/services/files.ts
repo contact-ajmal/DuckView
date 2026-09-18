@@ -44,6 +44,7 @@ export class FileService {
     }
     const stat = fs.statSync(target.absolute);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'file.upload', resource: `file:${target.relative}`, ip: p.ip, durationMs: null });
+    await this.workspaces.bumpVersion(workspaceId, 'file_uploaded', p.userId).catch(() => undefined);
     return { path: target.relative, kind: kindOf(base), size_bytes: stat.size, modified_at: stat.mtime.toISOString() };
   }
 
@@ -62,6 +63,7 @@ export class FileService {
       fs.unlinkSync(target.absolute);
     }
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'file.delete', resource: `file:${target.relative}`, ip: p.ip });
+    await this.workspaces.bumpVersion(workspaceId, 'file_deleted', p.userId).catch(() => undefined);
   }
 }
 

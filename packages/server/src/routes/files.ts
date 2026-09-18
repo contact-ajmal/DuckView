@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
+import { conditional } from './conditional.js';
 import { badRequest } from '../services/errors.js';
 import type { JailEntry } from '../engine/sandbox.js';
 import fs from 'node:fs';
@@ -49,9 +50,9 @@ export async function fileRoutes(app: FastifyInstance, ctx: AppContext) {
     return reply.send(fs.createReadStream(target.absolute));
   });
 
-  app.post('/api/workspaces/:id/overview', async (req) => {
+  app.post('/api/workspaces/:id/overview', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = z.object({ target: z.string().min(1), sample_rows: z.number().int().min(1).max(500).optional() }).parse(req.body);
-    return ctx.queries.overview(req.principal!, id, body.target);
+    const body = z.object({ target: z.string().min(1), sample_rows: z.number().int().min(1).max(500).optional(), refresh: z.boolean().optional() }).parse(req.body);
+    return conditional(req, reply, (c) => ctx.queries.overview(req.principal!, id, body.target, c));
   });
 }

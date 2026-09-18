@@ -13,6 +13,8 @@ function eventUserId(e: LiveEvent): string | null {
   switch (e.type) {
     case 'audit':
       return e.event.user_id;
+    case 'workspace':
+      return e.user_id;
     default:
       return e.user_id;
   }
@@ -50,7 +52,26 @@ export async function eventRoutes(app: FastifyInstance, ctx: AppContext) {
       }
       const p = principal;
       const all = isAdmin(p);
+      // Workspace epoch events go to every member, not just the actor; membership is memoised per socket for 30 s.
+      const access = new Map<string, { ok: boolean; at: number }>();
+      const canSee = async (workspaceId: string) => {
+        const m = access.get(workspaceId);
+        if (m && Date.now() - m.at < 30_000) return m.ok;
+        let ok = false;
+        try {
+          await ctx.workspaces.get(p, workspaceId);
+          ok = true;
+        } catch {
+          ok = false;
+        }
+        access.set(workspaceId, { ok, at: Date.now() });
+        return ok;
+      };
       unsubscribe = liveEvents.subscribe((e) => {
+        if (e.type === 'workspace') {
+          void canSee(e.workspace_id).then((ok) => ok && send(e));
+          return;
+        }
         if (all || eventUserId(e) === p.userId) send(e);
       });
       send({ type: 'ready', scope: all ? 'all' : 'own' });

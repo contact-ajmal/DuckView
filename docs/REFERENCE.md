@@ -25,6 +25,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  auth: local (scrypt) · OIDC+PKCE (+group→team sync) · API tokens (scoped)   │
 │  Sharing: workspace roles OWNER/EDITOR/VIEWER for users and teams            │
 │  QueryService ─ single choke point: authz → SQL guard → HITL → audit         │
+│  ResultCache ─ LRU keyed on file stat + workspace data epoch · ETag/304      │
 │  Storage: jailed tree · S3/Azure SDK listings · DESCRIBE-based inspection     │
 │  Exports: COPY … TO (parquet/csv/json) + streaming Arrow IPC writer          │
 │  Copilot: schema/SUMMARIZE/active-SQL context → provider bridge (SSE)        │
@@ -130,6 +131,8 @@ Key settings:
 | | `default_threads`, `temp_directory`, `query_timeout_seconds`, `max_result_rows` | Threads/timeout are per-workspace tunable; results are hard-capped for the grid. |
 | `mcp` | `default_page_size` / `max_page_size` | 50 / 200 rows per tool call; `max_cell_chars` truncates long strings. |
 | | `require_confirmation_for_mutations` | HITL gate for agents. |
+| `cache` | `enabled`, `max_bytes`, `max_entry_bytes` | Server-side result cache (default on, 256 MB LRU, entries ≤ 16 MB). See [Result cache](#result-cache). |
+| | `ttl_seconds`, `remote_ttl_seconds` | Lifetime of versioned entries (6 h) and of entries touching remote / lakehouse / MotherDuck sources (60 s; `0` never caches them). |
 | `observability` | `metrics_enabled`, `otel.*` | Prometheus at `/metrics`; OTLP/HTTP trace export when `otel.enabled`. |
 
 ## Security model
@@ -155,6 +158,25 @@ Six built-in themes decide both the colour system and the typeface — three dar
 ## Settings
 
 Settings is split into categories in a left-hand nav (deep-linkable as `#/settings/<category>`): **Appearance** (themes, fonts, scale) · **Layout** (show/hide components) · **Hardware** (live gauges, resources, warm engines) · **Engine** (memory, threads, timeout, sandbox) · **Storage** (cloud connections, data connections) · **Copilot** (provider status) · **Account** · **Users** (admin).
+
+## Result cache
+
+Profiles (`overview`, `SUMMARIZE`), schema inspection, `EXPLAIN` plans, dashboard widget data and read-only SQL results are cached in two places:
+
+1. **Server (shared).** An in-process LRU (`cache.max_bytes`) in front of the engine. Every member of a shared workspace, every dashboard viewer, Copilot's context hydration and the MCP `profile_dataset` / `execute_query` tools all hit the same entries.
+2. **Browser (per user).** IndexedDB keeps the last copy of each profile, schema, plan, widget and the final result of every workbench tab. On the next visit the page paints from it immediately (marked *cached · profiled 3 min ago*) and revalidates in the background. Wiped on sign-out and on session loss; capped at 150 MB (LRU); a tab result above 2 MB is not persisted.
+
+**Correctness comes from the key, not from timers.** The cache key — which is also the HTTP `ETag` — embeds:
+
+- the absolute path, size and mtime of every local file the operation reads (extracted from the SQL's string literals or the bare target), so a file rewritten outside DuckView invalidates;
+- the workspace **data epoch** (`workspaces.data_version`) for anything that can read in-database tables. The epoch moves on every non-read statement (even a failed script), `save_dataset`, uploads and deletions, folder changes, engine restart / settings change, transfer, lakehouse connection changes, and whenever a `:memory:` engine (re)starts — because that drops every table. Pure file targets do not embed it, so a `CREATE TABLE` never throws away a 10 s profile of a 400 MB CSV;
+- the paging/limit options.
+
+SQL that names an attached lakehouse alias, a remote URI (`s3://…`) or runs on a MotherDuck workspace has no version signal and is cached for `cache.remote_ttl_seconds` only. SQL using non-deterministic functions (`random()`, `now()`, `current_timestamp`, `uuid()`, …), mutations and `EXPLAIN ANALYZE` are never cached.
+
+**Protocol.** `POST /api/workspaces/:id/overview | /profile | /explain | /query`, `POST /api/storage/inspect` and `POST /api/dashboards/:id/widgets/:wid/data` answer with `ETag: "<key>"` and `cached` / `computed_at` in the body; send `If-None-Match` to get a `304` when the key still matches (one `stat` and a hash — no DuckDB work); `refresh: true` in the body (or `X-DuckView-Refresh: 1`) recomputes and re-stores. `GET /api/workspaces` carries each workspace's `data_version`; the live feed (`WS /api/ws/events`) pushes `{type:"workspace", workspace_id, data_version, reason}` to every member when it moves, and the query WebSocket's `done` message includes it after a mutation. `DELETE /api/workspaces/:id/cache` (editor) drops the workspace's server entries *and* moves the epoch so every browser recomputes; `POST /api/admin/cache/clear` empties the server cache. Stats: `GET /api/system/live → cache`, Prometheus `duckview_cache_lookups_total{kind,result}`, `duckview_cache_bytes`, `duckview_cache_entries`.
+
+Single-replica by design (the server cache is per process); with several replicas each keeps its own — still correct, just less warm.
 
 ## Sharing & teams
 
@@ -260,7 +282,8 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Exports | `POST /api/workspaces/:id/export {sql, format: parquet\|csv\|json\|arrow}` (native `COPY … TO` on disk, Arrow IPC via a streaming writer) · `GET /api/exports` · `GET /api/exports/:id/download` (streamed with `Content-Length`) · `DELETE /api/exports/:id` |
 | BI | `…/queries` CRUD (saved queries with folders/tags) · `…/dashboards` CRUD · `GET/PATCH/DELETE /api/dashboards/:id` (layout) · `POST/PATCH/DELETE /api/dashboards/:id/widgets[/:wid]` · `POST /api/dashboards/:id/widgets/:wid/data` |
 | Data | `POST /api/workspaces/:id/files` (multipart upload into the jail) · `DELETE /api/workspaces/:id/files?path=` · `POST /api/workspaces/:id/overview` (KPIs, null ratios, sample, distributions) · `GET /api/workspaces/:id/catalog` |
-| Query | `POST /api/workspaces/:id/query` · `/explain` · `/profile` · `/save` · `WS /api/ws/query` (auth → run/cancel; schema → rows* → done) |
+| Query | `POST /api/workspaces/:id/query` · `/explain` · `/profile` · `/save` · `WS /api/ws/query` (auth → run/cancel; schema → rows* → done). `query`, `explain`, `profile`, `overview`, `storage/inspect` and widget data are conditional (`ETag` / `If-None-Match` → 304, `refresh: true`). |
+| Cache | `DELETE /api/workspaces/:id/cache` · `POST /api/admin/cache/clear` · cache stats in `GET /api/system/live` |
 | Live | `WS /api/ws/events` — audit rows, MCP tool invocations and session events in real time (admins: all; others: own) · `GET /api/system/live` — CPU %, RAM, `duckdb_memory()` per engine, scratch/data disk usage |
 | Agents | `GET/POST/DELETE /api/tokens` · `GET /api/mcp/sessions` · `GET /api/mcp/info` (Claude Desktop / Cursor / Claude Code snippets) · `/api/agents…` (registered agents, snippets, self-test, invoke, discovery) · `GET /api/agent/openapi.json` · `GET/POST /api/agent/v1/tools[/:tool]` (REST façade) |
 | Lakehouse | `GET /api/lakehouse/providers` · `/api/lakehouse-connections…` · `GET /api/lakehouse/browse` · `GET /api/lakehouse/:id/inspect` · `POST /api/lakehouse/:id/query` · `POST /api/lakehouse/:id/materialize` |
@@ -284,7 +307,7 @@ duckview config
 ## Observability
 
 - **Logs:** pino structured JSON (pretty in dev TTYs), `x-request-id` propagated.
-- **Metrics (`/metrics`):** `duckview_queries_total{actor,class,status}`, `duckview_query_duration_seconds` histogram, `duckview_query_rows_returned`, `duckview_active_queries`, `duckview_engines_active`, `duckview_mcp_connections_active{transport}`, `duckview_mcp_tool_calls_total{tool,status}`, `duckview_mcp_tool_duration_seconds`, `duckview_mcp_hitl_challenges_total`, `duckview_sandbox_violations_total{actor}`, `duckview_ws_connections_active`, host/DuckDB memory gauges, plus Node process defaults.
+- **Metrics (`/metrics`):** `duckview_queries_total{actor,class,status}`, `duckview_query_duration_seconds` histogram, `duckview_query_rows_returned`, `duckview_active_queries`, `duckview_engines_active`, `duckview_mcp_connections_active{transport}`, `duckview_mcp_tool_calls_total{tool,status}`, `duckview_mcp_tool_duration_seconds`, `duckview_mcp_hitl_challenges_total`, `duckview_sandbox_violations_total{actor}`, `duckview_ws_connections_active`, `duckview_cache_lookups_total{kind,result}`, `duckview_cache_bytes`, `duckview_cache_entries`, host/DuckDB memory gauges, plus Node process defaults.
 - **Traces:** `duckdb.query` and `mcp.tool.<name>` spans (`db.system`, `db.statement`, workspace, actor, statement class) via OpenTelemetry; exported over OTLP/HTTP when `observability.otel.enabled`.
 
 ## Project layout
@@ -295,18 +318,20 @@ packages/server/src
   db/            Drizzle schemas (sqlite + pg), store factory, migrations in ../drizzle
   engine/        sandbox (DataJail), sql-guard (lexer/classifier/rewriter), duckdb (engines, overview, memory stats), results
   security/      AES-256-GCM, scrypt, token hashing
-  services/      audit, auth/tokens, groups (teams + SSO sync), workspaces (membership/roles, tabs), query (authz + HITL),
-                 connections, files (uploads),
+  services/      audit, auth/tokens, groups (teams + SSO sync), workspaces (membership/roles, tabs, data epoch), query (authz + HITL),
+                 cache (result cache: keys, LRU, ETag), connections, files (uploads),
                  lakehouse (Iceberg ATTACH + Databricks), databricks (UC + Statement Execution client), agents, aws (Bedrock/AgentCore bridge)
   agent/         tool registry (shared by MCP + REST), OpenAPI generator, framework snippets
   mcp/           server (registry → tools, resources, prompts), stdio, http (SSE + Streamable HTTP)
-  routes/        auth (local + OIDC), workspaces (+ members), groups, query (REST + WS), files, events (WS), connections, tokens, admin, system
+  routes/        auth (local + OIDC), workspaces (+ members), groups, query (REST + WS), files, events (WS), connections, tokens, admin, system,
+                 conditional (ETag / If-None-Match / refresh glue)
   observability/ pino, prom-client, OpenTelemetry, live event bus, CPU sampler
 packages/web/src
   features/overview   drop zone · KPI badges · null-ratio bars · Chart.js distributions · sample grid
   features/workspace  schema tree (click-to-insert) · tabs with per-tab Stop · editor (cursor persisted) · streaming grid · chart · plan · profile
   features/settings   categorised left-nav: appearance (themes/fonts/scale) · layout · hardware gauges · engine tuning · storage · copilot · account · teams · users
   features/workspace  ShareDialog (members, roles, transfer, leave) next to the workbench
+  lib/resultCache     IndexedDB result cache (LRU by bytes, per user, wiped on sign-out) · lib/useCached: stale-while-revalidate hook
   theme/              theme definitions (ramps, accents, tones, chart series, fonts) · store/theme.ts applies them as CSS variables
   features/mcp        registered agents (tokens, self-test, chat) · framework snippets + OpenAPI · client snippets · live inspector (WS)
   features/explorer   VS Code-style tree (data dir, folders, cloud, lakehouse) · schema panel · cloud & lakehouse wizards
@@ -315,7 +340,7 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 163 tests: jail, SQL guard, crypto, config, sharing/teams, and integration suites that boot real DuckDB
+pnpm test        # 174 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +

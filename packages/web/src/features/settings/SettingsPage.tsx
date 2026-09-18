@@ -14,6 +14,7 @@ import { LakehouseWizard } from '../explorer/LakehouseWizard';
 import { EngineSettingsForm } from './EngineSettingsForm';
 import { AppearanceSettings } from './Appearance';
 import { TeamsPanel } from './TeamsPanel';
+import { CachePanel } from './CachePanel';
 
 type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'account' | 'teams' | 'users';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; admin?: boolean }[] = [
@@ -154,6 +155,7 @@ export function SettingsPage() {
                   <Gauge value={scratchPct} label="Scratch storage" primary={live ? `${formatBytes(live.scratch.used_bytes)} spilled` : '—'} secondary={live ? `${formatBytes(live.scratch.free_bytes)} free on ${live.scratch.path.split('/').slice(-1)[0]}` : undefined} />
                 </div>
               )}
+              <CachePanel live={live} />
               {!hidden['settings.resources'] && (
                 <div className="grid gap-4 md:grid-cols-2">
                   <SideCard title="Live resources" hideId="settings.resources" meta={<span className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-400' : 'bg-zinc-600'}`} />}>

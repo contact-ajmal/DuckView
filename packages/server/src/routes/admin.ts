@@ -63,6 +63,14 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext) {
     return { ok: true };
   });
 
+  app.post('/api/admin/cache/clear', async (req) => {
+    requireAdmin(req.principal!);
+    const before = ctx.cache.stats();
+    ctx.cache.clear();
+    ctx.audit.log({ userId: req.principal!.userId, actorType: 'USER', action: 'admin.cache_clear', ip: req.ip });
+    return { dropped: before.entries, bytes: before.bytes };
+  });
+
   app.get('/api/admin/config', async (req) => {
     requireAdmin(req.principal!);
     return { config: redactConfig(ctx.cfg) };

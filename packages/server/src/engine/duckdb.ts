@@ -1096,6 +1096,8 @@ export class EngineManager {
   private pending = new Map<string, Promise<WorkspaceEngine>>();
   private sweeper: NodeJS.Timeout;
   readonly jail: DataJail;
+  /** Fired after a fresh DuckDB instance is opened for a workspace (first use, restart, or after idle eviction). */
+  onCreated: ((spec: EngineSpec) => void) | null = null;
 
   constructor(private readonly cfg: DuckViewConfig) {
     this.jail = cfg.security.filesystem_mode === 'full' ? new DataJail(path.parse(cfg.security.data_jail_directory).root, cfg.security.data_jail_directory) : new DataJail(cfg.security.data_jail_directory);
@@ -1122,6 +1124,7 @@ export class EngineManager {
       const eng = await WorkspaceEngine.open(spec, this.cfg, this.jail);
       this.engines.set(spec.workspaceId, eng);
       metrics.engines.set(this.engines.size);
+      this.onCreated?.(spec);
       return eng;
     })().finally(() => this.pending.delete(spec.workspaceId));
     this.pending.set(spec.workspaceId, p);

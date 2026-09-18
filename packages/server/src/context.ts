@@ -17,6 +17,7 @@ import { CopilotService } from './services/copilot.js';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
 import { GroupService } from './services/groups.js';
+import { ResultCache } from './services/cache.js';
 import type { AwsBridge } from './services/aws.js';
 import type { ProviderFactory } from './services/llm.js';
 import { logger } from './observability/logger.js';
@@ -42,6 +43,7 @@ export interface AppContext {
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
+  cache: ResultCache;
   startedAt: Date;
   shutdown(): Promise<void>;
 }
@@ -62,9 +64,11 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const workspaces = new WorkspaceService(store, engines, connections, cloud, groups);
   const lakehouse = new LakehouseService(cfg, store, cipher, engines);
   lakehouse.bind(workspaces, audit);
-  const queries = new QueryService(cfg, workspaces, audit);
+  const cache = new ResultCache(cfg, workspaces, engines.jail);
+  workspaces.onVersion((id) => cache.invalidateWorkspace(id));
+  const queries = new QueryService(cfg, workspaces, audit, cache);
   const files = new FileService(cfg, workspaces, audit);
-  const storage = new StorageService(cfg, workspaces, cloud, audit);
+  const storage = new StorageService(cfg, workspaces, cloud, audit, cache);
   const exportsSvc = new ExportService(cfg, workspaces, audit);
   const savedQueries = new SavedQueryService(store, workspaces);
   const dashboards = new DashboardService(store, workspaces);
@@ -99,6 +103,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     lakehouse,
     agents,
     groups,
+    cache,
     startedAt: new Date(),
     async shutdown() {
       await agents.flush();

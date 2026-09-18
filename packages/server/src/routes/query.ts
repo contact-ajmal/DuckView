@@ -9,6 +9,7 @@ import { metrics } from '../observability/metrics.js';
 import type { Principal } from '../services/principal.js';
 import { logger } from '../observability/logger.js';
 import type { JwtClaims } from './auth-plugin.js';
+import { conditional } from './conditional.js';
 
 const QueryBody = z.object({
   sql: z.string().min(1),
@@ -16,27 +17,30 @@ const QueryBody = z.object({
   page: z.number().int().min(1).optional(),
   count_total: z.boolean().optional(),
   dry_run: z.boolean().optional(),
+  refresh: z.boolean().optional(),
 });
 
 export async function queryRoutes(app: FastifyInstance, ctx: AppContext) {
-  app.post('/api/workspaces/:id/query', { preHandler: app.authenticate }, async (req) => {
+  app.post('/api/workspaces/:id/query', { preHandler: app.authenticate }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = QueryBody.parse(req.body);
-    const result = await ctx.queries.run(req.principal!, id, body.sql, { maxRows: body.max_rows, page: body.page, countTotal: body.count_total, dryRun: body.dry_run });
-    const { analysis, guardedSql: _g, ...rest } = result as typeof result & { guardedSql?: string };
-    return { ...rest, statements: analysis.statements.map((s) => ({ verb: s.verb, class: s.class })) };
+    return conditional(req, reply, async (c) => {
+      const result = await ctx.queries.run(req.principal!, id, body.sql, { maxRows: body.max_rows, page: body.page, countTotal: body.count_total, dryRun: body.dry_run, refresh: c.refresh, ifNoneMatch: c.ifNoneMatch });
+      const { analysis, guardedSql: _g, ...rest } = result as typeof result & { guardedSql?: string };
+      return { ...rest, statements: analysis.statements.map((s) => ({ verb: s.verb, class: s.class })) };
+    });
   });
 
-  app.post('/api/workspaces/:id/explain', { preHandler: app.authenticate }, async (req) => {
+  app.post('/api/workspaces/:id/explain', { preHandler: app.authenticate }, async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = z.object({ sql: z.string().min(1), analyze: z.boolean().optional() }).parse(req.body);
-    return ctx.queries.explain(req.principal!, id, body.sql, body.analyze ?? false);
+    const body = z.object({ sql: z.string().min(1), analyze: z.boolean().optional(), refresh: z.boolean().optional() }).parse(req.body);
+    return conditional(req, reply, (c) => ctx.queries.explain(req.principal!, id, body.sql, body.analyze ?? false, c));
   });
 
-  app.post('/api/workspaces/:id/profile', { preHandler: app.authenticate }, async (req) => {
+  app.post('/api/workspaces/:id/profile', { preHandler: app.authenticate }, async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = z.object({ target: z.string().min(1) }).parse(req.body);
-    return ctx.queries.profile(req.principal!, id, body.target);
+    const body = z.object({ target: z.string().min(1), refresh: z.boolean().optional() }).parse(req.body);
+    return conditional(req, reply, (c) => ctx.queries.profile(req.principal!, id, body.target, c));
   });
 
   app.get('/api/workspaces/:id/catalog', { preHandler: app.authenticate }, async (req) => {
@@ -106,7 +110,9 @@ export async function queryRoutes(app: FastifyInstance, ctx: AppContext) {
             },
             { maxRows: msg.max_rows, signal: ac.signal, dryRun: msg.dry_run },
           );
-          send({ type: 'done', id, row_count: out.rowCount, duration_ms: out.durationMs, truncated: out.truncated, statements: out.analysis.statements.map((s) => ({ verb: s.verb, class: s.class })) });
+          // After a mutation the epoch has moved; tell the client so it can drop its cached results at once.
+          const data_version = out.analysis.isMutating ? await ctx.workspaces.versionOf(String(msg.workspace_id ?? '')) : undefined;
+          send({ type: 'done', id, row_count: out.rowCount, duration_ms: out.durationMs, truncated: out.truncated, statements: out.analysis.statements.map((s) => ({ verb: s.verb, class: s.class })), ...(data_version !== undefined ? { data_version } : {}) });
         } catch (err) {
           send({ type: 'error', id, ...serializeError(err) });
         } finally {

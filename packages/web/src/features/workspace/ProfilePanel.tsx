@@ -5,7 +5,7 @@ import { ScanSearch } from 'lucide-react';
 
 export interface ProfileResult { summary: Record<string, unknown>[]; rowCount: number | null; columnCount: number; sizeBytes: number | null; sql: string }
 
-export function ProfilePanel({ profile, loading, onProfile, defaultTarget }: { profile: ProfileResult | null; loading: boolean; onProfile: (target: string) => void; defaultTarget: string }) {
+export function ProfilePanel({ profile, loading, onProfile, defaultTarget, provenance }: { profile: ProfileResult | null; loading: boolean; onProfile: (target: string, refresh?: boolean) => void; defaultTarget: string; provenance?: React.ReactNode }) {
   const [target, setTarget] = useState(defaultTarget);
   const rows = profile?.summary ?? [];
   return (
@@ -27,6 +27,7 @@ export function ProfilePanel({ profile, loading, onProfile, defaultTarget }: { p
           <Badge tone="violet">{profile.rowCount?.toLocaleString() ?? '?'} rows</Badge>
           <Badge>{profile.columnCount} columns</Badge>
           {profile.sizeBytes != null && <Badge>{formatBytes(profile.sizeBytes)} on disk</Badge>}
+          {provenance && <span className="ml-auto">{provenance}</span>}
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-auto">
