@@ -18,7 +18,7 @@ export async function initTracing(cfg: DuckViewConfig): Promise<void> {
     import('@opentelemetry/resources'),
     import('@opentelemetry/semantic-conventions'),
   ]);
-  const resource = resources.resourceFromAttributes({ [semconv.ATTR_SERVICE_NAME]: o.service_name, [semconv.ATTR_SERVICE_VERSION]: '1.0.0' });
+  const resource = resources.resourceFromAttributes({ [semconv.ATTR_SERVICE_NAME]: o.service_name, [semconv.ATTR_SERVICE_VERSION]: '1.1.0' });
   const spanProcessors = [];
   if (o.exporter_otlp_endpoint) spanProcessors.push(new BatchSpanProcessor(new OTLPTraceExporter({ url: o.exporter_otlp_endpoint })));
   if (o.console_exporter) spanProcessors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
@@ -33,7 +33,7 @@ export async function shutdownTracing(): Promise<void> {
 }
 
 export function tracer(): Tracer {
-  return trace.getTracer('duckview', '1.0.0');
+  return trace.getTracer('duckview', '1.1.0');
 }
 
 /** Runs `fn` inside a span; records exceptions and sets status. */

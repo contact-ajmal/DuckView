@@ -49,7 +49,7 @@ export function buildOpenApi(tools: ToolDef[], opts: { serverUrl: string; versio
     openapi: '3.0.3',
     info: {
       title: 'DuckView agent tools',
-      version: opts.version ?? '1.0.0',
+      version: opts.version ?? '1.1.0',
       description:
         'HTTP façade over the DuckView MCP tools: run DuckDB SQL, profile datasets, browse files / cloud buckets / lakehouse catalogs, inspect schemas, run Databricks SQL and manage dashboards. ' +
         'Mutating statements are held for human approval (HITL) until re-issued with dry_run=false. Results are capped; prefer aggregations. ' +

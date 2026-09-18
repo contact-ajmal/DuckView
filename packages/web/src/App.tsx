@@ -86,7 +86,7 @@ export default function App() {
         <a href="#/" className="flex items-center gap-2.5">
           <Logo className="h-7 w-7" />
           <span className="text-[15px] font-semibold tracking-tight text-zinc-50">DuckView</span>
-          <Tag>v1.0.0</Tag>
+          <Tag>v1.1.0</Tag>
         </a>
         <nav className="flex items-center gap-1">
           {ROUTES.map((r) => (

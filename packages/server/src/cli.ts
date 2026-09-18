@@ -15,7 +15,7 @@ import { initTracing, shutdownTracing } from './observability/tracing.js';
 import { createContext } from './context.js';
 
 const program = new Command();
-program.name('duckview').description('DuckView Enterprise — hardened DuckDB platform with an MCP server').version('1.0.0');
+program.name('duckview').description('DuckView Enterprise — hardened DuckDB platform with an MCP server').version('1.1.0');
 program.option('-c, --config <path>', 'path to duckview.config.yaml');
 
 function boot(opts: { stderr?: boolean } = {}) {

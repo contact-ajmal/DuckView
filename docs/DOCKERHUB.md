@@ -35,7 +35,7 @@ Open http://localhost:4200 and sign in with the admin email/password you set. Dr
 
 | Tag | Platforms |
 |---|---|
-| `latest`, `1`, `1.0`, `1.0.0` | `linux/amd64`, `linux/arm64` |
+| `latest`, `1`, `1.1`, `1.1.0` (also `1.0`, `1.0.0`) | `linux/amd64`, `linux/arm64` |
 
 Images are built by GitHub Actions from tagged releases, with SBOM and provenance attestations, and smoke-tested after the push.
 

@@ -72,6 +72,6 @@ export async function systemRoutes(app: FastifyInstance, ctx: AppContext) {
   app.get('/api/system', { preHandler: app.authenticate }, async () => {
     const r = ctx.engines.resources();
     r.duckdb.version = await getDuckDbVersion();
-    return { ...r, server: { version: '1.0.0', node: process.version, started_at: ctx.startedAt.toISOString(), uptime_s: Math.round(process.uptime()), metadata_dialect: ctx.store.dialect, auth_strategy: ctx.cfg.auth.strategy, max_result_rows: ctx.cfg.duckdb.max_result_rows, query_timeout_seconds: ctx.cfg.duckdb.query_timeout_seconds } };
+    return { ...r, server: { version: '1.1.0', node: process.version, started_at: ctx.startedAt.toISOString(), uptime_s: Math.round(process.uptime()), metadata_dialect: ctx.store.dialect, auth_strategy: ctx.cfg.auth.strategy, max_result_rows: ctx.cfg.duckdb.max_result_rows, query_timeout_seconds: ctx.cfg.duckdb.query_timeout_seconds } };
   });
 }
