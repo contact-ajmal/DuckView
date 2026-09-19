@@ -132,6 +132,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ steps.names.outputs.hub_repo }}
-          short-description: DuckDB workspace: lakehouse, dashboards, MCP for AI agents. Docs at contact-ajmal.github.io/DuckView
+          short-description: "DuckDB workspace: lakehouse, dashboards, MCP for AI agents. Docs at contact-ajmal.github.io/DuckView"
           readme-filepath: ./docs/DOCKERHUB.md
           enable-url-completion: true
