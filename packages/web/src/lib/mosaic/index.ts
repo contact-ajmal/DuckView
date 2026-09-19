@@ -33,8 +33,23 @@ export interface MosaicHandle {
   api: VgPlot;
   coordinator: InstanceType<VgPlot['Coordinator']>;
   info: MosaicInfo;
+  /** Distinct query errors reported by the coordinator for individual charts/inputs (the DOM stays up). */
+  problems: string[];
   /** Disconnects every client and drops the caches. */
   dispose(): void;
+}
+
+export interface CreateMosaicOptions {
+  /** Called for every query error a chart or input hits after instantiation (Mosaic keeps the view alive). */
+  onError?: (message: string) => void;
+}
+
+/** A query error carries the offending SQL; keep the DuckDB message and a short tail of the statement. */
+function describeError(e: unknown): string {
+  const err = e as { message?: string; query?: { sql?: string } | string; cause?: { message?: string } };
+  const message = (err.cause?.message ?? err.message ?? String(e)).replace(/^Error:\s*/, '').split('\n')[0]!;
+  const q = typeof err.query === 'string' ? err.query : err.query?.sql;
+  return q ? `${message} — in: ${q.replace(/\s+/g, ' ').slice(0, 160)}${q.length > 160 ? '…' : ''}` : message;
 }
 
 /** FNV-1a over a string → lowercase hex; used for source-view names so they are stable across reloads. */
@@ -47,16 +62,32 @@ export function fnv1a(text: string): string {
   return h.toString(16).padStart(8, '0');
 }
 
-export async function createMosaic(workspaceId: string): Promise<MosaicHandle> {
+export async function createMosaic(workspaceId: string, opts: CreateMosaicOptions = {}): Promise<MosaicHandle> {
   const [vg, info] = await Promise.all([import('@uwdata/vgplot'), mosaicInfo()]);
   if (!info.enabled) throw new Error('Mosaic is disabled on this server (mosaic.enabled)');
-  const coordinator = new vg.Coordinator(duckviewConnector(workspaceId) as never, { preagg: { schema: info.schema }, logger: null });
+  const problems: string[] = [];
+  const noop = () => undefined;
+  // Mosaic reports a failed chart query to its logger and moves on; without one those failures are invisible.
+  const logger = {
+    debug: noop, info: noop, log: noop, group: noop, groupCollapsed: noop, groupEnd: noop,
+    warn: (...args: unknown[]) => console.warn('[mosaic]', ...args),
+    error: (...args: unknown[]) => {
+      const message = describeError(args[0]);
+      console.error('[mosaic]', message);
+      if (!problems.includes(message)) {
+        problems.push(message);
+        opts.onError?.(message);
+      }
+    },
+  };
+  const coordinator = new vg.Coordinator(duckviewConnector(workspaceId) as never, { preagg: { schema: info.schema }, logger });
   const ctx = vg.createAPIContext({ coordinator }) as VgPlot;
   return {
     vg,
     api: ctx,
     coordinator,
     info,
+    problems,
     dispose() {
       coordinator.clear({ clients: true, cache: true });
     },

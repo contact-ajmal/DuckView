@@ -214,6 +214,10 @@ Everything else — `params`, selections (`crossfilter`, `intersect`, `single`�
 
 **Agents and Copilot.** The MCP tool `create_mosaic_dashboard` (spec or spec_text; `validate_only` to check first; `dashboard_id` to update) refuses invalid specs with the error list; the resource `duckdb://guides/mosaic-spec` and the prompt `build_mosaic_dashboard` carry the authoring rules. In DuckCopilot, **Build dashboard** (or any chat that mentions a chart or dashboard) puts the same guide in the system prompt; every ```yaml / ```json spec in a reply is validated against the workspace when the turn completes (`spec_blocks` on the `done` event) and rendered with **Create dashboard** — validated, saved and opened in one click — or **Fix with Copilot**, which sends the errors back.
 
+A chart whose query fails after rendering (Mosaic keeps the rest of the view alive) is listed in a *chart queries failed* panel with the DuckDB message and the statement, and in the editor's status bar.
+
+`examples/mosaic/nyc-yellow-taxi.yaml` is a complete dashboard over 3.7M TLC trips — menus and sliders, headline numbers, an hourly timeline, hour × weekday heatmap, brushable histograms, a distance/fare density raster, fare-by-payment lines, top zones and the filtered rows — all on one crossfilter selection.
+
 API: `POST /api/workspaces/:id/dashboards {name, description?, kind?: grid|mosaic, spec?}` · `PATCH /api/dashboards/:id {spec}` (editor) · `POST /api/workspaces/:id/mosaic/prepare`. The MCP `list_dashboards` tool reports `kind` and `spec`.
 
 ## Sharing & teams

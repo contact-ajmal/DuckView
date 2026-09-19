@@ -1,0 +1,283 @@
+# NYC yellow taxi — January 2026 (3.7M trips, TLC trip records). Every chart shares one crossfilter selection:
+# brush a histogram or the timeline, click bars, pick from the menus — everything else reacts.
+#
+# Put yellow_tripdata_2026-01.csv (https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) in the workspace
+# data directory, then Dashboards → New dashboard → Mosaic → Edit → paste this. For a faster first load convert the
+# CSV once (COPY (SELECT * FROM 'yellow_tripdata_2026-01.csv') TO 'yellow_tripdata_2026-01.parquet') and point the
+# query at the Parquet file. Agents can create it with create_mosaic_dashboard(spec_text: <this file>).
+meta:
+  title: NYC yellow taxi · January 2026
+  description: 3.7M trips from yellow_tripdata_2026-01.csv, cross-filtered across time, fares, distances, payment and zones.
+
+data:
+  trips:
+    query: >
+      SELECT
+        tpep_pickup_datetime AS pickup,
+        date_trunc('hour', tpep_pickup_datetime) AS hour_ts,
+        date_trunc('day', tpep_pickup_datetime)::DATE AS day,
+        hour(tpep_pickup_datetime) AS hour,
+        strftime(tpep_pickup_datetime, '%u %a') AS weekday,
+        CASE VendorID WHEN 1 THEN 'CMT' WHEN 2 THEN 'Curb' WHEN 6 THEN 'Myle' WHEN 7 THEN 'Helix' ELSE 'Other' END AS vendor,
+        CASE payment_type WHEN 1 THEN 'Credit card' WHEN 2 THEN 'Cash' WHEN 3 THEN 'No charge' WHEN 4 THEN 'Dispute' ELSE 'Unknown' END AS payment,
+        CASE RatecodeID WHEN 1 THEN 'Standard' WHEN 2 THEN 'JFK' WHEN 3 THEN 'Newark' WHEN 4 THEN 'Nassau / Westchester' WHEN 5 THEN 'Negotiated' WHEN 6 THEN 'Group ride' ELSE 'Unknown' END AS rate,
+        coalesce(passenger_count, 0)::VARCHAR AS passengers,
+        '#' || PULocationID AS pickup_zone,
+        '#' || DOLocationID AS dropoff_zone,
+        trip_distance AS distance,
+        epoch(tpep_dropoff_datetime - tpep_pickup_datetime) / 60.0 AS minutes,
+        CASE WHEN trip_distance / (epoch(tpep_dropoff_datetime - tpep_pickup_datetime) / 3600.0) BETWEEN 0.5 AND 70 THEN trip_distance / (epoch(tpep_dropoff_datetime - tpep_pickup_datetime) / 3600.0) END AS mph,
+        fare_amount AS fare,
+        tip_amount AS tip,
+        CASE WHEN payment_type = 1 AND tip_amount / fare_amount BETWEEN 0 AND 0.6 THEN 100.0 * tip_amount / fare_amount END AS tip_pct,
+        tolls_amount AS tolls,
+        coalesce(congestion_surcharge, 0) + coalesce(cbd_congestion_fee, 0) AS congestion,
+        coalesce(Airport_fee, 0) AS airport_fee,
+        total_amount AS total
+      FROM 'yellow_tripdata_2026-01.csv'
+      WHERE tpep_pickup_datetime >= '2026-01-01' AND tpep_pickup_datetime < '2026-02-01'
+        AND trip_distance BETWEEN 0.05 AND 40
+        AND fare_amount BETWEEN 1 AND 150
+        AND total_amount BETWEEN 1 AND 300
+        AND epoch(tpep_dropoff_datetime - tpep_pickup_datetime) BETWEEN 30 AND 10800
+
+params:
+  brush: { select: crossfilter }
+
+plotDefaults:
+  style: { fontSize: 11 }
+
+vconcat:
+  # ── Filters ────────────────────────────────────────────────────────────────
+  - hconcat:
+      - { input: menu, label: Vendor, as: $brush, from: trips, column: vendor }
+      - { input: menu, label: Payment, as: $brush, from: trips, column: payment }
+      - { input: menu, label: Rate, as: $brush, from: trips, column: rate }
+      - { input: menu, label: Passengers, as: $brush, from: trips, column: passengers }
+      - { input: slider, label: Max fare $, as: $brush, column: fare, select: interval, min: 5, max: 150, step: 5, value: 150, width: 200 }
+      - { input: slider, label: Max distance mi, as: $brush, column: distance, select: interval, min: 1, max: 40, step: 1, value: 40, width: 200 }
+
+  # ── Headline numbers (react to every filter) ───────────────────────────────
+  - hconcat:
+      - plot:
+          - { mark: text, data: { from: trips, filterBy: $brush }, text: { count: null }, frameAnchor: middle, fontSize: 26, fontWeight: 600, fill: '#8b5cf6' }
+          - { mark: text, text: ['trips'], frameAnchor: bottom, fontSize: 11, fill: '#71717a', dy: -4 }
+        width: 200
+        height: 84
+        axis: null
+        margin: 4
+      - plot:
+          - { mark: text, data: { from: trips, filterBy: $brush }, text: { avg: fare }, frameAnchor: middle, fontSize: 26, fontWeight: 600, fill: '#8b5cf6' }
+          - { mark: text, text: ['avg fare $'], frameAnchor: bottom, fontSize: 11, fill: '#71717a', dy: -4 }
+        width: 200
+        height: 84
+        axis: null
+        margin: 4
+      - plot:
+          - { mark: text, data: { from: trips, filterBy: $brush }, text: { avg: tip_pct }, frameAnchor: middle, fontSize: 26, fontWeight: 600, fill: '#8b5cf6' }
+          - { mark: text, text: ['avg card tip %'], frameAnchor: bottom, fontSize: 11, fill: '#71717a', dy: -4 }
+        width: 200
+        height: 84
+        axis: null
+        margin: 4
+      - plot:
+          - { mark: text, data: { from: trips, filterBy: $brush }, text: { avg: distance }, frameAnchor: middle, fontSize: 26, fontWeight: 600, fill: '#8b5cf6' }
+          - { mark: text, text: ['avg distance mi'], frameAnchor: bottom, fontSize: 11, fill: '#71717a', dy: -4 }
+        width: 200
+        height: 84
+        axis: null
+        margin: 4
+      - plot:
+          - { mark: text, data: { from: trips, filterBy: $brush }, text: { avg: minutes }, frameAnchor: middle, fontSize: 26, fontWeight: 600, fill: '#8b5cf6' }
+          - { mark: text, text: ['avg minutes'], frameAnchor: bottom, fontSize: 11, fill: '#71717a', dy: -4 }
+        width: 200
+        height: 84
+        axis: null
+        margin: 4
+      - plot:
+          - { mark: text, data: { from: trips, filterBy: $brush }, text: { sum: total }, frameAnchor: middle, fontSize: 26, fontWeight: 600, fill: '#8b5cf6' }
+          - { mark: text, text: ['revenue $'], frameAnchor: bottom, fontSize: 11, fill: '#71717a', dy: -4 }
+        width: 200
+        height: 84
+        axis: null
+        margin: 4
+
+  # ── When: hourly timeline for the month (brush a date range) ──────────────
+  - plot:
+      - { mark: areaY, data: { from: trips, filterBy: $brush }, x: hour_ts, y: { count: null }, fill: '#8b5cf6', fillOpacity: 0.25 }
+      - { mark: lineY, data: { from: trips, filterBy: $brush }, x: hour_ts, y: { count: null }, stroke: '#8b5cf6', strokeWidth: 1.2 }
+      - { select: intervalX, as: $brush }
+    xDomain: Fixed
+    xLabel: pickup hour, January 2026
+    yLabel: trips / hour
+    yTickFormat: s
+    width: 1340
+    height: 190
+    marginLeft: 48
+
+  - hconcat:
+      - plot:
+          - { mark: barY, data: { from: trips, filterBy: $brush }, x: hour, y: { count: null }, fill: '#8b5cf6', inset: 0.5 }
+          - { select: toggleX, as: $brush }
+        xLabel: hour of day
+        yLabel: trips
+        yTickFormat: s
+        width: 440
+        height: 200
+      - plot:
+          - { mark: barY, data: { from: trips, filterBy: $brush }, x: weekday, y: { count: null }, fill: '#8b5cf6' }
+          - { select: toggleX, as: $brush }
+        xLabel: weekday
+        yLabel: trips
+        yTickFormat: s
+        width: 440
+        height: 200
+      - plot:
+          - { mark: cell, data: { from: trips, filterBy: $brush }, x: hour, y: weekday, fill: { count: null }, inset: 0.5 }
+        xLabel: hour of day
+        yLabel: null
+        colorScheme: viridis
+        colorLabel: trips
+        width: 440
+        height: 200
+        marginLeft: 48
+
+  # ── How much, how far, how long: brush any histogram ──────────────────────
+  - hconcat:
+      - plot:
+          - { mark: rectY, data: { from: trips, filterBy: $brush }, x: { bin: fare, steps: 60 }, y: { count: null }, fill: '#8b5cf6', insetLeft: 0.5, insetRight: 0.5 }
+          - { select: intervalX, as: $brush }
+        xDomain: Fixed
+        xLabel: fare $
+        yLabel: null
+        yTickFormat: s
+        width: 440
+        height: 170
+      - plot:
+          - { mark: rectY, data: { from: trips, filterBy: $brush }, x: { bin: distance, steps: 60 }, y: { count: null }, fill: '#8b5cf6', insetLeft: 0.5, insetRight: 0.5 }
+          - { select: intervalX, as: $brush }
+        xDomain: Fixed
+        xLabel: distance mi
+        yLabel: null
+        yTickFormat: s
+        width: 440
+        height: 170
+      - plot:
+          - { mark: rectY, data: { from: trips, filterBy: $brush }, x: { bin: minutes, steps: 60 }, y: { count: null }, fill: '#8b5cf6', insetLeft: 0.5, insetRight: 0.5 }
+          - { select: intervalX, as: $brush }
+        xDomain: Fixed
+        xLabel: trip minutes
+        yLabel: null
+        yTickFormat: s
+        width: 440
+        height: 170
+  - hconcat:
+      - plot:
+          - { mark: rectY, data: { from: trips, filterBy: $brush }, x: { bin: tip_pct, steps: 60 }, y: { count: null }, fill: '#22c55e', insetLeft: 0.5, insetRight: 0.5 }
+          - { select: intervalX, as: $brush }
+        xDomain: Fixed
+        xLabel: card tip % (0–60)
+        yLabel: null
+        yTickFormat: s
+        width: 440
+        height: 170
+      - plot:
+          - { mark: rectY, data: { from: trips, filterBy: $brush }, x: { bin: mph, steps: 70 }, y: { count: null }, fill: '#22c55e', insetLeft: 0.5, insetRight: 0.5 }
+          - { select: intervalX, as: $brush }
+        xDomain: Fixed
+        xLabel: average speed mph (0–70)
+        yLabel: null
+        yTickFormat: s
+        width: 440
+        height: 170
+      - plot:
+          - { mark: rectY, data: { from: trips, filterBy: $brush }, x: { bin: total, steps: 60 }, y: { count: null }, fill: '#22c55e', insetLeft: 0.5, insetRight: 0.5 }
+          - { select: intervalX, as: $brush }
+        xDomain: Fixed
+        xLabel: total paid $
+        yLabel: null
+        yTickFormat: s
+        width: 440
+        height: 170
+
+  # ── Relationships ─────────────────────────────────────────────────────────
+  - hconcat:
+      - plot:
+          - { mark: raster, data: { from: trips, filterBy: $brush }, x: distance, y: fare, fill: density, bandwidth: 0, pixelSize: 2 }
+          - { select: intervalXY, as: $brush }
+        xDomain: [0, 30]
+        yDomain: [0, 120]
+        xLabel: distance mi
+        yLabel: fare $
+        colorScheme: viridis
+        colorScale: sqrt
+        width: 440
+        height: 260
+      - plot:
+          - { mark: lineY, data: { from: trips, filterBy: $brush }, x: hour, y: { avg: fare }, stroke: payment, strokeWidth: 1.6 }
+          - { mark: dot, data: { from: trips, filterBy: $brush }, x: hour, y: { avg: fare }, fill: payment, r: 2 }
+        xLabel: hour of day
+        yLabel: avg fare $
+        colorDomain: [Credit card, Cash, Unknown, No charge, Dispute]
+        colorRange: ['#8b5cf6', '#f59e0b', '#71717a', '#22c55e', '#ef4444']
+        width: 440
+        height: 260
+        name: fareByPayment
+      - vconcat:
+          - { legend: color, for: fareByPayment }
+          - plot:
+              - { mark: lineY, data: { from: trips, filterBy: $brush }, x: day, y: { avg: tip_pct }, stroke: '#22c55e', strokeWidth: 1.6 }
+              - { mark: dot, data: { from: trips, filterBy: $brush }, x: day, y: { avg: tip_pct }, fill: '#22c55e', r: 2 }
+            xLabel: day
+            yLabel: avg card tip %
+            width: 440
+            height: 220
+
+  # ── Where and who ─────────────────────────────────────────────────────────
+  - hconcat:
+      - plot:
+          - { mark: barX, data: { from: trips, filterBy: $brush }, x: { count: null }, y: pickup_zone, fill: '#8b5cf6', sort: { y: '-x', limit: 15 } }
+          - { select: toggleY, as: $brush }
+        xLabel: trips
+        yLabel: pickup zone (TLC id)
+        xTickFormat: s
+        width: 440
+        height: 300
+        marginLeft: 60
+      - plot:
+          - { mark: barX, data: { from: trips, filterBy: $brush }, x: { count: null }, y: dropoff_zone, fill: '#8b5cf6', sort: { y: '-x', limit: 15 } }
+          - { select: toggleY, as: $brush }
+        xLabel: trips
+        yLabel: dropoff zone (TLC id)
+        xTickFormat: s
+        width: 440
+        height: 300
+        marginLeft: 60
+      - vconcat:
+          - plot:
+              - { mark: barX, data: { from: trips, filterBy: $brush }, x: { count: null }, y: payment, fill: '#f59e0b', sort: { y: '-x' } }
+              - { select: toggleY, as: $brush }
+            xLabel: trips
+            yLabel: null
+            xTickFormat: s
+            width: 440
+            height: 140
+            marginLeft: 90
+          - plot:
+              - { mark: barX, data: { from: trips, filterBy: $brush }, x: { count: null }, y: rate, fill: '#f59e0b', sort: { y: '-x' } }
+              - { select: toggleY, as: $brush }
+            xLabel: trips
+            yLabel: null
+            xTickFormat: s
+            width: 440
+            height: 150
+            marginLeft: 130
+
+  # ── The rows behind the selection ─────────────────────────────────────────
+  - input: table
+    from: trips
+    filterBy: $brush
+    columns: [pickup, vendor, payment, rate, passengers, pickup_zone, dropoff_zone, distance, minutes, fare, tip, tolls, congestion, airport_fee, total]
+    width: 1340
+    height: 320
+    rowBatch: 100

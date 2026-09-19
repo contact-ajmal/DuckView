@@ -42,6 +42,8 @@ vconcat:
     height: 300
 ```
 
+A complete example — 3.7M NYC taxi trips with menus, sliders, headline numbers, an hourly timeline, an hour × weekday heatmap, brushable histograms, a density raster, grouped lines, top zones and the filtered rows — ships as [`examples/mosaic/nyc-yellow-taxi.yaml`](https://github.com/contact-ajmal/DuckView/blob/main/examples/mosaic/nyc-yellow-taxi.yaml).
+
 ## Agents and Copilot
 
 Every spec is validated by the server before it is rendered or saved — structure in Mosaic's own vocabulary, then every dataset and table bound in the workspace with `EXPLAIN` — so a missing file or column comes back as a precise error instead of a blank chart.
