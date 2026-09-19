@@ -156,12 +156,13 @@ Ask in plain English; get DuckDB SQL you can insert, open in a tab, or *run & in
 
 | Provider | Notes |
 |---|---|
-| **Anthropic** | Official SDK, streaming, `claude-opus-5` by default |
-| **OpenAI** · **Ollama** | `gpt-4o`, or any local model over the OpenAI-compatible endpoint |
+| **Claude** | Official Anthropic SDK, streaming, `claude-opus-5` by default |
+| **ChatGPT / OpenAI** · **Gemini** · **DeepSeek** · **OpenRouter** · **Kimi** · **Groq** · **Mistral** · **Grok** | One OpenAI-compatible bridge with a preset per vendor (endpoint, key console link, suggested models); OpenRouter gives one key for hundreds of models |
+| **Ollama** · **any OpenAI-compatible endpoint** | Local models, or Together / Fireworks / Perplexity / Azure OpenAI / vLLM / LM Studio |
 | **Amazon Bedrock** | Converse streaming with model / inference-profile discovery |
 | **Bedrock Agent** · **AgentCore runtime** | Route the drawer to *your* deployed agent; DuckView passes the workspace context along |
 
-Keys can be server-managed or bring-your-own (kept in the browser, sent per request, never stored).
+**Settings → Copilot** is the console: pick a vendor card, paste a key (the card links to where you get one), *Test connection*, *Save for everyone* — stored encrypted, live immediately. People can also bring their own key (browser-only). The **Usage** panel shows the sessions running right now and tokens per day, model and person.
 
 ---
 
@@ -204,7 +205,7 @@ Fastify 5 (TypeScript strict)
   auth (local · OIDC · API tokens)   sharing (owner / editor / viewer, teams)
   QueryService (authz → guard → HITL → audit)
   Lakehouse (Iceberg ATTACH · Databricks SQL API)   Agent tool registry → MCP + REST + OpenAPI
-  Copilot bridge (Anthropic · OpenAI · Ollama · Bedrock · Bedrock Agent · AgentCore)
+  Copilot bridge (Claude · OpenAI-compatible vendors · Ollama · Bedrock · Bedrock Agent · AgentCore)
         │
 EngineManager — one native DuckDB instance per workspace (LRU + idle TTL), jailed and locked
         │

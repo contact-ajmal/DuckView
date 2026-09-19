@@ -8,6 +8,7 @@ import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
 import { useLayout } from '../../store/layout';
 import { useCopilot } from '../../store/copilot';
+import { CopilotPanel } from './CopilotPanel';
 import { HideButton, LayoutSettings } from '../../components/LayoutMenu';
 import { CloudWizard } from '../explorer/CloudWizard';
 import { LakehouseWizard } from '../explorer/LakehouseWizard';
@@ -350,26 +351,7 @@ export function SettingsPage() {
             </div>
           )}
 
-          {cat === 'copilot' && (
-            <Card title="DuckCopilot">
-              {copilotCfg ? (
-                <div className="space-y-3 text-xs">
-                  <KvRows
-                    rows={[
-                      { k: 'enabled', v: copilotCfg.enabled ? 'yes' : 'no' },
-                      { k: 'server', v: copilotCfg.server_provider ? `${copilotCfg.server_provider} · ${copilotCfg.server_model}` : 'not configured', sub: copilotCfg.has_server_key ? '· key on server' : undefined },
-                      { k: 'BYOK', v: copilotCfg.allow_byok ? 'allowed' : 'disabled', sub: '· bring your own Anthropic / OpenAI / Ollama' },
-                      { k: 'your choice', v: cp.settings.provider ? `${cp.settings.provider} · ${cp.settings.model || copilotCfg.default_models[cp.settings.provider]}` : 'server-managed' },
-                    ]}
-                  />
-                  <p className="text-zinc-500">Provider, model and keys are chosen in the Copilot drawer (⚙ in its header); keys stay in this browser and are sent per request. Server defaults come from <code className="font-mono">copilot.*</code> in duckview.config.yaml.</p>
-                  <Button size="sm" onClick={() => cp.toggle(true)}><Bot className="h-3.5 w-3.5" /> Open Copilot</Button>
-                </div>
-              ) : (
-                <p className="text-xs text-zinc-500">Loading…</p>
-              )}
-            </Card>
-          )}
+          {cat === 'copilot' && (copilotCfg ? <CopilotPanel cfg={copilotCfg} isAdmin={isAdmin} reload={() => { api.get<CopilotConfig>('/api/copilot/config').then(setCopilotCfg).catch(() => undefined); void cp.loadConfig(); }} /> : <p className="text-xs text-zinc-500">Loading…</p>)}
 
           {cat === 'account' && (
             <Card title="Account">

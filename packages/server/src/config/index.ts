@@ -172,8 +172,11 @@ export const ConfigSchema = z.object({
   copilot: z
     .object({
       enabled: z.coerce.boolean().default(true),
-      /** Server-managed default provider. Users may still bring their own key when allow_byok is true. */
-      provider: z.enum(['anthropic', 'openai', 'ollama', 'bedrock', 'bedrock_agent', 'agentcore', 'none']).default('none'),
+      /**
+       * Deployment-time default provider (env vars / Docker). A provider set from Settings → Copilot by an
+       * administrator takes precedence. Users may still bring their own key when allow_byok is true.
+       */
+      provider: z.enum(['anthropic', 'openai', 'gemini', 'deepseek', 'openrouter', 'kimi', 'groq', 'mistral', 'xai', 'ollama', 'custom', 'bedrock', 'bedrock_agent', 'agentcore', 'none']).default('none'),
       model: z.string().optional(),
       api_key: z.string().optional(),
       /** OpenAI-compatible or Ollama base URL (e.g. http://ollama:11434). */

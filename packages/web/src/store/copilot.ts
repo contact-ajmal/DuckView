@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import { api, copilotChat, type CopilotConfig, type ChatMsg, type CopilotSpecBlock } from '../api/client';
+import { api, copilotChat, type CopilotConfig, type ChatMsg, type CopilotSpecBlock, type CopilotProvider } from '../api/client';
 
-export interface CopilotSettings { provider: 'anthropic' | 'openai' | 'ollama' | 'bedrock' | 'bedrock_agent' | 'agentcore' | ''; model: string; apiKey: string; baseUrl: string; region?: string; agentId?: string; agentAliasId?: string; runtimeArn?: string }
-export interface LiveMessage { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean; error?: string; sqlBlocks?: string[]; specBlocks?: CopilotSpecBlock[]; meta?: { model?: string; provider?: string; tables?: number; files?: number; targets?: string[]; duration_ms?: number } }
+export interface CopilotSettings { provider: CopilotProvider | ''; model: string; apiKey: string; baseUrl: string; region?: string; agentId?: string; agentAliasId?: string; runtimeArn?: string }
+export interface LiveMessage { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean; error?: string; sqlBlocks?: string[]; specBlocks?: CopilotSpecBlock[]; meta?: { model?: string; provider?: string; tables?: number; files?: number; targets?: string[]; duration_ms?: number; input_tokens?: number; output_tokens?: number } }
 
 const SETTINGS_KEY = 'duckview.copilot.settings';
 function loadSettings(): CopilotSettings {
@@ -19,6 +19,8 @@ interface CopilotState {
   config: CopilotConfig | null;
   settings: CopilotSettings;
   conversationId: string | null;
+  /** Tokens spent in the open conversation (from the server's usage rows, plus turns streamed in this session). */
+  usage: { input_tokens: number; output_tokens: number; requests: number };
   conversations: { id: string; title: string; last_at: string; messages: number }[];
   messages: LiveMessage[];
   streaming: boolean;
@@ -42,6 +44,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   config: null,
   settings: loadSettings(),
   conversationId: null,
+  usage: { input_tokens: 0, output_tokens: 0, requests: 0 },
   conversations: [],
   messages: [],
   streaming: false,
@@ -78,7 +81,8 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     }
   },
   async openConversation(workspaceId, id) {
-    if (!id) return set({ conversationId: null, messages: [] });
+    if (!id) return set({ conversationId: null, messages: [], usage: { input_tokens: 0, output_tokens: 0, requests: 0 } });
+    api.get<{ conversation: { input_tokens: number; output_tokens: number; requests: number } }>(`/api/copilot/usage?conversation_id=${id}`).then((u) => get().conversationId === id && set({ usage: u.conversation })).catch(() => undefined);
     const r = await api.get<{ messages: ChatMsg[] }>(`/api/copilot/messages?workspace_id=${workspaceId}&conversation_id=${id}`);
     set({
       conversationId: id,
@@ -110,7 +114,9 @@ export const useCopilot = create<CopilotState>((set, get) => ({
           upd({ content: cur + ev.text });
         } else if (ev.type === 'done') {
           const cur = get().messages.find((m) => m.id === asstId);
-          upd({ streaming: false, sqlBlocks: ev.sql_blocks, specBlocks: ev.spec_blocks, meta: { ...cur?.meta, duration_ms: ev.duration_ms } });
+          upd({ streaming: false, sqlBlocks: ev.sql_blocks, specBlocks: ev.spec_blocks, meta: { ...cur?.meta, duration_ms: ev.duration_ms, input_tokens: ev.usage.input_tokens ?? undefined, output_tokens: ev.usage.output_tokens ?? undefined } });
+          const u = get().usage;
+          set({ usage: { input_tokens: u.input_tokens + (ev.usage.input_tokens ?? 0), output_tokens: u.output_tokens + (ev.usage.output_tokens ?? 0), requests: u.requests + 1 } });
         } else if (ev.type === 'error') {
           upd({ streaming: false, error: ev.message });
         }
@@ -128,7 +134,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   async clear(workspaceId) {
     const id = get().conversationId;
     if (id) await api.del(`/api/copilot/conversations/${id}?workspace_id=${workspaceId}`).catch(() => undefined);
-    set({ conversationId: null, messages: [] });
+    set({ conversationId: null, messages: [], usage: { input_tokens: 0, output_tokens: 0, requests: 0 } });
     void get().loadConversations(workspaceId);
   },
 }));

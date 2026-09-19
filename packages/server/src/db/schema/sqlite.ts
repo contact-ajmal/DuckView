@@ -436,6 +436,51 @@ export const chatHistory = sqliteTable(
   (t) => [index('chat_history_conversation_idx').on(t.conversation_id), index('chat_history_workspace_idx').on(t.workspace_id)],
 );
 
+/** Server-managed DuckCopilot provider, set from Settings by an administrator (overrides copilot.* in the config file). */
+export const copilotSettings = sqliteTable('copilot_settings', {
+  id: text('id').primaryKey(), // always 'default'
+  provider: text('provider').notNull(),
+  model: text('model'),
+  base_url: text('base_url'),
+  /** AES-256-GCM (CredentialCipher); null for providers without a key. */
+  encrypted_api_key: text('encrypted_api_key'),
+  iv: text('iv'),
+  tag: text('tag'),
+  /** Last four characters of the key, so the UI can show which key is on file. */
+  key_hint: text('key_hint'),
+  aws_region: text('aws_region'),
+  bedrock_agent_id: text('bedrock_agent_id'),
+  bedrock_agent_alias_id: text('bedrock_agent_alias_id'),
+  agentcore_runtime_arn: text('agentcore_runtime_arn'),
+  updated_by: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const COPILOT_USAGE_STATUSES = ['ok', 'error', 'cancelled'] as const;
+
+/** One row per DuckCopilot turn: who, where, which model, how many tokens. */
+export const copilotUsage = sqliteTable(
+  'copilot_usage',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    conversation_id: text('conversation_id').notNull(),
+    message_id: text('message_id').notNull(),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    action: text('action').notNull(),
+    /** Key source: the server-managed one or the user's own. */
+    byok: integer('byok', { mode: 'boolean' }).notNull().default(false),
+    input_tokens: integer('input_tokens'),
+    output_tokens: integer('output_tokens'),
+    duration_ms: integer('duration_ms').notNull(),
+    status: text('status', { enum: COPILOT_USAGE_STATUSES }).notNull(),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('copilot_usage_user_idx').on(t.user_id), index('copilot_usage_created_idx').on(t.created_at), index('copilot_usage_conversation_idx').on(t.conversation_id)],
+);
+
 export type SavedQuery = typeof savedQueries.$inferSelect;
 export type Dashboard = typeof dashboards.$inferSelect;
 export type DashboardWidget = typeof dashboardWidgets.$inferSelect;
@@ -443,3 +488,5 @@ export type CloudConnection = typeof cloudConnections.$inferSelect;
 export type LakehouseConnection = typeof lakehouseConnections.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type ChatMessage = typeof chatHistory.$inferSelect;
+export type CopilotSettingsRow = typeof copilotSettings.$inferSelect;
+export type CopilotUsageRow = typeof copilotUsage.$inferSelect;

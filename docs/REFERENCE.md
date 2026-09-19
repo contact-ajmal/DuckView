@@ -17,7 +17,8 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │                  storage · copilot · account · users                          │
 │ #/mcp            registered agents · framework snippets · OpenAPI · tokens  │
 │                  · live agent inspector                                       │
-│ DuckCopilot      dockable AI drawer (Anthropic · OpenAI · Ollama · Bedrock ·  │
+│ DuckCopilot      dockable AI drawer (Claude · ChatGPT · Gemini · DeepSeek ·    │
+│                  OpenRouter · Kimi · Groq · Mistral · Grok · Ollama · Bedrock ·│
 │                  Bedrock Agent · AgentCore runtime, BYOK)                     │
 └──────────────┬───────────────────────────────────────────────────────────────┘
                │ REST · WS (rows, live events) · SSE (copilot, MCP) · Streamable HTTP
@@ -128,7 +129,7 @@ Key settings:
 | `security` | `filesystem_mode` | `full` (default, VS Code-like): add any local folder to the explorer, query files anywhere on the host, cloud sources on. `sandboxed` (multi-tenant): everything confined to `data_jail_directory`, external access off unless enabled. Relative paths always anchor to the data directory. |
 | `duckdb` | `extension_directory` | Where `httpfs`/`azure`/`arrow`/`iceberg`/`delta` are installed. The image ships them pre-installed at `/app/duckdb-extensions` (`scripts/install-extensions.mjs`). |
 | | `export_ttl_seconds`, `export_max_rows` | Server-side export files expire after the TTL. |
-| `copilot` | `provider`, `model`, `api_key`, `base_url`, `allow_byok` | DuckCopilot LLM bridge (`anthropic` / `openai` / `ollama`); users may bring their own key when `allow_byok` is true. |
+| `copilot` | `provider`, `model`, `api_key`, `base_url`, `allow_byok` | Deployment-time default for the DuckCopilot LLM bridge (`anthropic`, `openai`, `gemini`, `deepseek`, `openrouter`, `kimi`, `groq`, `mistral`, `xai`, `ollama`, `custom`, the AWS providers, or `none`). A provider saved from **Settings → Copilot** by an administrator takes precedence; users may bring their own key when `allow_byok` is true. See [DuckCopilot](#duckcopilot). |
 | `duckdb` | `default_memory_limit` | `80%` of host RAM or absolute (`16GB`). Per-workspace overrides in the UI. |
 | | `default_threads`, `temp_directory`, `query_timeout_seconds`, `max_result_rows` | Threads/timeout are per-workspace tunable; results are hard-capped for the grid. |
 | `mcp` | `default_page_size` / `max_page_size` | 50 / 200 rows per tool call; `max_cell_chars` truncates long strings. |
@@ -274,9 +275,20 @@ Both surfaces share one tool registry (`packages/server/src/agent/tools.ts`): th
 
 ## DuckCopilot
 
-An in-app assistant docked beside the workbench and the dashboard builder. Every turn is hydrated automatically with the workspace's tables/views (columns + types), the data files in the jail, the configured cloud buckets, the SQL in the active tab, and — for selected files/tables — `SUMMARIZE` statistics (min/max/distinct/null %). Providers: **Anthropic** (official SDK, streaming, default `claude-opus-5`), **OpenAI** (`gpt-4o`), **Ollama** (local, OpenAI-compatible endpoint), **Amazon Bedrock** (Converse streaming — Claude on Bedrock, model/inference-profile picker), **Bedrock Agent** (`InvokeAgent`, one session per conversation) and **AgentCore runtime** (`InvokeAgentRuntime`; the workspace context is sent as `payload.context` so your own Strands/LangGraph/CrewAI agent can use it). AWS providers use the server's default credential chain (`copilot.aws_region`, `copilot.bedrock_agent_*`, `copilot.agentcore_runtime_arn`, or bring-your-own from the drawer — including a one-click pick of any registered invokable agent). Keys are server-managed (`copilot.*`) or bring-your-own from the drawer's settings (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query* (sends the failing SQL + DuckDB error), *Suggest questions* (top analytical questions for a selected dataset), *Build dashboard* (drafts a Mosaic spec; see [Mosaic dashboards](#mosaic-dashboards)). Conversations persist in `chat_history` with the context snapshot of each turn.
+An in-app assistant docked beside the workbench and the dashboard builder. Every turn is hydrated automatically with the workspace's tables/views (columns + types), the data files in the jail, the configured cloud buckets, the SQL in the active tab, and — for selected files/tables — `SUMMARIZE` statistics (min/max/distinct/null %).
 
-`POST /api/copilot/chat` streams SSE events (`context` → `delta`* → `done` | `error`); `GET /api/copilot/config`, `POST /api/copilot/models`, `GET /api/copilot/conversations`, `GET /api/copilot/messages`, `DELETE /api/copilot/conversations/:id`.
+**Providers.** One streaming contract, three implementations: **Claude** (official Anthropic SDK), every vendor that speaks the OpenAI chat-completions dialect — **ChatGPT / OpenAI**, **Gemini** (Google AI Studio's OpenAI endpoint), **DeepSeek**, **OpenRouter** (one key, every model as `vendor/name`), **Kimi** (Moonshot), **Groq**, **Mistral**, **Grok** (xAI), a local **Ollama**, or **any OpenAI-compatible endpoint** (Together, Fireworks, Perplexity, Azure OpenAI, vLLM, LM Studio) — and the AWS trio (**Amazon Bedrock** Converse streaming with model discovery, **Bedrock Agent**, **AgentCore runtime**, which receive the workspace context as `payload.context`). The catalog (`services/llm-catalog.ts`, `GET /api/copilot/providers`) carries each vendor's endpoint, key console link, key prefix, suggested models and quirks; the bridge retries a request without an optional parameter a vendor rejects (`stream_options`, `max_completion_tokens`).
+
+**Where the key lives — three tiers, first one wins.**
+1. **Bring your own** (per person, browser-only): Settings → Copilot → *Your own key*, or ⚙ in the drawer. Sent with each request, never stored server-side. Requires `copilot.allow_byok`.
+2. **Server provider from Settings** (administrators): Settings → Copilot → *Server provider* — pick a vendor card, paste the key (the card links to the vendor's console), *Fetch models*, *Test connection*, *Save for everyone*. Stored in the metadata database encrypted with the platform key (AES-256-GCM, the last four characters kept as a hint), audited, applied immediately to everyone without a restart. *Test* lists models with the key, or runs a one-token completion for endpoints without `/models`.
+3. **`copilot.*` in the config file** — the deployment-time default (env vars, Docker).
+
+**Usage.** Every turn is recorded in `copilot_usage` (user, workspace, conversation, provider, model, action, own-key flag, input/output tokens, duration, status). Settings → Copilot → *Usage* shows the **sessions running now** (who, model, action, elapsed, characters streamed — refreshed every 5 s), token tiles for today / the window / all time, tokens per day, a by-model table and, for administrators, a by-person table and the recent turns. The drawer header shows the open conversation's tokens and each reply carries its own in/out count. Regular users see their own rows only. Prometheus keeps `duckview_copilot_tokens_total{provider,direction}`.
+
+Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query* (sends the failing SQL + DuckDB error), *Suggest questions* (top analytical questions for a selected dataset), *Build dashboard* (drafts a Mosaic spec; see [Mosaic dashboards](#mosaic-dashboards)). Conversations persist in `chat_history` with the context snapshot of each turn.
+
+`POST /api/copilot/chat` streams SSE events (`context` → `delta`* → `done` | `error`; `done` carries `usage`, `sql_blocks`, `spec_blocks`); `GET /api/copilot/config` · `GET /api/copilot/providers` · `POST /api/copilot/models` · `GET/PUT/DELETE /api/copilot/settings` + `POST /api/copilot/settings/test` (administrators) · `GET /api/copilot/usage?days=&conversation_id=` · `GET /api/copilot/conversations` · `GET /api/copilot/messages` · `DELETE /api/copilot/conversations/:id`.
 
 ## MCP server
 

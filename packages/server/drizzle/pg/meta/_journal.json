@@ -64,6 +64,13 @@
       "when": 1789809032252,
       "tag": "0008_dashboard_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789849363694,
+      "tag": "0009_copilot_settings_usage",
+      "breakpoints": true
     }
   ]
 }

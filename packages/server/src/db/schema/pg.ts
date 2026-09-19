@@ -153,7 +153,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -281,4 +281,42 @@ export const chatHistory = pgTable(
     timestamp: ts('timestamp').notNull(),
   },
   (t) => [index('chat_history_conversation_idx').on(t.conversation_id), index('chat_history_workspace_idx').on(t.workspace_id)],
+);
+
+export const copilotSettings = pgTable('copilot_settings', {
+  id: text('id').primaryKey(),
+  provider: text('provider').notNull(),
+  model: text('model'),
+  base_url: text('base_url'),
+  encrypted_api_key: text('encrypted_api_key'),
+  iv: text('iv'),
+  tag: text('tag'),
+  key_hint: text('key_hint'),
+  aws_region: text('aws_region'),
+  bedrock_agent_id: text('bedrock_agent_id'),
+  bedrock_agent_alias_id: text('bedrock_agent_alias_id'),
+  agentcore_runtime_arn: text('agentcore_runtime_arn'),
+  updated_by: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updated_at: ts('updated_at').notNull(),
+});
+
+export const copilotUsage = pgTable(
+  'copilot_usage',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    conversation_id: text('conversation_id').notNull(),
+    message_id: text('message_id').notNull(),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    action: text('action').notNull(),
+    byok: boolean('byok').notNull().default(false),
+    input_tokens: integer('input_tokens'),
+    output_tokens: integer('output_tokens'),
+    duration_ms: integer('duration_ms').notNull(),
+    status: text('status', { enum: COPILOT_USAGE_STATUSES }).notNull(),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('copilot_usage_user_idx').on(t.user_id), index('copilot_usage_created_idx').on(t.created_at), index('copilot_usage_conversation_idx').on(t.conversation_id)],
 );

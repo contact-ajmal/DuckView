@@ -14,6 +14,7 @@ import { ExportService } from './services/exports.js';
 import { SavedQueryService, DashboardService } from './services/bi.js';
 import { ChatHistoryService } from './services/chat.js';
 import { CopilotService } from './services/copilot.js';
+import { CopilotAdminService } from './services/copilot-admin.js';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
 import { GroupService } from './services/groups.js';
@@ -41,6 +42,7 @@ export interface AppContext {
   dashboards: DashboardService;
   chat: ChatHistoryService;
   copilot: CopilotService;
+  copilotAdmin: CopilotAdminService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -76,6 +78,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const dashboards = new DashboardService(store, workspaces);
   const chat = new ChatHistoryService(store, workspaces);
   const copilot = new CopilotService(cfg, workspaces, queries, cloud, chat, audit, opts.providerFactory, opts.awsBridge);
+  const copilotAdmin = new CopilotAdminService(store, cipher);
+  copilot.admin = copilotAdmin;
   const agents = new AgentService(cfg, store, auth, workspaces, audit, opts.awsBridge);
   const mosaic = new MosaicService(cfg, workspaces, queries, engines, audit);
   copilot.mosaic = mosaic;
@@ -106,6 +110,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     dashboards,
     chat,
     copilot,
+    copilotAdmin,
     lakehouse,
     agents,
     groups,

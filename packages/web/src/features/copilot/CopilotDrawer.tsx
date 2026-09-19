@@ -75,8 +75,8 @@ function SpecBlock({ text, verdict, workspaceId, onFix }: { text: string; verdic
   );
 }
 
-const PROVIDER_LABEL: Record<string, string> = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI', ollama: 'Ollama (local)', bedrock: 'Amazon Bedrock (Claude)', bedrock_agent: 'Amazon Bedrock Agent', agentcore: 'Bedrock AgentCore runtime' };
 const AWS = new Set(['bedrock', 'bedrock_agent', 'agentcore']);
+const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
 
 function SqlBlock({ sql, onInsert, onNewTab, onRun, busy }: { sql: string; onInsert: () => void; onNewTab: () => void; onRun: () => void; busy: boolean }) {
   return (
@@ -130,6 +130,7 @@ export function CopilotDrawer() {
 
   if (!cp.open) return null;
   const cfg = cp.config;
+  const labelOf = (id: string | null | undefined) => (id ? cfg?.providers.find((p) => p.id === id)?.label ?? id : '');
   const usingByok = !!(cfg?.allow_byok && cp.settings.provider);
   const effectiveProvider = usingByok ? cp.settings.provider : cfg?.server_provider ?? null;
   const effectiveModel = usingByok
@@ -245,8 +246,13 @@ export function CopilotDrawer() {
         <Bot className="h-4 w-4 text-accent-400" />
         <span className="text-sm font-semibold">DuckCopilot</span>
         <span className="truncate font-mono text-[10px] text-zinc-500" title={effectiveModel ?? ''}>
-          {effectiveProvider ? `${effectiveProvider} · ${effectiveModel}` : 'not configured'}
+          {effectiveProvider ? `${labelOf(effectiveProvider)} · ${effectiveModel}` : 'not configured'}
         </span>
+        {(cp.usage.requests > 0 || cp.streaming) && (
+          <span className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400" title={`This conversation: ${cp.usage.input_tokens.toLocaleString()} input + ${cp.usage.output_tokens.toLocaleString()} output tokens over ${cp.usage.requests} turn${cp.usage.requests === 1 ? '' : 's'}`}>
+            {cp.streaming && <Loader2 className="mr-1 inline h-3 w-3 animate-spin text-accent-300" />}{fmtTokens(cp.usage.input_tokens + cp.usage.output_tokens)} tok
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-0.5">
           <button onClick={() => setShowConvs(!showConvs)} className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100" title="Conversations">
             <History className="h-4 w-4" />
@@ -285,14 +291,15 @@ export function CopilotDrawer() {
           <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
             <KeyRound className="h-3 w-3" /> Provider
           </div>
-          <Select value={cp.settings.provider} onChange={(e) => { cp.setSettings({ provider: e.target.value as typeof cp.settings.provider, model: '' }); setModels([]); }} className="h-8 w-full text-xs" disabled={!cfg.allow_byok}>
-            <option value="">{cfg.server_provider ? `Server-managed: ${PROVIDER_LABEL[cfg.server_provider]} (${cfg.server_model})` : 'Server-managed: none configured'}</option>
-            {cfg.allow_byok && (['anthropic', 'openai', 'ollama', 'bedrock', 'bedrock_agent', 'agentcore'] as const).map((p) => (
-              <option key={p} value={p}>
-                Bring your own: {PROVIDER_LABEL[p]}
+          <Select value={cp.settings.provider} onChange={(e) => { cp.setSettings({ provider: e.target.value as typeof cp.settings.provider, model: '', apiKey: '', baseUrl: '' }); setModels([]); }} className="h-8 w-full text-xs" disabled={!cfg.allow_byok}>
+            <option value="">{cfg.server_provider ? `Server-managed: ${labelOf(cfg.server_provider)} (${cfg.server_model})` : 'Server-managed: none configured'}</option>
+            {cfg.allow_byok && cfg.providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                Bring your own: {p.label}{p.vendor !== 'Any' && p.vendor !== 'Local' ? ` (${p.vendor})` : ''}
               </option>
             ))}
           </Select>
+          <a href="#/settings/copilot" onClick={() => cp.toggle(false)} className="inline-flex items-center gap-1 text-[11px] text-accent-300 hover:underline"><Settings2 className="h-3 w-3" /> Manage providers, keys and usage in Settings</a>
           {cp.settings.provider && AWS.has(cp.settings.provider) && (
             <div className="space-y-2">
               <p className="text-[11px] text-zinc-500">Uses the DuckView server's AWS credentials (default credential chain). {cp.settings.provider === 'bedrock_agent' && 'Bedrock Agents Classic is closed to new customers — prefer AgentCore for new agents.'}</p>
@@ -356,16 +363,19 @@ export function CopilotDrawer() {
           )}
           {cp.settings.provider && !AWS.has(cp.settings.provider) && (
             <>
-              {cp.settings.provider !== 'ollama' && (
+              {cfg.providers.find((p) => p.id === cp.settings.provider)?.keyRequired && (
                 <div>
-                  <Label>API key <span className="normal-case text-zinc-600">(kept in this browser only)</span></Label>
-                  <Input type="password" value={cp.settings.apiKey} onChange={(e) => cp.setSettings({ apiKey: e.target.value })} className="h-8 font-mono text-xs" autoComplete="off" placeholder={cp.settings.provider === 'anthropic' ? 'sk-ant-…' : 'sk-…'} />
+                  <Label>
+                    API key <span className="normal-case text-zinc-600">(kept in this browser only)</span>
+                    {cfg.providers.find((p) => p.id === cp.settings.provider)?.keyUrl && <a href={cfg.providers.find((p) => p.id === cp.settings.provider)!.keyUrl!} target="_blank" rel="noreferrer" className="ml-1 normal-case text-accent-300 hover:underline">get one ↗</a>}
+                  </Label>
+                  <Input type="password" value={cp.settings.apiKey} onChange={(e) => cp.setSettings({ apiKey: e.target.value })} className="h-8 font-mono text-xs" autoComplete="off" placeholder={`${cfg.providers.find((p) => p.id === cp.settings.provider)?.keyPrefix ?? ''}…`} />
                 </div>
               )}
               {cp.settings.provider !== 'anthropic' && (
                 <div>
-                  <Label>Base URL {cp.settings.provider === 'ollama' ? '' : <span className="normal-case text-zinc-600">(optional, OpenAI-compatible)</span>}</Label>
-                  <Input value={cp.settings.baseUrl} onChange={(e) => cp.setSettings({ baseUrl: e.target.value })} className="h-8 font-mono text-xs" placeholder={cp.settings.provider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com/v1'} />
+                  <Label>Base URL {cfg.providers.find((p) => p.id === cp.settings.provider)?.baseUrl ? <span className="normal-case text-zinc-600">(optional override)</span> : ''}</Label>
+                  <Input value={cp.settings.baseUrl} onChange={(e) => cp.setSettings({ baseUrl: e.target.value })} className="h-8 font-mono text-xs" placeholder={cfg.providers.find((p) => p.id === cp.settings.provider)?.baseUrl ?? 'https://api.example.com/v1'} />
                 </div>
               )}
               <div>
@@ -387,7 +397,7 @@ export function CopilotDrawer() {
       <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-3 py-3 text-[13px] text-zinc-200">
         {!ready && (
           <div className="rounded-md border border-amber-900 bg-amber-950/40 p-3 text-xs text-amber-200">
-            {cfg?.enabled === false ? 'DuckCopilot is disabled on this server.' : 'No LLM provider configured. Open settings to bring your own key (Anthropic, OpenAI, a local Ollama) or point at Amazon Bedrock / a Bedrock Agent / an AgentCore runtime, or ask your administrator to set copilot.provider.'}
+            {cfg?.enabled === false ? 'DuckCopilot is disabled on this server.' : <>No LLM provider configured yet. <a href="#/settings/copilot" onClick={() => cp.toggle(false)} className="text-accent-300 hover:underline">Open Settings → Copilot</a> to pick Claude, ChatGPT, Gemini, DeepSeek, OpenRouter, Kimi, Groq, Mistral, Grok, a local Ollama or any OpenAI-compatible endpoint and paste a key{cfg?.can_manage ? ' for everyone' : ' for yourself'}.</>}
           </div>
         )}
         {ready && cp.messages.length === 0 && (
@@ -418,6 +428,7 @@ export function CopilotDrawer() {
                     {m.meta.model && <span>{m.meta.model}</span>}
                     {m.meta.tables != null && <span>· {m.meta.tables} tables · {m.meta.files} files{m.meta.targets?.length ? ` · profiled ${m.meta.targets.join(', ')}` : ''}</span>}
                     {m.meta.duration_ms != null && <span>· {(m.meta.duration_ms / 1000).toFixed(1)}s</span>}
+                    {m.meta.input_tokens != null && <span title="input + output tokens for this turn">· {fmtTokens(m.meta.input_tokens)} in / {fmtTokens(m.meta.output_tokens ?? 0)} out</span>}
                   </div>
                 )}
                 <div className="prose-sm">

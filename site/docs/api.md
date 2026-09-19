@@ -25,7 +25,7 @@ All API routes live under `/api` and take `Authorization: Bearer <jwt>` (UI sess
 | Live | `WS /api/ws/events` — audit rows, MCP tool invocations, session and workspace-epoch events in real time · `GET /api/system/live` — CPU, RAM, `duckdb_memory()` per engine, disk usage, cache stats |
 | Agents | `GET/POST/DELETE /api/tokens` · `GET /api/mcp/sessions` · `GET /api/mcp/info` · `/api/agents…` · `GET /api/agent/openapi.json` · `GET/POST /api/agent/v1/tools[/:tool]` |
 | Lakehouse | `GET /api/lakehouse/providers` · `/api/lakehouse-connections…` · `GET /api/lakehouse/browse` · `GET /api/lakehouse/:id/inspect` · `POST /api/lakehouse/:id/query` · `POST /api/lakehouse/:id/materialize` |
-| Copilot | `POST /api/copilot/chat` (SSE) · `GET /api/copilot/config` · `POST /api/copilot/models` · `GET /api/copilot/conversations` · `GET /api/copilot/messages` · `DELETE /api/copilot/conversations/:id` |
+| Copilot | `POST /api/copilot/chat` (SSE) · `GET /api/copilot/config` · `GET /api/copilot/providers` · `POST /api/copilot/models` · `GET/PUT/DELETE /api/copilot/settings` + `POST /api/copilot/settings/test` (admin) · `GET /api/copilot/usage` · `GET /api/copilot/conversations` · `GET /api/copilot/messages` · `DELETE /api/copilot/conversations/:id` |
 | Ops | `GET /api/system` · `GET /api/audit` · `GET/POST/PATCH/DELETE /api/admin/users` · `GET /api/admin/engines` · `POST /api/admin/engines/:id/evict` · `GET /api/admin/config` |
 | Probes | `GET /healthz` · `GET /readyz` · `GET /metrics` |
 

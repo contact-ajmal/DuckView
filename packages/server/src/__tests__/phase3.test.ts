@@ -25,7 +25,7 @@ const seen: LlmRequest[] = [];
 
 /** Stub provider: echoes what it received so tests can assert context hydration. */
 const stubFactory: ProviderFactory = (id, opts) => {
-  if (id === 'ollama' || (id === 'openai' && opts.baseUrl)) return defaultProviderFactory(id, opts); // real OpenAI-compatible path for the mock-server test
+  if (id === 'ollama' || id === 'custom' || (id === 'openai' && opts.baseUrl)) return defaultProviderFactory(id, opts); // real OpenAI-compatible path for the mock-server tests
   const provider: LlmProvider = {
     id,
     model: opts.model ?? 'stub-model',
@@ -59,11 +59,21 @@ function startMockLlm(): Promise<{ url: string; close: () => void; requests: unk
         res.writeHead(200, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ models: [{ name: 'llama3.1:8b' }, { name: 'qwen2.5-coder' }] }));
       }
-      if (req.url === '/v1/chat/completions') {
+      if (req.url === '/strict/models' || req.url === '/models') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ object: 'list', data: [{ id: 'vendor-large' }, { id: 'vendor-small' }] }));
+      }
+      if (req.url === '/v1/chat/completions' || req.url === '/chat/completions' || req.url === '/strict/chat/completions') {
         let body = '';
         req.on('data', (c) => (body += c));
         req.on('end', () => {
-          requests.push(JSON.parse(body));
+          const parsed = JSON.parse(body);
+          requests.push(parsed);
+          // A vendor that rejects OpenAI-only parameters: the bridge must retry without them.
+          if (req.url?.startsWith('/strict') && (parsed.stream_options || parsed.max_completion_tokens)) {
+            res.writeHead(400, { 'content-type': 'application/json' });
+            return res.end(JSON.stringify({ error: { message: `Unrecognized request argument supplied: ${parsed.stream_options ? 'stream_options' : 'max_completion_tokens'}`, type: 'invalid_request_error' } }));
+          }
           res.writeHead(200, { 'content-type': 'text/event-stream' });
           const chunk = (delta: Record<string, unknown>, extra: Record<string, unknown> = {}) => `data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', created: 1, model: 'llama3.1', choices: [{ index: 0, delta, finish_reason: null }], ...extra })}\n\n`;
           res.write(chunk({ role: 'assistant', content: '' }));
@@ -234,6 +244,96 @@ describe('DuckCopilot', () => {
     expect(seen.at(-1)!.system).toContain('Writing a DuckView Mosaic dashboard spec');
     await sse({ workspace_id: wsId, message: 'How many orders?' });
     expect(seen.at(-1)!.system).not.toContain('Writing a DuckView Mosaic dashboard spec');
+  });
+  it('any OpenAI-compatible vendor works through a preset (custom base URL), and unsupported parameters are retried without', async () => {
+    const mock = await startMockLlm();
+    try {
+      const r = await sse({ workspace_id: wsId, message: 'ping', provider: 'custom', base_url: `${mock.url}/strict`, api_key: 'vendor-key', model: 'vendor-large' });
+      expect(r.events[0]!.data).toMatchObject({ provider: 'custom', model: 'vendor-large' });
+      expect(r.events.filter((e) => e.event === 'delta').map((e) => e.data.text).join('')).toContain('Mock reply');
+      // First attempt carried stream_options (rejected), the retry did not and used max_tokens.
+      const attempts = mock.requests as { stream_options?: unknown; max_tokens?: number; max_completion_tokens?: number }[];
+      expect(attempts.length).toBeGreaterThanOrEqual(2);
+      expect(attempts[0]!.stream_options).toBeTruthy();
+      expect(attempts.at(-1)!.stream_options).toBeUndefined();
+      expect(attempts.at(-1)!.max_tokens).toBeGreaterThan(0);
+      // Presets with a fixed endpoint need no base URL; a key that does not match the vendor's format is refused early.
+      const models = await api('POST', '/api/copilot/models', { provider: 'custom', base_url: mock.url, api_key: 'k' });
+      expect(models.json).toMatchObject({ models: ['vendor-large', 'vendor-small'] });
+      const cat = await api('GET', '/api/copilot/providers');
+      const ids = (cat.json.providers as { id: string; keyUrl: string | null; baseUrl: string | null }[]).map((p) => p.id);
+      expect(ids).toEqual(expect.arrayContaining(['anthropic', 'openai', 'gemini', 'deepseek', 'openrouter', 'kimi', 'groq', 'mistral', 'xai', 'ollama', 'custom', 'bedrock']));
+      expect((cat.json.providers as { id: string; baseUrl: string | null }[]).find((p) => p.id === 'openrouter')!.baseUrl).toBe('https://openrouter.ai/api/v1');
+    } finally {
+      mock.close();
+    }
+  });
+  it('administrators set the server-managed provider from Settings; it overrides the config file and is stored encrypted', async () => {
+    const before = await api('GET', '/api/copilot/config');
+    expect(before.json).toMatchObject({ server_provider: 'anthropic', server_source: 'config', can_manage: true });
+    // Validation: wrong key format, missing base URL for a custom endpoint, missing region for Bedrock.
+    expect((await api('PUT', '/api/copilot/settings', { provider: 'anthropic', api_key: 'sk-or-wrong' })).status).toBe(400);
+    expect((await api('PUT', '/api/copilot/settings', { provider: 'custom', api_key: 'k', model: 'm' })).status).toBe(400);
+    expect((await api('PUT', '/api/copilot/settings', { provider: 'bedrock' })).status).toBe(400);
+    const set = await api('PUT', '/api/copilot/settings', { provider: 'openrouter', api_key: 'sk-or-v1-abcdef1234', model: 'openai/gpt-4.1' });
+    expect(set.status).toBe(200);
+    expect(set.json.settings).toMatchObject({ provider: 'openrouter', model: 'openai/gpt-4.1', has_key: true, key_hint: '1234', updated_by_email: 'admin@test.local' });
+    expect(JSON.stringify(set.json)).not.toContain('abcdef');
+    const after = await api('GET', '/api/copilot/config');
+    expect(after.json).toMatchObject({ server_provider: 'openrouter', server_model: 'openai/gpt-4.1', server_source: 'settings', has_server_key: true, server_key_hint: '1234' });
+    // Chat now runs on the stored provider and key (the stub echoes the provider id; the key reached the factory).
+    const r = await sse({ workspace_id: wsId, message: 'hi' });
+    expect(r.events[0]!.data).toMatchObject({ provider: 'openrouter', model: 'openai/gpt-4.1' });
+    expect(r.events.at(-1)!.event).toBe('done');
+    // Stored in the metadata database, ciphertext only.
+    const row = (await ctx.copilotAdmin['db'].select().from(ctx.copilotAdmin['s'].copilotSettings))[0]!;
+    expect(row.encrypted_api_key).toBeTruthy();
+    expect(row.encrypted_api_key).not.toContain('abcdef');
+    // Re-saving without a key keeps the key on file; changing the model only.
+    const keep = await api('PUT', '/api/copilot/settings', { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.5' });
+    expect(keep.json.settings).toMatchObject({ has_key: true, key_hint: '1234', model: 'anthropic/claude-sonnet-4.5' });
+    // Test endpoint uses the key on file through the provider (stub lists models).
+    const test = await api('POST', '/api/copilot/settings/test', { provider: 'openrouter' });
+    expect(test.json).toMatchObject({ ok: true, models: ['stub-model', 'stub-large'] });
+    // Non-admins cannot read, change or test the server provider — but see it in config.
+    const u = await ctx.auth.createLocalUser({ email: 'analyst@test.local', password: 'analyst-password', role: 'USER' });
+    const ujwt = (await api('POST', '/api/auth/login', { email: 'analyst@test.local', password: 'analyst-password' }, '')).json.token as string;
+    expect((await api('GET', '/api/copilot/settings', undefined, ujwt)).status).toBe(403);
+    expect((await api('PUT', '/api/copilot/settings', { provider: 'openai', api_key: 'sk-x' }, ujwt)).status).toBe(403);
+    expect((await api('POST', '/api/copilot/settings/test', { provider: 'openrouter' }, ujwt)).status).toBe(403);
+    expect((await api('GET', '/api/copilot/config', undefined, ujwt)).json).toMatchObject({ server_provider: 'openrouter', can_manage: false });
+    void u;
+    // Clearing returns to the config file.
+    expect((await api('DELETE', '/api/copilot/settings')).json).toMatchObject({ ok: true, source: 'config' });
+    expect((await api('GET', '/api/copilot/config')).json).toMatchObject({ server_provider: 'anthropic', server_source: 'config' });
+  });
+  it('tracks usage per turn and reports totals, per-model/user breakdowns and streams in flight', async () => {
+    const conv = (await sse({ workspace_id: wsId, message: 'count things' })).events[0]!.data.conversation_id as string;
+    await sse({ workspace_id: wsId, conversation_id: conv, message: 'and more' });
+    const c = await api('GET', `/api/copilot/usage?conversation_id=${conv}`);
+    expect(c.json.conversation).toMatchObject({ requests: 2, input_tokens: 246, output_tokens: 90, errors: 0 });
+    const report = await api('GET', '/api/copilot/usage?days=7');
+    const j = report.json as { scope: string; today: { requests: number; input_tokens: number }; window: { requests: number }; by_model: { provider: string; model: string; requests: number }[]; by_user: { email: string; requests: number }[]; by_day: { day: string }[]; active: unknown[]; recent: { status: string }[] };
+    expect(j.scope).toBe('all');
+    expect(j.today.requests).toBeGreaterThanOrEqual(2);
+    expect(j.today.input_tokens).toBeGreaterThanOrEqual(246);
+    expect(j.by_model.some((m) => m.provider === 'anthropic' && m.model === 'claude-opus-5')).toBe(true);
+    expect(j.by_user[0]).toMatchObject({ email: 'admin@test.local' });
+    expect(j.by_day.length).toBeGreaterThanOrEqual(1);
+    expect(j.active).toEqual([]);
+    expect(j.recent.some((r) => r.status === 'error')).toBe(true); // the earlier BYOK-without-key turn was recorded as an error
+    // A non-admin only sees their own rows.
+    const ujwt = (await api('POST', '/api/auth/login', { email: 'analyst@test.local', password: 'analyst-password' }, '')).json.token as string;
+    const mine = (await api('GET', '/api/copilot/usage', undefined, ujwt)).json as { scope: string; window: { requests: number }; by_user: unknown[] };
+    expect(mine).toMatchObject({ scope: 'self', window: { requests: 0 }, by_user: [] });
+    // Streams in flight are visible while a turn runs (the stub streams three chunks; peek between them).
+    const streamer = ctx.copilot.stream(admin, { workspaceId: wsId, message: 'slow' });
+    await streamer.next(); // context event: the stream is registered
+    await streamer.next(); // first delta
+    expect(ctx.copilotAdmin.activeStreams(admin)).toHaveLength(1);
+    expect(ctx.copilotAdmin.activeStreams(admin)[0]).toMatchObject({ user_email: 'admin@test.local', provider: 'anthropic', action: 'chat' });
+    for await (const _ of streamer) void _;
+    expect(ctx.copilotAdmin.activeStreams(admin)).toHaveLength(0);
   });
 });
 

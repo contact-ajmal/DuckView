@@ -1,21 +1,19 @@
 /**
- * LLM provider bridge for DuckCopilot. Six providers, one streaming contract:
- *   - anthropic     : official @anthropic-ai/sdk, Messages API streaming (default model claude-opus-5)
- *   - openai        : official openai SDK, chat completions streaming (default model gpt-4o)
- *   - ollama        : openai SDK against Ollama's OpenAI-compatible endpoint (<base_url>/v1), model list via /api/tags
- *   - bedrock       : Amazon Bedrock Converse streaming (Claude on Bedrock; default credential chain, region required)
- *   - bedrock_agent : an existing Amazon Bedrock Agent (Classic) — InvokeAgent with a per-conversation session
- *   - agentcore     : an agent deployed on Amazon Bedrock AgentCore Runtime — InvokeAgentRuntime (SSE or JSON)
- * The agent providers receive the workspace context separately (they keep their own instructions and memory).
+ * LLM provider bridge for DuckCopilot. One streaming contract over three implementations:
+ *   - anthropic                 : official @anthropic-ai/sdk, Messages API streaming
+ *   - OpenAI-compatible         : official openai SDK — OpenAI itself and every vendor that speaks its chat-completions
+ *                                 dialect (Gemini, DeepSeek, OpenRouter, Kimi, Groq, Mistral, xAI, a local Ollama, or any
+ *                                 custom endpoint); the preset in llm-catalog.ts supplies the base URL and quirks
+ *   - bedrock / bedrock_agent / agentcore : AWS (Converse streaming, InvokeAgent, InvokeAgentRuntime) on the server's
+ *                                 credential chain; the agent providers receive the workspace context separately.
  */
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { HttpError } from './errors.js';
 import { defaultAwsBridge, type AwsBridge } from './aws.js';
+import { presetFor, DEFAULT_MODELS, type ProviderId, type ProviderPreset } from './llm-catalog.js';
 
-export type ProviderId = 'anthropic' | 'openai' | 'ollama' | 'bedrock' | 'bedrock_agent' | 'agentcore';
-export const PROVIDER_IDS: ProviderId[] = ['anthropic', 'openai', 'ollama', 'bedrock', 'bedrock_agent', 'agentcore'];
-export const AWS_PROVIDERS: ProviderId[] = ['bedrock', 'bedrock_agent', 'agentcore'];
+export { PROVIDER_CATALOG, PROVIDER_IDS, AWS_PROVIDERS, DEFAULT_MODELS, SUGGESTED_MODELS, presetFor, type ProviderId, type ProviderPreset } from './llm-catalog.js';
 
 export interface LlmMessage {
   role: 'user' | 'assistant';
@@ -59,24 +57,6 @@ export interface ProviderOptions {
   runtimeArn?: string;
   aws?: AwsBridge;
 }
-
-export const DEFAULT_MODELS: Record<ProviderId, string> = {
-  anthropic: 'claude-opus-5',
-  openai: 'gpt-4o',
-  ollama: 'llama3.1',
-  bedrock: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
-  bedrock_agent: 'bedrock-agent',
-  agentcore: 'agentcore-runtime',
-};
-
-export const SUGGESTED_MODELS: Record<ProviderId, string[]> = {
-  anthropic: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3-mini'],
-  ollama: ['llama3.1', 'qwen2.5-coder', 'mistral', 'deepseek-r1'],
-  bedrock: ['us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'us.anthropic.claude-opus-4-1-20250805-v1:0', 'us.anthropic.claude-haiku-4-5-20251001-v1:0', 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'],
-  bedrock_agent: [],
-  agentcore: [],
-};
 
 /** AgentCore needs 33+ character session ids; keep one session per DuckView conversation. */
 function sessionIdFor(conversationId?: string): string {
@@ -181,31 +161,51 @@ class AnthropicProvider implements LlmProvider {
   }
 }
 
+/** Every vendor that speaks the OpenAI chat-completions dialect, parameterised by its catalog preset. */
 class OpenAICompatibleProvider implements LlmProvider {
   readonly id: ProviderId;
   readonly model: string;
   private client: OpenAI;
-  private readonly baseUrl: string | undefined;
-  constructor(id: 'openai' | 'ollama', opts: ProviderOptions) {
+  private readonly baseUrl: string;
+  private readonly preset: ProviderPreset;
+  /** Parameters this endpoint rejected once; not sent again for the lifetime of the provider instance. */
+  private readonly unsupported = new Set<string>();
+  constructor(id: ProviderId, opts: ProviderOptions) {
     this.id = id;
-    if (id === 'openai' && !opts.apiKey) throw new HttpError(400, 'OpenAI API key required (server-managed or bring-your-own)', 'COPILOT_KEY_REQUIRED');
-    const base = id === 'ollama' ? (opts.baseUrl || 'http://localhost:11434').replace(/\/+$/, '') : opts.baseUrl?.replace(/\/+$/, '');
+    this.preset = presetFor(id);
+    if (this.preset.keyRequired && !opts.apiKey) throw new HttpError(400, `${this.preset.label} API key required (server-managed or bring-your-own)`, 'COPILOT_KEY_REQUIRED');
+    const base = (opts.baseUrl || this.preset.baseUrl || '').replace(/\/+$/, '');
+    if (!base) throw new HttpError(400, `${this.preset.label}: a base URL is required (e.g. https://api.together.xyz/v1)`, 'COPILOT_BASE_URL_REQUIRED');
     this.baseUrl = base;
-    this.client = new OpenAI({ apiKey: opts.apiKey || (id === 'ollama' ? 'ollama' : ''), baseURL: id === 'ollama' ? `${base}/v1` : base, maxRetries: 1 });
-    this.model = opts.model || DEFAULT_MODELS[id];
+    this.client = new OpenAI({ apiKey: opts.apiKey || (id === 'ollama' ? 'ollama' : 'none'), baseURL: id === 'ollama' ? `${base}/v1` : base, maxRetries: 1, defaultHeaders: this.preset.headers });
+    this.model = opts.model || this.preset.defaultModel;
+  }
+  private body(req: LlmRequest): Record<string, unknown> {
+    const tokenParam = this.unsupported.has(this.preset.tokenParam) ? (this.preset.tokenParam === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens') : this.preset.tokenParam;
+    return {
+      model: this.model,
+      stream: true,
+      ...(this.unsupported.has('stream_options') ? {} : { stream_options: { include_usage: true } }),
+      [tokenParam]: req.maxTokens,
+      ...(req.temperature !== undefined && !this.unsupported.has('temperature') ? { temperature: req.temperature } : {}),
+      messages: [{ role: 'system', content: req.system }, ...req.messages.map((m) => ({ role: m.role, content: m.content }))],
+    };
   }
   async *stream(req: LlmRequest): AsyncGenerator<string, LlmUsage, void> {
-    const stream = await this.client.chat.completions.create(
-      {
-        model: this.model,
-        stream: true,
-        stream_options: { include_usage: true },
-        max_completion_tokens: req.maxTokens,
-        ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
-        messages: [{ role: 'system', content: req.system }, ...req.messages.map((m) => ({ role: m.role, content: m.content }))],
-      },
-      { signal: req.signal },
-    );
+    if (!this.model) throw new HttpError(400, `${this.preset.label}: a model is required`, 'COPILOT_MODEL_REQUIRED');
+    // Vendors differ in which optional parameters they accept; a 400 naming one of ours is retried without it.
+    let stream: AsyncIterable<{ choices?: { delta?: { content?: string | null } }[]; usage?: { prompt_tokens?: number | null; completion_tokens?: number | null } | null }>;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        stream = (await this.client.chat.completions.create(this.body(req) as never, { signal: req.signal })) as never;
+        break;
+      } catch (err) {
+        const e = err as { status?: number; message?: string };
+        const param = e.status === 400 ? ['stream_options', 'max_completion_tokens', 'max_tokens', 'temperature'].find((k) => (e.message ?? '').includes(k)) : undefined;
+        if (!param || this.unsupported.has(param) || attempt >= 2) throw err;
+        this.unsupported.add(param);
+      }
+    }
     let usage: LlmUsage = { input_tokens: null, output_tokens: null };
     for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta?.content;
@@ -222,7 +222,12 @@ class OpenAICompatibleProvider implements LlmProvider {
       return (j.models ?? []).map((m) => m.name);
     }
     const out: string[] = [];
-    for await (const m of this.client.models.list()) if (/gpt|o[134]/.test(m.id)) out.push(m.id);
+    for await (const m of this.client.models.list()) {
+      // OpenAI lists embeddings, audio and image models too; keep the chat families.
+      if (this.id === 'openai' && !/gpt|o[134]/.test(m.id)) continue;
+      out.push(m.id);
+      if (out.length >= 500) break;
+    }
     return out.sort();
   }
 }
@@ -234,7 +239,15 @@ export const defaultProviderFactory: ProviderFactory = (id, opts) => {
     case 'anthropic':
       return new AnthropicProvider(opts);
     case 'openai':
+    case 'gemini':
+    case 'deepseek':
+    case 'openrouter':
+    case 'kimi':
+    case 'groq':
+    case 'mistral':
+    case 'xai':
     case 'ollama':
+    case 'custom':
       return new OpenAICompatibleProvider(id, opts);
     case 'bedrock':
       return new BedrockProvider(opts);

@@ -67,7 +67,7 @@ The final object is validated with zod; the process refuses to start on invalid 
 
 ## copilot
 
-`provider` (`anthropic` | `openai` | `ollama` | `bedrock` | `bedrock_agent` | `agentcore` | `none`), `model`, `api_key`, `base_url` (Ollama / OpenAI-compatible), `aws_region`, `bedrock_agent_id`, `bedrock_agent_alias_id`, `agentcore_runtime_arn`, `allow_byok` (users may bring their own key), `max_context_tables`, `include_summaries`, `max_output_tokens`, `temperature`.
+`provider` (`anthropic` | `openai` | `gemini` | `deepseek` | `openrouter` | `kimi` | `groq` | `mistral` | `xai` | `ollama` | `custom` | `bedrock` | `bedrock_agent` | `agentcore` | `none`) — the deployment-time default; a provider saved from Settings → Copilot by an administrator takes precedence — `model`, `api_key`, `base_url` (Ollama / OpenAI-compatible), `aws_region`, `bedrock_agent_id`, `bedrock_agent_alias_id`, `agentcore_runtime_arn`, `allow_byok` (users may bring their own key), `max_context_tables`, `include_summaries`, `max_output_tokens`, `temperature`.
 
 ## cache
 
