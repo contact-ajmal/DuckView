@@ -42,6 +42,13 @@ vconcat:
     height: 300
 ```
 
+## Agents and Copilot
+
+Every spec is validated by the server before it is rendered or saved — structure in Mosaic's own vocabulary, then every dataset and table bound in the workspace with `EXPLAIN` — so a missing file or column comes back as a precise error instead of a blank chart.
+
+- **MCP**: `create_mosaic_dashboard(spec | spec_text, validate_only?)` creates or updates a dashboard and refuses invalid specs with the error list; the resource `duckdb://guides/mosaic-spec` and the prompt `build_mosaic_dashboard` carry the authoring rules.
+- **DuckCopilot**: *Build dashboard* drafts a spec for the selected dataset (or whatever you describe); each spec in a reply is validated and shown with **Create dashboard** — one click to save and open — or **Fix with Copilot** to send the errors back.
+
 ## How it stays safe
 
 The browser talks to `POST /api/workspaces/:id/mosaic`. Chart queries (`arrow` / `json`) run through the normal query pipeline — role, sandbox, audit, result cache with `ETag` — with their own row ceiling (`mosaic.max_rows`). Mosaic's plumbing (`exec`) is admitted only in its exact shapes: creating the `duckview_mosaic` schema, `preagg_<hash>` tables inside it, DuckView's `duckview_mosaic_src_<hash>` source views, and dropping them again; every wrapped SELECT must be a single read-only statement. Anything else is rejected. Pre-aggregates and source views are derived data: viewers can create them, they never move the data epoch, and they are dropped — and rebuilt lazily — whenever the epoch moves. They are hidden from the catalog, the explorer and agents.

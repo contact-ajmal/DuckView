@@ -39,10 +39,11 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `lakehouse_query(connection_id, sql, page_size?, dry_run?)` | SQL on a Databricks SQL warehouse; non-read statements need `dry_run=false` after approval. |
 | `list_dashboards(workspace_id?)` | Dashboards with their widgets and layouts. |
 | `create_dashboard_widget(dashboard_id \| dashboard_name, title, sql, widget_type, chart_config?, refresh_interval_sec?)` | Builds dashboards autonomously; the SQL is validated read-only and dry-run first. |
+| `create_mosaic_dashboard(spec \| spec_text, name?, description?, dashboard_id?, validate_only?, workspace_id?)` | Creates or updates an interactive Mosaic dashboard from a declarative spec (YAML/JSON). Validated structurally and every dataset/table bound with EXPLAIN before saving; errors come back as a list to fix. |
 
-**Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines).
+**Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec).
 
-**Prompts** — `data_quality_audit(table_or_path)` and `sql_optimization(sql)` encode complete agent workflows over the tools above.
+**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)` and `build_mosaic_dashboard(table_or_path, goal?)` encode complete agent workflows over the tools above.
 
 ## Human-in-the-loop
 
@@ -75,6 +76,6 @@ An in-app assistant docked beside the workbench and the dashboard builder. Every
 | **Amazon Bedrock** | Converse streaming with model / inference-profile discovery |
 | **Bedrock Agent** · **AgentCore runtime** | Route the drawer to your deployed agent; DuckView passes the workspace context along as `payload.context` |
 
-Keys are server-managed (`copilot.*`) or bring-your-own from the drawer (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query*, *Suggest questions*. Conversations persist with the context snapshot of each turn.
+Keys are server-managed (`copilot.*`) or bring-your-own from the drawer (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query*, *Suggest questions*, *Build dashboard* (drafts a Mosaic dashboard spec, validated against your data and created in one click — see [Mosaic dashboards](mosaic.html)). Conversations persist with the context snapshot of each turn.
 
 `POST /api/copilot/chat` streams SSE events (`context` → `delta`* → `done` | `error`); `GET /api/copilot/config`, `POST /api/copilot/models`, `GET /api/copilot/conversations`, `GET /api/copilot/messages`, `DELETE /api/copilot/conversations/:id`.

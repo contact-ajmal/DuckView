@@ -210,7 +210,11 @@ Specs are written exactly as in the Mosaic docs; the differences are only in whe
 
 Everything else — `params`, selections (`crossfilter`, `intersect`, `single`…), inputs (`menu`, `search`, `slider`, `table`), `plot` with every mark, interactor and attribute, `legend`, `hconcat` / `vconcat` / spacing — is Mosaic's own and runs through the same connector endpoint, so it inherits the role model, the sandbox, the result cache and the exec policy. Specs are capped at 512 KB; `spec` is `null` on grid dashboards and a PATCH with a `spec` on one is `400`. Widgets cannot be added to a Mosaic dashboard.
 
-API: `POST /api/workspaces/:id/dashboards {name, description?, kind?: grid|mosaic, spec?}` · `PATCH /api/dashboards/:id {spec}` (editor). The MCP `list_dashboards` tool reports `kind` and `spec`.
+**Validation is server-side and shared.** `POST /api/workspaces/:id/mosaic/prepare {spec | spec_text, bind?}` checks the structure in Mosaic's own terms (marks, attributes, interactors, legends, inputs, selection types — the vocabulary is generated from the installed vgplot by `scripts/gen-mosaic-names.mjs`, so the server never loads the browser stack), turns `data` into source-view statements, and binds every dataset SELECT and every plain `from:` table with `EXPLAIN` (no data is read) so a missing file, table or column is reported before anything renders or is saved. It answers `{ok, errors, warnings, spec, statements, sources, tables}`; the editor, the MCP tool and Copilot all go through it. Warnings flag channel objects that are not a transform (`x: {bins: col}`), which Mosaic would otherwise pass through as literals.
+
+**Agents and Copilot.** The MCP tool `create_mosaic_dashboard` (spec or spec_text; `validate_only` to check first; `dashboard_id` to update) refuses invalid specs with the error list; the resource `duckdb://guides/mosaic-spec` and the prompt `build_mosaic_dashboard` carry the authoring rules. In DuckCopilot, **Build dashboard** (or any chat that mentions a chart or dashboard) puts the same guide in the system prompt; every ```yaml / ```json spec in a reply is validated against the workspace when the turn completes (`spec_blocks` on the `done` event) and rendered with **Create dashboard** — validated, saved and opened in one click — or **Fix with Copilot**, which sends the errors back.
+
+API: `POST /api/workspaces/:id/dashboards {name, description?, kind?: grid|mosaic, spec?}` · `PATCH /api/dashboards/:id {spec}` (editor) · `POST /api/workspaces/:id/mosaic/prepare`. The MCP `list_dashboards` tool reports `kind` and `spec`.
 
 ## Sharing & teams
 
@@ -265,7 +269,7 @@ Both surfaces share one tool registry (`packages/server/src/agent/tools.ts`): th
 
 ## DuckCopilot
 
-An in-app assistant docked beside the workbench and the dashboard builder. Every turn is hydrated automatically with the workspace's tables/views (columns + types), the data files in the jail, the configured cloud buckets, the SQL in the active tab, and — for selected files/tables — `SUMMARIZE` statistics (min/max/distinct/null %). Providers: **Anthropic** (official SDK, streaming, default `claude-opus-5`), **OpenAI** (`gpt-4o`), **Ollama** (local, OpenAI-compatible endpoint), **Amazon Bedrock** (Converse streaming — Claude on Bedrock, model/inference-profile picker), **Bedrock Agent** (`InvokeAgent`, one session per conversation) and **AgentCore runtime** (`InvokeAgentRuntime`; the workspace context is sent as `payload.context` so your own Strands/LangGraph/CrewAI agent can use it). AWS providers use the server's default credential chain (`copilot.aws_region`, `copilot.bedrock_agent_*`, `copilot.agentcore_runtime_arn`, or bring-your-own from the drawer — including a one-click pick of any registered invokable agent). Keys are server-managed (`copilot.*`) or bring-your-own from the drawer's settings (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query* (sends the failing SQL + DuckDB error), *Suggest questions* (top analytical questions for a selected dataset). Conversations persist in `chat_history` with the context snapshot of each turn.
+An in-app assistant docked beside the workbench and the dashboard builder. Every turn is hydrated automatically with the workspace's tables/views (columns + types), the data files in the jail, the configured cloud buckets, the SQL in the active tab, and — for selected files/tables — `SUMMARIZE` statistics (min/max/distinct/null %). Providers: **Anthropic** (official SDK, streaming, default `claude-opus-5`), **OpenAI** (`gpt-4o`), **Ollama** (local, OpenAI-compatible endpoint), **Amazon Bedrock** (Converse streaming — Claude on Bedrock, model/inference-profile picker), **Bedrock Agent** (`InvokeAgent`, one session per conversation) and **AgentCore runtime** (`InvokeAgentRuntime`; the workspace context is sent as `payload.context` so your own Strands/LangGraph/CrewAI agent can use it). AWS providers use the server's default credential chain (`copilot.aws_region`, `copilot.bedrock_agent_*`, `copilot.agentcore_runtime_arn`, or bring-your-own from the drawer — including a one-click pick of any registered invokable agent). Keys are server-managed (`copilot.*`) or bring-your-own from the drawer's settings (kept in the browser, sent per request, never stored). Actions: *Insert into tab*, *New tab*, *Run & inspect* (executes, then explains the result in business language), *Fix my query* (sends the failing SQL + DuckDB error), *Suggest questions* (top analytical questions for a selected dataset), *Build dashboard* (drafts a Mosaic spec; see [Mosaic dashboards](#mosaic-dashboards)). Conversations persist in `chat_history` with the context snapshot of each turn.
 
 `POST /api/copilot/chat` streams SSE events (`context` → `delta`* → `done` | `error`); `GET /api/copilot/config`, `POST /api/copilot/models`, `GET /api/copilot/conversations`, `GET /api/copilot/messages`, `DELETE /api/copilot/conversations/:id`.
 
@@ -299,10 +303,11 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `lakehouse_query(connection_id, sql, page_size?, dry_run?)` | Runs SQL on a Databricks SQL warehouse; non-read statements need `dry_run=false` after approval. |
 | `list_dashboards(workspace_id?)` | Dashboards with their widgets and layouts. |
 | `create_dashboard_widget(dashboard_id | dashboard_name, title, sql, widget_type, chart_config?, refresh_interval_sec?)` | Builds dashboards autonomously; the SQL is validated read-only and dry-run first. |
+| `create_mosaic_dashboard(spec | spec_text, name?, description?, dashboard_id?, validate_only?, workspace_id?)` | Creates or updates an interactive Mosaic dashboard from a declarative spec (YAML/JSON). Validated structurally and every dataset/table bound with EXPLAIN before saving; errors come back as a list to fix. |
 
-**Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines).
+**Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec).
 
-**Prompts** — `data_quality_audit(table_or_path)` and `sql_optimization(sql)` encode complete agent workflows over the tools above.
+**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)` and `build_mosaic_dashboard(table_or_path, goal?)` encode complete agent workflows over the tools above.
 
 ## HTTP API (summary)
 
@@ -318,7 +323,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Data | `POST /api/workspaces/:id/files` (multipart upload into the jail) · `DELETE /api/workspaces/:id/files?path=` · `POST /api/workspaces/:id/overview` (KPIs, null ratios, sample, distributions) · `GET /api/workspaces/:id/catalog` |
 | Query | `POST /api/workspaces/:id/query` · `/explain` · `/profile` · `/save` · `WS /api/ws/query` (auth → run/cancel; schema → rows* → done). `query`, `explain`, `profile`, `overview`, `storage/inspect` and widget data are conditional (`ETag` / `If-None-Match` → 304, `refresh: true`). |
 | Cache | `DELETE /api/workspaces/:id/cache` · `POST /api/admin/cache/clear` · cache stats in `GET /api/system/live` |
-| Mosaic | `POST /api/workspaces/:id/mosaic {type: arrow\|json\|exec, sql}` · `GET /api/mosaic/info` |
+| Mosaic | `POST /api/workspaces/:id/mosaic {type: arrow\|json\|exec, sql}` · `POST /api/workspaces/:id/mosaic/prepare {spec \| spec_text, bind?}` · `GET /api/mosaic/info` |
 | Live | `WS /api/ws/events` — audit rows, MCP tool invocations and session events in real time (admins: all; others: own) · `GET /api/system/live` — CPU %, RAM, `duckdb_memory()` per engine, scratch/data disk usage |
 | Agents | `GET/POST/DELETE /api/tokens` · `GET /api/mcp/sessions` · `GET /api/mcp/info` (Claude Desktop / Cursor / Claude Code snippets) · `/api/agents…` (registered agents, snippets, self-test, invoke, discovery) · `GET /api/agent/openapi.json` · `GET/POST /api/agent/v1/tools[/:tool]` (REST façade) |
 | Lakehouse | `GET /api/lakehouse/providers` · `/api/lakehouse-connections…` · `GET /api/lakehouse/browse` · `GET /api/lakehouse/:id/inspect` · `POST /api/lakehouse/:id/query` · `POST /api/lakehouse/:id/materialize` |
@@ -354,7 +359,8 @@ packages/server/src
   engine/        sandbox (DataJail), sql-guard (lexer/classifier/rewriter), duckdb (engines, overview, memory stats), results
   security/      AES-256-GCM, scrypt, token hashing
   services/      audit, auth/tokens, groups (teams + SSO sync), workspaces (membership/roles, tabs, data epoch), query (authz + HITL),
-                 cache (result cache: keys, LRU, ETag), mosaic (connector endpoint + exec policy), connections, files (uploads),
+                 cache (result cache: keys, LRU, ETag), mosaic (connector endpoint + exec policy + spec prepare), mosaic-spec (parse, validate,
+                 data → views; mosaic-names generated from vgplot), mosaic-guide (agent/Copilot authoring guide), connections, files (uploads),
                  lakehouse (Iceberg ATTACH + Databricks), databricks (UC + Statement Execution client), agents, aws (Bedrock/AgentCore bridge)
   agent/         tool registry (shared by MCP + REST), OpenAPI generator, framework snippets
   mcp/           server (registry → tools, resources, prompts), stdio, http (SSE + Streamable HTTP)
@@ -377,7 +383,7 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 187 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
+pnpm test        # 192 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +

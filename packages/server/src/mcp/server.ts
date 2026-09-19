@@ -5,6 +5,7 @@
  */
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { MOSAIC_SPEC_GUIDE } from '../services/mosaic-guide.js';
 import type { AppContext } from '../context.js';
 import type { Principal } from '../services/principal.js';
 import { formatBytes } from '../engine/results.js';
@@ -91,6 +92,13 @@ export function buildMcpServer(ctx: AppContext, principal: Principal, opts: { de
     },
   );
 
+  server.registerResource(
+    'mosaic-spec-guide',
+    'duckdb://guides/mosaic-spec',
+    { title: 'Mosaic dashboard spec guide', description: 'How to write a declarative Mosaic dashboard spec for create_mosaic_dashboard: data rules, shape, marks, selections, rules of thumb.', mimeType: 'text/markdown' },
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: MOSAIC_SPEC_GUIDE }] }),
+  );
+
   // ---------------------------------------------------------------- prompts
   server.registerPrompt(
     'data_quality_audit',
@@ -149,6 +157,32 @@ Procedure:
 5. Rewrite the query, run \`explain_query\` on the rewrite, and compare estimated cardinalities / timings against the original.
 
 Output: a short diagnosis, the rewritten SQL, a before/after plan comparison table, and any \`save_dataset\` or DDL commands the human should approve. Never execute mutating statements without approval.`,
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    'build_mosaic_dashboard',
+    {
+      title: 'Build a Mosaic dashboard',
+      description: 'Guided workflow: profile a dataset, draft an interactive cross-filtered Mosaic spec, validate it and create the dashboard.',
+      argsSchema: { table_or_path: z.string().describe('Table, view or relative file path to visualise'), goal: z.string().optional().describe('What the dashboard should answer (optional)'), workspace_id: z.string().optional().describe('Workspace id') },
+    },
+    ({ table_or_path, goal, workspace_id }) => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Build an interactive Mosaic dashboard for \`${table_or_path}\`${workspace_id ? ` in workspace \`${workspace_id}\`` : ''}${goal ? ` that answers: ${goal}` : ''}.
+
+1. Read the resource \`duckdb://guides/mosaic-spec\` for the spec rules.
+2. Call \`profile_dataset\` on \`${table_or_path}\` to learn column names, types, cardinalities and ranges — chart only columns that exist.
+3. Draft a YAML spec: a crossfilter selection, one plot per meaningful column or relationship (histograms for numbers and dates, bars for low-cardinality text, a line over time when there is a timestamp), inputs where a filter makes sense, and a table of the filtered rows. Keep it to 12 plots or fewer.
+4. Call \`create_mosaic_dashboard\` with \`validate_only: true\`; fix every reported error, then call it again to create the dashboard.
+5. Reply with the dashboard link and three sentences on how to read it.`,
           },
         },
       ],

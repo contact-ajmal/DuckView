@@ -19,6 +19,7 @@ import { metrics } from '../observability/metrics.js';
 import { withSpan } from '../observability/tracing.js';
 import { HttpError } from '../services/errors.js';
 import { liveEvents, summarizeArgs } from '../observability/events.js';
+import { describeSpec, parseSpecText } from '../services/mosaic-spec.js';
 
 export type ToolResult = { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -404,7 +405,45 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`Added **${widget.title}** (${widget.widget_type}) to dashboard \`${dashId}\`. Open it at /#/dashboards/${dashId}.`)], structuredContent: { status: 'ok', dashboard_id: dashId, workspace_id: ws, widget: { id: widget.id, title: widget.title, widget_type: widget.widget_type, chart_config: widget.chart_config }, layout } };
       },
     }),
+
+    define({
+      name: 'create_mosaic_dashboard',
+      title: 'Create Mosaic dashboard',
+      description: 'Creates (or, with dashboard_id, updates) an interactive Mosaic dashboard from a declarative spec (YAML or JSON, see resource duckdb://guides/mosaic-spec). The spec is validated structurally and every dataset/table is bound in the workspace with EXPLAIN before anything is saved; errors come back as a list to fix. Pass validate_only to check a spec without saving.',
+      inputSchema: {
+        workspace_id: z.string().optional(),
+        name: z.string().optional().describe('Dashboard name (required when creating)'),
+        description: z.string().optional(),
+        dashboard_id: z.string().optional().describe('Update the spec of this existing Mosaic dashboard instead of creating one'),
+        spec: z.record(z.string(), z.unknown()).optional().describe('The spec as a JSON object'),
+        spec_text: z.string().optional().describe('The spec as YAML or JSON text (alternative to spec)'),
+        validate_only: z.boolean().optional().describe('Validate and report, do not save'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { workspace_id, name, description, dashboard_id, spec, spec_text, validate_only }) {
+        const parsed = spec ?? (spec_text !== undefined ? parseSpecText(spec_text) : null);
+        if (!parsed) throw new HttpError(400, 'Provide spec (object) or spec_text (YAML/JSON)', 'BAD_REQUEST');
+        let ws = workspace_id;
+        if (dashboard_id) {
+          const existing = await env.ctx.dashboards.get(env.principal, dashboard_id);
+          if (existing.kind !== 'mosaic') throw new HttpError(400, 'That dashboard is a grid dashboard; use create_dashboard_widget for it', 'BAD_REQUEST');
+          ws = existing.workspace_id;
+        } else ws = resolveWorkspace(env, ws);
+        const prepared = await env.ctx.mosaic.prepare(env.principal, ws, parsed);
+        const summary = describeSpec(parsed);
+        const report = `${summary.plots} plot(s), ${summary.inputs} input(s), ${summary.datasets} dataset(s)${prepared.tables.length ? `, tables: ${prepared.tables.join(', ')}` : ''}`;
+        if (!prepared.ok) {
+          return { content: [text(`**Spec rejected** (${report}).\n\nErrors:\n${prepared.errors.map((e) => `- ${e}`).join('\n')}${prepared.warnings.length ? `\n\nWarnings:\n${prepared.warnings.map((w) => `- ${w}`).join('\n')}` : ''}\n\nFix the spec and call again. The authoring guide is the resource \`duckdb://guides/mosaic-spec\`.`)], structuredContent: { status: 'invalid', errors: prepared.errors, warnings: prepared.warnings, workspace_id: ws }, isError: true };
+        }
+        if (validate_only) return { content: [text(`Spec is valid (${report}).${prepared.warnings.length ? `\n\nWarnings:\n${prepared.warnings.map((w) => `- ${w}`).join('\n')}` : ''}`)], structuredContent: { status: 'valid', warnings: prepared.warnings, workspace_id: ws, sources: prepared.sources.map((s) => ({ name: s.name, kind: s.kind })), tables: prepared.tables } };
+        const dashboard = dashboard_id
+          ? await env.ctx.dashboards.update(env.principal, dashboard_id, { spec: parsed, ...(name ? { name } : {}), ...(description !== undefined ? { description } : {}) })
+          : await env.ctx.dashboards.create(env.principal, ws, { name: name ?? summary.title ?? 'Mosaic dashboard', description: description ?? null, kind: 'mosaic', spec: parsed });
+        env.ctx.audit.log({ userId: env.principal.userId, actorType: env.principal.actorType, action: dashboard_id ? 'dashboard.update' : 'dashboard.create', resource: `dashboard:${dashboard.id}`, ip: env.principal.ip });
+        return { content: [text(`${dashboard_id ? 'Updated' : 'Created'} Mosaic dashboard **${dashboard.name}** (\`${dashboard.id}\`; ${report}). Open it at /#/dashboards/${dashboard.id}.${prepared.warnings.length ? `\n\nWarnings:\n${prepared.warnings.map((w) => `- ${w}`).join('\n')}` : ''}`)], structuredContent: { status: 'ok', dashboard_id: dashboard.id, workspace_id: ws, name: dashboard.name, url: `/#/dashboards/${dashboard.id}`, warnings: prepared.warnings } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard'] as const;

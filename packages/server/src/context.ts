@@ -78,6 +78,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const copilot = new CopilotService(cfg, workspaces, queries, cloud, chat, audit, opts.providerFactory, opts.awsBridge);
   const agents = new AgentService(cfg, store, auth, workspaces, audit, opts.awsBridge);
   const mosaic = new MosaicService(cfg, workspaces, queries, engines, audit);
+  copilot.mosaic = mosaic;
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
   await auth.bootstrapAdmin();

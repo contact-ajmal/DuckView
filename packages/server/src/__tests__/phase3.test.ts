@@ -36,7 +36,10 @@ const stubFactory: ProviderFactory = (id, opts) => {
       const names: string[] = [];
       let m: RegExpExecArray | null;
       while ((m = tables.exec(req.system))) names.push(m[1]!);
-      const chunks = [`Context: tables=${names.join(',')}; files=${(req.system.match(/^- '([^']+)'$/gm) ?? []).length}; buckets=${req.system.includes('### Cloud storage buckets') ? 'yes' : 'no'}; active=${req.system.includes('SQL in the active editor tab') ? 'yes' : 'no'}; history=${req.messages.length}; summaries=${req.system.includes('Selected dataset schemas') ? 'yes' : 'no'}\n`, 'Here is the query:\n```sql\nSELECT count(*) AS n FROM t_copilot;\n```\n', 'Done.'];
+      const last = req.messages.at(-1)?.content ?? '';
+      const chunks = last.includes('Design an interactive Mosaic dashboard')
+        ? [`Guide: ${req.system.includes('Writing a DuckView Mosaic dashboard spec') ? 'yes' : 'no'}\n`, last.includes('broken') ? 'Here:\n```yaml\nplot:\n  - mark: nope\n    data: { from: t_copilot }\n```\n' : 'Here:\n```yaml\nmeta: { title: Orders }\ndata:\n  orders: { file: orders.parquet }\nplot:\n  - mark: rectY\n    data: { from: orders }\n    x: { bin: amount }\n    y: { count: null }\n```\n- Brush to filter.\n']
+        : [`Context: tables=${names.join(',')}; files=${(req.system.match(/^- '([^']+)'$/gm) ?? []).length}; buckets=${req.system.includes('### Cloud storage buckets') ? 'yes' : 'no'}; active=${req.system.includes('SQL in the active editor tab') ? 'yes' : 'no'}; history=${req.messages.length}; summaries=${req.system.includes('Selected dataset schemas') ? 'yes' : 'no'}\n`, 'Here is the query:\n```sql\nSELECT count(*) AS n FROM t_copilot;\n```\n', 'Done.'];
       for (const c of chunks) yield c;
       return { input_tokens: 123, output_tokens: 45 };
     },
@@ -213,6 +216,25 @@ describe('DuckCopilot', () => {
   it('extractSqlBlocks ignores non-SQL fences', () => {
     expect(extractSqlBlocks('```json\n{"a":1}\n```\n```sql\nSELECT 1;\n```\n```\nSELECT 2\n```')).toEqual(['SELECT 1;', 'SELECT 2']);
   });
+  it('dashboard action: the spec guide reaches the model, and every spec in the reply is validated against the workspace', async () => {
+    const r = await sse({ workspace_id: wsId, message: 'orders by amount', action: 'dashboard', targets: ['orders.parquet'] });
+    expect(r.status).toBe(200);
+    const full = r.events.filter((e) => e.event === 'delta').map((e) => e.data.text).join('');
+    expect(full).toContain('Guide: yes');
+    const done = r.events.at(-1)!.data as { spec_blocks: { ok: boolean | null; title: string | null; errors: string[] }[] };
+    expect(done.spec_blocks).toHaveLength(1);
+    expect(done.spec_blocks[0]).toMatchObject({ ok: true, title: 'Orders', errors: [] });
+    expect(seen.at(-1)!.messages.at(-1)!.content).toContain('Datasets: orders.parquet');
+    const broken = await sse({ workspace_id: wsId, message: 'broken please', action: 'dashboard' });
+    const d2 = broken.events.at(-1)!.data as { spec_blocks: { ok: boolean | null; errors: string[] }[] };
+    expect(d2.spec_blocks[0]!.ok).toBe(false);
+    expect(d2.spec_blocks[0]!.errors[0]).toMatch(/unrecognized mark type "nope"/);
+    // Plain chat that mentions a chart also gets the guide; unrelated chat does not.
+    await sse({ workspace_id: wsId, message: 'chart the orders by name' });
+    expect(seen.at(-1)!.system).toContain('Writing a DuckView Mosaic dashboard spec');
+    await sse({ workspace_id: wsId, message: 'How many orders?' });
+    expect(seen.at(-1)!.system).not.toContain('Writing a DuckView Mosaic dashboard spec');
+  });
 });
 
 describe('MCP: browse_storage, inspect_schema, list_dashboards, create_dashboard_widget', () => {
@@ -225,8 +247,16 @@ describe('MCP: browse_storage, inspect_schema, list_dashboards, create_dashboard
     client = new Client({ name: 't', version: '0' });
     await client.connect(ct);
   });
-  it('exposes ten tools', async () => {
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_storage', 'create_dashboard_widget', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'profile_dataset', 'save_dataset']);
+  it('serves the Mosaic spec guide as a resource and a guided dashboard prompt', async () => {
+    const res = await client.readResource({ uri: 'duckdb://guides/mosaic-spec' });
+    expect((res.contents[0] as { text: string }).text).toContain('create_mosaic_dashboard');
+    const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
+    expect(prompts).toEqual(['build_mosaic_dashboard', 'data_quality_audit', 'sql_optimization']);
+    const prompt = await client.getPrompt({ name: 'build_mosaic_dashboard', arguments: { table_or_path: 'orders.parquet', goal: 'revenue by customer' } });
+    expect((prompt.messages[0]!.content as { text: string }).text).toContain('validate_only');
+  });
+  it('exposes eleven tools', async () => {
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_storage', 'create_dashboard_widget', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'profile_dataset', 'save_dataset']);
   });
   it('browse_storage local + cloud connection listing', async () => {
     const local = await client.callTool({ name: 'browse_storage', arguments: {} });

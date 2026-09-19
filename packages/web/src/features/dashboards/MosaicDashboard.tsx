@@ -55,7 +55,7 @@ export function MosaicDashboard({ id }: { id: string }) {
   const [text, setText] = useState('');
   const [draft, setDraft] = useState<Spec | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
-  const [render, setRender] = useState<SpecRenderStatus>({ state: 'idle', error: null, sources: 0 });
+  const [render, setRender] = useState<SpecRenderStatus>({ state: 'idle', error: null, warnings: [], sources: 0 });
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -192,7 +192,7 @@ export function MosaicDashboard({ id }: { id: string }) {
               </div>
               <a href="https://idl.uw.edu/mosaic/spec/" target="_blank" rel="noreferrer" className="text-zinc-500 hover:text-accent-300">spec reference ↗</a>
               <span className="ml-auto">
-                {parseError ? <span className="text-red-300">✗ {parseError.split('\n')[0]}</span> : render.state === 'error' ? <span className="text-amber-300">render failed</span> : dirty ? <span className="text-amber-300">unsaved changes</span> : savedAt ? <span className="text-emerald-300">saved</span> : null}
+                {parseError ? <span className="text-red-300">✗ {parseError.split('\n')[0]}</span> : render.state === 'error' ? <span className="text-red-300" title={render.error ?? ''}>✗ {render.error?.split('\n')[0]}</span> : render.warnings.length ? <span className="text-amber-300" title={render.warnings.join('\n')}>⚠ {render.warnings.length} warning{render.warnings.length === 1 ? '' : 's'}{dirty ? ' · unsaved' : ''}</span> : dirty ? <span className="text-amber-300">unsaved changes</span> : savedAt ? <span className="text-emerald-300">saved</span> : null}
               </span>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden">

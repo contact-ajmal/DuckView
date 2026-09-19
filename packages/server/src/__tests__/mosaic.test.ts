@@ -260,3 +260,105 @@ describe('Mosaic dashboards — kind and spec', () => {
     expect(listed.content[0]!.text).toContain('Mosaic spec');
   });
 });
+
+describe('Mosaic specs — prepare, validate, and the agent tool', () => {
+  const prepare = async (token: string, body: unknown) => {
+    const res = await fetch(`${base}/api/workspaces/${wsId}/mosaic/prepare`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+    return { status: res.status, payload: (await res.json()) as { ok: boolean; errors: string[]; warnings: string[]; spec: Record<string, unknown>; statements: string[]; sources: { name: string; view: string; kind: string }[]; tables: string[]; message?: string } };
+  };
+  const good = {
+    meta: { title: 'Trips' },
+    data: { nums: { file: 'nums.parquet' }, byhour: { query: 'SELECT hour, count(*) AS n FROM trips GROUP BY 1' }, notes: [{ label: 'a', v: 1 }, { label: 'b', v: 2 }] },
+    params: { brush: { select: 'crossfilter' } },
+    vconcat: [
+      { hconcat: [{ input: 'menu', from: 'trips', column: 'dow', as: '$dow' }, { input: 'slider', as: '$min', min: 0, max: 10 }] },
+      { plot: [{ mark: 'rectY', data: { from: 'nums', filterBy: '$brush' }, x: { bin: 'v' }, y: { count: null } }, { select: 'intervalX', as: '$brush' }], xDomain: 'Fixed', width: 400 },
+      { plot: [{ mark: 'lineY', data: { from: 'byhour' }, x: 'hour', y: 'n' }, { legend: 'color' }] },
+      { plot: [{ mark: 'barY', data: { from: 'notes' }, x: 'label', y: 'v' }] },
+      { input: 'table', from: 'trips', filterBy: '$brush' },
+    ],
+  };
+
+  it('prepares a valid spec: datasets become prefixed source views, plain tables are bound, from: is rewritten', async () => {
+    const r = await prepare(tokens.viewer, { spec: good });
+    expect(r.status).toBe(200);
+    expect(r.payload.ok, r.payload.errors.join('; ')).toBe(true);
+    expect(r.payload.sources.map((s) => [s.name, s.kind])).toEqual([['nums', 'parquet'], ['byhour', 'query'], ['notes', 'objects']]);
+    expect(r.payload.statements.every((st) => /^CREATE OR REPLACE VIEW "duckview_mosaic_src_[0-9a-f]{8}" AS /.test(st))).toBe(true);
+    expect(r.payload.tables).toEqual(['trips']);
+    const text = JSON.stringify(r.payload.spec);
+    expect(text).not.toContain('"from":"nums"');
+    expect(text).toContain(`"from":"${r.payload.sources[0]!.view}"`);
+    expect(r.payload.spec.data).toBeUndefined();
+    // …and the statements are exactly what the exec endpoint admits, so the browser can run them as they are.
+    for (const st of r.payload.statements) expect((await post(tokens.viewer, wsId, { type: 'exec', sql: st })).status).toBe(200);
+    // YAML text works too.
+    const y = await prepare(tokens.admin, { spec_text: 'plot:\n  - mark: dot\n    data: { from: trips }\n    x: hour\n    y: fare\n' });
+    expect(y.payload.ok).toBe(true);
+  });
+
+  it('reports structural errors in Mosaic terms, binding errors per dataset/table, and warnings for likely typos', async () => {
+    const bad = await prepare(tokens.admin, { spec: { vconcat: [{ plot: [{ mark: 'nope', data: { from: 'trips' } }, { select: 'wobble' }], bogus: 1 }, { input: 'dial' }, { legend: 'shape' }], params: { s: { select: 'many' } } } });
+    expect(bad.payload.ok).toBe(false);
+    expect(bad.payload.errors.join('\n')).toMatch(/unrecognized mark type "nope"/);
+    expect(bad.payload.errors.join('\n')).toMatch(/unrecognized interactor "wobble"/);
+    expect(bad.payload.errors.join('\n')).toMatch(/unrecognized plot attribute "bogus"/);
+    expect(bad.payload.errors.join('\n')).toMatch(/unrecognized input type "dial"/);
+    expect(bad.payload.errors.join('\n')).toMatch(/unrecognized legend type "shape"/);
+    expect(bad.payload.errors.join('\n')).toMatch(/unrecognized param type "many"/);
+    const binding = await prepare(tokens.admin, { spec: { data: { x: { file: 'missing.parquet' }, q: { query: 'SELECT nope FROM trips' } }, vconcat: [{ plot: [{ mark: 'dot', data: { from: 'x' }, x: 'a', y: 'b' }] }, { plot: [{ mark: 'dot', data: { from: 'q' }, x: 'a', y: 'b' }] }, { plot: [{ mark: 'dot', data: { from: 'ghost' }, x: 'a', y: 'b' }] }] } });
+    expect(binding.payload.ok).toBe(false);
+    expect(binding.payload.errors.some((e) => e.startsWith('data.x:'))).toBe(true);
+    expect(binding.payload.errors.some((e) => e.startsWith('data.q:') && /nope/i.test(e))).toBe(true);
+    expect(binding.payload.errors.some((e) => e.startsWith('from: ghost:'))).toBe(true);
+    const typo = await prepare(tokens.admin, { spec: { plot: [{ mark: 'rectY', data: { from: 'trips' }, x: { bins: 'hour' }, y: { count: null } }] } });
+    expect(typo.payload.ok).toBe(true);
+    expect(typo.payload.warnings[0]).toMatch(/bins/);
+    const empty = await prepare(tokens.admin, { spec: { meta: { title: 'x' } } });
+    expect(empty.payload.errors[0]).toMatch(/no content/);
+    const mutating = await prepare(tokens.admin, { spec: { data: { evil: { query: 'DELETE FROM trips' } }, plot: [{ mark: 'dot', data: { from: 'evil' } }] } });
+    expect(mutating.payload.ok).toBe(false);
+    expect(mutating.payload.errors[0]).toMatch(/read-only/);
+    expect((await ctx.queries.run(admin, wsId, 'SELECT count(*) AS n FROM trips')).rows[0]![0]).toBeGreaterThan(0);
+    // Access: outsiders never see the workspace; bad input is 400.
+    expect((await prepare(tokens.outsider, { spec: good })).status).toBe(404);
+    expect((await prepare(tokens.admin, {})).status).toBe(400);
+    expect((await prepare(tokens.admin, { spec_text: 'plot: [' })).status).toBe(400);
+  });
+
+  it('create_mosaic_dashboard validates, creates, updates and refuses — with errors an agent can act on', async () => {
+    const env: ToolEnv = { ctx, principal: admin, via: 'rest', defaultWorkspaceId: wsId, agent: null };
+    const tool = buildTools(ctx.cfg).find((t) => t.name === 'create_mosaic_dashboard')!;
+    const yaml = 'meta: { title: Nums by value }\ndata:\n  nums: { file: nums.parquet }\nparams:\n  brush: { select: crossfilter }\nplot:\n  - mark: rectY\n    data: { from: nums, filterBy: $brush }\n    x: { bin: v }\n    y: { count: null }\n  - select: intervalX\n    as: $brush\nxDomain: Fixed\n';
+    const checked = await runTool(env, tool, { spec_text: yaml, validate_only: true });
+    expect(checked.isError).toBeFalsy();
+    expect((checked.structuredContent as { status: string }).status).toBe('valid');
+    const created = await runTool(env, tool, { spec_text: yaml });
+    expect(created.isError).toBeFalsy();
+    const sc = created.structuredContent as { status: string; dashboard_id: string; name: string; url: string };
+    expect(sc).toMatchObject({ status: 'ok', name: 'Nums by value', url: `/#/dashboards/${sc.dashboard_id}` });
+    const stored = await ctx.dashboards.get(admin, sc.dashboard_id);
+    expect(stored.kind).toBe('mosaic');
+    expect((stored.spec as { meta: { title: string } }).meta.title).toBe('Nums by value');
+    // Update in place.
+    const updated = await runTool(env, tool, { dashboard_id: sc.dashboard_id, name: 'Renamed', spec: { ...(stored.spec as object), meta: { title: 'v2' } } });
+    expect((updated.structuredContent as { status: string; dashboard_id: string }).dashboard_id).toBe(sc.dashboard_id);
+    expect((await ctx.dashboards.get(admin, sc.dashboard_id)).name).toBe('Renamed');
+    // Invalid specs are refused with the error list, nothing is created.
+    const before = (await ctx.dashboards.list(admin, wsId)).length;
+    const bad = await runTool(env, tool, { name: 'Bad', spec: { plot: [{ mark: 'nope', data: { from: 'trips' } }] } });
+    expect(bad.isError).toBe(true);
+    expect((bad.structuredContent as { status: string; errors: string[] }).errors[0]).toMatch(/unrecognized mark type/);
+    expect(bad.content[0]!.text).toContain('duckdb://guides/mosaic-spec');
+    expect((await ctx.dashboards.list(admin, wsId)).length).toBe(before);
+    // A grid dashboard cannot be turned into a Mosaic one this way, and a viewer cannot create dashboards.
+    const grid = await ctx.dashboards.create(admin, wsId, { name: 'Grid' });
+    const wrong = await runTool(env, tool, { dashboard_id: grid.id, spec_text: yaml });
+    expect(wrong.isError).toBe(true);
+    const viewerEnv: ToolEnv = { ctx, principal: viewer, via: 'rest', defaultWorkspaceId: wsId, agent: null };
+    const denied = await runTool(viewerEnv, tool, { spec_text: yaml });
+    expect(denied.isError).toBe(true);
+    // The validate-only path is open to viewers though.
+    expect((await runTool(viewerEnv, tool, { spec_text: yaml, validate_only: true })).isError).toBeFalsy();
+  });
+});

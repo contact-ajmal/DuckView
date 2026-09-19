@@ -338,10 +338,12 @@ export async function* agentInvoke(agentId: string, body: Record<string, unknown
 }
 export interface ChatMsg { id: string; role: 'user' | 'assistant' | 'system'; content: string; timestamp: string; context: { tables: number; files: number; model?: string; provider?: string; targets: string[] } | null }
 
+/** A Mosaic spec the assistant wrote, validated against the workspace by the server. */
+export interface CopilotSpecBlock { text: string; title: string | null; ok: boolean | null; errors: string[]; warnings: string[] }
 export type CopilotEvent =
   | { type: 'context'; conversation_id: string; message_id: string; provider: string; model: string; tables: number; files: number; buckets: number; targets: string[] }
   | { type: 'delta'; text: string }
-  | { type: 'done'; message_id: string; usage: { input_tokens: number | null; output_tokens: number | null }; sql_blocks: string[]; duration_ms: number }
+  | { type: 'done'; message_id: string; usage: { input_tokens: number | null; output_tokens: number | null }; sql_blocks: string[]; spec_blocks: CopilotSpecBlock[]; duration_ms: number }
   | { type: 'error'; code: string; message: string };
 
 /** POSTs a copilot turn and yields SSE events as they arrive. */

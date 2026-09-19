@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, X, Send, Square, Settings2, Sparkles, Wrench, PlayCircle, FilePlus2, ArrowDownToLine, Trash2, History, ChevronDown, KeyRound, Loader2 } from 'lucide-react';
+import { Bot, X, Send, Square, Settings2, Sparkles, Wrench, PlayCircle, FilePlus2, ArrowDownToLine, Trash2, History, ChevronDown, KeyRound, Loader2, LayoutDashboard, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useCopilot } from '../../store/copilot';
 import { useWorkspace } from '../../store/workspace';
-import { api, type AgentRecord } from '../../api/client';
+import { api, type AgentRecord, type CopilotSpecBlock, type Dashboard } from '../../api/client';
 import { Button, Input, Label, Select, cn } from '../../components/ui';
 
 export interface CopilotHost {
@@ -21,6 +21,58 @@ export interface CopilotHost {
 let host: CopilotHost | null = null;
 export function registerCopilotHost(h: CopilotHost | null) {
   host = h;
+}
+
+/** A ```yaml / ```json block that is a Mosaic spec — validated by the server when the reply completed. */
+const looksLikeSpec = (text: string) => /^\s*(plot|vconcat|hconcat|input|mark|legend)\s*:/m.test(text) || /"(plot|vconcat|hconcat|input|mark|legend)"\s*:/.test(text);
+
+function SpecBlock({ text, verdict, workspaceId, onFix }: { text: string; verdict: CopilotSpecBlock | undefined; workspaceId: string | null; onFix: (errors: string[]) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const create = async () => {
+    if (!workspaceId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // The YAML parser rides with the Mosaic dashboard chunk; load it only when a spec is actually created.
+      const { parseSpecText, prepareSpec } = await import('../../lib/mosaic/spec');
+      const spec = parseSpecText(text);
+      const prepared = await prepareSpec(workspaceId, spec);
+      if (!prepared.ok) throw new Error(prepared.errors.join('\n'));
+      const title = (spec.meta as { title?: string } | undefined)?.title;
+      const r = await api.post<{ dashboard: Dashboard }>(`/api/workspaces/${workspaceId}/dashboards`, { name: title || 'Copilot dashboard', description: 'Drafted by DuckCopilot', kind: 'mosaic', spec });
+      location.hash = `#/dashboards/${r.dashboard.id}`;
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const errors = verdict?.errors ?? [];
+  return (
+    <div className="my-2 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-400">
+        <Sparkles className="h-3 w-3 shrink-0 text-accent-300" /> Mosaic dashboard spec{verdict?.title ? <span className="truncate text-zinc-200">· {verdict.title}</span> : null}
+        <span className="ml-auto shrink-0">
+          {verdict?.ok === true && <span className="inline-flex items-center gap-1 text-emerald-300"><CheckCircle2 className="h-3 w-3" /> valid for this workspace</span>}
+          {verdict?.ok === false && <span className="inline-flex items-center gap-1 text-amber-300"><AlertTriangle className="h-3 w-3" /> {errors.length} error{errors.length === 1 ? '' : 's'}</span>}
+        </span>
+      </div>
+      <pre className="max-h-72 overflow-auto p-2.5 font-mono text-[11px] leading-relaxed text-zinc-200">{text}</pre>
+      {errors.length > 0 && <ul className="border-t border-zinc-800 px-3 py-1.5 font-mono text-[10.5px] text-amber-200">{errors.slice(0, 6).map((e) => <li key={e}>• {e}</li>)}</ul>}
+      {error && <div className="border-t border-zinc-800 px-3 py-1.5 font-mono text-[10.5px] text-red-200">{error}</div>}
+      <div className="flex flex-wrap gap-1 border-t border-zinc-800 bg-zinc-900/60 px-1.5 py-1">
+        <button onClick={() => void create()} disabled={busy || !workspaceId} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" title="Validate the spec, save it as a Mosaic dashboard and open it">
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <LayoutDashboard className="h-3 w-3" />} Create dashboard
+        </button>
+        {errors.length > 0 && (
+          <button onClick={() => onFix(errors)} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Send the validation errors back to Copilot">
+            <Wrench className="h-3 w-3 text-amber-300" /> Fix with Copilot
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const PROVIDER_LABEL: Record<string, string> = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI', ollama: 'Ollama (local)', bedrock: 'Amazon Bedrock (Claude)', bedrock_agent: 'Amazon Bedrock Agent', agentcore: 'Bedrock AgentCore runtime' };
@@ -93,13 +145,15 @@ export function CopilotDrawer() {
         : cfg?.server_model;
   const ready = !!cfg?.enabled && !!effectiveProvider;
 
-  const submit = (action?: 'chat' | 'fix' | 'suggest' | 'explain') => {
+  const submit = (action?: 'chat' | 'fix' | 'suggest' | 'explain' | 'dashboard') => {
     if (!wsId || cp.streaming) return;
     const text = input.trim();
     if (action === 'fix') {
       void cp.send({ workspaceId: wsId, message: text, action: 'fix', activeSql: host?.activeSql() ?? '', errorMessage: host?.activeError() ?? null });
     } else if (action === 'suggest') {
       void cp.send({ workspaceId: wsId, message: text, action: 'suggest', targets: cp.targets });
+    } else if (action === 'dashboard') {
+      void cp.send({ workspaceId: wsId, message: text, action: 'dashboard', targets: cp.targets, activeSql: host?.activeSql() ?? null });
     } else {
       if (!text) return;
       void cp.send({ workspaceId: wsId, message: text, activeSql: host?.activeSql() ?? null });
@@ -135,6 +189,19 @@ export function CopilotDrawer() {
     }
   };
 
+  const fixSpec = (errors: string[]) => {
+    if (!wsId || cp.streaming) return;
+    void cp.send({ workspaceId: wsId, message: `The dashboard spec failed validation in this workspace. Fix it and return the complete corrected spec:\n${errors.map((e) => `- ${e}`).join('\n')}`, action: 'dashboard', targets: cp.targets });
+  };
+  const mdComponentsFor = (m: { specBlocks?: CopilotSpecBlock[] }) => ({
+    ...mdComponents,
+    code(props: { className?: string; children?: ReactNode; inline?: boolean }) {
+      const lang = /language-(\w+)/.exec(props.className ?? '')?.[1];
+      const text = String(props.children ?? '').replace(/\n$/, '');
+      if ((lang === 'yaml' || lang === 'yml' || lang === 'json') && looksLikeSpec(text)) return <SpecBlock text={text} verdict={m.specBlocks?.find((b) => b.text.trim() === text.trim())} workspaceId={wsId} onFix={fixSpec} />;
+      return mdComponents.code(props);
+    },
+  });
   const mdComponents = {
     code({ className, children, ...props }: { className?: string; children?: ReactNode; inline?: boolean }) {
       const lang = /language-(\w+)/.exec(className ?? '')?.[1];
@@ -331,6 +398,7 @@ export function CopilotDrawer() {
                 ['Which regions had the highest revenue growth month over month?', 'Trend + window functions'],
                 ['Find duplicate customers by normalised email', 'Data quality'],
                 ['Pivot orders by product into monthly columns', 'PIVOT'],
+                ['Build a cross-filtered dashboard of trips by hour, distance and fare', 'Mosaic dashboard'],
               ].map(([q, hint]) => (
                 <button key={q} onClick={() => setInput(q ?? "")} className="rounded-md border border-zinc-800 px-2.5 py-1.5 text-left text-xs text-zinc-300 hover:border-zinc-600">
                   {q} <span className="text-[10px] text-zinc-600">· {hint}</span>
@@ -353,7 +421,7 @@ export function CopilotDrawer() {
                   </div>
                 )}
                 <div className="prose-sm">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents as never}>{m.content || (m.streaming ? '…' : '')}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponentsFor(m) as never}>{m.content || (m.streaming ? '…' : '')}</ReactMarkdown>
                 </div>
                 {m.streaming && <span className="inline-block h-3 w-1.5 animate-pulse bg-accent-400" />}
                 {m.error && <div className="mt-1 rounded-md border border-red-900 bg-red-950/40 px-2 py-1 text-[11px] text-red-200">{m.error}</div>}
@@ -370,6 +438,9 @@ export function CopilotDrawer() {
           </button>
           <button onClick={() => submit('fix')} disabled={!ready || cp.streaming || !host?.activeSql()} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title="Send the active tab's SQL and its last error">
             <Wrench className="h-3 w-3 text-amber-300" /> Fix my query{host?.activeError() ? ' (error)' : ''}
+          </button>
+          <button onClick={() => submit('dashboard')} disabled={!ready || cp.streaming} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title={cp.targets.length ? `Draft an interactive Mosaic dashboard for ${cp.targets.join(', ')} (type a goal above to steer it)` : 'Draft an interactive Mosaic dashboard — select a dataset or describe what you want above'}>
+            <LayoutDashboard className="h-3 w-3 text-accent-300" /> Build dashboard{cp.targets.length ? ` (${cp.targets.length})` : ''}
           </button>
           {cp.messages.length > 0 && (
             <button onClick={() => wsId && void cp.clear(wsId)} className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:text-red-300" title="Delete this conversation">

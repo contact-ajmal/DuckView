@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import { api, copilotChat, type CopilotConfig, type ChatMsg } from '../api/client';
+import { api, copilotChat, type CopilotConfig, type ChatMsg, type CopilotSpecBlock } from '../api/client';
 
 export interface CopilotSettings { provider: 'anthropic' | 'openai' | 'ollama' | 'bedrock' | 'bedrock_agent' | 'agentcore' | ''; model: string; apiKey: string; baseUrl: string; region?: string; agentId?: string; agentAliasId?: string; runtimeArn?: string }
-export interface LiveMessage { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean; error?: string; sqlBlocks?: string[]; meta?: { model?: string; provider?: string; tables?: number; files?: number; targets?: string[]; duration_ms?: number } }
+export interface LiveMessage { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean; error?: string; sqlBlocks?: string[]; specBlocks?: CopilotSpecBlock[]; meta?: { model?: string; provider?: string; tables?: number; files?: number; targets?: string[]; duration_ms?: number } }
 
 const SETTINGS_KEY = 'duckview.copilot.settings';
 function loadSettings(): CopilotSettings {
@@ -31,7 +31,7 @@ interface CopilotState {
   loadConversations(workspaceId: string): Promise<void>;
   openConversation(workspaceId: string, id: string | null): Promise<void>;
   setTargets(t: string[]): void;
-  send(input: { workspaceId: string; message: string; action?: 'chat' | 'fix' | 'suggest' | 'explain'; activeSql?: string | null; errorMessage?: string | null; resultPreview?: { columns: { name: string; type: string }[]; rows: unknown[][]; rowCount?: number } | null; targets?: string[] }): Promise<void>;
+  send(input: { workspaceId: string; message: string; action?: 'chat' | 'fix' | 'suggest' | 'explain' | 'dashboard'; activeSql?: string | null; errorMessage?: string | null; resultPreview?: { columns: { name: string; type: string }[]; rows: unknown[][]; rowCount?: number } | null; targets?: string[] }): Promise<void>;
   cancel(): void;
   clear(workspaceId: string): Promise<void>;
 }
@@ -95,7 +95,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     const { settings, config } = get();
     const userId = `u-${Date.now()}`;
     const asstId = `a-${Date.now()}`;
-    const shown = input.message || (input.action === 'fix' ? 'Fix my query' : input.action === 'suggest' ? `Suggest questions for ${(input.targets ?? get().targets).join(', ') || 'this workspace'}` : input.action === 'explain' ? 'Run & inspect' : '');
+    const shown = input.message || (input.action === 'fix' ? 'Fix my query' : input.action === 'suggest' ? `Suggest questions for ${(input.targets ?? get().targets).join(', ') || 'this workspace'}` : input.action === 'explain' ? 'Run & inspect' : input.action === 'dashboard' ? `Build a dashboard for ${(input.targets ?? get().targets).join(', ') || 'this workspace'}` : '');
     const abort = new AbortController();
     set({ streaming: true, abort, messages: [...get().messages, { id: userId, role: 'user', content: shown }, { id: asstId, role: 'assistant', content: '', streaming: true }] });
     const upd = (patch: Partial<LiveMessage>) => set({ messages: get().messages.map((m) => (m.id === asstId ? { ...m, ...patch } : m)) });
@@ -110,7 +110,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
           upd({ content: cur + ev.text });
         } else if (ev.type === 'done') {
           const cur = get().messages.find((m) => m.id === asstId);
-          upd({ streaming: false, sqlBlocks: ev.sql_blocks, meta: { ...cur?.meta, duration_ms: ev.duration_ms } });
+          upd({ streaming: false, sqlBlocks: ev.sql_blocks, specBlocks: ev.spec_blocks, meta: { ...cur?.meta, duration_ms: ev.duration_ms } });
         } else if (ev.type === 'error') {
           upd({ streaming: false, error: ev.message });
         }

@@ -69,6 +69,8 @@ ws.on('message', (raw) => {
   } else if (m.method === 'Runtime.exceptionThrown') {
     errors.push(m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
   } else if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') {
+    // Third-party resources (web fonts) failing to load in a headless profile say nothing about the app.
+    if (m.params.entry.url && !m.params.entry.url.startsWith(BASE)) return;
     errors.push(`[log] ${m.params.entry.text} ${m.params.entry.url ?? ''}`);
   }
 });

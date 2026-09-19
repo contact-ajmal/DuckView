@@ -19,7 +19,6 @@
     "@uiw/react-codemirror": "^4.24.0",
     "@uwdata/mosaic-core": "0.31.0",
     "@uwdata/mosaic-spec": "0.31.0",
-    "@uwdata/mosaic-sql": "0.31.0",
     "@uwdata/vgplot": "0.31.0",
     "chart.js": "^4.5.1",
     "lucide-react": "^0.544.0",

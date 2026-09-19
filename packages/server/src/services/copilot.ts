@@ -13,12 +13,15 @@ import type { ChatContextSnapshot } from '../db/schema/sqlite.js';
 import { defaultProviderFactory, mapProviderError, DEFAULT_MODELS, SUGGESTED_MODELS, AWS_PROVIDERS, type ProviderFactory, type ProviderId, type LlmMessage, type LlmUsage } from './llm.js';
 import type { AwsBridge } from './aws.js';
 import { HttpError, badRequest } from './errors.js';
+import { MOSAIC_SPEC_GUIDE } from './mosaic-guide.js';
+import { describeSpec, parseSpecText, type Spec } from './mosaic-spec.js';
+import type { MosaicService } from './mosaic.js';
 import { newId } from '../security/crypto.js';
 import { metrics } from '../observability/metrics.js';
 import { tracer } from '../observability/tracing.js';
 import { SpanStatusCode } from '@opentelemetry/api';
 
-export type CopilotAction = 'chat' | 'fix' | 'suggest' | 'explain';
+export type CopilotAction = 'chat' | 'fix' | 'suggest' | 'explain' | 'dashboard';
 
 export interface CopilotRequest {
   workspaceId: string;
@@ -42,10 +45,20 @@ export interface CopilotRequest {
   signal?: AbortSignal;
 }
 
+/** A Mosaic spec the assistant wrote (a ```yaml / ```json block), validated against the workspace. */
+export interface SpecBlock {
+  text: string;
+  title: string | null;
+  /** null when validation could not run (Mosaic disabled). */
+  ok: boolean | null;
+  errors: string[];
+  warnings: string[];
+}
+
 export type CopilotEvent =
   | { type: 'context'; conversation_id: string; message_id: string; provider: ProviderId; model: string; tables: number; files: number; buckets: number; targets: string[] }
   | { type: 'delta'; text: string }
-  | { type: 'done'; message_id: string; usage: LlmUsage; sql_blocks: string[]; duration_ms: number }
+  | { type: 'done'; message_id: string; usage: LlmUsage; sql_blocks: string[]; spec_blocks: SpecBlock[]; duration_ms: number }
   | { type: 'error'; code: string; message: string };
 
 const SYSTEM_PROMPT = `You are DuckCopilot, the in-app data assistant inside DuckView — a native DuckDB analytics workspace.
@@ -68,7 +81,10 @@ const ACTION_PROMPTS: Record<CopilotAction, string> = {
   fix: 'The user\'s query failed. Diagnose the DuckDB error, then return the corrected SQL in a single ```sql block followed by a one-sentence explanation of what changed.',
   suggest: 'Propose the 5 most insightful analytical questions for the selected dataset(s). For each: a one-line question as a heading, then a ```sql block that answers it. Prefer aggregations, trends over time, distributions and comparisons.',
   explain: 'Explain the query result below in plain business language for a non-technical stakeholder: what the query did, the key numbers, notable patterns or anomalies, and one suggested follow-up question with its SQL.',
+  dashboard: 'Design an interactive Mosaic dashboard for the request below (or, if none, for the selected dataset(s)). Return exactly one ```yaml block with the complete spec — meta.title, data (only for files/queries), params, and the layout — followed by two or three bullets on how to read it. Use only columns that exist in the context, write read-only SQL, and follow the Mosaic spec guide in the system prompt.',
 };
+
+const WANTS_CHART = /\b(dashboard|chart|visuali[sz]e|visualization|plot|histogram|graph|scatter|heatmap)\b/i;
 
 function renderContext(c: ChatContextSnapshot, cfg: DuckViewConfig): string {
   const parts: string[] = ['## Workspace context (live)'];
@@ -129,6 +145,9 @@ export class CopilotService {
     private readonly providers: ProviderFactory = defaultProviderFactory,
     private readonly aws?: AwsBridge,
   ) {}
+
+  /** Set once the Mosaic service exists (it is built after Copilot); enables spec validation of replies. */
+  mosaic: MosaicService | null = null;
 
   /** Workspace context as text (tables, files, buckets, active SQL) — for external agents and the "ask my agent" flow. */
   renderContextText(snapshot: ChatContextSnapshot): string {
@@ -238,7 +257,7 @@ export class CopilotService {
       userParts.push(`Result preview (${req.resultPreview.rowCount ?? req.resultPreview.rows.length} rows${req.resultPreview.rows.length < (req.resultPreview.rowCount ?? 0) ? ', first 30 shown' : ''}):\n${cols.join(' | ')}\n${rows.join('\n')}`);
       if (req.activeSql) userParts.push('Query:\n```sql\n' + req.activeSql.slice(0, 6000) + '\n```');
     }
-    if (action === 'suggest' && req.targets?.length) userParts.push(`Datasets: ${req.targets.join(', ')}`);
+    if ((action === 'suggest' || action === 'dashboard') && req.targets?.length) userParts.push(`Datasets: ${req.targets.join(', ')}`);
     const userContent = userParts.join('\n\n');
 
     const history = req.conversationId ? await this.chat.messages(p, req.workspaceId, req.conversationId, this.cfg.copilot.history_limit) : [];
@@ -248,7 +267,9 @@ export class CopilotService {
 
     const llmMessages: LlmMessage[] = [...history.filter((m) => m.role === 'user' || m.role === 'assistant').map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })), { role: 'user', content: userContent }];
     // Consecutive same-role turns are fine for Anthropic; OpenAI-compatible servers also accept them.
-    const system = `${SYSTEM_PROMPT}\n\n${renderContext(snapshot, this.cfg)}`;
+    // The spec guide is prompt material only when a chart or dashboard is in play.
+    const wantsChart = action === 'dashboard' || WANTS_CHART.test(req.message ?? '');
+    const system = `${SYSTEM_PROMPT}${wantsChart ? `\n\n${MOSAIC_SPEC_GUIDE}\n\nWhen you produce a dashboard spec, put it in a single \`\`\`yaml block; the user can create it with one click.` : ''}\n\n${renderContext(snapshot, this.cfg)}`;
 
     let text = '';
     let usage: LlmUsage = { input_tokens: null, output_tokens: null };
@@ -278,13 +299,68 @@ export class CopilotService {
       span.end();
     }
     const sqlBlocks = extractSqlBlocks(text);
+    const specBlocks = await this.validateSpecBlocks(p, req.workspaceId, text);
     await this.chat.append(p, req.workspaceId, conversationId, 'assistant', text, null);
     metrics.copilotRequests.inc({ provider, status: 'ok' });
     if (usage.input_tokens != null) metrics.copilotTokens.inc({ provider, direction: 'input' }, usage.input_tokens);
     if (usage.output_tokens != null) metrics.copilotTokens.inc({ provider, direction: 'output' }, usage.output_tokens);
     const durationMs = Math.round(performance.now() - started);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: `copilot.${action}`, resource: `conversation:${conversationId}`, queryText: req.message.slice(0, 2000), durationMs, ip: p.ip });
-    yield { type: 'done', message_id: messageId, usage, sql_blocks: sqlBlocks, duration_ms: durationMs };
+    yield { type: 'done', message_id: messageId, usage, sql_blocks: sqlBlocks, spec_blocks: specBlocks, duration_ms: durationMs };
   }
+
+  /** Every ```yaml / ```json block that is a Mosaic spec, validated and bound in the workspace (EXPLAIN only). */
+  async validateSpecBlocks(p: Principal, workspaceId: string, text: string): Promise<SpecBlock[]> {
+    const out: SpecBlock[] = [];
+    for (const body of extractFencedBlocks(text, ['yaml', 'yml', 'json'])) {
+      let spec: Spec;
+      try {
+        spec = parseSpecText(body);
+      } catch {
+        continue;
+      }
+      if (!looksLikeSpec(spec)) continue;
+      const title = describeSpec(spec).title;
+      if (!this.mosaic) {
+        out.push({ text: body, title, ok: null, errors: [], warnings: [] });
+        continue;
+      }
+      try {
+        const r = await this.mosaic.prepare(p, workspaceId, spec);
+        out.push({ text: body, title, ok: r.ok, errors: r.errors, warnings: r.warnings });
+      } catch (err) {
+        out.push({ text: body, title, ok: null, errors: [(err as Error).message], warnings: [] });
+      }
+    }
+    return out;
+  }
+}
+
+const SPEC_KEYS = ['plot', 'mark', 'input', 'legend', 'hconcat', 'vconcat'];
+export const looksLikeSpec = (spec: Spec) => SPEC_KEYS.some((k) => k in spec);
+
+/** Bodies of fenced blocks whose language tag is one of `langs`. */
+export function extractFencedBlocks(text: string, langs: string[]): string[] {
+  const out: string[] = [];
+  let inBlock = false;
+  let lang = '';
+  let buf: string[] = [];
+  for (const line of text.replace(/([^\n])```/g, '$1\n```').split(/\r?\n/)) {
+    const fence = /^\s*```(\w*)\s*$/.exec(line);
+    if (fence) {
+      if (!inBlock) {
+        inBlock = true;
+        lang = (fence[1] ?? '').toLowerCase();
+        buf = [];
+      } else {
+        const body = buf.join('\n').trim();
+        if (body && langs.includes(lang)) out.push(body);
+        inBlock = false;
+      }
+      continue;
+    }
+    if (inBlock) buf.push(line);
+  }
+  return out;
 }
 

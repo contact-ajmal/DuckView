@@ -61,6 +61,7 @@ description: The complete DuckView feature list — querying, workbench, dashboa
         <li><b>Explore</b>: every column of a file, table or query becomes a linked chart — brush one, the rest cross-filter</li>
         <li>Powered by <a href="https://idl.uw.edu/mosaic/">Mosaic</a> with the workspace engine as its connector: pre-aggregated data cubes keep millions of rows interactive, nothing runs in the browser</li>
         <li><b>Mosaic dashboards</b>: declarative YAML/JSON specs with an editor and live preview, generated from any dataset in one click</li>
+        <li>Agents build them through <code>create_mosaic_dashboard</code>; DuckCopilot drafts one on request and validates it against your data before you create it</li>
         <li>Any table, file, query or inline rows as a dataset; inputs, selections, legends and layouts as in the Mosaic docs</li>
         <li>Same roles, sandbox, audit and cache as every other query; pre-aggregates invalidated by the data epoch</li>
       </ul>
@@ -170,10 +171,11 @@ description: The complete DuckView feature list — querying, workbench, dashboa
           <tr><td><code>save_dataset</code></td><td><code>COPY … TO</code> Parquet / CSV / JSON inside the jail</td></tr>
           <tr><td><code>list_dashboards</code></td><td>Dashboards with their widgets and layouts</td></tr>
           <tr><td><code>create_dashboard_widget</code></td><td>Build dashboards autonomously; SQL validated read-only and dry-run first</td></tr>
+          <tr><td><code>create_mosaic_dashboard</code></td><td>Interactive Mosaic dashboards from a declarative spec, validated and bound in the workspace before saving</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="muted" style="text-align:center">Resources: <code>duckdb://workspaces</code>, <code>duckdb://schemas/{workspace_id}</code>, <code>duckdb://system/resources</code>. Prompts: <code>data_quality_audit</code>, <code>sql_optimization</code>.</p>
+    <p class="muted" style="text-align:center">Resources: <code>duckdb://workspaces</code>, <code>duckdb://schemas/{workspace_id}</code>, <code>duckdb://system/resources</code>, <code>duckdb://guides/mosaic-spec</code>. Prompts: <code>data_quality_audit</code>, <code>sql_optimization</code>, <code>build_mosaic_dashboard</code>.</p>
   </div>
 </section>
 

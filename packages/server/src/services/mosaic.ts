@@ -29,6 +29,7 @@ import type { Principal } from './principal.js';
 import { requireScope } from './principal.js';
 import { badRequest, forbidden } from './errors.js';
 import type { CacheMeta } from './cache.js';
+import { prepareSpec, validateSpecStructure, type PreparedSpec, type Spec } from './mosaic-spec.js';
 import { logger } from '../observability/logger.js';
 import { metrics } from '../observability/metrics.js';
 
@@ -37,6 +38,13 @@ export type MosaicRequestType = 'arrow' | 'json' | 'exec';
 export interface MosaicExecOutcome {
   statements: number;
   duration_ms: number;
+}
+
+export interface PrepareOutcome extends PreparedSpec {
+  /** True when the spec is structurally valid and every dataset and table binds in the workspace. */
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
 }
 
 const HEX = '[0-9a-f]+';
@@ -126,6 +134,46 @@ export class MosaicService {
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'mosaic.exec', resource: `workspace:${workspaceId}`, queryText: sql.slice(0, 4000), durationMs: performance.now() - start, ip: p.ip, status: 'error', error: (err as Error).message });
       throw err;
     }
+  }
+
+  /**
+   * Validates and prepares a spec for a workspace: structure in Mosaic's terms, then — unless `bind` is off — every
+   * dataset's SELECT and every plain `from:` table is bound with EXPLAIN (no data is read), so a missing file,
+   * table or column is reported before anything renders or is saved. Statements are checked against the exec
+   * policy exactly as the browser would submit them.
+   */
+  async prepare(p: Principal, workspaceId: string, spec: Spec, opts: { bind?: boolean } = {}): Promise<PrepareOutcome> {
+    this.assertEnabled();
+    requireScope(p, 'read');
+    await this.workspaces.get(p, workspaceId);
+    const structure = validateSpecStructure(spec);
+    const errors = [...structure.errors];
+    const warnings = [...structure.warnings];
+    let prepared: PreparedSpec = { spec, statements: [], sources: [], tables: [] };
+    try {
+      prepared = prepareSpec(spec, this.viewPrefix);
+    } catch (err) {
+      errors.push((err as Error).message);
+    }
+    if (opts.bind !== false && errors.length === 0) {
+      for (const [i, src] of prepared.sources.entries()) {
+        try {
+          this.classifyExec(prepared.statements[i]!);
+          await this.queries.explain(p, workspaceId, src.body);
+        } catch (err) {
+          errors.push(`data.${src.name}: ${(err as Error).message}`);
+        }
+      }
+      for (const table of prepared.tables) {
+        if (table.startsWith(this.viewPrefix)) continue;
+        try {
+          await this.queries.explain(p, workspaceId, `SELECT * FROM "${table.replace(/"/g, '""')}"`);
+        } catch (err) {
+          errors.push(`from: ${table}: ${(err as Error).message}${spec.data && typeof spec.data === 'object' ? '' : ' — declare files and queries under `data`, or use a table that exists in the workspace'}`);
+        }
+      }
+    }
+    return { ...prepared, ok: errors.length === 0, errors, warnings };
   }
 
   /**

@@ -42,7 +42,7 @@ export async function copilotRoutes(app: FastifyInstance, ctx: AppContext) {
         workspace_id: z.string().min(1),
         conversation_id: z.string().optional(),
         message: z.string().max(50_000).default(''),
-        action: z.enum(['chat', 'fix', 'suggest', 'explain']).optional(),
+        action: z.enum(['chat', 'fix', 'suggest', 'explain', 'dashboard']).optional(),
         active_sql: z.string().max(200_000).nullable().optional(),
         error_message: z.string().max(20_000).nullable().optional(),
         targets: z.array(z.string()).max(5).optional(),
