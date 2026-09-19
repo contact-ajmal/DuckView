@@ -30,6 +30,13 @@ describe('analyzeSql classification', () => {
       expect(analyzeSql(s).overall, s).toBe('read');
     }
   });
+  it('reads a parenthesised query by its first verb, and nothing else', () => {
+    expect(analyzeSql(`(SELECT 1 AS "a") UNION ALL (SELECT 2 AS "a")`).isMutating).toBe(false);
+    expect(analyzeSql('(WITH t AS (SELECT 1) SELECT * FROM t)').isMutating).toBe(false);
+    expect(analyzeSql('(DELETE FROM t)').isMutating).toBe(true);
+    expect(analyzeSql('()').isMutating).toBe(true);
+  });
+
   it('classifies destructive statements', () => {
     for (const s of ['DROP TABLE t', 'delete from t where 1=1', 'ALTER TABLE t ADD COLUMN x INT', 'UPDATE t SET a=1', 'TRUNCATE t', 'CREATE OR REPLACE TABLE t AS SELECT 1']) {
       const a = analyzeSql(s);

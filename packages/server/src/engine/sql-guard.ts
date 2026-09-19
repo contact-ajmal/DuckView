@@ -163,6 +163,12 @@ function statementVerb(tokens: Token[]): string {
   const words = tokens.filter((t) => t.type === 'word' || t.type === 'punct');
   if (words.length === 0) return '';
   const first = words[0]!;
+  if (first.type === 'punct' && first.value === '(') {
+    // A parenthesised query — "(SELECT …) UNION ALL (SELECT …)" — is the only statement DuckDB accepts in this
+    // form, so the first word decides, and only a read verb is admitted.
+    const w = words.find((t) => t.type === 'word');
+    return w && READ.has(w.value) ? w.value : '';
+  }
   if (first.type !== 'word') return '';
   if (first.value !== 'WITH') return first.value;
   // WITH [RECURSIVE] name [(cols)] AS [MATERIALIZED] ( ... ) [, ...] <VERB>

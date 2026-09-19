@@ -1,31 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, Sparkles, RefreshCw } from 'lucide-react';
-import { asTableRef } from '@uwdata/mosaic-sql';
-import { createMosaic, fnv1a, quoteIdent, type MosaicHandle } from '../../lib/mosaic';
+import { createMosaic, type MosaicHandle } from '../../lib/mosaic';
+import { analyzeColumns, resolveSource, MAX_CATEGORIES, MAX_CHARTS, type ColumnInfo, type DataSource } from '../../lib/mosaic/analyze';
 import { useWorkspace } from '../../store/workspace';
 import { Empty, cn } from '../../components/ui';
 
 /** What to explore: an in-database table, a data file (relative or absolute path) or an ad-hoc SELECT. */
-export interface ExploreSource {
-  kind: 'table' | 'file' | 'query';
-  target: string;
-  label?: string;
-}
+export type ExploreSource = DataSource;
 
-interface ColumnInfo {
-  name: string;
-  type: string;
-  role: 'numeric' | 'temporal' | 'category' | 'skip';
-  distinct?: number;
-}
-
-const MAX_CHARTS = 12;
-const MAX_CATEGORIES = 40;
 const CHART_HEIGHT = 170;
-
-const NUMERIC = /^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|UHUGEINT|FLOAT|REAL|DOUBLE|DECIMAL)/i;
-const TEMPORAL = /^(DATE|TIMESTAMP)/i;
-const CATEGORY = /^(VARCHAR|BOOLEAN|ENUM|UUID)/i;
 
 function cssVar(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -65,37 +48,15 @@ export function ExploreView({ workspaceId, source, className }: { workspaceId: s
     (async () => {
       handle = await createMosaic(workspaceId);
       if (cancelled) return;
-      const { api, info } = handle;
+      const { api } = handle;
 
-      // 1. Resolve a table reference Mosaic can FROM. Files and queries get a stable view inside the Mosaic schema.
-      // A TableRefNode (not a plain array) is what every Mosaic code path — marks, field info, consolidation —
-      // renders as "schema"."table"; an array would be read as two tables by Query.from().
-      let path: string[];
-      if (source.kind === 'table') {
-        path = source.target.includes('.') ? source.target.split('.') : [source.target];
-      } else {
-        const name = `src_${fnv1a(`${source.kind}:${source.target}`)}`;
-        const body = source.kind === 'file' ? `SELECT * FROM '${source.target.replace(/'/g, "''")}'` : source.target.trim().replace(/;\s*$/, '');
-        await handle.coordinator.exec([`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(info.schema)}`, `CREATE OR REPLACE VIEW ${quoteIdent(info.schema)}.${quoteIdent(name)} AS ${body}`]);
-        path = [info.schema, name];
-      }
-      const ref = asTableRef(path)!;
+      // 1. A single table name Mosaic can FROM: tables as they are, files and queries through a hidden source view.
+      const ref = await resolveSource(handle, source);
       if (cancelled) return;
 
       // 2. Column roles: DESCRIBE plus approximate cardinality for text columns.
-      const refSql = path.map(quoteIdent).join('.');
-      const described = (await handle.coordinator.query(`DESCRIBE SELECT * FROM ${refSql}`, { type: 'json' })) as { column_name: string; column_type: string }[];
-      if (cancelled) return;
-      const cols: ColumnInfo[] = described.map((d) => ({ name: d.column_name, type: d.column_type, role: NUMERIC.test(d.column_type) ? 'numeric' : TEMPORAL.test(d.column_type) ? 'temporal' : CATEGORY.test(d.column_type) ? 'category' : 'skip' }));
-      const textCols = cols.filter((c) => c.role === 'category').slice(0, 16);
-      if (textCols.length) {
-        const q = `SELECT ${textCols.map((c) => `approx_count_distinct(${quoteIdent(c.name)}) AS ${quoteIdent(c.name)}`).join(', ')} FROM ${refSql}`;
-        const [row] = (await handle.coordinator.query(q, { type: 'json' })) as Record<string, number>[];
-        for (const c of textCols) {
-          c.distinct = Number(row?.[c.name] ?? 0);
-          if (!(c.distinct > 0 && c.distinct <= MAX_CATEGORIES)) c.role = 'skip';
-        }
-      }
+      const signal = { get cancelled() { return cancelled; } };
+      const cols = await analyzeColumns(handle, ref, signal);
       if (cancelled) return;
       const charted = cols.filter((c) => c.role !== 'skip').slice(0, MAX_CHARTS);
       setColumns(cols);
@@ -132,7 +93,7 @@ export function ExploreView({ workspaceId, source, className }: { workspaceId: s
 
       // 4. The rows themselves, filtered by the same selection and paged as you scroll.
       if (tableEl) {
-        const t = api.table({ from: ref as unknown as string, filterBy: brush, height: 320, rowBatch: 100, width: Math.max(320, host.clientWidth - 2) }) as HTMLElement;
+        const t = api.table({ from: ref, filterBy: brush, height: 320, rowBatch: 100, width: Math.max(320, host.clientWidth - 2) }) as HTMLElement;
         tableEl.appendChild(t);
       }
       if (!cancelled) setState('ready');

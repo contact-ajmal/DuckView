@@ -7,8 +7,10 @@
  *     legitimately exceed the grid cap.
  *   - `exec` — Mosaic's pre-aggregation plumbing: `CREATE SCHEMA IF NOT EXISTS "mosaic"`,
  *     `CREATE TABLE IF NOT EXISTS "mosaic"."preagg_<hex>" AS SELECT …` and `DROP SCHEMA IF EXISTS "mosaic" CASCADE`,
- *     plus DuckView's own `CREATE OR REPLACE VIEW "mosaic"."src_<hex>" AS SELECT …` that turns a file path or an
- *     ad-hoc query into something Mosaic can `FROM`. These are derived data, not workspace mutations: they are
+ *     plus DuckView's own source views `CREATE OR REPLACE VIEW "<schema>_src_<hex>" AS SELECT …` that turn a file
+ *     path or an ad-hoc query into a plain table name Mosaic can `FROM` (they live in the main schema because every
+ *     Mosaic code path — marks, field info, consolidation — expects a single identifier; the prefix keeps them out of
+ *     the catalogs). These are derived data, not workspace mutations: they are
  *     admitted only in exactly those shapes (validated statement by statement), run for any member with read access,
  *     never move the data epoch and are never held for agent approval. Everything else is rejected.
  *
@@ -48,6 +50,10 @@ export class MosaicService {
   get schema() {
     return this.cfg.mosaic.schema;
   }
+  /** Name prefix of DuckView source views (main schema). */
+  get viewPrefix() {
+    return `${this.cfg.mosaic.schema}_src_`;
+  }
 
   private assertEnabled() {
     if (!this.enabled) throw forbidden('Mosaic is disabled by configuration (mosaic.enabled)');
@@ -75,15 +81,16 @@ export class MosaicService {
    * Classifies one statement against the admitted exec shapes. Returns a label for the audit log or throws.
    * Identifiers are matched exactly as Mosaic's SQL generator quotes them (always double-quoted).
    */
-  classifyExec(statement: string): 'create_schema' | 'create_preagg' | 'create_view' | 'drop_schema' | 'drop_preagg' {
+  classifyExec(statement: string): 'create_schema' | 'create_preagg' | 'create_view' | 'drop_schema' | 'drop_preagg' | 'drop_view' {
     const s = stripTrailingSemicolon(statement).trim();
     const schema = this.schema;
     const q = (id: string) => `"${id}"`;
     if (new RegExp(`^CREATE\\s+SCHEMA\\s+IF\\s+NOT\\s+EXISTS\\s+${q(schema)}$`, 'i').test(s)) return 'create_schema';
     if (new RegExp(`^DROP\\s+SCHEMA\\s+IF\\s+EXISTS\\s+${q(schema)}\\s+CASCADE$`, 'i').test(s)) return 'drop_schema';
     if (new RegExp(`^DROP\\s+TABLE\\s+IF\\s+EXISTS\\s+${q(schema)}\\.${q(`preagg_${HEX}`)}$`, 'i').test(s)) return 'drop_preagg';
+    if (new RegExp(`^DROP\\s+VIEW\\s+IF\\s+EXISTS\\s+${q(`${this.viewPrefix}${HEX}`)}$`, 'i').test(s)) return 'drop_view';
     const preagg = new RegExp(`^CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+${q(schema)}\\.${q(`preagg_${HEX}`)}\\s+AS\\s+([\\s\\S]+)$`, 'i').exec(s);
-    const view = new RegExp(`^CREATE\\s+(?:OR\\s+REPLACE\\s+)?VIEW\\s+${q(schema)}\\.${q(`src_${HEX}`)}\\s+AS\\s+([\\s\\S]+)$`, 'i').exec(s);
+    const view = new RegExp(`^CREATE\\s+(?:OR\\s+REPLACE\\s+)?VIEW\\s+${q(`${this.viewPrefix}${HEX}`)}\\s+AS\\s+([\\s\\S]+)$`, 'i').exec(s);
     const m = preagg ?? view;
     if (!m) throw forbidden(`Statement is not part of the Mosaic protocol and was rejected: ${s.slice(0, 120)}`);
     const body = analyzeSql(m[1]!);
@@ -106,8 +113,8 @@ export class MosaicService {
     try {
       const { engine } = await this.workspaces.engine(p, workspaceId);
       const actor = p.actorType === 'AGENT' ? 'agent' : 'user';
-      // A view or pre-aggregate needs the schema; Mosaic itself only creates it alongside its first pre-aggregate.
-      if (kinds.some((k) => k === 'create_view' || k === 'create_preagg') && !kinds.includes('create_schema')) await engine.execute(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`, { maxRows: 1, actor });
+      // A pre-aggregate needs the schema; Mosaic itself only creates it alongside its first pre-aggregate.
+      if (kinds.includes('create_preagg') && !kinds.includes('create_schema')) await engine.execute(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`, { maxRows: 1, actor });
       // Statement by statement: `execute` returns the last result only, and a clear per-statement failure beats a
       // partially applied batch that leaves the coordinator guessing.
       for (const st of statements) await engine.execute(st, { maxRows: 1, actor });
@@ -122,14 +129,17 @@ export class MosaicService {
   }
 
   /**
-   * Drops the Mosaic schema of a running engine — called when the workspace data epoch moves. Pre-aggregates are
-   * rebuilt lazily by the next interaction; the browser is told through the same live event.
+   * Drops the Mosaic schema (pre-aggregates) and DuckView's source views of a running engine — called when the
+   * workspace data epoch moves. Both are rebuilt lazily by the next interaction; the browser is told through the
+   * same live event.
    */
   async dropSchema(workspaceId: string): Promise<boolean> {
     const engine = this.engines.peek(workspaceId);
     if (!engine) return false;
     try {
       await engine.runInternal(`DROP SCHEMA IF EXISTS "${this.schema}" CASCADE`, 30_000);
+      const views = await engine.runInternal(`SELECT view_name FROM duckdb_views() WHERE NOT internal AND schema_name = 'main' AND view_name LIKE '${this.viewPrefix}%'`, 15_000);
+      for (const v of views) await engine.runInternal(`DROP VIEW IF EXISTS "${String(v.view_name).replace(/"/g, '""')}"`, 15_000);
       return true;
     } catch (err) {
       logger().warn({ workspaceId, err: (err as Error).message }, 'Could not drop the Mosaic schema after an epoch change');

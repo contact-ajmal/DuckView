@@ -81,6 +81,16 @@ The final object is validated with zod; the process refuses to start on invalid 
 
 See [Result cache](cache.html) for how keys are built.
 
+## mosaic
+
+| Setting | Notes |
+|---|---|
+| `enabled` | The Mosaic connector endpoint behind the Explore view and Mosaic dashboards (default on). |
+| `schema` | Schema for Mosaic's pre-aggregated tables (default `duckview_mosaic`); source views are `<schema>_src_<hash>` in the main schema. Both are dropped when the data epoch moves and hidden from catalogs. |
+| `max_rows` | Row ceiling for chart queries, independent of the grid cap (default 1 000 000). |
+
+See [Interactive exploration & Mosaic dashboards](mosaic.html).
+
 ## observability
 
 `metrics_enabled`, `metrics_require_auth` (Prometheus at `/metrics`), `otel.enabled`, `otel.service_name`, `otel.exporter_otlp_endpoint`, `otel.console_exporter`.

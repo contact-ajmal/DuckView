@@ -17,7 +17,8 @@ All API routes live under `/api` and take `Authorization: Bearer <jwt>` (UI sess
 | Storage explorer | `GET/POST/DELETE /api/workspaces/:id/folders` · `GET /api/storage/browse` · `GET /api/storage/local` · `GET /api/storage/cloud` · `POST /api/storage/inspect` |
 | Cloud connections | `GET /api/cloud-connections/providers` · `GET/POST/PATCH/DELETE /api/cloud-connections` · `POST /api/cloud-connections/:id/test` |
 | Exports | `POST /api/workspaces/:id/export {sql, format: parquet\|csv\|json\|arrow}` · `GET /api/exports` · `GET /api/exports/:id/download` · `DELETE /api/exports/:id` |
-| BI | `…/queries` CRUD · `…/dashboards` CRUD · `GET/PATCH/DELETE /api/dashboards/:id` · `POST/PATCH/DELETE /api/dashboards/:id/widgets[/:wid]` · `POST /api/dashboards/:id/widgets/:wid/data` |
+| BI | `…/queries` CRUD · `…/dashboards` CRUD (`kind: grid\|mosaic`, `spec`) · `GET/PATCH/DELETE /api/dashboards/:id` (layout, spec) · `POST/PATCH/DELETE /api/dashboards/:id/widgets[/:wid]` · `POST /api/dashboards/:id/widgets/:wid/data` |
+| Mosaic | `POST /api/workspaces/:id/mosaic {type: arrow\|json\|exec, sql}` (Arrow IPC / JSON reads with ETag; admitted plumbing statements) · `GET /api/mosaic/info` |
 | Data | `POST /api/workspaces/:id/files` (multipart upload) · `DELETE /api/workspaces/:id/files?path=` · `POST /api/workspaces/:id/overview` · `GET /api/workspaces/:id/catalog` |
 | Query | `POST /api/workspaces/:id/query` · `/explain` · `/profile` · `/save` · `WS /api/ws/query` (auth → run/cancel; schema → rows* → done) |
 | Cache | `query`, `explain`, `profile`, `overview`, `storage/inspect` and widget data are conditional (`ETag` / `If-None-Match` → 304, `refresh: true`) · `DELETE /api/workspaces/:id/cache` · `POST /api/admin/cache/clear` |

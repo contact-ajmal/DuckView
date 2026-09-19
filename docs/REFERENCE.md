@@ -10,8 +10,9 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │ #/query          VS Code-style explorer (any local folder + S3/R2/GCS/Azure  │
 │                  + lakehouse catalogs) · schema pane · tabs · engine picker  │
 │                  (DuckDB / Databricks warehouse) · saved queries · .sql io   │
-│ #/dashboards     BI builder: drag-and-drop grid, KPI/chart/table/markdown,   │
-│                  auto-refresh                                                 │
+│ #/dashboards     grid dashboards (drag-and-drop KPI/chart/table/markdown,    │
+│                  auto-refresh) · Mosaic dashboards (declarative spec, editor │
+│                  + live preview, cross-filtered, generated from any dataset) │
 │ #/settings       categorised: appearance · layout · hardware · engine ·     │
 │                  storage · copilot · account · users                          │
 │ #/mcp            registered agents · framework snippets · OpenAPI · tokens  │
@@ -26,7 +27,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Sharing: workspace roles OWNER/EDITOR/VIEWER for users and teams            │
 │  QueryService ─ single choke point: authz → SQL guard → HITL → audit         │
 │  ResultCache ─ LRU keyed on file stat + workspace data epoch · ETag/304      │
-│  Mosaic ─ workspace engine as a Mosaic data connector (Arrow, exec policy)   │
+│  Mosaic ─ engine as a Mosaic connector (Arrow, exec policy) · spec dashboards│
 │  Storage: jailed tree · S3/Azure SDK listings · DESCRIBE-based inspection     │
 │  Exports: COPY … TO (parquet/csv/json) + streaming Arrow IPC writer          │
 │  Copilot: schema/SUMMARIZE/active-SQL context → provider bridge (SSE)        │
@@ -133,7 +134,7 @@ Key settings:
 | `mcp` | `default_page_size` / `max_page_size` | 50 / 200 rows per tool call; `max_cell_chars` truncates long strings. |
 | | `require_confirmation_for_mutations` | HITL gate for agents. |
 | `cache` | `enabled`, `max_bytes`, `max_entry_bytes` | Server-side result cache (default on, 256 MB LRU, entries ≤ 16 MB). See [Result cache](#result-cache). |
-| `mosaic` | `enabled`, `schema`, `max_rows` | Interactive visualization (uwdata/mosaic) endpoint; the schema (default `duckview_mosaic`) holds pre-aggregated views and is dropped whenever the data epoch moves; `max_rows` (1 000 000) caps chart queries independently of the grid. See [Interactive exploration (Mosaic)](#interactive-exploration-mosaic). |
+| `mosaic` | `enabled`, `schema`, `max_rows` | Interactive visualization (uwdata/mosaic) endpoint; the schema (default `duckview_mosaic`) holds pre-aggregated views, source views are `<schema>_src_<hash>` in the main schema, both dropped whenever the data epoch moves; `max_rows` (1 000 000) caps chart queries independently of the grid. See [Interactive exploration (Mosaic)](#interactive-exploration-mosaic) and [Mosaic dashboards](#mosaic-dashboards). |
 | | `ttl_seconds`, `remote_ttl_seconds` | Lifetime of versioned entries (6 h) and of entries touching remote / lakehouse / MotherDuck sources (60 s; `0` never caches them). |
 | `observability` | `metrics_enabled`, `otel.*` | Prometheus at `/metrics`; OTLP/HTTP trace export when `otel.enabled`. |
 
@@ -189,11 +190,27 @@ DuckView runs Mosaic against the workspace engine — never DuckDB-WASM in the b
 | `type` | What happens |
 |---|---|
 | `arrow` / `json` | A single read-only statement run through the normal query pipeline (role, guard, audit, result cache with `ETag` / `If-None-Match`) with the `mosaic.max_rows` ceiling; `arrow` returns an Arrow IPC stream. |
-| `exec` | Admitted only in Mosaic's own shapes, validated statement by statement: `CREATE SCHEMA IF NOT EXISTS "<schema>"`, `CREATE TABLE IF NOT EXISTS "<schema>"."preagg_<hex>" AS SELECT …`, `DROP SCHEMA IF EXISTS "<schema>" CASCADE`, `DROP TABLE IF EXISTS "<schema>"."preagg_<hex>"`, plus DuckView's `CREATE OR REPLACE VIEW "<schema>"."src_<hex>" AS SELECT …` that makes a file or an ad-hoc query addressable. The wrapped SELECT must be read-only and passes the sandbox. Anything else is `403`. |
+| `exec` | Admitted only in Mosaic's own shapes, validated statement by statement: `CREATE SCHEMA IF NOT EXISTS "<schema>"`, `CREATE TABLE IF NOT EXISTS "<schema>"."preagg_<hex>" AS SELECT …`, `DROP SCHEMA IF EXISTS "<schema>" CASCADE`, `DROP TABLE IF EXISTS "<schema>"."preagg_<hex>"`, plus DuckView's **source views** `CREATE [OR REPLACE] VIEW "<schema>_src_<hex>" AS SELECT …` / `DROP VIEW IF EXISTS "<schema>_src_<hex>"` that make a file, a schema-qualified table, an ad-hoc query or a spec's inline rows addressable by one plain name (Mosaic reads every table reference as a single identifier). The wrapped SELECT must be a single read-only statement and passes the sandbox. Anything else is `403`. |
 
-Pre-aggregates are derived data, not workspace mutations: any member with read access can create them (viewers included), they never move the data epoch and are never held for agent approval. **Invalidation reuses the epoch** — when it moves, the server drops the Mosaic schema and the Explore view rebuilds from the live event. The schema is hidden from the catalog, the explorer and `list_accessible_data`; it is named `duckview_mosaic` rather than `mosaic` because a workspace database file called `mosaic.duckdb` would make `"mosaic"."preagg_x"` ambiguous between catalog and schema. `GET /api/mosaic/info` reports the schema and limits; `duckview_mosaic_exec_total{kind}` counts plumbing statements.
+Pre-aggregates and source views are derived data, not workspace mutations: any member with read access can create them (viewers included), they never move the data epoch and are never held for agent approval. **Invalidation reuses the epoch** — when it moves, the server drops the Mosaic schema and every source view, and the views rebuild from the live event. Both are hidden from the catalog, the explorer and `list_accessible_data`; the schema is named `duckview_mosaic` rather than `mosaic` because a workspace database file called `mosaic.duckdb` would make `"mosaic"."preagg_x"` ambiguous between catalog and schema. `GET /api/mosaic/info` reports the schema and limits; `duckview_mosaic_exec_total{kind}` counts plumbing statements.
 
-Browser side: `lib/mosaic` (a connector that decodes Arrow with Mosaic's `decodeIPC`, one coordinator per view bound to the workspace) and `features/explore/ExploreView.tsx`. `scripts/e2e-mosaic.mjs` drives a real Chrome through the Overview and workbench scenarios (login, render, brush) over the DevTools protocol and fails on any page exception.
+Browser side: `lib/mosaic` (a connector that decodes Arrow with Mosaic's `decodeIPC`, one coordinator per view bound to the workspace, `analyze.ts` for column roles and source views, `spec.ts` for spec preparation) and `features/explore/ExploreView.tsx`. `scripts/e2e-mosaic.mjs` drives a real Chrome through the Overview, workbench and Mosaic-dashboard scenarios (login, render, generate, save, brush, reload) over the DevTools protocol and fails on any page exception.
+
+## Mosaic dashboards
+
+Dashboards have a `kind`: **grid** (widgets on a drag-and-drop layout, bound to saved queries or SQL) or **mosaic** — a [Mosaic declarative specification](https://idl.uw.edu/mosaic/spec/) stored as JSON (`dashboards.spec`) and rendered live against the workspace. Pick the kind when creating one; the list badges Mosaic dashboards and summarises their plots and inputs.
+
+A Mosaic dashboard page has three modes: **view** (everyone with access to the workspace), **edit** (editors: a YAML/JSON editor with a live preview that re-renders 600 ms after a valid change, ⌘S / *Save* to persist, format toggle) and **Generate** — pick a table, a data file or a SELECT and DuckView drafts a complete spec from its columns: a cross-filtered histogram per numeric or temporal column, a bar chart per low-cardinality text column, and the filtered rows underneath. The draft is ordinary spec text you then edit.
+
+Specs are written exactly as in the Mosaic docs; the differences are only in where data comes from:
+
+- `from: <name>` works directly for any table or view in the workspace's main schema. Schema-qualified names (other schemas, attached lakehouse catalogs) go through a `data` entry with a query, e.g. `{query: SELECT * FROM lake.sales.orders}`.
+- `data:` entries — `{query}` / a bare SQL string, `{file: x.parquet}` (`csv`, `json` with their `read_*` options), an inline list of rows — become hidden **source views** (`<schema>_src_<hash>`, hashed on the definition so an edited dataset gets a fresh view) and every `from:` referring to them is rewritten before the spec is instantiated. Existing tables need no `data` entry; `spatial` data is not available.
+- File paths are resolved inside the workspace jail like any other SQL literal.
+
+Everything else — `params`, selections (`crossfilter`, `intersect`, `single`…), inputs (`menu`, `search`, `slider`, `table`), `plot` with every mark, interactor and attribute, `legend`, `hconcat` / `vconcat` / spacing — is Mosaic's own and runs through the same connector endpoint, so it inherits the role model, the sandbox, the result cache and the exec policy. Specs are capped at 512 KB; `spec` is `null` on grid dashboards and a PATCH with a `spec` on one is `400`. Widgets cannot be added to a Mosaic dashboard.
+
+API: `POST /api/workspaces/:id/dashboards {name, description?, kind?: grid|mosaic, spec?}` · `PATCH /api/dashboards/:id {spec}` (editor). The MCP `list_dashboards` tool reports `kind` and `spec`.
 
 ## Sharing & teams
 
@@ -297,7 +314,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Storage explorer | `GET/POST/DELETE /api/workspaces/:id/folders` (workspace folders) · `GET /api/storage/browse?workspace_id&path` (folder picker) · `GET /api/storage/local?workspace_id&path` (tree, one level) · `GET /api/storage/cloud?connection_id[&bucket&prefix]` (buckets / objects with folders via S3 `ListObjectsV2` delimiter or Azure hierarchy) · `POST /api/storage/inspect {workspace_id,target}` (`DESCRIBE … LIMIT 0` for files, `s3://`/`r2://`/`gs://`/`az://` objects, tables, `.duckdb` files, subqueries; Parquet row counts from the footer) |
 | Cloud connections | `GET /api/cloud-connections/providers` · `GET/POST/PATCH/DELETE /api/cloud-connections` (S3 · R2 · GCS · Azure, AES-256-GCM at rest, applied as DuckDB `CREATE SECRET` to every engine of the owner) · `POST /api/cloud-connections/:id/test` |
 | Exports | `POST /api/workspaces/:id/export {sql, format: parquet\|csv\|json\|arrow}` (native `COPY … TO` on disk, Arrow IPC via a streaming writer) · `GET /api/exports` · `GET /api/exports/:id/download` (streamed with `Content-Length`) · `DELETE /api/exports/:id` |
-| BI | `…/queries` CRUD (saved queries with folders/tags) · `…/dashboards` CRUD · `GET/PATCH/DELETE /api/dashboards/:id` (layout) · `POST/PATCH/DELETE /api/dashboards/:id/widgets[/:wid]` · `POST /api/dashboards/:id/widgets/:wid/data` |
+| BI | `…/queries` CRUD (saved queries with folders/tags) · `…/dashboards` CRUD (`kind: grid\|mosaic`, `spec`) · `GET/PATCH/DELETE /api/dashboards/:id` (layout, spec) · `POST/PATCH/DELETE /api/dashboards/:id/widgets[/:wid]` · `POST /api/dashboards/:id/widgets/:wid/data` |
 | Data | `POST /api/workspaces/:id/files` (multipart upload into the jail) · `DELETE /api/workspaces/:id/files?path=` · `POST /api/workspaces/:id/overview` (KPIs, null ratios, sample, distributions) · `GET /api/workspaces/:id/catalog` |
 | Query | `POST /api/workspaces/:id/query` · `/explain` · `/profile` · `/save` · `WS /api/ws/query` (auth → run/cancel; schema → rows* → done). `query`, `explain`, `profile`, `overview`, `storage/inspect` and widget data are conditional (`ETag` / `If-None-Match` → 304, `refresh: true`). |
 | Cache | `DELETE /api/workspaces/:id/cache` · `POST /api/admin/cache/clear` · cache stats in `GET /api/system/live` |
@@ -350,7 +367,8 @@ packages/web/src
   features/settings   categorised left-nav: appearance (themes/fonts/scale) · layout · hardware gauges · engine tuning · storage · copilot · account · teams · users
   features/workspace  ShareDialog (members, roles, transfer, leave) next to the workbench
   lib/resultCache     IndexedDB result cache (LRU by bytes, per user, wiped on sign-out) · lib/useCached: stale-while-revalidate hook
-  lib/mosaic          Mosaic connector + per-view coordinator · features/explore: cross-filtered Explore view (vgplot)
+  lib/mosaic          Mosaic connector + per-view coordinator · analyze (column roles, source views, template spec) · spec (YAML/JSON, data → views)
+  features/explore    cross-filtered Explore view (vgplot) · features/dashboards: grid canvas + MosaicDashboard (editor, preview, generator)
   theme/              theme definitions (ramps, accents, tones, chart series, fonts) · store/theme.ts applies them as CSS variables
   features/mcp        registered agents (tokens, self-test, chat) · framework snippets + OpenAPI · client snippets · live inspector (WS)
   features/explorer   VS Code-style tree (data dir, folders, cloud, lakehouse) · schema panel · cloud & lakehouse wizards
@@ -359,11 +377,11 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 184 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
+pnpm test        # 187 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +
                  # Statement Execution API) and the agent façade / AWS providers against a fake AWS bridge
 node scripts/smoke.mjs http://localhost:4200 admin@example.com <password>   # against a running instance
-node scripts/e2e-mosaic.mjs overview-explore                               # real-browser check of the Explore view (needs Chrome)
+node scripts/e2e-mosaic.mjs overview-explore                               # real-browser checks (needs Chrome): overview-explore · workbench-explore · mosaic-dashboard
 ```

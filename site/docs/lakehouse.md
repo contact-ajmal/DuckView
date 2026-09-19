@@ -1,6 +1,6 @@
 ---
 title: Lakehouse connectors
-order: 7
+order: 8
 group: Guide
 description: Attach AWS Glue / SageMaker Lakehouse, Amazon S3 Tables, any Iceberg REST catalog and Databricks; query them as alias.schema.table from SQL, dashboards, Copilot and agents.
 ---

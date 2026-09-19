@@ -351,14 +351,14 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
     define({
       name: 'list_dashboards',
       title: 'List dashboards',
-      description: 'Lists BI dashboards (and their widgets) in a workspace, or across all accessible workspaces when workspace_id is omitted.',
+      description: 'Lists dashboards in a workspace, or across all accessible workspaces when workspace_id is omitted. kind "grid" dashboards carry widgets; kind "mosaic" dashboards carry a declarative Mosaic spec.',
       inputSchema: { workspace_id: z.string().optional() },
       annotations: { readOnlyHint: true, openWorldHint: false },
       async handler(env, { workspace_id }) {
         const list = workspace_id ? await env.ctx.dashboards.list(env.principal, workspace_id) : await env.ctx.dashboards.listAll(env.principal);
         const detailed = await Promise.all(list.map((d) => env.ctx.dashboards.get(env.principal, d.id)));
-        const lines = detailed.map((d) => `- **${d.name}** (\`${d.id}\`, workspace \`${d.workspace_id}\`) — ${d.widgets.length} widget(s): ${d.widgets.map((w) => `${w.title} [${w.widget_type}]`).join(', ') || 'none'}`);
-        return { content: [text(`**Dashboards** (${detailed.length})\n${lines.join('\n') || '_(none)_'}`)], structuredContent: { status: 'ok', dashboards: detailed.map((d) => ({ id: d.id, name: d.name, description: d.description, workspace_id: d.workspace_id, layout: d.layout, widgets: d.widgets.map((w) => ({ id: w.id, title: w.title, widget_type: w.widget_type, custom_sql: w.custom_sql, saved_query_id: w.saved_query_id, chart_config: w.chart_config, refresh_interval_sec: w.refresh_interval_sec })) })) } };
+        const lines = detailed.map((d) => d.kind === 'mosaic' ? `- **${d.name}** (\`${d.id}\`, workspace \`${d.workspace_id}\`) — Mosaic spec${d.spec && Object.keys(d.spec).length ? '' : ' (empty)'}` : `- **${d.name}** (\`${d.id}\`, workspace \`${d.workspace_id}\`) — ${d.widgets.length} widget(s): ${d.widgets.map((w) => `${w.title} [${w.widget_type}]`).join(', ') || 'none'}`);
+        return { content: [text(`**Dashboards** (${detailed.length})\n${lines.join('\n') || '_(none)_'}`)], structuredContent: { status: 'ok', dashboards: detailed.map((d) => ({ id: d.id, name: d.name, description: d.description, workspace_id: d.workspace_id, kind: d.kind, layout: d.layout, spec: d.spec, widgets: d.widgets.map((w) => ({ id: w.id, title: w.title, widget_type: w.widget_type, custom_sql: w.custom_sql, saved_query_id: w.saved_query_id, chart_config: w.chart_config, refresh_interval_sec: w.refresh_interval_sec })) })) } };
       },
     }),
 
@@ -384,7 +384,11 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
           if (!dashboard_name) throw new HttpError(400, 'Provide dashboard_id, or dashboard_name to create a new dashboard', 'BAD_REQUEST');
           ws = resolveWorkspace(env, ws);
           dashId = (await env.ctx.dashboards.create(env.principal, ws, { name: dashboard_name })).id;
-        } else ws = (await env.ctx.dashboards.get(env.principal, dashId)).workspace_id;
+        } else {
+          const existing = await env.ctx.dashboards.get(env.principal, dashId);
+          if (existing.kind !== 'grid') throw new HttpError(400, 'Widgets belong to grid dashboards; this one is a Mosaic dashboard (edit its spec instead)', 'BAD_REQUEST');
+          ws = existing.workspace_id;
+        }
         if (widget_type !== 'MARKDOWN') {
           // Dry-run the SQL so agents get immediate feedback on broken queries.
           await env.ctx.queries.run(env.principal, ws, sql, { maxRows: 5, dryRun: true });

@@ -956,14 +956,14 @@ export class WorkspaceEngine {
     // fetch remote table metadata for every table.
     const excluded = (this.spec.attachments ?? []).map((a) => sqlString(a.alias.replace(/[^A-Za-z0-9_]/g, '_')));
     // Mosaic's pre-aggregated views and DuckView's source views are plumbing, not user data.
-    const notLakehouse = (excluded.length ? ` AND database_name NOT IN (${excluded.join(', ')})` : '') + ` AND schema_name <> ${sqlString(this.cfg.mosaic.schema)}`;
+    const notLakehouse = (excluded.length ? ` AND database_name NOT IN (${excluded.join(', ')})` : '') + ` AND schema_name <> ${sqlString(this.cfg.mosaic.schema)} AND NOT starts_with(table_name, ${sqlString(`${this.cfg.mosaic.schema}_src_`)})`;
     return this.withConnection(async (conn) => {
       const t = await conn.runAndReadAll(`
         SELECT database_name, schema_name, table_name AS name, 'TABLE' AS type, estimated_size, column_count, sql
         FROM duckdb_tables() WHERE NOT internal${notLakehouse}
         UNION ALL
         SELECT database_name, schema_name, view_name AS name, 'VIEW' AS type, NULL, column_count, sql
-        FROM duckdb_views() WHERE NOT internal${notLakehouse}
+        FROM duckdb_views() WHERE NOT internal${notLakehouse.replace('table_name', 'view_name')}
         ORDER BY 1, 2, 3`);
       const c = await conn.runAndReadAll(`SELECT database_name, schema_name, table_name, column_name, data_type, is_nullable, column_index FROM duckdb_columns() WHERE NOT internal${notLakehouse} ORDER BY column_index`);
       const cols = new Map<string, CatalogObject['columns']>();

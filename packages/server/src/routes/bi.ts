@@ -56,7 +56,7 @@ export async function biRoutes(app: FastifyInstance, ctx: AppContext) {
   });
   app.post('/api/workspaces/:id/dashboards', async (req) => {
     const { id } = req.params as { id: string };
-    const body = z.object({ name: z.string(), description: z.string().nullable().optional() }).parse(req.body ?? {});
+    const body = z.object({ name: z.string(), description: z.string().nullable().optional(), kind: z.enum(['grid', 'mosaic']).optional(), spec: z.record(z.string(), z.unknown()).nullable().optional() }).parse(req.body ?? {});
     const d = await ctx.dashboards.create(req.principal!, id, body);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'dashboard.create', resource: `dashboard:${d.id}`, ip: req.ip });
     return { dashboard: d };
@@ -67,7 +67,7 @@ export async function biRoutes(app: FastifyInstance, ctx: AppContext) {
   });
   app.patch('/api/dashboards/:id', async (req) => {
     const { id } = req.params as { id: string };
-    const body = z.object({ name: z.string().optional(), description: z.string().nullable().optional(), layout: Layout.optional() }).parse(req.body ?? {});
+    const body = z.object({ name: z.string().optional(), description: z.string().nullable().optional(), layout: Layout.optional(), spec: z.record(z.string(), z.unknown()).nullable().optional() }).parse(req.body ?? {});
     return { dashboard: await ctx.dashboards.update(req.principal!, id, body) };
   });
   app.delete('/api/dashboards/:id', async (req) => {

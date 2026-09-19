@@ -210,6 +210,9 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 // ---------------------------------------------------------------------------
 
 export const WIDGET_TYPES = ['KPI', 'CHART', 'TABLE', 'MARKDOWN'] as const;
+/** grid: widget grid (Chart.js); mosaic: a declarative Mosaic spec rendered with cross-filtering. */
+export const DASHBOARD_KINDS = ['grid', 'mosaic'] as const;
+export type DashboardKind = (typeof DASHBOARD_KINDS)[number];
 export const CLOUD_PROVIDERS = ['S3', 'R2', 'GCS', 'AZURE'] as const;
 export const LAKEHOUSE_PROVIDERS = ['AWS_GLUE', 'AWS_S3_TABLES', 'ICEBERG_REST', 'DATABRICKS'] as const;
 export const LAKEHOUSE_STATUSES = ['unknown', 'ok', 'error'] as const;
@@ -327,6 +330,9 @@ export const dashboards = sqliteTable(
     name: text('name').notNull(),
     description: text('description'),
     layout: text('layout', { mode: 'json' }).$type<LayoutItem[]>().notNull().default([]),
+    kind: text('kind', { enum: DASHBOARD_KINDS }).notNull().default('grid'),
+    /** Mosaic declarative spec (JSON object) for kind = mosaic; data definitions may reference workspace files/queries. */
+    spec: text('spec', { mode: 'json' }).$type<Record<string, unknown> | null>(),
     created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },

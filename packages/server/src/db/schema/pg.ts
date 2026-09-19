@@ -153,7 +153,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, CLOUD_PROVIDERS, CHAT_ROLES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -181,6 +181,8 @@ export const dashboards = pgTable(
     name: text('name').notNull(),
     description: text('description'),
     layout: jsonb('layout').$type<LayoutItem[]>().notNull().default([]),
+    kind: text('kind', { enum: DASHBOARD_KINDS }).notNull().default('grid'),
+    spec: jsonb('spec').$type<Record<string, unknown> | null>(),
     created_at: ts('created_at').notNull(),
     updated_at: ts('updated_at').notNull(),
   },

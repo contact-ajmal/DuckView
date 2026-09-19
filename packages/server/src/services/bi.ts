@@ -3,8 +3,8 @@
  */
 import { eq, and, asc, desc } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
-import type { SavedQuery, Dashboard, DashboardWidget, LayoutItem, WidgetChartConfig, WidgetType, WorkspaceRole } from '../db/schema/sqlite.js';
-import { WIDGET_TYPES } from '../db/schema/sqlite.js';
+import type { SavedQuery, Dashboard, DashboardWidget, LayoutItem, WidgetChartConfig, WidgetType, WorkspaceRole, DashboardKind } from '../db/schema/sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS } from '../db/schema/sqlite.js';
 import { newId } from '../security/crypto.js';
 import type { WorkspaceService } from './workspaces.js';
 import type { Principal } from './principal.js';
@@ -115,22 +115,37 @@ export class DashboardService {
     return { ...d, widgets };
   }
 
-  async create(p: Principal, workspaceId: string, input: { name: string; description?: string | null }): Promise<Dashboard> {
+  /** A Mosaic spec must be a JSON object of bounded size; its contents are validated when rendered (parseSpec). */
+  validateSpec(spec: unknown): Record<string, unknown> | null {
+    if (spec === null || spec === undefined) return null;
+    if (typeof spec !== 'object' || Array.isArray(spec)) throw badRequest('spec must be a JSON object (a Mosaic declarative specification)');
+    const text = JSON.stringify(spec);
+    if (text.length > 512_000) throw badRequest('spec is too large (limit 512 KB)');
+    return spec as Record<string, unknown>;
+  }
+
+  async create(p: Principal, workspaceId: string, input: { name: string; description?: string | null; kind?: DashboardKind; spec?: unknown }): Promise<Dashboard> {
     requireWrite(p);
     await this.workspaces.get(p, workspaceId, 'EDITOR');
+    const kind = input.kind ?? 'grid';
+    if (!(DASHBOARD_KINDS as readonly string[]).includes(kind)) throw badRequest(`kind must be one of ${DASHBOARD_KINDS.join(', ')}`);
     const now = new Date();
-    const d: Dashboard = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name: (input.name ?? '').trim().slice(0, 160) || 'Untitled dashboard', description: input.description?.trim().slice(0, 2000) || null, layout: [], created_at: now, updated_at: now };
+    const d: Dashboard = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name: (input.name ?? '').trim().slice(0, 160) || 'Untitled dashboard', description: input.description?.trim().slice(0, 2000) || null, layout: [], kind, spec: kind === 'mosaic' ? this.validateSpec(input.spec) ?? {} : null, created_at: now, updated_at: now };
     await this.db.insert(this.s.dashboards).values(d);
     return d;
   }
 
-  async update(p: Principal, id: string, patch: { name?: string; description?: string | null; layout?: LayoutItem[] }): Promise<Dashboard> {
+  async update(p: Principal, id: string, patch: { name?: string; description?: string | null; layout?: LayoutItem[]; spec?: unknown }): Promise<Dashboard> {
     requireWrite(p);
     const d = await this.get(p, id, 'EDITOR');
     const set: Partial<Dashboard> = { updated_at: new Date() };
     if (patch.name !== undefined) set.name = patch.name.trim().slice(0, 160) || d.name;
     if (patch.description !== undefined) set.description = patch.description?.trim().slice(0, 2000) || null;
     if (patch.layout !== undefined) set.layout = this.validateLayout(patch.layout, d.widgets.map((w) => w.id));
+    if (patch.spec !== undefined) {
+      if (d.kind !== 'mosaic') throw badRequest('Only Mosaic dashboards carry a spec');
+      set.spec = this.validateSpec(patch.spec) ?? {};
+    }
     await this.db.update(this.s.dashboards).set(set).where(eq(this.s.dashboards.id, id));
     const { widgets: _w, ...plain } = d;
     return { ...plain, ...set };
@@ -177,6 +192,7 @@ export class DashboardService {
   async addWidget(p: Principal, dashboardId: string, input: WidgetInput & { title: string; widget_type: WidgetType }): Promise<{ widget: DashboardWidget; layout: LayoutItem[] }> {
     requireWrite(p);
     const d = await this.get(p, dashboardId, 'EDITOR');
+    if (d.kind !== 'grid') throw badRequest('Widgets belong to grid dashboards; a Mosaic dashboard is described by its spec');
     if (input.saved_query_id) {
       const q = await this.db.select({ id: this.s.savedQueries.id }).from(this.s.savedQueries).where(and(eq(this.s.savedQueries.id, input.saved_query_id), eq(this.s.savedQueries.workspace_id, d.workspace_id))).limit(1);
       if (!q[0]) throw badRequest('saved_query_id does not belong to this workspace');

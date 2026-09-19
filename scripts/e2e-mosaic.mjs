@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
- * Browser end-to-end check for the Mosaic Explore view, driven over the Chrome DevTools Protocol (no Playwright).
- *   node scripts/e2e-mosaic.mjs [overview-explore|workbench-explore] [screenshot.png]
+ * Browser end-to-end check for the Mosaic Explore view and Mosaic dashboards, driven over the Chrome DevTools
+ * Protocol (no Playwright).
+ *   node scripts/e2e-mosaic.mjs [overview-explore|workbench-explore|mosaic-dashboard] [screenshot.png]
  * Env: DUCKVIEW_URL (default http://localhost:4200), DUCKVIEW_ADMIN_EMAIL / DUCKVIEW_ADMIN_PASSWORD, CHROME (binary).
  * Signs in through the API, opens the app, renders the interactive profile of the Overview's dataset (or the first
  * tab's SQL), brushes a chart, and fails on any page exception, missing charts or a silent cross-filter.
- * The Overview scenario expects at least one dataset in the workspace.
+ * The Overview scenario expects at least one dataset in the workspace; the dashboard scenario creates a Mosaic
+ * dashboard through the UI, generates its spec from the first data file, saves it, brushes, reloads and deletes it.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -100,6 +102,11 @@ await sleep(1500);
 await waitFor(`!!document.querySelector('header nav')`, 30000, 'signed-in shell');
 
 const report = { scenario, ok: false, details: {} };
+const authed = (url, init = {}) => fetch(`${BASE}${url}`, { ...init, headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}`, ...(init.headers ?? {}) } });
+// React inputs ignore a plain `.value =`; set through the prototype setter and fire the event React listens to.
+const setField = (selector, value, event = 'input') => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set; set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); return el.value; })()`);
+const clickButton = (text, which = 'first') => evaluate(`(() => { const all = [...document.querySelectorAll('button')].filter(b => b.textContent.trim() === ${JSON.stringify(text)}); const b = ${JSON.stringify(which)} === 'last' ? all.at(-1) : all[0]; if (!b) throw new Error('no button: ' + ${JSON.stringify(text)}); b.click(); return true; })()`);
+let cleanup = null;
 try {
   if (scenario === 'overview-explore') {
     await send('Page.navigate', { url: `${BASE}/#/` });
@@ -135,9 +142,75 @@ try {
     report.details.error = await evaluate(`document.querySelector('.mosaic-explore .text-red-200')?.textContent ?? null`);
     report.details.cellTitles = await evaluate(`[...document.querySelectorAll('.mosaic-cell-title span')].map(e => e.textContent)`);
   }
+  else if (scenario === 'mosaic-dashboard') {
+    const wsList = await (await authed('/api/workspaces')).json();
+    const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
+    const catalog = await (await authed(`/api/workspaces/${wsId}/catalog`)).json();
+    const file = catalog.files?.[0]?.path;
+    if (!file) throw new Error('the first workspace has no data file to generate from');
+    report.details.file = file;
+    // 1. Create a Mosaic dashboard through the list page.
+    await send('Page.navigate', { url: `${BASE}/#/dashboards` });
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New dashboard')`, 40000, 'dashboards list');
+    await clickButton('New dashboard');
+    await waitFor(`!!document.querySelector('input[placeholder="Revenue overview"]')`, 10000, 'new dashboard modal');
+    const dashName = `E2E Mosaic ${Date.now()}`;
+    await setField('input[placeholder="Revenue overview"]', dashName);
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('Mosaic')).click(); true`);
+    await clickButton('Create');
+    await waitFor(`new RegExp('^#/dashboards/[^/]+$').test(location.hash)`, 15000, 'navigated to the new dashboard');
+    const dashId = await evaluate(`location.hash.split('/').pop()`);
+    cleanup = () => authed(`/api/dashboards/${dashId}`, { method: 'DELETE' });
+    report.details.dashboardId = dashId;
+    // 2. Generate a spec from the first data file.
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Generate from dataset')`, 20000, 'empty Mosaic dashboard');
+    await clickButton('Generate from dataset');
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'File')`, 10000, 'generator modal');
+    await clickButton('File');
+    await waitFor(`!!document.querySelector('select') && document.querySelector('select').options.length > 0`, 20000, 'file list');
+    await setField('select', file, 'change');
+    await clickButton('Generate', 'last'); // the header has a "Generate" button too; the modal's comes last
+    await waitFor(`document.querySelectorAll('.mosaic-dashboard svg').length > 0 || !!document.querySelector('.mosaic-dashboard .text-red-200')`, 90000, 'generated dashboard rendered');
+    await sleep(2500);
+    report.details.plots = await evaluate(`document.querySelectorAll('.mosaic-dashboard svg').length`);
+    report.details.editorOpen = await evaluate(`!!document.querySelector('.cm-editor')`);
+    report.details.editorLines = await evaluate(`document.querySelectorAll('.cm-line').length`);
+    report.details.tableRows = await evaluate(`document.querySelectorAll('.mosaic-dashboard tbody tr').length`);
+    report.details.error = await evaluate(`document.querySelector('.mosaic-dashboard .text-red-200')?.textContent ?? null`);
+    { const shot0 = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_editing.png'), Buffer.from(shot0.result.data, 'base64')); }
+    // 3. Save, then confirm the spec is persisted through the API.
+    await evaluate(`document.querySelector('button[title^="Save the spec"]').click(); true`);
+    await waitFor(`document.body.textContent.includes('saved')`, 15000, 'saved indicator');
+    const persisted = (await (await authed(`/api/dashboards/${dashId}`)).json()).dashboard;
+    report.details.persisted = { kind: persisted.kind, hasSpec: !!persisted.spec?.vconcat, datasets: Object.keys(persisted.spec?.data ?? {}) };
+    // 4. Brush the first histogram: the table (filtered by the same selection) must change.
+    const box = await evaluate(`(() => { const s = document.querySelector('.mosaic-dashboard svg'); const r = s.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })()`);
+    const y = box.y + box.h * 0.5;
+    const x0 = box.x + box.w * 0.25, x1 = box.x + box.w * 0.45;
+    const secondBefore = await evaluate(`document.querySelectorAll('.mosaic-dashboard svg')[1]?.innerHTML.length ?? 0`);
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x0, y, button: 'left', clickCount: 1 });
+    for (let i = 1; i <= 8; i++) await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x0 + ((x1 - x0) * i) / 8, y, button: 'left' });
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x1, y, button: 'left', clickCount: 1 });
+    await sleep(3000);
+    report.details.brush = { secondChartChanged: (await evaluate(`document.querySelectorAll('.mosaic-dashboard svg')[1]?.innerHTML.length ?? 0`)) !== secondBefore };
+    // 5. Reload: the saved spec renders on its own, editor closed.
+    await send('Page.navigate', { url: `${BASE}/#/dashboards` });
+    await sleep(500);
+    await send('Page.navigate', { url: `${BASE}/#/dashboards/${dashId}` });
+    await waitFor(`document.querySelectorAll('.mosaic-dashboard svg').length > 0`, 90000, 'reloaded dashboard rendered');
+    await sleep(1500);
+    report.details.reloaded = { plots: await evaluate(`document.querySelectorAll('.mosaic-dashboard svg').length`), editorOpen: await evaluate(`!!document.querySelector('.cm-editor')`), badge: await evaluate(`document.body.textContent.includes('Mosaic')`) };
+    report.details.charts = report.details.reloaded.plots;
+  }
   const d = report.details;
   const problems = [];
   if (!(d.charts > 0)) problems.push('no charts rendered');
+  if (scenario === 'mosaic-dashboard') {
+    if (!d.editorOpen) problems.push('the editor did not open after generating');
+    if (!d.persisted?.hasSpec) problems.push('the spec was not persisted');
+    if (d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+    if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
+  }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
   if (d.error) problems.push(`view error: ${d.error}`);
   report.ok = problems.length === 0;
@@ -150,6 +223,7 @@ try {
   report.consoleErrors = consoleMsgs.filter((m) => m.startsWith('[error]') || m.startsWith('[warning]')).slice(0, 15);
   report.exceptions = errors.slice(0, 10);
   if (report.exceptions.length) report.ok = false;
+  if (cleanup) await cleanup().catch(() => undefined);
   console.log(JSON.stringify(report, null, 2));
   console.log(report.ok ? `\n✓ ${scenario} passed — screenshot: ${out}` : `\n✗ ${scenario} failed`);
   ws.close();

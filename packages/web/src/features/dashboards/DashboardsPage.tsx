@@ -1,15 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import GridLayout, { WidthProvider, type Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { LayoutDashboard, Plus, Pencil, Trash2, RefreshCw, GripVertical, Settings2, Check, ArrowLeft, Bot, Lock, Unlock } from 'lucide-react';
-import { api, type Dashboard, type DashboardWidget, type LayoutItem, type SavedQuery } from '../../api/client';
+import { LayoutDashboard, Plus, Pencil, Trash2, RefreshCw, GripVertical, Settings2, Check, ArrowLeft, Bot, Lock, Unlock, Sparkles } from 'lucide-react';
+import { api, type Dashboard, type DashboardKind, type DashboardWidget, type LayoutItem, type SavedQuery } from '../../api/client';
+import { describeSpec } from '../../lib/mosaic/summary';
+
+// The Mosaic page brings the spec parser, YAML and the editor modes with it — loaded only when such a dashboard opens.
+const MosaicDashboard = lazy(() => import('./MosaicDashboard').then((m) => ({ default: m.MosaicDashboard })));
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
 import { WidgetBody } from './widgets';
 import { WidgetEditor, type WidgetDraft } from './WidgetEditor';
 import { Eyebrow, PageTitle, Panel } from '../../components/layout';
-import { Button, Empty, Input, Label, Modal, cn } from '../../components/ui';
+import { Badge, Button, Empty, Input, Label, Modal, cn } from '../../components/ui';
 
 const Grid = WidthProvider(GridLayout);
 
@@ -26,7 +30,20 @@ function useHashId(): string | null {
 
 export function DashboardsPage() {
   const id = useHashId();
-  return id ? <DashboardCanvas id={id} /> : <DashboardList />;
+  return id ? <DashboardRoute id={id} /> : <DashboardList />;
+}
+
+/** Grid and Mosaic dashboards share the URL space; the kind decides which page renders. */
+function DashboardRoute({ id }: { id: string }) {
+  const [kind, setKind] = useState<DashboardKind | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setKind(null);
+    api.get<{ dashboard: Dashboard }>(`/api/dashboards/${id}`).then((r) => setKind(r.dashboard.kind)).catch((e) => setError((e as Error).message));
+  }, [id]);
+  if (error) return <div className="m-6 rounded-lg border border-red-900 bg-red-950/40 p-4 text-xs text-red-200">{error}</div>;
+  if (!kind) return <div className="p-6 text-xs text-zinc-500">Loading…</div>;
+  return kind === 'mosaic' ? <Suspense fallback={<div className="p-6 text-xs text-zinc-500">Loading…</div>}><MosaicDashboard id={id} /></Suspense> : <DashboardCanvas id={id} />;
 }
 
 function DashboardList() {
@@ -36,6 +53,7 @@ function DashboardList() {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
+  const [kind, setKind] = useState<DashboardKind>('grid');
   const wsId = ws.activeId;
   const load = useCallback(async () => {
     if (!wsId) return;
@@ -48,7 +66,7 @@ function DashboardList() {
         <div>
           <Eyebrow>Business intelligence</Eyebrow>
           <PageTitle>Dashboards</PageTitle>
-          <p className="mt-1 text-xs text-zinc-500">KPI cards, charts, tables and notes on a drag-and-drop grid, bound to saved queries or SQL, with auto-refresh.</p>
+          <p className="mt-1 text-xs text-zinc-500">Grid dashboards: KPI cards, charts, tables and notes bound to saved queries or SQL. Mosaic dashboards: cross-filtered, interactive charts from a declarative spec.</p>
         </div>
         {access.canEdit && (
           <Button variant="primary" onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New dashboard</Button>
@@ -65,9 +83,9 @@ function DashboardList() {
                   <div className="truncate text-sm font-semibold text-zinc-50">{d.name}</div>
                   <div className="mt-0.5 line-clamp-2 text-xs text-zinc-500">{d.description || 'No description'}</div>
                 </div>
-                <LayoutDashboard className="h-4 w-4 shrink-0 text-accent-400" />
+                {d.kind === 'mosaic' ? <Badge tone="violet" className="shrink-0 gap-1"><Sparkles className="h-3 w-3" /> Mosaic</Badge> : <LayoutDashboard className="h-4 w-4 shrink-0 text-accent-400" />}
               </div>
-              <div className="mt-3 font-mono text-[10px] text-zinc-500">{d.layout.length} widget{d.layout.length === 1 ? '' : 's'} · updated {new Date(d.updated_at).toLocaleString()}</div>
+              <div className="mt-3 font-mono text-[10px] text-zinc-500">{d.kind === 'mosaic' ? mosaicSummary(d) : `${d.layout.length} widget${d.layout.length === 1 ? '' : 's'}`} · updated {new Date(d.updated_at).toLocaleString()}</div>
             </a>
           ))}
         </div>
@@ -76,14 +94,34 @@ function DashboardList() {
         <div className="space-y-3">
           <div><Label>Name</Label><Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Revenue overview" /></div>
           <div><Label>Description</Label><Input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Weekly exec view" /></div>
+          <div>
+            <Label>Type</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                ['grid', 'Grid', 'Widgets on a drag-and-drop grid: KPIs, charts, tables, notes — from saved queries or SQL.', <LayoutDashboard key="g" className="h-4 w-4" />],
+                ['mosaic', 'Mosaic', 'Interactive, cross-filtered charts from a declarative spec — brush, toggle and zoom over millions of rows.', <Sparkles key="m" className="h-4 w-4" />],
+              ] as const).map(([k, label, hint, icon]) => (
+                <button key={k} type="button" onClick={() => setKind(k)} className={cn('rounded-lg border p-3 text-left', kind === k ? 'border-accent-500 bg-accent-500/10' : 'border-zinc-800 hover:border-zinc-600')}>
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">{icon} {label}</div>
+                  <div className="mt-1 text-[11px] leading-snug text-zinc-500">{hint}</div>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
-            <Button variant="primary" disabled={!name.trim()} onClick={async () => { const r = await api.post<{ dashboard: Dashboard }>(`/api/workspaces/${wsId}/dashboards`, { name, description: desc || null }); setCreating(false); setName(''); setDesc(''); location.hash = `#/dashboards/${r.dashboard.id}`; }}>Create</Button>
+            <Button variant="primary" disabled={!name.trim()} onClick={async () => { const r = await api.post<{ dashboard: Dashboard }>(`/api/workspaces/${wsId}/dashboards`, { name, description: desc || null, kind }); setCreating(false); setName(''); setDesc(''); setKind('grid'); location.hash = `#/dashboards/${r.dashboard.id}`; }}>Create</Button>
           </div>
         </div>
       </Modal>
     </div>
   );
+}
+
+function mosaicSummary(d: Dashboard): string {
+  const s = describeSpec(d.spec);
+  if (!s.plots && !s.inputs) return 'empty spec';
+  return `${s.plots} plot${s.plots === 1 ? '' : 's'}${s.inputs ? ` · ${s.inputs} input${s.inputs === 1 ? '' : 's'}` : ''}`;
 }
 
 function DashboardCanvas({ id }: { id: string }) {

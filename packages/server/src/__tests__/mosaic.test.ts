@@ -119,15 +119,25 @@ describe('Mosaic connector — exec policy', () => {
     expect(Number(tableFromIPC(q.payload as Uint8Array).getChild('total')!.get(0))).toBe(20000);
   });
 
-  it('admits DuckView source views over files and queries (paths jailed), and drop statements', async () => {
-    // No schema yet on a fresh engine: the server creates it on the way.
+  it('admits DuckView source views (main schema, prefixed) over files and queries — paths jailed — and drop statements', async () => {
     expect((await post(tokens.admin, wsId, { type: 'exec', sql: 'DROP SCHEMA IF EXISTS "duckview_mosaic" CASCADE' })).status).toBe(200);
-    const v = await post(tokens.admin, wsId, { type: 'exec', sql: `CREATE OR REPLACE VIEW "duckview_mosaic"."src_ff01" AS SELECT * FROM 'nums.parquet'` });
+    // Viewers build source views too: it is how Explore and Mosaic dashboards turn a file into a table name.
+    const v = await post(tokens.viewer, wsId, { type: 'exec', sql: `CREATE OR REPLACE VIEW "duckview_mosaic_src_ff01" AS SELECT * FROM 'nums.parquet'` });
     expect(v.status).toBe(200);
-    const q = await post(tokens.admin, wsId, { type: 'arrow', sql: 'SELECT max(v) AS m FROM "duckview_mosaic"."src_ff01"' });
+    const q = await post(tokens.viewer, wsId, { type: 'arrow', sql: 'SELECT max(v) AS m FROM "duckview_mosaic_src_ff01"' });
     expect(Number(tableFromIPC(q.payload as Uint8Array).getChild('m')!.get(0))).toBe(1998);
-    const escape = await post(tokens.admin, wsId, { type: 'exec', sql: `CREATE OR REPLACE VIEW "duckview_mosaic"."src_ff02" AS SELECT * FROM '../../etc/passwd'` });
+    const q2 = await post(tokens.admin, wsId, { type: 'exec', sql: `CREATE VIEW "duckview_mosaic_src_ff03" AS SELECT hour, count(*) AS n FROM trips GROUP BY 1` });
+    expect(q2.status).toBe(200);
+    // Inline spec data is a parenthesised UNION of literal rows.
+    const inline = await post(tokens.admin, wsId, { type: 'exec', sql: `CREATE OR REPLACE VIEW "duckview_mosaic_src_ff04" AS (SELECT 1 AS "label", 'a' AS "v") UNION ALL (SELECT 2 AS "label", 'b' AS "v")` });
+    expect(inline.status).toBe(200);
+    const escape = await post(tokens.admin, wsId, { type: 'exec', sql: `CREATE OR REPLACE VIEW "duckview_mosaic_src_ff02" AS SELECT * FROM '../../etc/passwd'` });
     expect(escape.status).toBe(403);
+    // Source views never show up in the catalogs (the prefix hides them), the underlying tables do.
+    const cat = await ctx.queries.catalog(admin, wsId);
+    expect(cat.objects.some((o) => o.name.startsWith('duckview_mosaic_src_'))).toBe(false);
+    expect(cat.objects.some((o) => o.name === 'trips')).toBe(true);
+    expect((await post(tokens.admin, wsId, { type: 'exec', sql: 'DROP VIEW IF EXISTS "duckview_mosaic_src_ff03"' })).status).toBe(200);
     expect((await post(tokens.admin, wsId, { type: 'exec', sql: 'DROP TABLE IF EXISTS "duckview_mosaic"."preagg_1a2b3c"' })).status).toBe(200);
     expect((await post(tokens.admin, wsId, { type: 'exec', sql: 'DROP SCHEMA IF EXISTS "duckview_mosaic" CASCADE' })).status).toBe(200);
   });
@@ -140,6 +150,11 @@ describe('Mosaic connector — exec policy', () => {
       'CREATE TABLE IF NOT EXISTS "duckview_mosaic"."notpreagg" AS SELECT 1',
       'CREATE TABLE IF NOT EXISTS "duckview_mosaic"."preagg_1" AS DELETE FROM trips',
       'CREATE TABLE IF NOT EXISTS "duckview_mosaic"."preagg_1" AS SELECT 1; DROP TABLE trips',
+      'CREATE VIEW "duckview_mosaic"."src_ff01" AS SELECT 1',
+      'CREATE VIEW "src_ff01" AS SELECT 1',
+      'CREATE VIEW "duckview_mosaic_src_zz" AS SELECT 1',
+      'CREATE OR REPLACE VIEW "duckview_mosaic_src_ff01" AS DELETE FROM trips',
+      'DROP VIEW IF EXISTS "trips"',
       "SET threads = 1",
       'INSERT INTO trips VALUES (1, 1, \'1\', 1)',
       'DROP SCHEMA IF EXISTS "main" CASCADE',
@@ -166,12 +181,17 @@ describe('Mosaic connector — exec policy', () => {
     expect(raw.rows[0]![0]).toBe(1);
   });
 
-  it('drops the schema whenever the data epoch moves', async () => {
+  it('drops the schema and the source views whenever the data epoch moves', async () => {
     const has = async () => Number((await ctx.queries.run(admin, wsId, "SELECT count(*) AS n FROM duckdb_schemas() WHERE schema_name = 'duckview_mosaic'", { cache: false })).rows[0]![0]);
+    const views = async () => Number((await ctx.queries.run(admin, wsId, "SELECT count(*) AS n FROM duckdb_views() WHERE view_name LIKE 'duckview_mosaic_src_%'", { cache: false })).rows[0]![0]);
     expect(await has()).toBe(1);
+    expect((await post(tokens.admin, wsId, { type: 'exec', sql: `CREATE OR REPLACE VIEW "duckview_mosaic_src_ee01" AS SELECT * FROM trips` })).status).toBe(200);
+    expect(await views()).toBeGreaterThan(0);
     await ctx.queries.run(admin, wsId, 'INSERT INTO trips VALUES (99999, 1, \'1\', 1.0)');
-    for (let i = 0; i < 20 && (await has()) !== 0; i++) await new Promise((r) => setTimeout(r, 50));
+    // The drop runs off the epoch listener: schema first, then each source view.
+    for (let i = 0; i < 40 && ((await has()) !== 0 || (await views()) !== 0); i++) await new Promise((r) => setTimeout(r, 50));
     expect(await has()).toBe(0);
+    expect(await views()).toBe(0);
     // …and Mosaic simply recreates it on the next interaction.
     expect((await post(tokens.admin, wsId, { type: 'exec', sql: preagg })).status).toBe(200);
     expect(await has()).toBe(1);
@@ -187,5 +207,56 @@ describe('Mosaic connector — exec policy', () => {
     } finally {
       ctx.cfg.mosaic.enabled = true;
     }
+  });
+});
+
+describe('Mosaic dashboards — kind and spec', () => {
+  const dash = async (token: string, method: string, url: string, body?: unknown) => {
+    const res = await fetch(`${base}${url}`, { method, headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: res.status, payload: (await res.json()) as { dashboard?: { id: string; kind: string; spec: unknown; name: string }; dashboards?: { id: string; kind: string }[]; error?: string; message?: string } };
+  };
+  const spec = { meta: { title: 'Trips by hour' }, data: { trips: { query: 'SELECT * FROM trips' } }, plot: [{ mark: 'rectY', data: { from: 'trips' }, x: { bin: 'hour' }, y: { count: null } }] };
+
+  it('creates grid dashboards by default and Mosaic dashboards with a spec; the spec is validated and bounded', async () => {
+    const grid = await dash(tokens.admin, 'POST', `/api/workspaces/${wsId}/dashboards`, { name: 'Plain' });
+    expect(grid.status).toBe(200);
+    expect(grid.payload.dashboard).toMatchObject({ kind: 'grid', spec: null });
+    const mosaic = await dash(tokens.admin, 'POST', `/api/workspaces/${wsId}/dashboards`, { name: 'Hours', kind: 'mosaic', spec });
+    expect(mosaic.status).toBe(200);
+    expect(mosaic.payload.dashboard).toMatchObject({ kind: 'mosaic', spec });
+    const empty = await dash(tokens.admin, 'POST', `/api/workspaces/${wsId}/dashboards`, { name: 'Blank', kind: 'mosaic' });
+    expect(empty.payload.dashboard!.spec).toEqual({});
+    expect((await dash(tokens.admin, 'POST', `/api/workspaces/${wsId}/dashboards`, { name: 'Bad', kind: 'other' })).status).toBe(400);
+    expect((await dash(tokens.admin, 'POST', `/api/workspaces/${wsId}/dashboards`, { name: 'Bad', kind: 'mosaic', spec: [1, 2] })).status).toBe(400);
+    const huge = await dash(tokens.admin, 'POST', `/api/workspaces/${wsId}/dashboards`, { name: 'Huge', kind: 'mosaic', spec: { blob: 'x'.repeat(600_000) } });
+    expect(huge.status).toBe(400);
+    expect(huge.payload.message).toMatch(/too large/);
+    // The listing carries the kind so the UI can badge and route.
+    const list = await dash(tokens.admin, 'GET', `/api/workspaces/${wsId}/dashboards`);
+    expect(list.payload.dashboards!.find((d) => d.id === mosaic.payload.dashboard!.id)?.kind).toBe('mosaic');
+  });
+
+  it('updates the spec for editors only, rejects a spec on grid dashboards, and viewers can read it', async () => {
+    const created = (await dash(tokens.admin, 'POST', `/api/workspaces/${wsId}/dashboards`, { name: 'Editable', kind: 'mosaic', spec })).payload.dashboard!;
+    const next = { ...spec, meta: { title: 'v2' } };
+    const up = await dash(tokens.admin, 'PATCH', `/api/dashboards/${created.id}`, { spec: next });
+    expect(up.status).toBe(200);
+    expect(up.payload.dashboard!.spec).toEqual(next);
+    const grid = (await dash(tokens.admin, 'POST', `/api/workspaces/${wsId}/dashboards`, { name: 'Grid' })).payload.dashboard!;
+    expect((await dash(tokens.admin, 'PATCH', `/api/dashboards/${grid.id}`, { spec })).status).toBe(400);
+    const seen = await dash(tokens.viewer, 'GET', `/api/dashboards/${created.id}`);
+    expect(seen.status).toBe(200);
+    expect(seen.payload.dashboard!.spec).toEqual(next);
+    expect((await dash(tokens.viewer, 'PATCH', `/api/dashboards/${created.id}`, { spec })).status).toBe(403);
+    expect((await dash(tokens.outsider, 'GET', `/api/dashboards/${created.id}`)).status).toBe(404);
+    // Widgets are a grid concept.
+    expect((await dash(tokens.admin, 'POST', `/api/dashboards/${created.id}/widgets`, { title: 'x', widget_type: 'TABLE', custom_sql: 'SELECT 1' })).status).toBe(400);
+    // Agents see the kind and the spec.
+    const env: ToolEnv = { ctx, principal: admin, via: 'rest', defaultWorkspaceId: wsId, agent: null };
+    const listed = await runTool(env, buildTools(ctx.cfg).find((t) => t.name === 'list_dashboards')!, { workspace_id: wsId });
+    const mine = (listed.structuredContent as { dashboards: { id: string; kind: string; spec: unknown }[] }).dashboards.find((d) => d.id === created.id);
+    expect(mine?.kind).toBe('mosaic');
+    expect(mine?.spec).toEqual(next);
+    expect(listed.content[0]!.text).toContain('Mosaic spec');
   });
 });

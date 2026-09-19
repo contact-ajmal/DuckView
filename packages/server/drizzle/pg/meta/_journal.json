@@ -57,6 +57,13 @@
       "when": 1789750355118,
       "tag": "0007_data_version",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789809032252,
+      "tag": "0008_dashboard_kind",
+      "breakpoints": true
     }
   ]
 }
