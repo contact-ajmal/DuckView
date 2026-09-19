@@ -22,6 +22,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ vars.DOCKERHUB_IMAGE || format('{0}/duckview', secrets.DOCKERHUB_USERNAME) }}
-          short-description: DuckDB analytics workspace — lakehouse connectors, dashboards, Copilot, MCP server for AI agents · https://contact-ajmal.github.io/DuckView/
+          short-description: DuckDB workspace: lakehouse, dashboards, MCP for AI agents. Docs at contact-ajmal.github.io/DuckView
           readme-filepath: ./docs/DOCKERHUB.md
           enable-url-completion: true
