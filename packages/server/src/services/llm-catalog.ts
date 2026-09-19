@@ -54,10 +54,10 @@ export const PROVIDER_CATALOG: ProviderPreset[] = [
   }),
   openaiLike({
     id: 'openrouter', label: 'OpenRouter', vendor: 'OpenRouter', blurb: 'One key for hundreds of models from every vendor — pick any model id from openrouter.ai/models.', baseUrl: 'https://openrouter.ai/api/v1',
-    keyUrl: 'https://openrouter.ai/settings/keys', keyPrefix: 'sk-or-', defaultModel: 'anthropic/claude-sonnet-4.5',
-    models: ['anthropic/claude-sonnet-4.5', 'anthropic/claude-opus-4.1', 'openai/gpt-4.1', 'openai/gpt-4o', 'google/gemini-2.5-pro', 'google/gemini-2.5-flash', 'deepseek/deepseek-chat-v3.1', 'moonshotai/kimi-k2', 'x-ai/grok-4', 'meta-llama/llama-4-maverick', 'qwen/qwen3-coder', 'mistralai/mistral-large'],
+    keyUrl: 'https://openrouter.ai/settings/keys', keyPrefix: 'sk-or-', defaultModel: 'deepseek/deepseek-v4-flash-0731:free',
+    models: ['deepseek/deepseek-v4-flash-0731:free', 'nvidia/nemotron-3-super-120b-a12b:free', 'qwen/qwen3.8-27b:free', 'google/gemma-4-31b-it:free', 'openrouter/free', 'anthropic/claude-sonnet-4.5', 'anthropic/claude-opus-4.1', 'openai/gpt-4.1', 'google/gemini-2.5-pro', 'deepseek/deepseek-chat-v3.1', 'moonshotai/kimi-k2', 'x-ai/grok-4', 'qwen/qwen3-coder'],
     headers: { 'HTTP-Referer': 'https://contact-ajmal.github.io/DuckView/', 'X-Title': 'DuckView' },
-    note: 'Fetch models lists everything your key can reach; the model id is vendor/name.',
+    note: 'Models ending in :free cost nothing (rate-limited: ~20 requests/min, 50/day — 1 000/day once $10 of credits are on the account; some require allowing prompt logging under openrouter.ai/settings/privacy). Fetch models lists everything your key can reach, free ones first; the id is vendor/name.',
   }),
   openaiLike({
     id: 'kimi', label: 'Kimi', vendor: 'Moonshot AI', blurb: 'Kimi K2 and the Moonshot models.', baseUrl: 'https://api.moonshot.ai/v1',

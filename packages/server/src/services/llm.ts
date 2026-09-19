@@ -228,7 +228,9 @@ class OpenAICompatibleProvider implements LlmProvider {
       out.push(m.id);
       if (out.length >= 500) break;
     }
-    return out.sort();
+    out.sort();
+    // OpenRouter: the free tier is the natural starting point — surface it first.
+    return this.id === 'openrouter' ? [...out.filter((m) => m.endsWith(':free')), ...out.filter((m) => !m.endsWith(':free'))] : out;
   }
 }
 
