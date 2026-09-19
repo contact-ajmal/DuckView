@@ -14,6 +14,19 @@ export interface MosaicQueryRequest {
  *   exec  → resolves when the pre-aggregation plumbing has been applied
  * Authentication, roles, the sandbox and the server result cache all apply on the other side.
  */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const MAX_RETRIES = 3;
+
+/** A throttled (429) or momentarily unavailable (503) request is retried after the server's Retry-After, capped. */
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    if ((res.status !== 429 && res.status !== 503) || attempt >= MAX_RETRIES) return res;
+    const after = Number(res.headers.get('retry-after'));
+    await sleep(Math.min(Number.isFinite(after) && after > 0 ? after * 1000 : 1000 * (attempt + 1), 8000));
+  }
+}
+
 export function duckviewConnector(workspaceId: string) {
   const url = `/api/workspaces/${workspaceId}/mosaic`;
   return {
@@ -21,7 +34,7 @@ export function duckviewConnector(workspaceId: string) {
       const headers: Record<string, string> = { 'content-type': 'application/json', accept: req.type === 'arrow' ? 'application/vnd.apache.arrow.stream' : 'application/json' };
       const token = getToken();
       if (token) headers.authorization = `Bearer ${token}`;
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ type: req.type, sql: req.sql }) });
+      const res = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify({ type: req.type, sql: req.sql }) });
       if (!res.ok) {
         let json: Record<string, unknown> = {};
         try {

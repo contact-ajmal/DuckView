@@ -54,8 +54,8 @@ vconcat:
       - { input: menu, label: Payment, as: $brush, from: trips, column: payment }
       - { input: menu, label: Rate, as: $brush, from: trips, column: rate }
       - { input: menu, label: Passengers, as: $brush, from: trips, column: passengers }
-      - { input: slider, label: Max fare $, as: $brush, column: fare, select: interval, min: 5, max: 150, step: 5, value: 150, width: 200 }
-      - { input: slider, label: Max distance mi, as: $brush, column: distance, select: interval, min: 1, max: 40, step: 1, value: 40, width: 200 }
+      - { input: slider, label: Max fare $, as: $brush, column: fare, select: interval, min: 0, max: 150, step: 5, value: 150, width: 200 }
+      - { input: slider, label: Max distance mi, as: $brush, column: distance, select: interval, min: 0, max: 40, step: 1, value: 40, width: 200 }
 
   # ── Headline numbers (react to every filter) ───────────────────────────────
   - hconcat:

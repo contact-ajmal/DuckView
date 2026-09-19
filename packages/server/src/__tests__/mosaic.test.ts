@@ -395,3 +395,25 @@ describe('Mosaic specs — prepare, validate, and the agent tool', () => {
     expect((await runTool(viewerEnv, tool, { spec_text: yaml, validate_only: true })).isError).toBeFalsy();
   });
 });
+
+describe('Mosaic connector — rate limit', () => {
+  it('has its own per-session budget, separate from the global per-IP limit', async () => {
+    // A second app on the same context with a tiny connector budget and a small global one.
+    const cfg = { ...ctx.cfg, mosaic: { ...ctx.cfg.mosaic, rate_limit_per_minute: 3 }, server: { ...ctx.cfg.server, rate_limit_per_minute: 8 } };
+    const { app: small } = await buildApp({ ...ctx, cfg });
+    await small.listen({ port: 0, host: '127.0.0.1' });
+    const b = `http://127.0.0.1:${(small.server.address() as { port: number }).port}`;
+    const hit = async (token: string) => (await fetch(`${b}/api/workspaces/${wsId}/mosaic`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ type: 'json', sql: 'SELECT 1' }) })).status;
+    try {
+      expect([await hit(tokens.admin), await hit(tokens.admin), await hit(tokens.admin)]).toEqual([200, 200, 200]);
+      const throttled = await fetch(`${b}/api/workspaces/${wsId}/mosaic`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tokens.admin}` }, body: JSON.stringify({ type: 'json', sql: 'SELECT 1' }) });
+      expect(throttled.status).toBe(429);
+      expect(Number(throttled.headers.get('retry-after'))).toBeGreaterThan(0);
+      // Another session from the same address still has its own budget, and the rest of the API is untouched.
+      expect(await hit(tokens.viewer)).toBe(200);
+      expect((await fetch(`${b}/api/workspaces`, { headers: { authorization: `Bearer ${tokens.admin}` } })).status).toBe(200);
+    } finally {
+      await small.close();
+    }
+  });
+});

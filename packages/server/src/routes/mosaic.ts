@@ -6,7 +6,8 @@
  * POST /api/workspaces/:id/mosaic/prepare — validate a spec and turn its data definitions into source-view statements.
  * GET /api/mosaic/info — schema name and limits for the client.
  */
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { RateLimitOptions } from '@fastify/rate-limit';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { NotModified } from '../services/cache.js';
@@ -18,6 +19,12 @@ const Body = z.object({ type: z.enum(['arrow', 'json', 'exec']), sql: z.string()
 
 export async function mosaicRoutes(app: FastifyInstance, ctx: AppContext) {
   app.addHook('preHandler', app.authenticate);
+  // The connector has its own budget, counted per session: a single interaction fans out into dozens of small
+  // requests, and users behind one proxy address must not starve each other. Rate limiting runs before
+  // authentication, so the key is the bearer token itself (kept in memory only), falling back to the address.
+  const perMinute = ctx.cfg.mosaic.rate_limit_per_minute;
+  const keyGenerator = (req: FastifyRequest) => (req.headers.authorization ? `mosaic:${req.headers.authorization.slice(-40)}` : `mosaic:${req.ip}`);
+  const connectorLimit: { rateLimit: RateLimitOptions | false } = perMinute > 0 ? { rateLimit: { max: perMinute, timeWindow: '1 minute', keyGenerator } } : { rateLimit: false };
 
   app.get('/api/mosaic/info', async () => ({ enabled: ctx.mosaic.enabled, schema: ctx.mosaic.schema, max_rows: ctx.cfg.mosaic.max_rows }));
 
@@ -31,7 +38,7 @@ export async function mosaicRoutes(app: FastifyInstance, ctx: AppContext) {
     return { ok: r.ok, errors: r.errors, warnings: r.warnings, spec: r.spec, statements: r.statements, sources: r.sources.map(({ name, view, kind }) => ({ name, view, kind })), tables: r.tables };
   });
 
-  app.post('/api/workspaces/:id/mosaic', async (req, reply) => {
+  app.post('/api/workspaces/:id/mosaic', { config: connectorLimit }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = Body.parse(req.body);
     const c = conditionalOpts(req);

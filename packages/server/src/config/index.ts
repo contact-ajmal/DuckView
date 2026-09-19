@@ -140,6 +140,12 @@ export const ConfigSchema = z.object({
        * `materialize: false`, are served as views. 0 disables materialisation.
        */
       materialize_max_rows: z.coerce.number().int().min(0).default(20_000_000),
+      /**
+       * Own rate limit for the connector endpoint, per session (token) rather than per IP: one brush on a dashboard
+       * with 25 charts is 25–75 small requests, which would exhaust server.rate_limit_per_minute in a few
+       * interactions. 0 disables the limit for this endpoint.
+       */
+      rate_limit_per_minute: z.coerce.number().int().min(0).default(6000),
     })
     .default({}),
   mcp: z

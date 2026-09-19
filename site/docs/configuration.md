@@ -89,6 +89,7 @@ See [Result cache](cache.html) for how keys are built.
 | `schema` | Schema for Mosaic's pre-aggregated tables (default `duckview_mosaic`); source views are `<schema>_src_<hash>` in the main schema. Both are dropped when the data epoch moves and hidden from catalogs. |
 | `max_rows` | Row ceiling for chart queries, independent of the grid cap (default 1 000 000). |
 | `materialize_max_rows` | Dashboard datasets up to this many rows are materialised once into an attached in-memory database so interactions read memory instead of re-parsing files (default 20 000 000; `0` = always views). |
+| `rate_limit_per_minute` | The connector's own budget, per session rather than per IP (default 6 000; `0` = unlimited). A brush over 25 charts is 25–75 requests, so the global `server.rate_limit_per_minute` no longer throttles dashboards. |
 
 See [Interactive exploration & Mosaic dashboards](mosaic.html).
 
