@@ -166,21 +166,35 @@ export class CopilotService {
     if (fromSettings) return { ...fromSettings, source: 'settings' };
     const c = this.cfg.copilot;
     if (c.provider === 'none') return null;
-    return { provider: c.provider, model: c.model ?? null, base_url: c.base_url ?? null, api_key: c.api_key ?? null, key_hint: c.api_key ? c.api_key.slice(-4) : null, aws_region: c.aws_region ?? null, bedrock_agent_id: c.bedrock_agent_id ?? null, bedrock_agent_alias_id: c.bedrock_agent_alias_id ?? null, agentcore_runtime_arn: c.agentcore_runtime_arn ?? null, updated_by: null, updated_at: new Date(0), source: 'config' };
+    return { provider: c.provider, model: c.model ?? null, base_url: c.base_url ?? null, api_key: c.api_key ?? null, key_hint: c.api_key ? c.api_key.slice(-4) : null, key_stored: !!c.api_key, aws_region: c.aws_region ?? null, bedrock_agent_id: c.bedrock_agent_id ?? null, bedrock_agent_alias_id: c.bedrock_agent_alias_id ?? null, agentcore_runtime_arn: c.agentcore_runtime_arn ?? null, updated_by: null, updated_at: new Date(0), source: 'config' };
+  }
+
+  /** Personal keys are allowed when the config says so and no administrator has switched them off from Settings. */
+  async allowByok(): Promise<boolean> {
+    const override = await this.admin?.allowByokOverride();
+    return override ?? this.cfg.copilot.allow_byok;
   }
 
   async config(p?: Principal) {
     const c = this.cfg.copilot;
     const sp = await this.serverProvider();
     const preset = sp ? presetFor(sp.provider) : null;
+    const canManage = !!p && p.role === 'ADMIN' && p.scopes.includes('admin');
+    const allowByok = await this.allowByok();
     return {
       enabled: c.enabled,
-      allow_byok: c.allow_byok,
+      allow_byok: allowByok,
+      allow_byok_config: c.allow_byok,
       server_provider: sp?.provider ?? null,
       server_model: sp ? sp.model ?? DEFAULT_MODELS[sp.provider] : null,
       server_source: sp?.source ?? null,
       has_server_key: !!sp && (!!sp.api_key || !preset!.keyRequired),
-      server_key_hint: sp?.key_hint ?? null,
+      /** 'ok' | 'none' | 'undecryptable' (the platform encryption key changed since the key was stored). */
+      server_key_status: !sp || !preset!.keyRequired ? 'ok' : sp.api_key ? 'ok' : sp.source === 'settings' && sp.key_hint === null && sp.key_stored ? 'undecryptable' : 'none',
+      /** Last four characters of the key — administrators only. */
+      server_key_hint: canManage ? sp?.key_hint ?? null : null,
+      /** True when the server runs without ENCRYPTION_KEY: stored keys will not survive a restart. */
+      ephemeral_encryption_key: canManage ? this.cfg.ephemeralSecrets : false,
       server_base_url: sp?.base_url ?? preset?.baseUrl ?? null,
       server_aws: sp && AWS_PROVIDERS.includes(sp.provider) ? { region: sp.aws_region, agent_id: sp.bedrock_agent_id, agent_alias_id: sp.bedrock_agent_alias_id, runtime_arn: sp.agentcore_runtime_arn } : null,
       aws_providers: AWS_PROVIDERS,
@@ -188,8 +202,8 @@ export class CopilotService {
       default_models: DEFAULT_MODELS,
       suggested_models: SUGGESTED_MODELS,
       include_summaries: c.include_summaries,
-      can_manage: !!p && p.role === 'ADMIN' && p.scopes.includes('admin'),
-      can_use: c.enabled && (!!sp || c.allow_byok) && (!p || p.scopes.includes('read')),
+      can_manage: canManage,
+      can_use: c.enabled && (!!sp || allowByok) && (!p || p.scopes.includes('read')),
     };
   }
 
@@ -198,26 +212,27 @@ export class CopilotService {
     const c = this.cfg.copilot;
     if (!c.enabled) throw new HttpError(403, 'DuckCopilot is disabled in the server configuration', 'COPILOT_DISABLED');
     const sp = await this.serverProvider();
-    const byok = c.allow_byok && !!(req.apiKey || req.baseUrl || req.region || req.agentId || req.runtimeArn || (req.provider && req.provider !== sp?.provider));
-    const provider: ProviderId | undefined = byok && req.provider ? req.provider : req.provider ?? sp?.provider;
+    const byok = (await this.allowByok()) && !!(req.apiKey || req.baseUrl || req.region || req.agentId || req.runtimeArn || (req.provider && req.provider !== sp?.provider));
+    // Without personal keys (disallowed, or none given) the request runs on the server provider exactly as the
+    // administrator configured it — a client cannot pick another vendor, key, endpoint or model on the server's key.
+    const provider: ProviderId | undefined = byok ? req.provider ?? sp?.provider : sp?.provider;
     if (!provider) throw new HttpError(409, 'No LLM provider configured. An administrator can add one under Settings → Copilot, or bring your own key.', 'COPILOT_NOT_CONFIGURED');
-    const serverManaged = !!sp && provider === sp.provider && !byok;
-    const apiKey = byok && req.apiKey ? req.apiKey : serverManaged ? sp.api_key ?? undefined : undefined;
-    const baseUrl = byok && req.baseUrl ? req.baseUrl : serverManaged ? sp.base_url ?? undefined : undefined;
-    const model = req.model || (serverManaged ? sp.model ?? undefined : undefined) || DEFAULT_MODELS[provider];
-    const region = (byok && req.region) || (serverManaged ? sp.aws_region ?? undefined : undefined) || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
-    const agentId = (byok && req.agentId) || (serverManaged ? sp.bedrock_agent_id ?? undefined : undefined);
-    const agentAliasId = (byok && req.agentAliasId) || (serverManaged ? sp.bedrock_agent_alias_id ?? undefined : undefined);
-    const runtimeArn = (byok && req.runtimeArn) || (serverManaged ? sp.agentcore_runtime_arn ?? undefined : undefined);
-    return { provider, byok, instance: this.providers(provider, { apiKey, baseUrl, model, region, agentId, agentAliasId, runtimeArn, aws: this.aws }) };
+    const apiKey = byok ? req.apiKey : sp!.api_key ?? undefined;
+    const baseUrl = byok ? req.baseUrl : sp!.base_url ?? undefined;
+    const model = (byok ? req.model : sp!.model ?? undefined) || DEFAULT_MODELS[provider];
+    const region = (byok ? req.region : sp!.aws_region ?? undefined) || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+    const agentId = byok ? req.agentId : sp!.bedrock_agent_id ?? undefined;
+    const agentAliasId = byok ? req.agentAliasId : sp!.bedrock_agent_alias_id ?? undefined;
+    const runtimeArn = byok ? req.runtimeArn : sp!.agentcore_runtime_arn ?? undefined;
+    return { provider, byok, secrets: [apiKey], instance: this.providers(provider, { apiKey, baseUrl, model, region, agentId, agentAliasId, runtimeArn, aws: this.aws }) };
   }
 
   async listModels(req: { provider: ProviderId; apiKey?: string; baseUrl?: string; region?: string; agentId?: string; agentAliasId?: string; runtimeArn?: string }): Promise<string[]> {
-    const { instance } = await this.resolveProvider({ workspaceId: '', message: '', ...req });
+    const { instance, secrets } = await this.resolveProvider({ workspaceId: '', message: '', ...req });
     try {
       return await instance.listModels();
     } catch (err) {
-      throw mapProviderError(err);
+      throw mapProviderError(err, secrets);
     }
   }
 
@@ -237,7 +252,7 @@ export class CopilotService {
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'copilot.test', resource: `provider:${input.provider}`, durationMs: performance.now() - start, ip: p.ip });
       return { ok: true, models: models.slice(0, 200), model: instance.model, latency_ms: Math.round(performance.now() - start), via: 'models' };
     } catch (err) {
-      const mapped = mapProviderError(err);
+      const mapped = mapProviderError(err, [apiKey]);
       // No /models on this endpoint (or a key that may only chat): prove it with the smallest possible completion.
       if (preset.kind === 'openai' && (mapped.statusCode === 404 || mapped.statusCode === 502)) {
         const gen = instance.stream({ system: 'Reply with the single word OK.', messages: [{ role: 'user', content: 'ping' }], model: instance.model, maxTokens: 5 });
@@ -247,7 +262,7 @@ export class CopilotService {
           this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'copilot.test', resource: `provider:${input.provider}`, durationMs: performance.now() - start, ip: p.ip });
           return { ok: true, models: [], model: instance.model, latency_ms: Math.round(performance.now() - start), via: 'completion' };
         } catch (err2) {
-          throw mapProviderError(err2);
+          throw mapProviderError(err2, [apiKey]);
         }
       }
       throw mapped;
@@ -292,7 +307,7 @@ export class CopilotService {
     if (!req.message?.trim() && action === 'chat') throw badRequest('message is required');
     if (action === 'fix' && !req.activeSql?.trim()) throw badRequest('fix requires active_sql');
     await this.workspaces.get(p, req.workspaceId);
-    const { provider, byok, instance } = await this.resolveProvider(req);
+    const { provider, byok, instance, secrets } = await this.resolveProvider(req);
     const conversationId = req.conversationId ?? newId();
     const started = performance.now();
 
@@ -343,8 +358,8 @@ export class CopilotService {
       usage = next.value;
       span.setStatus({ code: SpanStatusCode.OK });
     } catch (err) {
-      const e = mapProviderError(err);
-      span.recordException(err as Error);
+      const e = mapProviderError(err, secrets);
+      span.recordException(e);
       span.setStatus({ code: SpanStatusCode.ERROR, message: e.message });
       metrics.copilotRequests.inc({ provider, status: 'error' });
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: `copilot.${action}`, resource: `conversation:${conversationId}`, durationMs: performance.now() - started, ip: p.ip, status: 'error', error: e.message });

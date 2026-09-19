@@ -452,6 +452,8 @@ export const copilotSettings = sqliteTable('copilot_settings', {
   bedrock_agent_id: text('bedrock_agent_id'),
   bedrock_agent_alias_id: text('bedrock_agent_alias_id'),
   agentcore_runtime_arn: text('agentcore_runtime_arn'),
+  /** Deployment-wide override of copilot.allow_byok; null keeps the configured value. */
+  allow_byok: integer('allow_byok', { mode: 'boolean' }),
   updated_by: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });

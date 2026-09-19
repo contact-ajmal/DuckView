@@ -8,6 +8,8 @@
  *   duckview create-token --email --name [--scopes read,write,mcp] [--workspace] [--days]
  *   duckview config                     — print the effective (redacted) configuration
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { Command } from 'commander';
 import { loadConfig, setConfig, redactConfig } from './config/index.js';
 import { initLogger, logger } from './observability/logger.js';
@@ -18,12 +20,38 @@ const program = new Command();
 program.name('duckview').description('DuckView Enterprise — hardened DuckDB platform with an MCP server').version('1.1.0');
 program.option('-c, --config <path>', 'path to duckview.config.yaml');
 
+/**
+ * Reads `.env` from the working directory (or DUCKVIEW_ENV_FILE) into process.env — never overriding variables that
+ * are already set — so `pnpm start` outside Docker gets the same JWT_SECRET / ENCRYPTION_KEY / provider settings
+ * that docker compose reads from the same file. Plain KEY=VALUE lines, `#` comments, optional quotes.
+ */
+export function loadDotEnv(file = process.env.DUCKVIEW_ENV_FILE ?? path.resolve(process.cwd(), '.env')): string[] {
+  if (!fs.existsSync(file)) return [];
+  const loaded: string[] = [];
+  for (const raw of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!m) continue;
+    let value = m[2]!.trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    else value = value.replace(/\s+#.*$/, '');
+    if (process.env[m[1]!] === undefined) {
+      process.env[m[1]!] = value;
+      loaded.push(m[1]!);
+    }
+  }
+  return loaded;
+}
+
 function boot(opts: { stderr?: boolean } = {}) {
   const globalOpts = program.opts<{ config?: string }>();
   if (globalOpts.config) process.env.DUCKVIEW_CONFIG = globalOpts.config;
+  const fromEnvFile = loadDotEnv();
   const cfg = loadConfig();
   setConfig(cfg);
   initLogger({ level: cfg.server.log_level, stderr: opts.stderr });
+  if (fromEnvFile.length) logger().info({ variables: fromEnvFile }, 'Loaded .env');
   return cfg;
 }
 

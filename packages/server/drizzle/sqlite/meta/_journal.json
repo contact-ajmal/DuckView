@@ -71,6 +71,13 @@
       "when": 1789849362923,
       "tag": "0009_copilot_settings_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789851319166,
+      "tag": "0010_copilot_byok_policy",
+      "breakpoints": true
     }
   ]
 }

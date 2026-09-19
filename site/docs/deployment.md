@@ -69,7 +69,7 @@ DuckDB engines are process-local — in-memory workspaces live in the pod. Scale
 ```bash
 git clone {{repo}}.git && cd DuckView
 pnpm install && pnpm build
-export JWT_SECRET=$(openssl rand -hex 32) ENCRYPTION_KEY=$(openssl rand -hex 32)
+export JWT_SECRET=$(openssl rand -hex 32) ENCRYPTION_KEY=$(openssl rand -hex 32)   # or put them in .env — pnpm start reads it
 DUCKVIEW_ADMIN_EMAIL=admin@example.com DUCKVIEW_ADMIN_PASSWORD='change-me' pnpm start
 ```
 

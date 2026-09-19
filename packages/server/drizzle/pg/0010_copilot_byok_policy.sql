@@ -1,0 +1,1 @@
+ALTER TABLE "copilot_settings" ADD COLUMN "allow_byok" boolean;

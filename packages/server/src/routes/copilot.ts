@@ -32,6 +32,13 @@ export async function copilotRoutes(app: FastifyInstance, ctx: AppContext) {
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'copilot.settings.update', resource: `provider:${saved.provider}`, ip: req.ip });
     return { settings: await ctx.copilotAdmin.describe(req.principal!), source: 'settings' };
   });
+  // Personal-key policy for the deployment (null = as configured in copilot.allow_byok).
+  app.put('/api/copilot/settings/byok', async (req) => {
+    const body = z.object({ allow: z.boolean().nullable() }).parse(req.body ?? {});
+    await ctx.copilotAdmin.setAllowByok(req.principal!, body.allow);
+    ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'copilot.settings.byok', resource: `allow:${String(body.allow)}`, ip: req.ip });
+    return { allow_byok: await ctx.copilot.allowByok() };
+  });
   app.delete('/api/copilot/settings', async (req) => {
     await ctx.copilotAdmin.clearServerProvider(req.principal!);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'copilot.settings.clear', resource: 'provider', ip: req.ip });

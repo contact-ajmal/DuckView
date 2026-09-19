@@ -12,6 +12,8 @@ import { buildApp } from '../app.js';
 import { buildMcpServer } from '../mcp/server.js';
 import { defaultProviderFactory, type ProviderFactory, type LlmProvider, type LlmRequest, type LlmUsage } from '../services/llm.js';
 import { extractSqlBlocks } from '../services/copilot.js';
+import { mapProviderError, scrubSecrets } from '../services/llm.js';
+import { eq } from 'drizzle-orm';
 import type { Principal } from '../services/principal.js';
 
 let dir: string;
@@ -334,6 +336,44 @@ describe('DuckCopilot', () => {
     expect(ctx.copilotAdmin.activeStreams(admin)[0]).toMatchObject({ user_email: 'admin@test.local', provider: 'anthropic', action: 'chat' });
     for await (const _ of streamer) void _;
     expect(ctx.copilotAdmin.activeStreams(admin)).toHaveLength(0);
+  });
+  it('keys never leave the server: not in any response, scrubbed from provider errors, admin-only hint, undecryptable after key rotation, personal keys switchable off', async () => {
+    const KEY = 'sk-or-v1-supersecret-key-value-42';
+    await api('PUT', '/api/copilot/settings', { provider: 'openrouter', api_key: KEY, model: 'openrouter/free' });
+    // Every endpoint that talks about the provider: no key material anywhere.
+    for (const url of ['/api/copilot/config', '/api/copilot/settings', '/api/copilot/providers', '/api/copilot/usage']) expect(JSON.stringify((await api('GET', url)).json)).not.toContain('supersecret');
+    const cfgAdmin = (await api('GET', '/api/copilot/config')).json as { server_key_hint: string | null; server_key_status: string; ephemeral_encryption_key: boolean };
+    expect(cfgAdmin.server_key_hint).toBe('e-42');
+    expect(cfgAdmin.server_key_status).toBe('ok');
+    const ujwt = (await api('POST', '/api/auth/login', { email: 'analyst@test.local', password: 'analyst-password' }, '')).json.token as string;
+    const cfgUser = (await api('GET', '/api/copilot/config', undefined, ujwt)).json as { server_key_hint: string | null; ephemeral_encryption_key: boolean };
+    expect(cfgUser.server_key_hint).toBeNull(); // not even the last four characters for non-admins
+    expect(cfgUser.ephemeral_encryption_key).toBe(false);
+    // The audit trail records the change, not the key.
+    const audit = await api('GET', '/api/audit?limit=20');
+    expect(JSON.stringify(audit.json)).toContain('copilot.settings.update');
+    expect(JSON.stringify(audit.json)).not.toContain('supersecret');
+    // Provider error messages that echo a credential are scrubbed before they reach a client or the audit log.
+    expect(scrubSecrets(`Incorrect API key provided: ${KEY}. Also sk-proj-abcdefghijklmnop and Bearer abc.def.ghi-12345 and AIzaSyD-1234567890abcdefghijklmn`, [KEY])).toBe('Incorrect API key provided: [redacted]. Also sk-proj-[redacted] and Bearer [redacted] and AIza[redacted]');
+    expect(mapProviderError(new Error(`boom ${KEY}`), [KEY]).message).not.toContain('supersecret');
+    // A rotated platform encryption key leaves the stored key unreadable — reported as such, never as a stale value.
+    const row = (await ctx.copilotAdmin['db'].select().from(ctx.copilotAdmin['s'].copilotSettings))[0]!;
+    await ctx.copilotAdmin['db'].update(ctx.copilotAdmin['s'].copilotSettings).set({ tag: Buffer.from('0'.repeat(16)).toString('base64') }).where(eq(ctx.copilotAdmin['s'].copilotSettings.id, row.id));
+    ctx.copilotAdmin['cached'] = undefined;
+    const rotated = (await api('GET', '/api/copilot/settings')).json as { settings: { has_key: boolean; key_status: string } };
+    expect(rotated.settings).toMatchObject({ has_key: false, key_status: 'undecryptable' });
+    expect((await api('GET', '/api/copilot/config')).json).toMatchObject({ server_key_status: 'undecryptable', has_server_key: false });
+    // Pasting the key again repairs it.
+    await api('PUT', '/api/copilot/settings', { provider: 'openrouter', api_key: KEY, model: 'openrouter/free' });
+    expect((await api('GET', '/api/copilot/settings')).json).toMatchObject({ settings: { has_key: true, key_status: 'ok' } });
+    // Personal keys can be switched off for the deployment: BYOK requests then run on the server provider.
+    expect((await api('PUT', '/api/copilot/settings/byok', { allow: false })).json).toEqual({ allow_byok: false });
+    expect((await api('GET', '/api/copilot/config', undefined, ujwt)).json).toMatchObject({ allow_byok: false, allow_byok_config: true });
+    const forced = await sse({ workspace_id: wsId, message: 'hi', provider: 'openai', api_key: 'sk-mine', model: 'gpt-4o' });
+    expect(forced.events[0]!.data).toMatchObject({ provider: 'openrouter', model: 'openrouter/free' });
+    expect((await api('PUT', '/api/copilot/settings/byok', { allow: null })).json).toEqual({ allow_byok: true });
+    expect((await api('PUT', '/api/copilot/settings/byok', { allow: false }, ujwt)).status).toBe(403);
+    await api('DELETE', '/api/copilot/settings');
   });
 });
 

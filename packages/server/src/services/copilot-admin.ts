@@ -34,6 +34,8 @@ export interface ServerProvider {
   base_url: string | null;
   api_key: string | null;
   key_hint: string | null;
+  /** A key is on file (even when it cannot be decrypted any more). */
+  key_stored: boolean;
   aws_region: string | null;
   bedrock_agent_id: string | null;
   bedrock_agent_alias_id: string | null;
@@ -96,11 +98,11 @@ export class CopilotAdminService {
         api_key = null; // encryption key rotated: the settings page shows the key as missing
       }
     }
-    return { provider: r.provider as ProviderId, model: r.model, base_url: r.base_url, api_key, key_hint: api_key ? r.key_hint : null, aws_region: r.aws_region, bedrock_agent_id: r.bedrock_agent_id, bedrock_agent_alias_id: r.bedrock_agent_alias_id, agentcore_runtime_arn: r.agentcore_runtime_arn, updated_by: r.updated_by, updated_at: r.updated_at };
+    return { provider: r.provider as ProviderId, model: r.model, base_url: r.base_url, api_key, key_hint: api_key ? r.key_hint : null, key_stored: !!r.encrypted_api_key, aws_region: r.aws_region, bedrock_agent_id: r.bedrock_agent_id, bedrock_agent_alias_id: r.bedrock_agent_alias_id, agentcore_runtime_arn: r.agentcore_runtime_arn, updated_by: r.updated_by, updated_at: r.updated_at };
   }
 
   /** Public view (no key) for the settings page. */
-  async describe(p: Principal): Promise<(Omit<ServerProvider, 'api_key'> & { has_key: boolean; updated_by_email: string | null }) | null> {
+  async describe(p: Principal): Promise<(Omit<ServerProvider, 'api_key'> & { has_key: boolean; key_status: 'ok' | 'none' | 'undecryptable'; updated_by_email: string | null }) | null> {
     requireAdmin(p);
     const sp = await this.serverProvider();
     if (!sp) return null;
@@ -110,7 +112,19 @@ export class CopilotAdminService {
       const u = await this.db.select({ email: this.s.users.email }).from(this.s.users).where(eq(this.s.users.id, sp.updated_by)).limit(1);
       updated_by_email = u[0]?.email ?? null;
     }
-    return { ...rest, has_key: !!api_key, updated_by_email };
+    return { ...rest, has_key: !!api_key, key_status: api_key ? 'ok' : sp.key_stored ? 'undecryptable' : 'none', updated_by_email };
+  }
+
+  /** Administrators can switch personal (bring-your-own) keys off for the whole deployment; null = as configured. */
+  async allowByokOverride(): Promise<boolean | null> {
+    const rows = await this.db.select({ v: this.s.copilotSettings.allow_byok }).from(this.s.copilotSettings).where(eq(this.s.copilotSettings.id, ROW_ID)).limit(1);
+    return rows[0]?.v ?? null;
+  }
+  async setAllowByok(p: Principal, allow: boolean | null): Promise<void> {
+    requireAdmin(p);
+    const existing = await this.db.select({ id: this.s.copilotSettings.id }).from(this.s.copilotSettings).where(eq(this.s.copilotSettings.id, ROW_ID)).limit(1);
+    if (existing[0]) await this.db.update(this.s.copilotSettings).set({ allow_byok: allow, updated_by: p.userId, updated_at: new Date() }).where(eq(this.s.copilotSettings.id, ROW_ID));
+    else if (allow !== null) throw badRequest('Save a server provider first; the personal-key policy is stored with it');
   }
 
   /** Validates and stores the server-managed provider; a key given here replaces the one on file. */
@@ -147,6 +161,7 @@ export class CopilotAdminService {
       bedrock_agent_id: input.bedrock_agent_id?.trim() || null,
       bedrock_agent_alias_id: input.bedrock_agent_alias_id?.trim() || null,
       agentcore_runtime_arn: input.agentcore_runtime_arn?.trim() || null,
+      allow_byok: (await this.allowByokOverride()),
       updated_by: p.userId,
       updated_at: new Date(),
     };

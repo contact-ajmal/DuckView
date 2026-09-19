@@ -55,8 +55,9 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 pnpm install
 pnpm build
 
+# …or put these in a .env file next to package.json: `pnpm start` reads it (shell variables win), as does docker compose.
 export JWT_SECRET=$(openssl rand -hex 32)
-export ENCRYPTION_KEY=$(openssl rand -hex 32)
+export ENCRYPTION_KEY=$(openssl rand -hex 32)   # keep it: it protects stored credentials and the Copilot key saved from Settings
 export DUCKVIEW_DATA_DIR=./data                 # the filesystem jail
 export DUCKVIEW_ADMIN_EMAIL=admin@example.com   # bootstrap admin (first start only)
 export DUCKVIEW_ADMIN_PASSWORD=change-me-now
@@ -129,7 +130,7 @@ Key settings:
 | `security` | `filesystem_mode` | `full` (default, VS Code-like): add any local folder to the explorer, query files anywhere on the host, cloud sources on. `sandboxed` (multi-tenant): everything confined to `data_jail_directory`, external access off unless enabled. Relative paths always anchor to the data directory. |
 | `duckdb` | `extension_directory` | Where `httpfs`/`azure`/`arrow`/`iceberg`/`delta` are installed. The image ships them pre-installed at `/app/duckdb-extensions` (`scripts/install-extensions.mjs`). |
 | | `export_ttl_seconds`, `export_max_rows` | Server-side export files expire after the TTL. |
-| `copilot` | `provider`, `model`, `api_key`, `base_url`, `allow_byok` | Deployment-time default for the DuckCopilot LLM bridge (`anthropic`, `openai`, `gemini`, `deepseek`, `openrouter`, `kimi`, `groq`, `mistral`, `xai`, `ollama`, `custom`, the AWS providers, or `none`). A provider saved from **Settings → Copilot** by an administrator takes precedence; users may bring their own key when `allow_byok` is true. See [DuckCopilot](#duckcopilot). |
+| `copilot` | `provider`, `model`, `api_key`, `base_url`, `allow_byok` | Deployment-time default for the DuckCopilot LLM bridge (prefer Settings → Copilot, which keeps the key out of files) (`anthropic`, `openai`, `gemini`, `deepseek`, `openrouter`, `kimi`, `groq`, `mistral`, `xai`, `ollama`, `custom`, the AWS providers, or `none`). A provider saved from **Settings → Copilot** by an administrator takes precedence; users may bring their own key when `allow_byok` is true. See [DuckCopilot](#duckcopilot). |
 | `duckdb` | `default_memory_limit` | `80%` of host RAM or absolute (`16GB`). Per-workspace overrides in the UI. |
 | | `default_threads`, `temp_directory`, `query_timeout_seconds`, `max_result_rows` | Threads/timeout are per-workspace tunable; results are hard-capped for the grid. |
 | `mcp` | `default_page_size` / `max_page_size` | 50 / 200 rows per tool call; `max_cell_chars` truncates long strings. |
@@ -145,7 +146,7 @@ Key settings:
 2. **DuckDB hardening (engine layer).** Each engine starts with `memory_limit`, `threads`, `temp_directory`, autoinstall off; then `SET allowed_directories = [jail, spill]`, `SET enable_external_access = false`, `SET lock_configuration = true`. A literal that dodges the Node heuristic (e.g. built with `concat()`) still hits DuckDB's own `Permission Error`.
 3. **Statement classification.** A quote/comment/CTE-aware lexer classifies each statement as `read` / `write` / `destructive` / `admin`. `READ_ONLY` users and tokens without `write` cannot run mutating SQL; `admin` statements (`SET`, `PRAGMA`, `ATTACH`, `INSTALL`, `LOAD`, `CALL`) require the `admin` scope for agents.
 4. **Human-in-the-loop for agents.** Any mutating statement from an MCP/API-token actor is blocked with an `approval_required` challenge (the verbs, per-statement previews, and how to proceed) until it is re-issued with `dry_run: false`. `save_dataset` is gated the same way.
-5. **Secrets.** Stored S3/GCS/Azure/HTTP/Postgres/MotherDuck credentials are AES-256-GCM encrypted (unique IV, auth tag, row-id as AAD) and applied via `CREATE SECRET` / `motherduck_token` only for the owning user's engine. Passwords use scrypt; API tokens are `dv_…` random strings stored as SHA-256 hashes and shown once.
+5. **Secrets.** Stored S3/GCS/Azure/HTTP/Postgres/MotherDuck credentials are AES-256-GCM encrypted (unique IV, auth tag, row-id as AAD) and applied via `CREATE SECRET` / `motherduck_token` only for the owning user's engine. Passwords use scrypt; API tokens are `dv_…` random strings stored as SHA-256 hashes and shown once. **LLM API keys** saved from Settings → Copilot are write-only: encrypted the same way (the platform `ENCRYPTION_KEY`; only the last four characters are kept in clear, shown to administrators), never returned by any endpoint or page, never in logs (pino redacts `authorization`, `api_key`, `password`, `token` fields on every log line) or the audit trail (which records `copilot.settings.update` and the provider, not the value), scrubbed from provider error messages (`scrubSecrets`: known key formats, bearer values and the key in use), and only ever sent to the vendor's endpoint. A rotated `ENCRYPTION_KEY` leaves the stored key *undecryptable* — the console says so and asks for it again rather than using a stale value; without an `ENCRYPTION_KEY` at all the console warns that the key will not survive a restart. Administrators can switch personal (bring-your-own) keys off for the deployment, after which every request runs on the server provider exactly as configured — no client-chosen vendor, key, endpoint or model. Personal keys, when allowed, live in the person's browser only and are sent per request.
 6. **Isolation & limits.** One DuckDB instance per workspace, a fresh connection per query (so `interrupt()` on timeout/cancel is query-scoped), row caps, cell truncation, rate limiting, and a full audit trail (`actor_type` USER/AGENT, action, SQL, duration, IP, status).
 7. **Workspace authorization.** Every workspace access resolves an effective role — the creator and platform admins (UI sessions only, never tokens) are OWNER; otherwise the highest of the user's direct grant and their teams' grants. Inaccessible workspaces are `404` (no existence leak); insufficient role is `403`. See [Sharing & teams](#sharing--teams).
 
@@ -400,7 +401,7 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 196 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
+pnpm test        # 197 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, ExternalLink, Eye, EyeOff, KeyRound, Loader2, PlugZap, RefreshCw, Save, Trash2, Activity, Gauge, Users, Sparkles } from 'lucide-react';
+import { Bot, CheckCircle2, ExternalLink, Eye, EyeOff, KeyRound, Loader2, PlugZap, RefreshCw, Save, Trash2, Activity, Gauge, Users, Sparkles, ShieldCheck, AlertTriangle, Lock } from 'lucide-react';
 import { api, type CopilotConfig, type CopilotProvider, type CopilotProviderPreset, type CopilotServerSettings, type CopilotUsageReport, type CopilotUsageTotals } from '../../api/client';
 import { useCopilot } from '../../store/copilot';
 import { Badge, Button, Input, Label, Select, cn } from '../../components/ui';
@@ -131,6 +131,7 @@ function ServerProviderCard({ cfg, reload }: { cfg: CopilotConfig; reload: () =>
   useEffect(() => void load(), [load]);
 
   const keyOnFile = settings?.provider === draft.provider && settings.has_key ? settings.key_hint : source === 'config' && cfg.server_provider === draft.provider && cfg.has_server_key ? cfg.server_key_hint : null;
+  const undecryptable = settings?.provider === draft.provider && settings.key_status === 'undecryptable';
   const body = () => ({ provider: draft.provider, model: draft.model || null, base_url: draft.base_url || null, ...(draft.api_key ? { api_key: draft.api_key } : {}), aws_region: draft.aws_region || null, bedrock_agent_id: draft.bedrock_agent_id || null, bedrock_agent_alias_id: draft.bedrock_agent_alias_id || null, agentcore_runtime_arn: draft.agentcore_runtime_arn || null });
   const runTest = async () => {
     setTest({ state: 'busy' });
@@ -179,6 +180,18 @@ function ServerProviderCard({ cfg, reload }: { cfg: CopilotConfig; reload: () =>
         <span className="ml-auto text-[11px] text-zinc-500">{settings?.updated_by_email ? `set by ${settings.updated_by_email}` : source === 'config' ? 'copilot.* in duckview.config.yaml' : 'pick a vendor, paste a key, save'}</span>
       </header>
       <div className="space-y-4 p-4">
+        {cfg.ephemeral_encryption_key && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>This server is running without <code className="font-mono">ENCRYPTION_KEY</code>: the key you save here is encrypted with a random key that changes on every restart, so it will have to be pasted again after each restart. Set <code className="font-mono">ENCRYPTION_KEY</code> (and <code className="font-mono">JWT_SECRET</code>) in the environment to keep it.</span>
+          </div>
+        )}
+        {undecryptable && (
+          <div className="flex items-start gap-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-[11px] text-red-200">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>The stored key cannot be decrypted any more — the server's encryption key changed since it was saved. Copilot is not working for anyone until you paste the key again.</span>
+          </div>
+        )}
         <ProviderPicker presets={cfg.providers} value={draft.provider} onPick={(id) => { setDraft({ ...emptyDraft(id), model: settings?.provider === id ? settings.model ?? '' : '', base_url: settings?.provider === id ? settings.base_url ?? '' : '', aws_region: draft.aws_region }); setTest({ state: 'idle' }); setSaved(null); }} />
         <ProviderForm preset={preset} draft={draft} onChange={(d) => { setDraft((x) => ({ ...x, ...d })); setTest({ state: 'idle' }); }} keyOnFile={keyOnFile} fetchModels={async () => (await api.post<{ ok: true; models: string[] }>('/api/copilot/settings/test', body())).models} />
         <div className="flex flex-wrap items-center gap-2">
@@ -189,7 +202,14 @@ function ServerProviderCard({ cfg, reload }: { cfg: CopilotConfig; reload: () =>
           {test.state === 'error' && <span className="text-[11px] text-red-300">{test.message}</span>}
           {saved && test.state !== 'error' && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {saved}</span>}
         </div>
-        <p className="text-[11px] text-zinc-500">The key is encrypted at rest (AES-256-GCM) and only ever sent to {preset.vendor === 'Any' ? 'the endpoint you configure' : preset.vendor}. It overrides <code className="font-mono">copilot.*</code> in duckview.config.yaml; people can still bring their own key below when BYOK is allowed.</p>
+        <div className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] text-zinc-400">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+          <span>Once saved, the key is <b className="text-zinc-300">write-only</b>: it is encrypted at rest (AES-256-GCM with the server's encryption key), never returned by any API or page — administrators see only its last four characters — never written to logs or the audit trail, scrubbed from provider error messages, and only ever sent to {preset.vendor === 'Any' ? 'the endpoint you configure' : preset.vendor}. Saving here overrides <code className="font-mono">copilot.*</code> in duckview.config.yaml, so no key needs to live in a file or the environment.</span>
+        </div>
+        <label className="flex cursor-pointer items-start gap-2 text-[11px] text-zinc-400">
+          <input type="checkbox" className="mt-0.5 accent-accent-500" checked={cfg.allow_byok} disabled={source !== 'settings'} onChange={async (e) => { await api.put('/api/copilot/settings/byok', { allow: e.target.checked === cfg.allow_byok_config ? null : e.target.checked }); reload(); }} />
+          <span><Lock className="mr-1 inline h-3 w-3" />Allow people to use their own keys (bring-your-own). Off = everyone uses this server provider and cannot pick another vendor, key or model.{source !== 'settings' ? ' Save a server provider first to change this.' : cfg.allow_byok !== cfg.allow_byok_config ? ' (overriding the config file)' : ''}</span>
+        </label>
       </div>
     </section>
   );

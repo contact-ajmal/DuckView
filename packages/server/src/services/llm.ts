@@ -262,15 +262,28 @@ export const defaultProviderFactory: ProviderFactory = (id, opts) => {
   }
 };
 
+/**
+ * Removes anything that looks like an API key from text that may be shown or stored (provider error messages
+ * sometimes echo the credential back): known vendor formats, bearer values, and any explicit secrets given.
+ */
+export function scrubSecrets(text: string, secrets: (string | null | undefined)[] = []): string {
+  let out = text;
+  for (const s of secrets) if (s && s.length >= 8) out = out.split(s).join('[redacted]');
+  return out
+    .replace(/\b(sk-ant|sk-or|sk-proj|sk|xai|gsk|pk)[-_][A-Za-z0-9_-]{8,}/g, '$1-[redacted]')
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}/g, 'AIza[redacted]')
+    .replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/gi, '$1[redacted]');
+}
+
 /** Maps SDK errors to HttpErrors with stable codes (never leaks keys). */
-export function mapProviderError(err: unknown): HttpError {
-  if (err instanceof HttpError) return err;
+export function mapProviderError(err: unknown, secrets: (string | null | undefined)[] = []): HttpError {
+  if (err instanceof HttpError) return new HttpError(err.statusCode, scrubSecrets(err.message, secrets), err.code, err.details);
   if (err instanceof Anthropic.AuthenticationError || err instanceof OpenAI.AuthenticationError) return new HttpError(401, 'The LLM provider rejected the API key.', 'COPILOT_AUTH_FAILED');
   if (err instanceof Anthropic.RateLimitError || err instanceof OpenAI.RateLimitError) return new HttpError(429, 'The LLM provider is rate limiting requests — try again shortly.', 'COPILOT_RATE_LIMITED');
   if (err instanceof Anthropic.NotFoundError || err instanceof OpenAI.NotFoundError) return new HttpError(404, 'Model not found at the provider.', 'COPILOT_MODEL_NOT_FOUND');
-  if (err instanceof Anthropic.APIError || err instanceof OpenAI.APIError) return new HttpError(502, `LLM provider error: ${err.message}`, 'COPILOT_PROVIDER_ERROR');
+  if (err instanceof Anthropic.APIError || err instanceof OpenAI.APIError) return new HttpError(502, `LLM provider error: ${scrubSecrets(err.message, secrets)}`, 'COPILOT_PROVIDER_ERROR');
   const e = err as Error & { name?: string; code?: string };
   if (e?.name === 'AbortError') return new HttpError(499, 'Request cancelled', 'COPILOT_CANCELLED');
-  if (e?.code === 'ECONNREFUSED' || /fetch failed|ECONNREFUSED|ENOTFOUND/.test(e?.message ?? '')) return new HttpError(502, `Cannot reach the LLM provider: ${e.message}`, 'COPILOT_PROVIDER_UNREACHABLE');
-  return new HttpError(502, e?.message ?? 'LLM provider error', 'COPILOT_PROVIDER_ERROR');
+  if (e?.code === 'ECONNREFUSED' || /fetch failed|ECONNREFUSED|ENOTFOUND/.test(e?.message ?? '')) return new HttpError(502, `Cannot reach the LLM provider: ${scrubSecrets(e.message, secrets)}`, 'COPILOT_PROVIDER_UNREACHABLE');
+  return new HttpError(502, scrubSecrets(e?.message ?? 'LLM provider error', secrets), 'COPILOT_PROVIDER_ERROR');
 }

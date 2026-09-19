@@ -296,6 +296,7 @@ export const copilotSettings = pgTable('copilot_settings', {
   bedrock_agent_id: text('bedrock_agent_id'),
   bedrock_agent_alias_id: text('bedrock_agent_alias_id'),
   agentcore_runtime_arn: text('agentcore_runtime_arn'),
+  allow_byok: boolean('allow_byok'),
   updated_by: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updated_at: ts('updated_at').notNull(),
 });
