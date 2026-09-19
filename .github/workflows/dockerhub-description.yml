@@ -25,3 +25,9 @@ jobs:
           short-description: DuckDB workspace: lakehouse, dashboards, MCP for AI agents. Docs at contact-ajmal.github.io/DuckView
           readme-filepath: ./docs/DOCKERHUB.md
           enable-url-completion: true
+      - name: Verify the overview on Docker Hub
+        run: |
+          set -euo pipefail
+          repo="${{ vars.DOCKERHUB_IMAGE || format('{0}/duckview', secrets.DOCKERHUB_USERNAME) }}"
+          body="$(curl -fsS "https://hub.docker.com/v2/repositories/${repo}/")"
+          echo "$body" | python3 -c 'import sys,json; d=json.load(sys.stdin); fd=d.get("full_description") or ""; ok="contact-ajmal.github.io/DuckView" in fd; print("website link present:", ok); sys.exit(0 if ok else 1)'
