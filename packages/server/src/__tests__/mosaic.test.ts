@@ -155,6 +155,11 @@ describe('Mosaic connector — exec policy', () => {
       'CREATE VIEW "duckview_mosaic_src_zz" AS SELECT 1',
       'CREATE OR REPLACE VIEW "duckview_mosaic_src_ff01" AS DELETE FROM trips',
       'DROP VIEW IF EXISTS "trips"',
+      'CREATE TABLE IF NOT EXISTS "duckview_mosaic_mem"."evil" AS SELECT 1',
+      'CREATE TABLE IF NOT EXISTS "other"."src_ab12" AS SELECT 1',
+      'CREATE TABLE "duckview_mosaic_mem"."src_ab12" AS SELECT 1',
+      'DROP TABLE IF EXISTS "duckview_mosaic_mem"."trips"',
+      "ATTACH ':memory:' AS duckview_mosaic_mem",
       "SET threads = 1",
       'INSERT INTO trips VALUES (1, 1, \'1\', 1)',
       'DROP SCHEMA IF EXISTS "main" CASCADE',
@@ -187,11 +192,15 @@ describe('Mosaic connector — exec policy', () => {
     expect(await has()).toBe(1);
     expect((await post(tokens.admin, wsId, { type: 'exec', sql: `CREATE OR REPLACE VIEW "duckview_mosaic_src_ee01" AS SELECT * FROM trips` })).status).toBe(200);
     expect(await views()).toBeGreaterThan(0);
+    const memAttached = async () => Number((await ctx.queries.run(admin, wsId, "SELECT count(*) AS n FROM duckdb_databases() WHERE database_name = 'duckview_mosaic_mem'", { cache: false })).rows[0]![0]);
+    expect((await post(tokens.admin, wsId, { type: 'exec', sql: 'CREATE TABLE IF NOT EXISTS "duckview_mosaic_mem"."src_ee01" AS SELECT * FROM trips' })).status).toBe(200);
+    expect(await memAttached()).toBe(1);
     await ctx.queries.run(admin, wsId, 'INSERT INTO trips VALUES (99999, 1, \'1\', 1.0)');
-    // The drop runs off the epoch listener: schema first, then each source view.
-    for (let i = 0; i < 40 && ((await has()) !== 0 || (await views()) !== 0); i++) await new Promise((r) => setTimeout(r, 50));
+    // The drop runs off the epoch listener: schema first, then each source view, then the in-memory database.
+    for (let i = 0; i < 40 && ((await has()) !== 0 || (await views()) !== 0 || (await memAttached()) !== 0); i++) await new Promise((r) => setTimeout(r, 50));
     expect(await has()).toBe(0);
     expect(await views()).toBe(0);
+    expect(await memAttached()).toBe(0);
     // …and Mosaic simply recreates it on the next interaction.
     expect((await post(tokens.admin, wsId, { type: 'exec', sql: preagg })).status).toBe(200);
     expect(await has()).toBe(1);
@@ -279,19 +288,43 @@ describe('Mosaic specs — prepare, validate, and the agent tool', () => {
     ],
   };
 
-  it('prepares a valid spec: datasets become prefixed source views, plain tables are bound, from: is rewritten', async () => {
+  it('prepares a valid spec: datasets are materialised in the in-memory db behind prefixed source views, plain tables are bound, from: is rewritten', async () => {
     const r = await prepare(tokens.viewer, { spec: good });
     expect(r.status).toBe(200);
     expect(r.payload.ok, r.payload.errors.join('; ')).toBe(true);
     expect(r.payload.sources.map((s) => [s.name, s.kind])).toEqual([['nums', 'parquet'], ['byhour', 'query'], ['notes', 'objects']]);
-    expect(r.payload.statements.every((st) => /^CREATE OR REPLACE VIEW "duckview_mosaic_src_[0-9a-f]{8}" AS /.test(st))).toBe(true);
+    // Two statements per dataset: the materialised table and the view Mosaic addresses it by.
+    expect(r.payload.statements).toHaveLength(6);
+    expect(r.payload.statements.filter((st) => /^CREATE TABLE IF NOT EXISTS "duckview_mosaic_mem"\."src_[0-9a-f]{8}" AS /.test(st))).toHaveLength(3);
+    expect(r.payload.statements.filter((st) => /^CREATE OR REPLACE VIEW "duckview_mosaic_src_[0-9a-f]{8}" AS SELECT \* FROM "duckview_mosaic_mem"\."src_[0-9a-f]{8}"$/.test(st))).toHaveLength(3);
     expect(r.payload.tables).toEqual(['trips']);
     const text = JSON.stringify(r.payload.spec);
     expect(text).not.toContain('"from":"nums"');
     expect(text).toContain(`"from":"${r.payload.sources[0]!.view}"`);
     expect(r.payload.spec.data).toBeUndefined();
-    // …and the statements are exactly what the exec endpoint admits, so the browser can run them as they are.
+    // …and the statements are exactly what the exec endpoint admits, so the browser can run them as they are; the
+    // in-memory database is attached on first use.
     for (const st of r.payload.statements) expect((await post(tokens.viewer, wsId, { type: 'exec', sql: st })).status).toBe(200);
+    const q = await post(tokens.viewer, wsId, { type: 'json', sql: `SELECT max(v) AS m FROM "${r.payload.sources[0]!.view}"` });
+    expect((q.payload as { rows: unknown[][] }).rows[0]![0]).toBe(1998);
+    const mem = await ctx.queries.run(admin, wsId, "SELECT database_name, table_name FROM duckdb_tables() WHERE database_name = 'duckview_mosaic_mem' ORDER BY 2", { cache: false });
+    expect(mem.rows).toHaveLength(3);
+    // Neither the in-memory tables nor the views reach the catalogs.
+    const cat = await ctx.queries.catalog(admin, wsId);
+    expect(cat.objects.some((o) => o.database === 'duckview_mosaic_mem' || o.name.startsWith('src_') || o.name.startsWith('duckview_mosaic_src_'))).toBe(false);
+    // Opting out keeps a plain view over the source; a cap demotes big datasets with a warning.
+    const plain = await prepare(tokens.admin, { spec: { data: { nums: { file: 'nums.parquet', materialize: false } }, plot: [{ mark: 'dot', data: { from: 'nums' }, x: 'id', y: 'v' }] } });
+    expect(plain.payload.statements).toHaveLength(1);
+    expect(plain.payload.statements[0]).toMatch(/^CREATE OR REPLACE VIEW "duckview_mosaic_src_[0-9a-f]{8}" AS SELECT \* FROM read_parquet\('nums.parquet'\)$/);
+    ctx.cfg.mosaic.materialize_max_rows = 100;
+    try {
+      const capped = await prepare(tokens.admin, { spec: { data: { nums: { file: 'nums.parquet' } }, plot: [{ mark: 'dot', data: { from: 'nums' }, x: 'id', y: 'v' }] } });
+      expect(capped.payload.ok).toBe(true);
+      expect(capped.payload.statements).toHaveLength(1);
+      expect(capped.payload.warnings[0]).toMatch(/1,000 rows exceed mosaic.materialize_max_rows/);
+    } finally {
+      ctx.cfg.mosaic.materialize_max_rows = 20_000_000;
+    }
     // YAML text works too.
     const y = await prepare(tokens.admin, { spec_text: 'plot:\n  - mark: dot\n    data: { from: trips }\n    x: hour\n    y: fare\n' });
     expect(y.payload.ok).toBe(true);

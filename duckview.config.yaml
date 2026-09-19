@@ -67,6 +67,7 @@ mosaic:                                  # interactive visualization (uwdata/mos
   enabled: true
   schema: duckview_mosaic                # holds pre-aggregated views; dropped whenever the workspace data epoch moves
   max_rows: 1000000                      # cap for Mosaic result queries (pixel-binned rasters), independent of the grid cap
+  materialize_max_rows: 20000000         # dashboard datasets up to this size are held in an attached in-memory db (0 = always views)
 
 mcp:
   default_page_size: 50

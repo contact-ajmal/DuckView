@@ -133,6 +133,13 @@ export const ConfigSchema = z.object({
       schema: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).default('duckview_mosaic'),
       /** Row cap for Mosaic result queries (pixel-binned rasters can be large; the grid cap does not apply). */
       max_rows: z.coerce.number().int().min(1000).default(1_000_000),
+      /**
+       * Dashboard datasets (spec `data` entries: files, queries, inline rows) up to this many rows are materialised
+       * once into an attached in-memory database ("<schema>_mem") instead of being re-read from the file on every
+       * interaction — a 3.7M-row CSV goes from ~600 ms to ~6 ms per chart query. Larger datasets, and entries with
+       * `materialize: false`, are served as views. 0 disables materialisation.
+       */
+      materialize_max_rows: z.coerce.number().int().min(0).default(20_000_000),
     })
     .default({}),
   mcp: z

@@ -19,6 +19,7 @@ Dashboards come in two kinds. **Grid** dashboards are widgets on a drag-and-drop
 - **Edit** opens a YAML/JSON editor next to a live preview that re-renders as you type (⌘S saves). Viewers see the rendered dashboard only.
 - Any workspace table can be referenced with `from: table_name`. Files, queries and inline rows are declared under `data:` exactly as in the Mosaic docs; DuckView turns them into hidden source views inside the workspace jail.
 - Params, selections, inputs (`menu`, `search`, `slider`, `table`), every mark, interactor and attribute, legends and `hconcat` / `vconcat` layouts are Mosaic's own.
+- Datasets are materialised once into an in-memory database (up to `mosaic.materialize_max_rows`; `materialize: false` opts out), so brushing, menus and sliders answer in milliseconds even when the source is a large CSV.
 
 ```yaml
 meta: { title: Trips by hour }
@@ -53,6 +54,6 @@ Every spec is validated by the server before it is rendered or saved — structu
 
 ## How it stays safe
 
-The browser talks to `POST /api/workspaces/:id/mosaic`. Chart queries (`arrow` / `json`) run through the normal query pipeline — role, sandbox, audit, result cache with `ETag` — with their own row ceiling (`mosaic.max_rows`). Mosaic's plumbing (`exec`) is admitted only in its exact shapes: creating the `duckview_mosaic` schema, `preagg_<hash>` tables inside it, DuckView's `duckview_mosaic_src_<hash>` source views, and dropping them again; every wrapped SELECT must be a single read-only statement. Anything else is rejected. Pre-aggregates and source views are derived data: viewers can create them, they never move the data epoch, and they are dropped — and rebuilt lazily — whenever the epoch moves. They are hidden from the catalog, the explorer and agents.
+The browser talks to `POST /api/workspaces/:id/mosaic`. Chart queries (`arrow` / `json`) run through the normal query pipeline — role, sandbox, audit, result cache with `ETag` — with their own row ceiling (`mosaic.max_rows`). Mosaic's plumbing (`exec`) is admitted only in its exact shapes: creating the `duckview_mosaic` schema, `preagg_<hash>` tables inside it, DuckView's `duckview_mosaic_src_<hash>` source views and `duckview_mosaic_mem.src_<hash>` in-memory tables, and dropping them again; every wrapped SELECT must be a single read-only statement. Anything else is rejected. Pre-aggregates and source views are derived data: viewers can create them, they never move the data epoch, and they are dropped — and rebuilt lazily — whenever the epoch moves. They are hidden from the catalog, the explorer and agents.
 
 Configuration: `mosaic.enabled`, `mosaic.schema`, `mosaic.max_rows`. Metrics: `duckview_mosaic_exec_total{kind}`.

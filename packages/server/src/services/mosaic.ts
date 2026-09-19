@@ -10,12 +10,16 @@
  *     plus DuckView's own source views `CREATE OR REPLACE VIEW "<schema>_src_<hex>" AS SELECT …` that turn a file
  *     path or an ad-hoc query into a plain table name Mosaic can `FROM` (they live in the main schema because every
  *     Mosaic code path — marks, field info, consolidation — expects a single identifier; the prefix keeps them out of
- *     the catalogs). These are derived data, not workspace mutations: they are
- *     admitted only in exactly those shapes (validated statement by statement), run for any member with read access,
- *     never move the data epoch and are never held for agent approval. Everything else is rejected.
+ *     the catalogs), and materialised datasets `CREATE TABLE IF NOT EXISTS "<schema>_mem"."src_<hex>" AS SELECT …`
+ *     in an attached in-memory database (attached on first use; never written to the workspace file) so that every
+ *     interaction reads columnar memory instead of re-parsing a file. These are derived data, not workspace
+ *     mutations: they are admitted only in exactly those shapes (validated statement by statement), run for any
+ *     member with read access, never move the data epoch and are never held for agent approval. Everything else is
+ *     rejected.
  *
- * Invalidation reuses the data epoch: whenever it moves the schema is dropped, so pre-aggregates over changed data
- * cannot be served; the browser hears the same event and clears its coordinator.
+ * Invalidation reuses the data epoch: whenever it moves the schema is dropped, the source views removed and the
+ * in-memory database detached, so pre-aggregates and materialised datasets over changed data cannot be served; the
+ * browser hears the same event and clears its coordinator.
  */
 import type { DuckViewConfig } from '../config/index.js';
 import type { EngineManager } from '../engine/duckdb.js';
@@ -29,7 +33,7 @@ import type { Principal } from './principal.js';
 import { requireScope } from './principal.js';
 import { badRequest, forbidden } from './errors.js';
 import type { CacheMeta } from './cache.js';
-import { prepareSpec, validateSpecStructure, type PreparedSpec, type Spec } from './mosaic-spec.js';
+import { prepareSpec, sourceStatements, validateSpecStructure, type PreparedSpec, type Spec } from './mosaic-spec.js';
 import { logger } from '../observability/logger.js';
 import { metrics } from '../observability/metrics.js';
 
@@ -62,6 +66,10 @@ export class MosaicService {
   get viewPrefix() {
     return `${this.cfg.mosaic.schema}_src_`;
   }
+  /** Attached in-memory database holding materialised datasets. */
+  get memDb() {
+    return `${this.cfg.mosaic.schema}_mem`;
+  }
 
   private assertEnabled() {
     if (!this.enabled) throw forbidden('Mosaic is disabled by configuration (mosaic.enabled)');
@@ -89,21 +97,29 @@ export class MosaicService {
    * Classifies one statement against the admitted exec shapes. Returns a label for the audit log or throws.
    * Identifiers are matched exactly as Mosaic's SQL generator quotes them (always double-quoted).
    */
-  classifyExec(statement: string): 'create_schema' | 'create_preagg' | 'create_view' | 'drop_schema' | 'drop_preagg' | 'drop_view' {
+  classifyExec(statement: string): 'create_schema' | 'create_preagg' | 'create_view' | 'create_table' | 'drop_schema' | 'drop_preagg' | 'drop_view' | 'drop_table' {
     const s = stripTrailingSemicolon(statement).trim();
     const schema = this.schema;
     const q = (id: string) => `"${id}"`;
     if (new RegExp(`^CREATE\\s+SCHEMA\\s+IF\\s+NOT\\s+EXISTS\\s+${q(schema)}$`, 'i').test(s)) return 'create_schema';
     if (new RegExp(`^DROP\\s+SCHEMA\\s+IF\\s+EXISTS\\s+${q(schema)}\\s+CASCADE$`, 'i').test(s)) return 'drop_schema';
     if (new RegExp(`^DROP\\s+TABLE\\s+IF\\s+EXISTS\\s+${q(schema)}\\.${q(`preagg_${HEX}`)}$`, 'i').test(s)) return 'drop_preagg';
+    if (new RegExp(`^DROP\\s+TABLE\\s+IF\\s+EXISTS\\s+${q(this.memDb)}\\.${q(`src_${HEX}`)}$`, 'i').test(s)) return 'drop_table';
     if (new RegExp(`^DROP\\s+VIEW\\s+IF\\s+EXISTS\\s+${q(`${this.viewPrefix}${HEX}`)}$`, 'i').test(s)) return 'drop_view';
     const preagg = new RegExp(`^CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+${q(schema)}\\.${q(`preagg_${HEX}`)}\\s+AS\\s+([\\s\\S]+)$`, 'i').exec(s);
+    const table = new RegExp(`^CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+${q(this.memDb)}\\.${q(`src_${HEX}`)}\\s+AS\\s+([\\s\\S]+)$`, 'i').exec(s);
     const view = new RegExp(`^CREATE\\s+(?:OR\\s+REPLACE\\s+)?VIEW\\s+${q(`${this.viewPrefix}${HEX}`)}\\s+AS\\s+([\\s\\S]+)$`, 'i').exec(s);
-    const m = preagg ?? view;
+    const m = preagg ?? table ?? view;
     if (!m) throw forbidden(`Statement is not part of the Mosaic protocol and was rejected: ${s.slice(0, 120)}`);
     const body = analyzeSql(m[1]!);
     if (body.statements.length !== 1 || body.isMutating) throw forbidden('Mosaic CREATE statements may only wrap a single read-only SELECT');
-    return preagg ? 'create_preagg' : 'create_view';
+    return preagg ? 'create_preagg' : table ? 'create_table' : 'create_view';
+  }
+
+  /** Attaches the in-memory database for materialised datasets if this engine does not have it yet. */
+  private async ensureMemDb(engine: { runInternal(sql: string, timeoutMs?: number): Promise<Record<string, unknown>[]> }) {
+    const rows = await engine.runInternal(`SELECT count(*) AS n FROM duckdb_databases() WHERE database_name = '${this.memDb}'`, 15_000);
+    if (Number(rows[0]?.n ?? 0) === 0) await engine.runInternal(`ATTACH ':memory:' AS "${this.memDb}"`, 15_000);
   }
 
   /**
@@ -123,11 +139,13 @@ export class MosaicService {
       const actor = p.actorType === 'AGENT' ? 'agent' : 'user';
       // A pre-aggregate needs the schema; Mosaic itself only creates it alongside its first pre-aggregate.
       if (kinds.includes('create_preagg') && !kinds.includes('create_schema')) await engine.execute(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`, { maxRows: 1, actor });
+      // A materialised dataset needs the in-memory database (attached lazily, once per engine lifetime).
+      if (kinds.includes('create_table')) await this.ensureMemDb(engine);
       // Statement by statement: `execute` returns the last result only, and a clear per-statement failure beats a
       // partially applied batch that leaves the coordinator guessing.
-      for (const st of statements) await engine.execute(st, { maxRows: 1, actor });
+      for (const st of statements) await engine.execute(st, { maxRows: 1, actor, timeoutMs: this.cfg.duckdb.query_timeout_seconds * 1000 });
       const duration_ms = Math.round(performance.now() - start);
-      metrics.mosaicExec.inc({ kind: kinds.includes('create_preagg') ? 'preagg' : kinds.includes('create_view') ? 'view' : kinds.includes('drop_schema') ? 'drop' : 'schema' });
+      metrics.mosaicExec.inc({ kind: kinds.includes('create_preagg') ? 'preagg' : kinds.includes('create_table') ? 'table' : kinds.includes('create_view') ? 'view' : kinds.includes('drop_schema') ? 'drop' : 'schema' });
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'mosaic.exec', resource: `workspace:${workspaceId}`, queryText: sql.slice(0, 4000), durationMs: duration_ms, ip: p.ip });
       return { statements: statements.length, duration_ms };
     } catch (err) {
@@ -149,21 +167,32 @@ export class MosaicService {
     const structure = validateSpecStructure(spec);
     const errors = [...structure.errors];
     const warnings = [...structure.warnings];
+    const cap = this.cfg.mosaic.materialize_max_rows;
     let prepared: PreparedSpec = { spec, statements: [], sources: [], tables: [] };
     try {
-      prepared = prepareSpec(spec, this.viewPrefix);
+      prepared = prepareSpec(spec, { viewPrefix: this.viewPrefix, memDb: this.memDb, materialize: cap > 0 });
     } catch (err) {
       errors.push((err as Error).message);
     }
     if (opts.bind !== false && errors.length === 0) {
-      for (const [i, src] of prepared.sources.entries()) {
+      for (const src of prepared.sources) {
         try {
-          this.classifyExec(prepared.statements[i]!);
+          for (const st of sourceStatements(src)) this.classifyExec(st);
           await this.queries.explain(p, workspaceId, src.body);
+          // Materialisation is bounded: a dataset above the cap stays a view (the count is cached like any query).
+          if (src.materialize && cap > 0) {
+            const r = await this.queries.run(p, workspaceId, `SELECT count(*) AS n FROM (${src.body}) AS _dv`, { maxRows: 1, countTotal: false });
+            const n = Number(r.rows[0]?.[0] ?? 0);
+            if (n > cap) {
+              src.materialize = false;
+              warnings.push(`data.${src.name}: ${n.toLocaleString()} rows exceed mosaic.materialize_max_rows (${cap.toLocaleString()}); served as a view — interactions will re-read the source`);
+            }
+          } else if (src.materialize && cap === 0) src.materialize = false;
         } catch (err) {
           errors.push(`data.${src.name}: ${(err as Error).message}`);
         }
       }
+      prepared.statements = prepared.sources.flatMap(sourceStatements);
       for (const table of prepared.tables) {
         if (table.startsWith(this.viewPrefix)) continue;
         try {
@@ -177,9 +206,9 @@ export class MosaicService {
   }
 
   /**
-   * Drops the Mosaic schema (pre-aggregates) and DuckView's source views of a running engine — called when the
-   * workspace data epoch moves. Both are rebuilt lazily by the next interaction; the browser is told through the
-   * same live event.
+   * Drops the Mosaic schema (pre-aggregates), DuckView's source views and the in-memory database of materialised
+   * datasets of a running engine — called when the workspace data epoch moves. All are rebuilt lazily by the next
+   * interaction; the browser is told through the same live event.
    */
   async dropSchema(workspaceId: string): Promise<boolean> {
     const engine = this.engines.peek(workspaceId);
@@ -188,6 +217,7 @@ export class MosaicService {
       await engine.runInternal(`DROP SCHEMA IF EXISTS "${this.schema}" CASCADE`, 30_000);
       const views = await engine.runInternal(`SELECT view_name FROM duckdb_views() WHERE NOT internal AND schema_name = 'main' AND view_name LIKE '${this.viewPrefix}%'`, 15_000);
       for (const v of views) await engine.runInternal(`DROP VIEW IF EXISTS "${String(v.view_name).replace(/"/g, '""')}"`, 15_000);
+      await engine.runInternal(`DETACH DATABASE IF EXISTS "${this.memDb}"`, 30_000);
       return true;
     } catch (err) {
       logger().warn({ workspaceId, err: (err as Error).message }, 'Could not drop the Mosaic schema after an epoch change');

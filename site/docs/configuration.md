@@ -88,6 +88,7 @@ See [Result cache](cache.html) for how keys are built.
 | `enabled` | The Mosaic connector endpoint behind the Explore view and Mosaic dashboards (default on). |
 | `schema` | Schema for Mosaic's pre-aggregated tables (default `duckview_mosaic`); source views are `<schema>_src_<hash>` in the main schema. Both are dropped when the data epoch moves and hidden from catalogs. |
 | `max_rows` | Row ceiling for chart queries, independent of the grid cap (default 1 000 000). |
+| `materialize_max_rows` | Dashboard datasets up to this many rows are materialised once into an attached in-memory database so interactions read memory instead of re-parsing files (default 20 000 000; `0` = always views). |
 
 See [Interactive exploration & Mosaic dashboards](mosaic.html).
 

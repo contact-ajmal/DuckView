@@ -19,10 +19,24 @@ export type Spec = Record<string, unknown>;
 
 export interface PreparedSource {
   name: string;
+  /** Main-schema view Mosaic addresses the dataset by. */
   view: string;
   kind: 'query' | 'parquet' | 'csv' | 'json' | 'objects';
-  /** The SELECT the view wraps (what gets bound/validated). */
+  /** The SELECT behind the dataset (what gets bound/validated). */
   body: string;
+  /** Materialised once into the in-memory database (fast interactions) rather than re-read through a view. */
+  materialize: boolean;
+  /** `"<memDb>"."src_<hash>"` — the in-memory table when materialised. */
+  table: string;
+}
+
+export interface PrepareOptions {
+  /** `<mosaic.schema>_src_` */
+  viewPrefix: string;
+  /** Attached in-memory database for materialised datasets (`<mosaic.schema>_mem`). */
+  memDb: string;
+  /** Default for datasets that do not say `materialize:` themselves. */
+  materialize: boolean;
 }
 
 export interface PreparedSpec {
@@ -75,17 +89,25 @@ function fileExtension(file: unknown): string | null {
   return idx > 0 ? file.slice(idx + 1).toLowerCase() : null;
 }
 
-/** One `data` entry → the statement standing in for it, or null for a table that already exists. */
-function sourceStatement(name: string, def: unknown, view: string): { sql: string; kind: PreparedSource['kind'] } | null {
+/** One `data` entry → the SELECT standing in for it (as a CREATE VIEW statement to reuse Mosaic's generators), or null for a table that already exists. */
+function sourceStatement(name: string, def: unknown, view: string): { sql: string; kind: PreparedSource['kind']; materialize: boolean | null } | null {
   const opt = { view: true, replace: true } as const;
   const trimSql = (q: string) => q.trim().replace(/;\s*$/, '');
-  if (typeof def === 'string') return { sql: String(createTable(view, trimSql(def), opt)), kind: 'query' };
+  if (typeof def === 'string') return { sql: String(createTable(view, trimSql(def), opt)), kind: 'query', materialize: null };
   if (Array.isArray(def)) {
     if (!def.length || !isObject(def[0])) throw badRequest(`data.${name}: inline data must be a non-empty list of objects`);
-    return { sql: String(loadObjects(view, def as Record<string, unknown>[], opt)), kind: 'objects' };
+    return { sql: String(loadObjects(view, def as Record<string, unknown>[], opt)), kind: 'objects', materialize: null };
   }
   if (!isObject(def)) throw badRequest(`data.${name}: expected a query string, a list of rows or a definition object`);
-  const { type: declared, file, query, data, temp: _t, view: _v, replace: _r, ...options } = def;
+  // `materialize` is DuckView's own option; it must not reach the read_* parameter list.
+  const { type: declared, file, query, data, temp: _t, view: _v, replace: _r, materialize: mat, ...options } = def;
+  const materialize = typeof mat === 'boolean' ? mat : null;
+  const r = sourceStatementFor(name, view, { declared, file, query, data, options, opt });
+  return r && { ...r, materialize };
+}
+
+function sourceStatementFor(name: string, view: string, { declared, file, query, data, options, opt }: { declared: unknown; file: unknown; query: unknown; data: unknown; options: Record<string, unknown>; opt: { view: true; replace: true } }): { sql: string; kind: PreparedSource['kind'] } | null {
+  const trimSql = (q: string) => q.trim().replace(/;\s*$/, '');
   const type = (typeof declared === 'string' && declared) || fileExtension(file) || 'table';
   const fileName = typeof file === 'string' ? file : null;
   switch (type) {
@@ -126,28 +148,36 @@ function rewriteFrom(node: unknown, map: Map<string, string>, tables: Set<string
   return out;
 }
 
-/** Data definitions → source-view statements; `from:` rewritten. `viewPrefix` is `<mosaic.schema>_src_`. */
-export function prepareSpec(spec: Spec, viewPrefix: string): PreparedSpec {
+/**
+ * The statements that stand a source up, exactly in the shapes the exec policy admits: a materialised dataset is
+ * `CREATE TABLE IF NOT EXISTS "<memDb>"."src_<hash>" AS …` (idempotent across reloads — the hash covers the
+ * definition) plus a main-schema view over it; otherwise one `CREATE OR REPLACE VIEW … AS <body>`.
+ */
+export function sourceStatements(src: PreparedSource): string[] {
+  return src.materialize ? [`CREATE TABLE IF NOT EXISTS ${src.table} AS ${src.body}`, `CREATE OR REPLACE VIEW "${src.view}" AS SELECT * FROM ${src.table}`] : [`CREATE OR REPLACE VIEW "${src.view}" AS ${src.body}`];
+}
+
+/** Data definitions → source statements; `from:` rewritten. */
+export function prepareSpec(spec: Spec, opts: PrepareOptions): PreparedSpec {
   const { data, ...rest } = spec;
-  const statements: string[] = [];
   const sources: PreparedSource[] = [];
   const map = new Map<string, string>();
   if (data !== undefined) {
     if (!isObject(data)) throw badRequest('`data` must be a mapping of dataset name → definition');
     for (const [name, def] of Object.entries(data)) {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw badRequest(`data.${name}: dataset names must be plain identifiers`);
-      const view = `${viewPrefix}${fnv1a(`${name}\n${JSON.stringify(def)}`)}`;
+      const hash = fnv1a(`${name}\n${JSON.stringify(def)}`);
+      const view = `${opts.viewPrefix}${hash}`;
       const st = sourceStatement(name, def, view);
       if (!st) continue;
       const body = st.sql.slice(st.sql.indexOf(' AS ') + 4);
-      statements.push(st.sql);
-      sources.push({ name, view, kind: st.kind, body });
+      sources.push({ name, view, kind: st.kind, body, materialize: st.materialize ?? opts.materialize, table: `"${opts.memDb}"."src_${hash}"` });
       map.set(name, view);
     }
   }
   const tables = new Set<string>();
   const prepared = rewriteFrom(rest, map, tables) as Spec;
-  return { spec: prepared, statements, sources, tables: [...tables] };
+  return { spec: prepared, statements: sources.flatMap(sourceStatements), sources, tables: [...tables] };
 }
 
 // ------------------------------------------------------------------------------------------------ structure

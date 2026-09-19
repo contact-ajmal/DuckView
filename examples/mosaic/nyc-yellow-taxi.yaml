@@ -2,9 +2,9 @@
 # brush a histogram or the timeline, click bars, pick from the menus — everything else reacts.
 #
 # Put yellow_tripdata_2026-01.csv (https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) in the workspace
-# data directory, then Dashboards → New dashboard → Mosaic → Edit → paste this. For a faster first load convert the
-# CSV once (COPY (SELECT * FROM 'yellow_tripdata_2026-01.csv') TO 'yellow_tripdata_2026-01.parquet') and point the
-# query at the Parquet file. Agents can create it with create_mosaic_dashboard(spec_text: <this file>).
+# data directory, then Dashboards → New dashboard → Mosaic → Edit → paste this. The cleaned dataset is materialised
+# once in memory (~1 s for the 387 MB CSV), after which every brush, menu and slider answers in milliseconds.
+# Agents can create it with create_mosaic_dashboard(spec_text: <this file>).
 meta:
   title: NYC yellow taxi · January 2026
   description: 3.7M trips from yellow_tripdata_2026-01.csv, cross-filtered across time, fares, distances, payment and zones.
