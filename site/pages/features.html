@@ -1,0 +1,184 @@
+---
+title: Features
+description: The complete DuckView feature list — querying, workbench, dashboards, lakehouse connectors, AI agents & MCP, DuckCopilot, sharing & teams, result cache, security, observability and themes.
+---
+<section class="hero-small">
+  <div class="container">
+    <span class="eyebrow">Features</span>
+    <h1>Everything DuckView does.</h1>
+    <p class="lead">One native DuckDB engine per workspace, wrapped in the tooling analysts, teams and agents actually need.</p>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="container grid grid-2">
+    <div class="card">
+      <h3>Query & ingest</h3>
+      <ul>
+        <li>Parquet, CSV/TSV, JSON/NDJSON, Excel, Arrow/Feather, DuckDB files, Delta and Iceberg table directories</li>
+        <li>S3, Cloudflare R2, Google Cloud Storage and Azure objects via encrypted cloud connections</li>
+        <li>Drag-and-drop uploads that land in the jail and become queryable instantly</li>
+        <li>VS Code-style workspace folders: mount any local folder into the explorer</li>
+        <li>Persistent <code>.duckdb</code> workspaces, in-memory scratchpads or MotherDuck (<code>md:</code>)</li>
+        <li>Relative paths in SQL resolve against the workspace data directory</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Overview & profiling</h3>
+      <ul>
+        <li>Auto-profile on selection: row/column counts, type mix, null ratios, duplicate rows</li>
+        <li>Per-column min / max / avg / median and equi-width histograms, category and timeline distributions</li>
+        <li><code>SUMMARIZE</code> profiles of any table, file, remote object or SELECT</li>
+        <li>Schema inspection with <code>DESCRIBE … LIMIT 0</code> — no data scan; Parquet row counts from the footer</li>
+        <li>Selection remembered per workspace; profiles cached and confirmed with a 304</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Workbench</h3>
+      <ul>
+        <li>CodeMirror SQL editor with schema hints, tabs with per-tab <em>Stop</em>, cursor and draft persistence</li>
+        <li>Streaming results over WebSocket with row caps and cell truncation</li>
+        <li>Chart, plan (<code>EXPLAIN</code> / <code>EXPLAIN ANALYZE</code>) and profile views per tab</li>
+        <li>Engine picker: DuckDB or a Databricks SQL warehouse per tab, with one-click materialise into DuckDB</li>
+        <li>Saved-query library with folders and tags; <code>.sql</code> import and export</li>
+        <li>Exports to Parquet, CSV, JSON and streaming Arrow IPC</li>
+        <li>Resizable IDE panes; any component can be hidden and restored</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Dashboards</h3>
+      <ul>
+        <li>KPI, chart (bar, line, area, scatter, pie), table and Markdown widgets</li>
+        <li>Drag-and-drop 12-column grid with per-widget auto-refresh</li>
+        <li>Widgets bound to saved queries or custom read-only SQL</li>
+        <li>Built by agents through <code>create_dashboard_widget</code></li>
+        <li>Shared with every member of the workspace</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Lakehouse connectors</h3>
+      <ul>
+        <li>AWS Glue / SageMaker Lakehouse via Glue's Iceberg REST endpoint (SigV4); federated and S3 Tables catalogs</li>
+        <li>Amazon S3 Tables by table-bucket ARN</li>
+        <li>Any Iceberg REST catalog — Polaris, Lakekeeper, Nessie, Snowflake Open Catalog, Tabular, Unity Catalog IRC — with bearer, OAuth2 or no auth</li>
+        <li>Databricks: browse Unity Catalog, run SQL on a warehouse (Statement Execution API), materialise results, attach UniForm tables natively</li>
+        <li>Lazy browsing; hot-applied secrets and <code>ATTACH</code> statements without restarting engines</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>AI agents & MCP</h3>
+      <ul>
+        <li>MCP server over stdio, legacy SSE and Streamable HTTP; 10 tools, 3 resources, 2 guided prompts</li>
+        <li>REST façade <code>POST /api/agent/v1/tools/&lt;tool&gt;</code> and generated OpenAPI 3.0</li>
+        <li>Human-in-the-loop: mutations return an approval challenge until re-issued with <code>dry_run=false</code></li>
+        <li>Registered agents with workspace-scoped tokens, per-framework snippets, self-test and live inspector</li>
+        <li>Strands, LangGraph, LangChain, CrewAI, AgentCore Runtime / Gateway, Bedrock Agents, custom HTTP</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>DuckCopilot</h3>
+      <ul>
+        <li>Context hydrated with tables, columns, files, buckets, the active tab's SQL and <code>SUMMARIZE</code> stats</li>
+        <li>Anthropic, OpenAI, Ollama, Amazon Bedrock (Converse), Bedrock Agent and AgentCore runtime providers</li>
+        <li>Insert into tab, open in a new tab, run &amp; inspect, fix my query, suggest questions</li>
+        <li>Server-managed keys or bring-your-own (kept in the browser, never stored)</li>
+        <li>Conversations persisted with the context snapshot of each turn</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Sharing & teams <span class="tag new">New in 1.1</span></h3>
+      <ul>
+        <li>Share a workspace with users or teams as <b>Owner</b>, <b>Editor</b> or <b>Viewer</b>; the highest grant wins</li>
+        <li>Personal tabs inside shared workspaces; shared saved queries and dashboards</li>
+        <li>Teams managed by admins and team managers; mirrored from OIDC group claims on every login</li>
+        <li><code>admin_groups</code> promote IdP groups to platform admin</li>
+        <li>Transfer ownership, leave a workspace, member directory and audit of every grant</li>
+        <li>Agents inherit the member's role — a viewer's token never mutates</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Result cache <span class="tag new">New in 1.1</span></h3>
+      <ul>
+        <li>Server LRU (256 MB default) in front of profiles, schemas, plans, widget data and read-only SQL</li>
+        <li>Keys embed file size + mtime and a per-workspace data epoch — exact invalidation, no timers</li>
+        <li>Browser IndexedDB copy with stale-while-revalidate and <code>ETag</code> / <code>304</code></li>
+        <li>Last result of every tab restored after a reload; overview selection remembered</li>
+        <li>Live epoch events to every workspace member; per-workspace and global clear</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Security</h3>
+      <ul>
+        <li>Two sandbox layers: a Node filesystem jail and DuckDB's <code>allowed_directories</code> / <code>enable_external_access</code> / <code>lock_configuration</code></li>
+        <li>One choke point for every query: authorization → SQL guard → HITL → audit</li>
+        <li>AES-256-GCM credential vault with the row id as AAD; scrypt passwords; SHA-256 API tokens shown once</li>
+        <li>Roles ADMIN / USER / READ_ONLY, scoped tokens <code>read</code> / <code>write</code> / <code>mcp</code> / <code>admin</code> with workspace pinning and expiry</li>
+        <li>Local login, OIDC (Authorization Code + PKCE) with group → role mapping</li>
+        <li>Per-workspace memory, thread and timeout limits; extension allow-list; rate limiting</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Observability & operations</h3>
+      <ul>
+        <li>Prometheus metrics: queries, latency, rows, engines, MCP tool calls, HITL challenges, cache hit rate</li>
+        <li>OpenTelemetry traces for every query and tool call, exported over OTLP/HTTP</li>
+        <li>Structured pino logs with request ids; real-time audit feed over WebSocket</li>
+        <li>Liveness / readiness probes; live hardware gauges in Settings</li>
+        <li>SQLite metadata by default, PostgreSQL via <code>DATABASE_URL</code>; migrations run at start</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Themes & layout</h3>
+      <ul>
+        <li>Six themes — Midnight, Graphite, Fjord (dark); Daylight, Professional, Paper (light)</li>
+        <li>Runtime CSS variables so charts, editor and gauges follow; palettes validated for colour-vision separation</li>
+        <li>Override sans / mono fonts and UI scale independently of the theme</li>
+        <li>Resizable splitters everywhere; hide and restore any component per page</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section-alt">
+  <div class="container">
+    <div class="section-head center">
+      <span class="eyebrow">MCP tools</span>
+      <h2>Ten tools, one registry.</h2>
+      <p class="lead">The same definitions back the MCP server, the REST façade and the OpenAPI document — they cannot drift.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>execute_query</code></td><td>Guarded DuckDB SQL with paging — including attached lakehouse catalogs; mutations need <code>dry_run=false</code> after approval</td></tr>
+          <tr><td><code>profile_dataset</code></td><td><code>SUMMARIZE</code> statistics of a table, file, lakehouse table or SELECT</td></tr>
+          <tr><td><code>inspect_schema</code></td><td>Columns, types and nullability without scanning — files, tables, remote objects, <code>.duckdb</code> files</td></tr>
+          <tr><td><code>explain_query</code></td><td>Physical plan as JSON tree + ASCII, optionally with measured timings</td></tr>
+          <tr><td><code>list_accessible_data</code></td><td>Workspaces, tables and views with columns, every data file, attached lakehouse catalogs</td></tr>
+          <tr><td><code>browse_storage</code></td><td>One level of the data directory, cloud buckets and objects, or lakehouse schemas and tables</td></tr>
+          <tr><td><code>lakehouse_query</code></td><td>SQL on a Databricks SQL warehouse, HITL-gated for non-read statements</td></tr>
+          <tr><td><code>save_dataset</code></td><td><code>COPY … TO</code> Parquet / CSV / JSON inside the jail</td></tr>
+          <tr><td><code>list_dashboards</code></td><td>Dashboards with their widgets and layouts</td></tr>
+          <tr><td><code>create_dashboard_widget</code></td><td>Build dashboards autonomously; SQL validated read-only and dry-run first</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="text-align:center">Resources: <code>duckdb://workspaces</code>, <code>duckdb://schemas/{workspace_id}</code>, <code>duckdb://system/resources</code>. Prompts: <code>data_quality_audit</code>, <code>sql_optimization</code>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <div class="cta-band">
+      <div>
+        <h2>See it running.</h2>
+        <p>One image, every architecture. Or build from source in two commands.</p>
+        <div class="cta-row" style="margin-top:20px">
+          <a class="btn btn-primary" href="{{root}}deploy.html">Download &amp; deploy</a>
+          <a class="btn" href="{{root}}docs/index.html">Getting started</a>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre><code>docker pull {{image}}:{{version}}</code></pre></div>
+    </div>
+  </div>
+</section>

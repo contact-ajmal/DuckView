@@ -13,3 +13,6 @@ coverage/
 
 # third-party design references — kept locally, not published
 docs/reference/
+
+# website build output (site/build.mjs)
+site/dist/

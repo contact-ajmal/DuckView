@@ -1,0 +1,147 @@
+---
+title: Download & deploy
+description: Get DuckView from Docker Hub (multi-arch image), run it with docker run or docker compose, deploy to Kubernetes with the bundled manifests, or build from source with pnpm.
+---
+<section class="hero-small">
+  <div class="container">
+    <span class="eyebrow">Download &amp; deploy</span>
+    <h1>Pick a way to run it.</h1>
+    <p class="lead">Every option gives you the same server: HTTP API, WebSocket streaming, MCP transports and the web UI on port <code>4200</code>. Node 20+ and the bundled native DuckDB are the only runtime.</p>
+    <div class="cta-row" style="justify-content:center;margin-top:20px">
+      <a class="btn btn-primary" href="{{hub}}" target="_blank" rel="noopener">Docker Hub — {{image}} ↗</a>
+      <a class="btn" href="{{repo}}/releases" target="_blank" rel="noopener">Releases on GitHub ↗</a>
+      <a class="btn" href="{{repo}}/archive/refs/heads/main.zip" target="_blank" rel="noopener">Source (.zip) ↗</a>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="container grid grid-2">
+    <div class="deploy-card">
+      <h3>1 · Docker Hub image</h3>
+      <p class="muted">Multi-arch (<code>linux/amd64</code>, <code>linux/arm64</code>), built by CI on every release with SBOM and provenance, smoke-tested before it is tagged.</p>
+      <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre><code>docker pull {{image}}:latest        # newest release
+docker pull {{image}}:{{version}}         # pinned
+docker pull {{ghcr}}:latest    # GHCR mirror</code></pre></div>
+      <div class="kv">
+        <b>Tags</b><span><code>latest</code>, <code>1</code>, <code>1.1</code>, <code>{{version}}</code> (older: <code>1.0</code>, <code>1.0.0</code>)</span>
+        <b>Base</b><span><code>node:20-bookworm-slim</code>, runs as <code>duckuser</code>, <code>tini</code> init, healthcheck on <code>/readyz</code></span>
+        <b>Volumes</b><span><code>/data</code> (datasets — the filesystem jail) · <code>/app/meta</code> (SQLite metadata)</span>
+        <b>Extensions</b><span><code>httpfs</code>, <code>azure</code>, <code>arrow</code>, <code>iceberg</code>, <code>delta</code>, <code>excel</code> pre-installed — no network needed at runtime</span>
+      </div>
+    </div>
+
+    <div class="deploy-card">
+      <h3>2 · <code>docker run</code></h3>
+      <p class="muted">The fastest first look. Set <code>JWT_SECRET</code> and <code>ENCRYPTION_KEY</code> for anything beyond that, or sessions and stored credentials will not survive a restart.</p>
+      <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre><code>docker run -d --name duckview -p 4200:4200 \
+  -v duckview-data:/data -v duckview-meta:/app/meta \
+  -e JWT_SECRET=$(openssl rand -hex 32) \
+  -e ENCRYPTION_KEY=$(openssl rand -hex 32) \
+  -e DUCKVIEW_ADMIN_EMAIL=admin@example.com \
+  -e DUCKVIEW_ADMIN_PASSWORD='change-me-now' \
+  {{image}}:latest
+
+open http://localhost:4200</code></pre></div>
+      <p class="muted" style="margin:0">Mount a host folder instead of the named volume (<code>-v $PWD/data:/data</code>) to query files you already have.</p>
+    </div>
+
+    <div class="deploy-card">
+      <h3>3 · Docker Compose</h3>
+      <p class="muted">The repository ships a <code>docker-compose.yml</code> with optional profiles: PostgreSQL metadata, a local Ollama for DuckCopilot, and Prometheus.</p>
+      <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre><code>git clone {{repo}}.git &amp;&amp; cd DuckView
+cp .env.example .env            # secrets, admin credentials
+docker compose up -d                              # SQLite metadata
+docker compose --profile postgres up -d           # + PostgreSQL (set DATABASE_URL in .env)
+docker compose --profile ollama up -d             # + Ollama for DuckCopilot
+docker compose --profile observability up -d      # + Prometheus on :9090</code></pre></div>
+      <div class="kv">
+        <b>Data</b><span><code>./data</code> is mounted at <code>/data</code>; spill goes to a tmpfs</span>
+        <b>Memory</b><span><code>DUCKVIEW_MEMORY</code> (container limit, default 8g) and <code>DUCKDB_MEMORY_LIMIT</code> (engine ceiling, default 70%)</span>
+      </div>
+    </div>
+
+    <div class="deploy-card">
+      <h3>4 · Kubernetes</h3>
+      <p class="muted">Kustomize manifests in <code>k8s/</code>: Deployment with liveness/readiness/startup probes, non-root read-only rootfs, an <code>emptyDir</code> spill volume, a PVC for <code>/data</code>, <code>ClientIP</code> session affinity (keeps SSE streams pinned) and Prometheus scrape annotations.</p>
+      <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre><code>cp k8s/secret.example.yaml k8s/secret.yaml   # or ExternalSecrets / SealedSecrets
+kubectl apply -k k8s/
+kubectl -n duckview get pods</code></pre></div>
+      <p class="muted" style="margin:0">DuckDB engines are process-local: scale vertically first. For more than one replica use PostgreSQL metadata, a RWX data volume and session affinity.</p>
+    </div>
+
+    <div class="deploy-card">
+      <h3>5 · From source</h3>
+      <p class="muted">A pnpm monorepo: Fastify server + React web app. DuckDB ships as a native module — nothing else to install.</p>
+      <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre><code>git clone {{repo}}.git &amp;&amp; cd DuckView
+pnpm install &amp;&amp; pnpm build
+DUCKVIEW_ADMIN_EMAIL=admin@example.com \
+DUCKVIEW_ADMIN_PASSWORD='change-me' pnpm start
+# → http://localhost:4200   ·   pnpm dev for hot reload (web on :5173)</code></pre></div>
+      <div class="kv">
+        <b>Requires</b><span>Node 20+, pnpm 10</span>
+        <b>CLI</b><span><code>duckview serve | mcp | migrate | create-user | create-token | config</code></span>
+      </div>
+    </div>
+
+    <div class="deploy-card">
+      <h3>6 · MCP for your editor</h3>
+      <p class="muted">Point Claude Desktop, Claude Code or Cursor at a running DuckView with a token that has the <code>mcp</code> scope (mint one in the Agent &amp; MCP hub or with <code>duckview create-token</code>).</p>
+      <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre><code>claude mcp add --transport http duckview http://localhost:4200/mcp \
+  --header "Authorization: Bearer dv_…"
+
+# stdio alternative
+duckview mcp --token dv_… [--workspace &lt;id&gt;]</code></pre></div>
+    </div>
+  </div>
+</section>
+
+<section class="section-alt">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">Configuration essentials</span>
+      <h2>Ten settings cover most deployments.</h2>
+      <p class="lead">Everything lives in <code>duckview.config.yaml</code> with <code>${VAR:-default}</code> placeholders; any key can be overridden with <code>DUCKVIEW__SECTION__KEY</code>. The <a href="{{root}}docs/configuration.html">configuration reference</a> has the full list.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variable</th><th>Purpose</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><code>JWT_SECRET</code></td><td>Signs sessions (≥ 16 chars). Required in production.</td><td>ephemeral (dev)</td></tr>
+          <tr><td><code>ENCRYPTION_KEY</code></td><td>32-byte hex for the AES-256-GCM credential vault. Required in production.</td><td>ephemeral (dev)</td></tr>
+          <tr><td><code>DUCKVIEW_ADMIN_EMAIL</code> / <code>_PASSWORD</code></td><td>Bootstrap admin, created only when no users exist.</td><td>—</td></tr>
+          <tr><td><code>DUCKVIEW_DATA_DIR</code></td><td>The filesystem jail for every DuckDB file read and write.</td><td><code>./data</code> (<code>/data</code> in the image)</td></tr>
+          <tr><td><code>DUCKVIEW_FILESYSTEM_MODE</code></td><td><code>full</code> for a personal workstation (mount any folder), <code>sandboxed</code> for multi-tenant deployments.</td><td><code>full</code></td></tr>
+          <tr><td><code>DATABASE_URL</code></td><td>Metadata store: <code>sqlite://…</code> or <code>postgres://…</code>. Migrations run at start.</td><td>SQLite</td></tr>
+          <tr><td><code>DUCKVIEW_ENABLE_EXTERNAL_ACCESS</code></td><td>Required for <code>s3://</code>, <code>gcs://</code>, <code>https://</code> and MotherDuck sources in sandboxed mode.</td><td><code>false</code></td></tr>
+          <tr><td><code>DUCKDB_MEMORY_LIMIT</code> / <code>DUCKDB_THREADS</code></td><td>Engine ceiling as a percentage of host RAM or absolute; threads per engine.</td><td><code>80%</code> / <code>auto</code></td></tr>
+          <tr><td><code>AUTH_STRATEGY</code> + <code>OIDC_*</code></td><td>Switch to SSO (Authorization Code + PKCE); <code>OIDC_GROUPS_CLAIM</code> maps IdP groups to teams.</td><td><code>local</code></td></tr>
+          <tr><td><code>COPILOT_PROVIDER</code> + keys</td><td><code>anthropic</code>, <code>openai</code>, <code>ollama</code>, <code>bedrock</code>, <code>bedrock_agent</code>, <code>agentcore</code>.</td><td><code>none</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn"><span>⚠</span><span><b>Upgrading.</b> Metadata migrations are additive and run automatically on start (SQLite and PostgreSQL). Back up <code>/app/meta</code> or your Postgres database before a major upgrade; the DuckDB engines and the data directory are untouched.</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <div class="section-head center">
+      <span class="eyebrow">What you get</span>
+      <h2>One container, the whole platform.</h2>
+    </div>
+    <div class="arch">
+      <div class="layer"><b>Web UI</b><span>React 19 · Vite · Tailwind v4 · Chart.js · CodeMirror — served by the same process on <code>/</code></span></div>
+      <div class="down">│ REST · WebSocket (rows, live events) · SSE (Copilot, MCP) · Streamable HTTP</div>
+      <div class="layer"><b>Fastify 5</b><span>auth (local · OIDC · tokens) · sharing (owner/editor/viewer, teams) · QueryService (authz → guard → HITL → audit) · result cache · lakehouse · Copilot bridge · agent tool registry → MCP + REST + OpenAPI</span></div>
+      <div class="down">│</div>
+      <div class="layer"><b>EngineManager</b><span>one native DuckDB instance per workspace (LRU + idle TTL), jailed and locked; httpfs / azure / iceberg secrets and <code>ATTACH</code>ed catalogs hot-applied</span></div>
+      <div class="down">│</div>
+      <div class="layer"><b>Metadata</b><span>Drizzle ORM — SQLite by default, PostgreSQL via <code>DATABASE_URL</code>; users · teams · workspaces · members · tabs · saved queries · dashboards · connections · agents · audit</span></div>
+    </div>
+    <div class="cta-row" style="justify-content:center;margin-top:36px">
+      <a class="btn btn-primary" href="{{root}}docs/index.html">Getting started guide</a>
+      <a class="btn" href="{{root}}docs/architecture.html">Architecture</a>
+    </div>
+  </div>
+</section>
