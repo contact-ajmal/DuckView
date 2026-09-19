@@ -97,6 +97,8 @@ section { padding: 72px 0; }
 
 /* ---------- cards */
 .grid { display: grid; gap: 18px; }
+/* Grid/flex items default to min-width:auto, so a long <pre> line would widen the whole column past the viewport. */
+.grid > *, .tour > *, .cta-band > *, .docs-layout > *, .footer-grid > * { min-width: 0; }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
@@ -122,7 +124,7 @@ section { padding: 72px 0; }
 
 /* ---------- code */
 .code { position: relative; background: #0b0b0e; border: 1px solid var(--border); border-radius: 12px; margin: 14px 0 18px; overflow: hidden; }
-.code pre { margin: 0; padding: 16px 18px; overflow-x: auto; font-size: 0.86rem; line-height: 1.6; color: #e4e4e7; }
+.code pre { margin: 0; padding: 16px 72px 16px 18px; overflow-x: auto; font-size: 0.86rem; line-height: 1.6; color: #e4e4e7; }
 .code .copy { position: absolute; top: 8px; right: 8px; font: 500 0.72rem var(--sans); color: var(--text-2); background: var(--surface); border: 1px solid var(--border-2); border-radius: 6px; padding: 4px 8px; cursor: pointer; opacity: 0.85; }
 .code .copy:hover { color: #fff; opacity: 1; }
 .code .copy.done { color: var(--green); border-color: var(--green); }
