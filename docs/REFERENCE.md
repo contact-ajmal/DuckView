@@ -26,6 +26,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Sharing: workspace roles OWNER/EDITOR/VIEWER for users and teams            │
 │  QueryService ─ single choke point: authz → SQL guard → HITL → audit         │
 │  ResultCache ─ LRU keyed on file stat + workspace data epoch · ETag/304      │
+│  Mosaic ─ workspace engine as a Mosaic data connector (Arrow, exec policy)   │
 │  Storage: jailed tree · S3/Azure SDK listings · DESCRIBE-based inspection     │
 │  Exports: COPY … TO (parquet/csv/json) + streaming Arrow IPC writer          │
 │  Copilot: schema/SUMMARIZE/active-SQL context → provider bridge (SSE)        │
@@ -132,6 +133,7 @@ Key settings:
 | `mcp` | `default_page_size` / `max_page_size` | 50 / 200 rows per tool call; `max_cell_chars` truncates long strings. |
 | | `require_confirmation_for_mutations` | HITL gate for agents. |
 | `cache` | `enabled`, `max_bytes`, `max_entry_bytes` | Server-side result cache (default on, 256 MB LRU, entries ≤ 16 MB). See [Result cache](#result-cache). |
+| `mosaic` | `enabled`, `schema`, `max_rows` | Interactive visualization (uwdata/mosaic) endpoint; the schema (default `duckview_mosaic`) holds pre-aggregated views and is dropped whenever the data epoch moves; `max_rows` (1 000 000) caps chart queries independently of the grid. See [Interactive exploration (Mosaic)](#interactive-exploration-mosaic). |
 | | `ttl_seconds`, `remote_ttl_seconds` | Lifetime of versioned entries (6 h) and of entries touching remote / lakehouse / MotherDuck sources (60 s; `0` never caches them). |
 | `observability` | `metrics_enabled`, `otel.*` | Prometheus at `/metrics`; OTLP/HTTP trace export when `otel.enabled`. |
 
@@ -177,6 +179,21 @@ SQL that names an attached lakehouse alias, a remote URI (`s3://…`) or runs on
 **Protocol.** `POST /api/workspaces/:id/overview | /profile | /explain | /query`, `POST /api/storage/inspect` and `POST /api/dashboards/:id/widgets/:wid/data` answer with `ETag: "<key>"` and `cached` / `computed_at` in the body; send `If-None-Match` to get a `304` when the key still matches (one `stat` and a hash — no DuckDB work); `refresh: true` in the body (or `X-DuckView-Refresh: 1`) recomputes and re-stores. `GET /api/workspaces` carries each workspace's `data_version`; the live feed (`WS /api/ws/events`) pushes `{type:"workspace", workspace_id, data_version, reason}` to every member when it moves, and the query WebSocket's `done` message includes it after a mutation. `DELETE /api/workspaces/:id/cache` (editor) drops the workspace's server entries *and* moves the epoch so every browser recomputes; `POST /api/admin/cache/clear` empties the server cache. Stats: `GET /api/system/live → cache`, Prometheus `duckview_cache_lookups_total{kind,result}`, `duckview_cache_bytes`, `duckview_cache_entries`.
 
 Single-replica by design (the server cache is per process); with several replicas each keeps its own — still correct, just less warm.
+
+## Interactive exploration (Mosaic)
+
+The **Explore** view — on the Overview page (*Explore* button) and as a results view in the workbench — is built on [Mosaic](https://idl.uw.edu/mosaic/) (`@uwdata/vgplot` 0.31, BSD-3). Every numeric or temporal column becomes a histogram, every low-cardinality text column a bar chart, with a lazily paged table underneath; brushing any chart cross-filters all the others. Mosaic's coordinator turns interactions into SQL and, for repeated filtering, builds pixel-binned **pre-aggregated views** so brushing stays interactive on millions of rows.
+
+DuckView runs Mosaic against the workspace engine — never DuckDB-WASM in the browser — through `POST /api/workspaces/:id/mosaic`:
+
+| `type` | What happens |
+|---|---|
+| `arrow` / `json` | A single read-only statement run through the normal query pipeline (role, guard, audit, result cache with `ETag` / `If-None-Match`) with the `mosaic.max_rows` ceiling; `arrow` returns an Arrow IPC stream. |
+| `exec` | Admitted only in Mosaic's own shapes, validated statement by statement: `CREATE SCHEMA IF NOT EXISTS "<schema>"`, `CREATE TABLE IF NOT EXISTS "<schema>"."preagg_<hex>" AS SELECT …`, `DROP SCHEMA IF EXISTS "<schema>" CASCADE`, `DROP TABLE IF EXISTS "<schema>"."preagg_<hex>"`, plus DuckView's `CREATE OR REPLACE VIEW "<schema>"."src_<hex>" AS SELECT …` that makes a file or an ad-hoc query addressable. The wrapped SELECT must be read-only and passes the sandbox. Anything else is `403`. |
+
+Pre-aggregates are derived data, not workspace mutations: any member with read access can create them (viewers included), they never move the data epoch and are never held for agent approval. **Invalidation reuses the epoch** — when it moves, the server drops the Mosaic schema and the Explore view rebuilds from the live event. The schema is hidden from the catalog, the explorer and `list_accessible_data`; it is named `duckview_mosaic` rather than `mosaic` because a workspace database file called `mosaic.duckdb` would make `"mosaic"."preagg_x"` ambiguous between catalog and schema. `GET /api/mosaic/info` reports the schema and limits; `duckview_mosaic_exec_total{kind}` counts plumbing statements.
+
+Browser side: `lib/mosaic` (a connector that decodes Arrow with Mosaic's `decodeIPC`, one coordinator per view bound to the workspace) and `features/explore/ExploreView.tsx`. `scripts/e2e-mosaic.mjs` drives a real Chrome through the Overview and workbench scenarios (login, render, brush) over the DevTools protocol and fails on any page exception.
 
 ## Sharing & teams
 
@@ -284,6 +301,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Data | `POST /api/workspaces/:id/files` (multipart upload into the jail) · `DELETE /api/workspaces/:id/files?path=` · `POST /api/workspaces/:id/overview` (KPIs, null ratios, sample, distributions) · `GET /api/workspaces/:id/catalog` |
 | Query | `POST /api/workspaces/:id/query` · `/explain` · `/profile` · `/save` · `WS /api/ws/query` (auth → run/cancel; schema → rows* → done). `query`, `explain`, `profile`, `overview`, `storage/inspect` and widget data are conditional (`ETag` / `If-None-Match` → 304, `refresh: true`). |
 | Cache | `DELETE /api/workspaces/:id/cache` · `POST /api/admin/cache/clear` · cache stats in `GET /api/system/live` |
+| Mosaic | `POST /api/workspaces/:id/mosaic {type: arrow\|json\|exec, sql}` · `GET /api/mosaic/info` |
 | Live | `WS /api/ws/events` — audit rows, MCP tool invocations and session events in real time (admins: all; others: own) · `GET /api/system/live` — CPU %, RAM, `duckdb_memory()` per engine, scratch/data disk usage |
 | Agents | `GET/POST/DELETE /api/tokens` · `GET /api/mcp/sessions` · `GET /api/mcp/info` (Claude Desktop / Cursor / Claude Code snippets) · `/api/agents…` (registered agents, snippets, self-test, invoke, discovery) · `GET /api/agent/openapi.json` · `GET/POST /api/agent/v1/tools[/:tool]` (REST façade) |
 | Lakehouse | `GET /api/lakehouse/providers` · `/api/lakehouse-connections…` · `GET /api/lakehouse/browse` · `GET /api/lakehouse/:id/inspect` · `POST /api/lakehouse/:id/query` · `POST /api/lakehouse/:id/materialize` |
@@ -319,7 +337,7 @@ packages/server/src
   engine/        sandbox (DataJail), sql-guard (lexer/classifier/rewriter), duckdb (engines, overview, memory stats), results
   security/      AES-256-GCM, scrypt, token hashing
   services/      audit, auth/tokens, groups (teams + SSO sync), workspaces (membership/roles, tabs, data epoch), query (authz + HITL),
-                 cache (result cache: keys, LRU, ETag), connections, files (uploads),
+                 cache (result cache: keys, LRU, ETag), mosaic (connector endpoint + exec policy), connections, files (uploads),
                  lakehouse (Iceberg ATTACH + Databricks), databricks (UC + Statement Execution client), agents, aws (Bedrock/AgentCore bridge)
   agent/         tool registry (shared by MCP + REST), OpenAPI generator, framework snippets
   mcp/           server (registry → tools, resources, prompts), stdio, http (SSE + Streamable HTTP)
@@ -332,6 +350,7 @@ packages/web/src
   features/settings   categorised left-nav: appearance (themes/fonts/scale) · layout · hardware gauges · engine tuning · storage · copilot · account · teams · users
   features/workspace  ShareDialog (members, roles, transfer, leave) next to the workbench
   lib/resultCache     IndexedDB result cache (LRU by bytes, per user, wiped on sign-out) · lib/useCached: stale-while-revalidate hook
+  lib/mosaic          Mosaic connector + per-view coordinator · features/explore: cross-filtered Explore view (vgplot)
   theme/              theme definitions (ramps, accents, tones, chart series, fonts) · store/theme.ts applies them as CSS variables
   features/mcp        registered agents (tokens, self-test, chat) · framework snippets + OpenAPI · client snippets · live inspector (WS)
   features/explorer   VS Code-style tree (data dir, folders, cloud, lakehouse) · schema panel · cloud & lakehouse wizards
@@ -340,10 +359,11 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 174 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, and integration suites that boot real DuckDB
+pnpm test        # 184 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +
                  # Statement Execution API) and the agent façade / AWS providers against a fake AWS bridge
 node scripts/smoke.mjs http://localhost:4200 admin@example.com <password>   # against a running instance
+node scripts/e2e-mosaic.mjs overview-explore                               # real-browser check of the Explore view (needs Chrome)
 ```

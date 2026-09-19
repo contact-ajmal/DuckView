@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/DuckDB-1.5-FFF000?logo=duckdb&logoColor=black" alt="DuckDB 1.5">
   <img src="https://img.shields.io/badge/MCP-stdio%20%C2%B7%20SSE%20%C2%B7%20Streamable%20HTTP-7c3aed" alt="MCP transports">
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript strict">
-  <img src="https://img.shields.io/badge/tests-174%20passing-22c55e" alt="174 tests">
+  <img src="https://img.shields.io/badge/tests-184%20passing-22c55e" alt="184 tests">
 </p>
 
 <p align="center">
@@ -45,6 +45,7 @@ Most "SQL UIs" stop at the query box. DuckView is a complete, self-hosted data w
 | 🤖 **Agent-native from day one** | A hardened **MCP server** plus a **REST / OpenAPI façade** expose the same tools to Claude Desktop, Cursor, Claude Code, Strands, LangGraph, LangChain, CrewAI, Bedrock AgentCore and Bedrock Agents. Every mutation is held for **human approval**. |
 | 🧠 **DuckCopilot** | An in-app assistant hydrated with your live schema, files, buckets and the SQL you're writing. Bring Anthropic, OpenAI, Ollama, Amazon Bedrock — or point it at **your own agent** on AgentCore. |
 | 📊 **From profile to dashboard** | Auto-profiling on load (KPIs, null ratios, distributions), a tabbed IDE-style workbench with charts, plans and profiles, and a drag-and-drop BI dashboard builder with auto-refresh. |
+| 🔍 **Explore, interactively** | Every column of a file, table or query becomes a linked chart — brush one and the rest cross-filter, at data-cube speed on millions of rows, computed in the workspace engine. Built on [Mosaic](https://idl.uw.edu/mosaic/). |
 | ⚡ **Fast the second time** | A two-tier result cache — shared on the server, per user in the browser — keyed on file fingerprints and a workspace data epoch, so a 10 s profile of a 400 MB CSV comes back in milliseconds for everyone, and is *never* stale after a mutation. |
 | 👥 **Built for teams** | Share a workspace with people or teams as **viewer / editor / owner**. Dashboards and saved queries are shared; tabs stay personal. Teams mirror your IdP groups over OIDC, so `okta:finance` is a share target on day one. |
 | 🔒 **Enterprise hardening** | Filesystem jail, DuckDB `lock_configuration`, per-workspace memory/thread limits, AES-256-GCM credential vault, scoped API tokens, audit log, Prometheus + OpenTelemetry, OIDC with group → role mapping. |
@@ -215,7 +216,7 @@ Full details — configuration keys, every endpoint, the MCP tool contracts, CLI
 
 ## 🧪 Quality
 
-`pnpm test` runs **174 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API) and exercise the agent façade against a fake AWS bridge. `scripts/smoke.mjs` verifies a running instance end to end.
+`pnpm test` runs **184 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API) and exercise the agent façade against a fake AWS bridge. `scripts/smoke.mjs` verifies a running instance end to end.
 
 ---
 

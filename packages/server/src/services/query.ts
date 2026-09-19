@@ -32,6 +32,8 @@ export interface RunOptions {
   refresh?: boolean;
   /** Client ETag; when it still matches, `run` resolves to `{ notModified: true }` without executing anything. */
   ifNoneMatch?: string | null;
+  /** Raise the row ceiling above duckdb.max_result_rows for callers that page or bin themselves (Mosaic). */
+  rowCap?: number;
 }
 
 
@@ -105,14 +107,14 @@ export class QueryService {
       const execute = async () => {
         const { engine } = await this.workspaces.engine(p, workspaceId);
         try {
-          return await engine.execute(sql, { maxRows: opts.maxRows, page: opts.page, countTotal: opts.countTotal, signal: opts.signal, timeoutMs: opts.timeoutMs, actor });
+          return await engine.execute(sql, { maxRows: opts.maxRows, rowCap: opts.rowCap, page: opts.page, countTotal: opts.countTotal, signal: opts.signal, timeoutMs: opts.timeoutMs, actor });
         } finally {
           await this.noteMutation(p, workspaceId, analysis);
         }
       };
       const cacheable = opts.cache !== false && !analysis.isMutating;
       const outcome: CacheOutcome<QueryResult & { analysis: SqlAnalysis; guardedSql: string }> = cacheable
-        ? await this.cache.through(p, workspaceId, 'query', sql, { maxRows: opts.maxRows ?? null, page: opts.page ?? 1, countTotal: !!opts.countTotal }, { ifNoneMatch: opts.ifNoneMatch, refresh: opts.refresh }, execute)
+        ? await this.cache.through(p, workspaceId, 'query', sql, { maxRows: opts.maxRows ?? null, rowCap: opts.rowCap ?? null, page: opts.page ?? 1, countTotal: !!opts.countTotal }, { ifNoneMatch: opts.ifNoneMatch, refresh: opts.refresh }, execute)
         : { status: 'bypass', etag: null, value: await execute(), cached: false, computed_at: new Date().toISOString() };
       const durationMs = outcome.status === 'not_modified' ? 0 : outcome.value.durationMs;
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'query.execute', resource: `workspace:${workspaceId}`, queryText: sql, durationMs, ip: p.ip, status: 'ok' });

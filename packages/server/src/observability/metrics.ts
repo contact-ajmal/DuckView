@@ -58,6 +58,7 @@ export const metrics = {
   cacheLookups: new Counter({ name: 'duckview_cache_lookups_total', help: 'Result cache lookups by kind and outcome', labelNames: ['kind', 'result'] as const, registers: [registry] }),
   cacheBytes: new Gauge({ name: 'duckview_cache_bytes', help: 'Bytes held by the server result cache', registers: [registry] }),
   cacheEntries: new Gauge({ name: 'duckview_cache_entries', help: 'Entries held by the server result cache', registers: [registry] }),
+  mosaicExec: new Counter({ name: 'duckview_mosaic_exec_total', help: 'Mosaic pre-aggregation plumbing statements by kind', labelNames: ['kind'] as const, registers: [registry] }),
 };
 
 metrics.hostMemoryBytes.set(os.totalmem());

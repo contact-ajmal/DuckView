@@ -7,6 +7,8 @@ import { withAlpha, compactNumber, useChartTheme } from '../../lib/chart';
 import { api, uploadFiles, formatBytes, type OverviewResult, type OverviewColumn, type JailEntry } from '../../api/client';
 import { useCached } from '../../lib/useCached';
 import { CacheChip } from '../../components/CacheChip';
+import { ExploreView, type ExploreSource } from '../explore/ExploreView';
+import { Sparkles } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { ResultsGrid } from '../workspace/ResultsGrid';
 import { Eyebrow, PageTitle, SideCard, Panel, TypePill, Tag } from '../../components/layout';
@@ -96,10 +98,16 @@ function Distribution({ col }: { col: OverviewColumn }) {
   );
 }
 
+/** Maps the Overview's target kinds onto what the Explore view understands. */
+function exploreSource(kind: string, target: string): ExploreSource {
+  return { kind: kind === 'table' ? 'table' : kind === 'query' ? 'query' : 'file', target };
+}
+
 export function OverviewPage() {
   const ws = useWorkspace();
   const { canEdit: canWrite } = useWorkspaceAccess();
   const [dragging, setDragging] = useState(false);
+  const [explore, setExplore] = useState(false);
   const [uploads, setUploads] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const [picker, setPicker] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -379,12 +387,21 @@ export function OverviewPage() {
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-[11px] text-zinc-500">overview suite finished in {overview.duration_ms} ms</span>
                   <CacheChip state={ov.state} computedAt={ov.computedAt} fromCache={ov.fromCache} serverCached={ov.serverCached} onRefresh={ov.refresh} verb="profiled" />
+                  <button onClick={() => setExplore((e) => !e)} className={cn('inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium', explore ? 'border-accent-600/60 bg-accent-600/20 text-accent-100' : 'border-zinc-700 bg-zinc-900/70 text-zinc-200 hover:border-zinc-500')} title="Interactive, cross-filtered charts of every column (Mosaic)">
+                    <Sparkles className="h-3.5 w-3.5" /> {explore ? 'Hide explore' : 'Explore'}
+                  </button>
                   <button onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)} className="inline-flex items-center gap-1.5 rounded-md border border-accent-600/60 bg-accent-600/20 px-3 py-1.5 text-xs font-medium text-accent-100 hover:bg-accent-600/30">
                     Open Query tool <ArrowRight className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
             </div>
+
+            {explore && target && (
+              <div className="h-[720px] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
+                <ExploreView workspaceId={wsId!} source={exploreSource(overview.kind, target)} />
+              </div>
+            )}
 
             {!hidden['overview.kpis'] && <div className="group/kpi relative grid grid-cols-1 gap-4 md:grid-cols-3">
               <HideButton id="overview.kpis" className="absolute -top-5 right-0 opacity-0 group-hover/kpi:opacity-100" />

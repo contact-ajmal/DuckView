@@ -86,6 +86,8 @@ export interface EngineSpec {
 
 export interface ExecuteOptions {
   maxRows?: number;
+  /** Upper bound for maxRows instead of duckdb.max_result_rows (Mosaic rasters legitimately exceed the grid cap). */
+  rowCap?: number;
   timeoutMs?: number;
   /** Compute total row count with a wrapped COUNT(*) (read queries only). */
   countTotal?: boolean;
@@ -497,7 +499,8 @@ export class WorkspaceEngine {
 
   /** Executes (possibly multi-statement) SQL; returns the last statement's result, capped at maxRows. */
   async execute(rawSql: string, opts: ExecuteOptions = {}): Promise<QueryResult & { analysis: SqlAnalysis; guardedSql: string }> {
-    const maxRows = Math.max(1, Math.min(opts.maxRows ?? this.cfg.duckdb.max_result_rows, this.cfg.duckdb.max_result_rows));
+    const cap = opts.rowCap ?? this.cfg.duckdb.max_result_rows;
+    const maxRows = Math.max(1, Math.min(opts.maxRows ?? cap, cap));
     const timeoutMs = opts.timeoutMs ?? (this.spec.settings.query_timeout_seconds ?? this.cfg.duckdb.query_timeout_seconds) * 1000;
     const guarded = this.guard(rawSql);
     const actor = opts.actor ?? 'user';
@@ -952,7 +955,8 @@ export class WorkspaceEngine {
     // Attached lakehouse catalogs are browsed lazily elsewhere (lakehouseTree); listing their columns here would
     // fetch remote table metadata for every table.
     const excluded = (this.spec.attachments ?? []).map((a) => sqlString(a.alias.replace(/[^A-Za-z0-9_]/g, '_')));
-    const notLakehouse = excluded.length ? ` AND database_name NOT IN (${excluded.join(', ')})` : '';
+    // Mosaic's pre-aggregated views and DuckView's source views are plumbing, not user data.
+    const notLakehouse = (excluded.length ? ` AND database_name NOT IN (${excluded.join(', ')})` : '') + ` AND schema_name <> ${sqlString(this.cfg.mosaic.schema)}`;
     return this.withConnection(async (conn) => {
       const t = await conn.runAndReadAll(`
         SELECT database_name, schema_name, table_name AS name, 'TABLE' AS type, estimated_size, column_count, sql

@@ -121,6 +121,20 @@ export const ConfigSchema = z.object({
       remote_ttl_seconds: z.coerce.number().int().min(0).default(60),
     })
     .default({}),
+  mosaic: z
+    .object({
+      /** Mosaic (uwdata/mosaic) interactive visualization endpoint. */
+      enabled: z.coerce.boolean().default(true),
+      /**
+       * Database schema that holds Mosaic's pre-aggregated materialized views and DuckView's source views; hidden
+       * from catalogs. Deliberately not "mosaic": a workspace database file called mosaic.duckdb would make
+       * "mosaic"."preagg_x" ambiguous between catalog and schema.
+       */
+      schema: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).default('duckview_mosaic'),
+      /** Row cap for Mosaic result queries (pixel-binned rasters can be large; the grid cap does not apply). */
+      max_rows: z.coerce.number().int().min(1000).default(1_000_000),
+    })
+    .default({}),
   mcp: z
     .object({
       default_page_size: z.coerce.number().int().min(1).default(50),

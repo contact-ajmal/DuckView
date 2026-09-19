@@ -63,6 +63,11 @@ cache:                                   # server-side result cache (profiles, s
   ttl_seconds: 21600                     # versioned entries (local files + workspace data epoch): 6 h
   remote_ttl_seconds: 60                 # entries touching s3://, lakehouse catalogs or MotherDuck; 0 = never cache them
 
+mosaic:                                  # interactive visualization (uwdata/mosaic) over the workspace engine
+  enabled: true
+  schema: duckview_mosaic                # holds pre-aggregated views; dropped whenever the workspace data epoch moves
+  max_rows: 1000000                      # cap for Mosaic result queries (pixel-binned rasters), independent of the grid cap
+
 mcp:
   default_page_size: 50
   max_page_size: 200

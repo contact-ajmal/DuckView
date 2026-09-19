@@ -5,7 +5,8 @@
  */
 import fs from 'node:fs';
 import type { DuckDBResult } from '@duckdb/node-api';
-import { RecordBatchStreamWriter, RecordBatch, Schema, Field, Utf8, Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32, Uint64, Float32, Float64, Bool, DateMillisecond, TimestampMillisecond, TimestampMicrosecond, makeData, Struct, vectorFromArray, type DataType } from 'apache-arrow';
+import { RecordBatchStreamWriter, RecordBatch, Schema, Field, Utf8, Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32, Uint64, Float32, Float64, Bool, DateMillisecond, TimestampMillisecond, TimestampMicrosecond, makeData, Struct, vectorFromArray, tableToIPC, Table, type DataType } from 'apache-arrow';
+import type { ColumnSchema } from './results.js';
 
 function arrowType(duck: string): { type: DataType; convert: (v: unknown) => unknown } {
   const t = duck.toUpperCase();
@@ -79,4 +80,23 @@ export async function writeArrowStream(result: DuckDBResult, filePath: string): 
     });
   }
   return rows;
+}
+
+/**
+ * Encodes an already-materialised result (columns + JSON-safe rows, as held by the result cache) as an Arrow IPC
+ * stream — the wire format Mosaic clients decode. Small aggregate results dominate that workload, so a row-wise
+ * conversion is fine; rasters of ~1e5 rows take a few milliseconds.
+ */
+export function resultToArrowIPC(columns: ColumnSchema[], rows: unknown[][]): Uint8Array {
+  const types = columns.map((c) => arrowType(c.type));
+  const schema = new Schema(columns.map((c, i) => new Field(c.name, types[i]!.type, true)));
+  const n = rows.length;
+  const vectors = columns.map((_c, i) => {
+    const conv = types[i]!.convert;
+    const values = new Array(n);
+    for (let r = 0; r < n; r++) values[r] = conv(rows[r]![i]);
+    return vectorFromArray(values, types[i]!.type);
+  });
+  const data = makeData({ type: new Struct(schema.fields), length: n, nullCount: 0, children: vectors.map((v) => v.data[0]!) });
+  return tableToIPC(new Table(schema, [new RecordBatch(schema, data)]), 'stream');
 }

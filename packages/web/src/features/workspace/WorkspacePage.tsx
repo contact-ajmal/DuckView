@@ -11,6 +11,7 @@ import { ResultsGrid } from './ResultsGrid';
 import { ChartPanel } from './ChartPanel';
 import { PlanView, type PlanResult } from './PlanView';
 import { ProfilePanel, type ProfileResult } from './ProfilePanel';
+import { ExploreView } from '../explore/ExploreView';
 import { SchemaTree } from './SchemaTree';
 import { SavedQueriesTree } from './SavedQueries';
 import { Explorer, type ExplorerNode } from '../explorer/Explorer';
@@ -25,7 +26,7 @@ import { useLayout } from '../../store/layout';
 import { HideButton } from '../../components/LayoutMenu';
 import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
 
-type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile';
+type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile' | 'explore';
 
 export function WorkspacePage() {
   const ws = useWorkspace();
@@ -468,7 +469,7 @@ export function WorkspacePage() {
         <span className="flex flex-wrap items-center gap-2">
           <span className="whitespace-nowrap">Results {tab && <span className="text-zinc-500">· {tab.title}</span>}</span>
           <span className="flex rounded-md border border-zinc-800 p-0.5 font-normal">
-            {(['table', 'schema', 'chart', 'plan', 'profile'] as View[]).map((v) => <button key={v} onClick={() => setView(v)} className={cn('rounded px-2.5 py-0.5 text-[11px] capitalize', view === v ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-200')}>{v}</button>)}
+            {(['table', 'schema', 'chart', 'plan', 'profile', 'explore'] as View[]).map((v) => <button key={v} onClick={() => setView(v)} className={cn('rounded px-2.5 py-0.5 text-[11px] capitalize', view === v ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-200')} title={v === 'explore' ? 'Interactive cross-filtered charts of this query (Mosaic)' : undefined}>{v}</button>)}
           </span>
         </span>
       }
@@ -517,6 +518,10 @@ export function WorkspacePage() {
         )}
         {view === 'chart' && tab && (chartable ? <ChartPanel columns={result!.columns} rows={result!.rows} config={tab.chart_config} onChange={(c: ChartConfig) => void ws.setChart(tab.id, c)} /> : <Empty title="Run a query to chart it" />)}
         {view === 'plan' && <PlanView plan={plan} loading={planLoading} onExplain={() => void explain(false)} onAnalyze={() => void explain(true)} />}
+        {view === 'explore' && (
+          // Explores the tab's SQL as it is in the editor (a single SELECT); the view is rebuilt when the SQL changes.
+          <ExploreView workspaceId={workspace.id} source={sql.trim() && /^(select|with|from|pivot|unpivot)\b/i.test(sql.trim()) && !/;\s*\S/.test(sql.trim()) ? { kind: 'query', target: sql.trim(), label: tab?.title } : null} />
+        )}
         {view === 'profile' && (
           <ProfilePanel
             profile={profile}

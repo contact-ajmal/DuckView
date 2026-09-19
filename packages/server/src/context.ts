@@ -18,6 +18,7 @@ import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
 import { GroupService } from './services/groups.js';
 import { ResultCache } from './services/cache.js';
+import { MosaicService } from './services/mosaic.js';
 import type { AwsBridge } from './services/aws.js';
 import type { ProviderFactory } from './services/llm.js';
 import { logger } from './observability/logger.js';
@@ -44,6 +45,7 @@ export interface AppContext {
   agents: AgentService;
   groups: GroupService;
   cache: ResultCache;
+  mosaic: MosaicService;
   startedAt: Date;
   shutdown(): Promise<void>;
 }
@@ -75,6 +77,9 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const chat = new ChatHistoryService(store, workspaces);
   const copilot = new CopilotService(cfg, workspaces, queries, cloud, chat, audit, opts.providerFactory, opts.awsBridge);
   const agents = new AgentService(cfg, store, auth, workspaces, audit, opts.awsBridge);
+  const mosaic = new MosaicService(cfg, workspaces, queries, engines, audit);
+  // Pre-aggregates are only valid for the epoch they were built in.
+  workspaces.onVersion((id) => void mosaic.dropSchema(id));
   await auth.bootstrapAdmin();
   if (cfg.security.filesystem_mode === 'full') {
     logger().warn({ dataDir: cfg.security.data_jail_directory }, 'filesystem_mode=full: users can mount any local folder and DuckDB may read anywhere this process can. Set security.filesystem_mode=sandboxed for multi-tenant deployments.');
@@ -104,6 +109,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     agents,
     groups,
     cache,
+    mosaic,
     startedAt: new Date(),
     async shutdown() {
       await agents.flush();
