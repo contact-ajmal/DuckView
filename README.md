@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://contact-ajmal.github.io/DuckView/"><img src="https://img.shields.io/badge/website-contact--ajmal.github.io%2FDuckView-7c3aed?logo=googlechrome&logoColor=white" alt="Website"></a>
   <a href="https://github.com/contact-ajmal/DuckView/actions/workflows/ci.yml"><img src="https://github.com/contact-ajmal/DuckView/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://hub.docker.com/r/anbproject/duckview"><img src="https://img.shields.io/docker/v/anbproject/duckview?sort=semver&label=Docker%20Hub&logo=docker&logoColor=white&color=2496ED" alt="Docker Hub"></a>
   <a href="https://hub.docker.com/r/anbproject/duckview"><img src="https://img.shields.io/docker/pulls/anbproject/duckview?logo=docker&logoColor=white&color=2496ED" alt="Docker pulls"></a>
@@ -20,6 +21,8 @@
 </p>
 
 <p align="center">
+  <a href="https://contact-ajmal.github.io/DuckView/"><b>Website</b></a> ·
+  <a href="https://contact-ajmal.github.io/DuckView/docs/index.html"><b>Docs</b></a> ·
   <a href="#-quick-start">Quick start</a> ·
   <a href="#-what-you-get">Features</a> ·
   <a href="#-lakehouse-connectors">Lakehouse</a> ·
@@ -50,6 +53,8 @@ Most "SQL UIs" stop at the query box. DuckView is a complete, self-hosted data w
 ---
 
 ## 🚀 Quick start
+
+> 🌐 **Website & documentation:** [contact-ajmal.github.io/DuckView](https://contact-ajmal.github.io/DuckView/) — feature tour, every deployment option, and the full guides (getting started, configuration, security, sharing & teams, result cache, lakehouse, agents & MCP, API).
 
 ```bash
 git clone https://github.com/contact-ajmal/DuckView.git && cd DuckView

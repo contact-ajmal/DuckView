@@ -5,7 +5,8 @@
 **The analytics workspace where DuckDB, your lakehouse and your AI agents meet.**
 Query files, warehouses and Iceberg catalogs from one SQL workbench. Build dashboards. Let agents do the same — safely.
 
-Source, docs and issues: https://github.com/contact-ajmal/DuckView
+🌐 **Website & documentation:** https://contact-ajmal.github.io/DuckView/ — feature tour, all deployment options (Docker, Compose, Kubernetes, source), configuration, security, sharing & teams, result cache, lakehouse, agents & MCP.
+Source and issues: https://github.com/contact-ajmal/DuckView
 
 ## Quick start
 
@@ -37,7 +38,7 @@ Open http://localhost:4200 and sign in with the admin email/password you set. Dr
 |---|---|
 | `latest`, `1`, `1.1`, `1.1.0` (also `1.0`, `1.0.0`) | `linux/amd64`, `linux/arm64` |
 
-Images are built by GitHub Actions from tagged releases, with SBOM and provenance attestations, and smoke-tested after the push.
+Images are built by GitHub Actions from tagged releases, with SBOM and provenance attestations, and smoke-tested after the push. Deployment guides for Compose and Kubernetes: https://contact-ajmal.github.io/DuckView/deploy.html
 
 ## Volumes
 
