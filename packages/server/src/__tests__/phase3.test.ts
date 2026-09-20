@@ -395,8 +395,8 @@ describe('MCP: browse_storage, inspect_schema, list_dashboards, create_dashboard
     const prompt = await client.getPrompt({ name: 'build_mosaic_dashboard', arguments: { table_or_path: 'orders.parquet', goal: 'revenue by customer' } });
     expect((prompt.messages[0]!.content as { text: string }).text).toContain('validate_only');
   });
-  it('exposes fifteen tools', async () => {
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_storage', 'create_dashboard_widget', 'create_data_sync', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'list_data_sources', 'profile_dataset', 'run_data_sync', 'save_dataset', 'update_data_sync']);
+  it('exposes seventeen tools', async () => {
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_connector', 'browse_storage', 'connector_query', 'create_dashboard_widget', 'create_data_sync', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'list_data_sources', 'profile_dataset', 'run_data_sync', 'save_dataset', 'update_data_sync']);
   });
   it('browse_storage local + cloud connection listing', async () => {
     const local = await client.callTool({ name: 'browse_storage', arguments: {} });

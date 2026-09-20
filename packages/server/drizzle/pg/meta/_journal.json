@@ -92,6 +92,13 @@
       "when": 1789881534890,
       "tag": "0012_data_connections_syncs",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789883937081,
+      "tag": "0013_connector_connections",
+      "breakpoints": true
     }
   ]
 }

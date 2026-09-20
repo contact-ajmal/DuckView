@@ -148,7 +148,9 @@ try {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
     const catalog = await (await authed(`/api/workspaces/${wsId}/catalog`)).json();
-    const file = catalog.files?.[0]?.path;
+    // Prefer a file whose first column is numeric (the brush step drags across a histogram); any file otherwise.
+    const files = (catalog.files ?? []).map((f) => f.path);
+    const file = process.env.E2E_FILE ?? files.find((p) => /tripdata/i.test(p)) ?? files[0];
     if (!file) throw new Error('the first workspace has no data file to generate from');
     report.details.file = file;
     // 1. Create a Mosaic dashboard through the list page.

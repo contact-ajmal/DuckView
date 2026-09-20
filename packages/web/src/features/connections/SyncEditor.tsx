@@ -1,16 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Play, Save, Loader2, Eye, Wand2 } from 'lucide-react';
-import { api, copilotChat, type DataSync, type DatabaseConnection, type DatabaseEntry, type LakehouseConnection, type SyncSource, type SyncSchedule } from '../../api/client';
+import { Play, Save, Loader2, Eye, Wand2, ChevronRight, Folder, FileText, Table2 } from 'lucide-react';
+import { api, copilotChat, type DataSync, type DatabaseConnection, type DatabaseEntry, type LakehouseConnection, type SyncSource, type SyncSchedule, type ConnectorConnection, type BrowseEntry } from '../../api/client';
+import { describeResource } from './ConnectionsPage';
 import { useCopilot } from '../../store/copilot';
 import { Button, Input, Label, Modal, Select, cn } from '../../components/ui';
 
-type SourceKind = 'table' | 'url' | 'sheet' | 'sql';
+type SourceKind = 'table' | 'connector' | 'url' | 'sheet' | 'sql';
 
 /** Create or edit a scheduled sync: source → target, schedule, transformation (with a Copilot drafter), preview. */
-export function SyncEditor({ open, workspaceId, initial, databases, lakehouses, onClose, onSaved }: { open: boolean; workspaceId: string; initial?: DataSync | null; databases: DatabaseConnection[]; lakehouses: LakehouseConnection[]; onClose: () => void; onSaved: (s: DataSync, ran?: boolean) => void }) {
+export function SyncEditor({ open, workspaceId, initial, initialConnectorId, databases, lakehouses, connectors, onClose, onSaved }: { open: boolean; workspaceId: string; initial?: DataSync | null; initialConnectorId?: string; databases: DatabaseConnection[]; lakehouses: LakehouseConnection[]; connectors: ConnectorConnection[]; onClose: () => void; onSaved: (s: DataSync, ran?: boolean) => void }) {
   const cp = useCopilot();
   const [name, setName] = useState('');
   const [kind, setKind] = useState<SourceKind>('table');
+  // Connector sources: a connection, a browse path, the picked leaf (or SQL for warehouses).
+  const [connId, setConnId] = useState('');
+  const [connPath, setConnPath] = useState<string[]>([]);
+  const [connEntries, setConnEntries] = useState<BrowseEntry[] | null>(null);
+  const [connBusy, setConnBusy] = useState(false);
+  const [resource, setResource] = useState<Record<string, unknown> | null>(null);
+  const [remoteSql, setRemoteSql] = useState('');
+  const [connMode, setConnMode] = useState<'browse' | 'sql'>('browse');
   const [dbId, setDbId] = useState('');
   const [catalog, setCatalog] = useState('');
   const [schema, setSchema] = useState('');
@@ -48,12 +57,21 @@ export function SyncEditor({ open, workspaceId, initial, databases, lakehouses, 
       if (initial.schedule.kind === 'cron') setCron(initial.schedule.expression);
       const s = initial.source;
       if (s.kind === 'table') { setKind('table'); setDbId(s.database_connection_id ?? ''); setCatalog(s.catalog ?? ''); setSchema(s.schema); setTable(s.table); }
+      else if (s.kind === 'connector') { setKind('connector'); setConnId(s.connection_id); setConnPath([]); if (typeof s.resource.sql === 'string') { setConnMode('sql'); setRemoteSql(s.resource.sql); setResource(null); } else { setConnMode('browse'); setResource(s.resource); setRemoteSql(''); } }
       else if (s.kind === 'url') { const m = /docs\.google\.com\/spreadsheets\/d\/([^/]+)\/export\?format=csv(?:&gid=([^&]+))?/.exec(s.url); if (m) { setKind('sheet'); setSheetId(decodeURIComponent(m[1]!)); setGid(m[2] ? decodeURIComponent(m[2]) : ''); } else { setKind('url'); setUrl(s.url); setFormat(s.format); } }
       else { setKind('sql'); setSql(s.sql); }
     } else {
-      setName(''); setKind(databases.length || lakehouses.length ? 'table' : 'url'); setDbId(databases[0]?.id ?? ''); setCatalog(lakehouses[0]?.alias ?? ''); setSchema(''); setTable(''); setUrl(''); setFormat('auto'); setSheetId(''); setGid(''); setSql(''); setTarget(''); setTargetSchema('main'); setMode('replace'); setSchedKind('interval'); setMinutes(60); setCron('0 6 * * *'); setTransform('');
+      setName(''); setKind(initialConnectorId ? 'connector' : databases.length || lakehouses.length ? 'table' : connectors.length ? 'connector' : 'url'); setConnId(initialConnectorId ?? connectors[0]?.id ?? ''); setConnPath([]); setResource(null); setRemoteSql(''); setConnMode('browse'); setDbId(databases[0]?.id ?? ''); setCatalog(lakehouses[0]?.alias ?? ''); setSchema(''); setTable(''); setUrl(''); setFormat('auto'); setSheetId(''); setGid(''); setSql(''); setTarget(''); setTargetSchema('main'); setMode('replace'); setSchedKind('interval'); setMinutes(60); setCron('0 6 * * *'); setTransform('');
     }
   }, [open, initial]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Browse the chosen connector connection one level at a time.
+  useEffect(() => {
+    if (!open || kind !== 'connector' || !connId || connMode !== 'browse') return setConnEntries(null);
+    setConnBusy(true);
+    api.get<{ entries: BrowseEntry[] }>(`/api/connector-connections/${connId}/browse${connPath.length ? `?path=${connPath.map(encodeURIComponent).join('/')}` : ''}`).then((r) => setConnEntries(r.entries)).catch((e) => { setConnEntries([]); setError((e as Error).message); }).finally(() => setConnBusy(false));
+  }, [open, kind, connId, connPath, connMode]);
+  const conn = connectors.find((c) => c.id === connId) ?? null;
 
   // Browse the chosen database connection.
   useEffect(() => {
@@ -67,14 +85,20 @@ export function SyncEditor({ open, workspaceId, initial, databases, lakehouses, 
 
   const source = useMemo<SyncSource | null>(() => {
     if (kind === 'table') return schema && table ? { kind: 'table', database_connection_id: dbId || null, catalog: dbId ? null : catalog || null, schema, table } : null;
+    if (kind === 'connector') { if (!connId) return null; if (connMode === 'sql') return remoteSql.trim() ? { kind: 'connector', connection_id: connId, resource: { sql: remoteSql.trim() } } : null; return resource ? { kind: 'connector', connection_id: connId, resource } : null; }
     if (kind === 'url') return url.trim() ? { kind: 'url', url: url.trim(), format } : null;
     if (kind === 'sheet') return sheetId.trim() ? { kind: 'url', url: `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId.trim())}/export?format=csv${gid.trim() ? `&gid=${encodeURIComponent(gid.trim())}` : ''}`, format: 'csv' } : null;
     return sql.trim() ? { kind: 'sql', sql: sql.trim() } : null;
-  }, [kind, dbId, catalog, schema, table, url, format, sheetId, gid, sql]);
+  }, [kind, dbId, catalog, schema, table, url, format, sheetId, gid, sql, connId, connMode, resource, remoteSql]);
   const schedule: SyncSchedule = schedKind === 'manual' ? { kind: 'manual' } : schedKind === 'interval' ? { kind: 'interval', minutes } : { kind: 'cron', expression: cron };
   useEffect(() => {
     if (!target && kind === 'table' && table) setTarget(table);
   }, [table]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (target || kind !== 'connector' || !resource) return;
+    const guess = [resource.table_name, resource.table, resource.object, resource.resource, resource.sheet, resource.name].find((v) => typeof v === 'string' && v) as string | undefined;
+    if (guess) setTarget(guess.replace(/\.[a-z0-9]+$/i, '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 63));
+  }, [resource]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doPreview = async () => {
     if (!source) return;
@@ -132,6 +156,7 @@ export function SyncEditor({ open, workspaceId, initial, databases, lakehouses, 
 
   const kinds: { id: SourceKind; label: string; hint: string }[] = [
     { id: 'table', label: 'Table', hint: 'from a database or lakehouse connection' },
+    { id: 'connector', label: 'Connector', hint: 'a warehouse, an application, Google Drive or Sheets' },
     { id: 'url', label: 'URL / API', hint: 'CSV, JSON, Parquet or Excel over HTTPS' },
     { id: 'sheet', label: 'Google Sheet', hint: 'shared with anyone with the link' },
     { id: 'sql', label: 'SQL', hint: 'any read-only SELECT in this workspace' },
@@ -143,7 +168,7 @@ export function SyncEditor({ open, workspaceId, initial, databases, lakehouses, 
           <div><Label>Name</Label><Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Orders from production" /></div>
           <div>
             <Label>Source</Label>
-            <div className="grid grid-cols-4 gap-1 rounded-md border border-zinc-800 p-0.5">
+            <div className="grid grid-cols-5 gap-1 rounded-md border border-zinc-800 p-0.5">
               {kinds.map((k) => <button key={k.id} onClick={() => { setKind(k.id); setPreview(null); }} className={cn('rounded px-2 py-1 text-xs', kind === k.id ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200')} title={k.hint}>{k.label}</button>)}
             </div>
           </div>
@@ -167,6 +192,55 @@ export function SyncEditor({ open, workspaceId, initial, databases, lakehouses, 
                   {dbId && tables.length ? <Select value={table} onChange={(e) => setTable(e.target.value)} className="w-full"><option value="">pick…</option>{tables.map((t) => <option key={t.name} value={t.name}>{t.name}{t.type === 'view' ? ' (view)' : ''}{t.rows != null ? ` · ~${t.rows.toLocaleString()} rows` : ''}</option>)}</Select> : <Input value={table} onChange={(e) => setTable(e.target.value)} className="font-mono" placeholder="orders" />}
                 </div>
               </div>
+            </div>
+          )}
+          {kind === 'connector' && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <div>
+                  <Label>Connection</Label>
+                  <Select value={connId} onChange={(e) => { setConnId(e.target.value); setConnPath([]); setResource(null); setPreview(null); setConnMode('browse'); }} className="w-full">
+                    {connectors.length === 0 && <option value="">No warehouse, application or Google connection yet</option>}
+                    {connectors.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.connector_label}{c.account_label ? ` · ${c.account_label}` : ''}</option>)}
+                  </Select>
+                </div>
+                {conn?.remote_sql && (
+                  <div>
+                    <Label>Read</Label>
+                    <div className="flex rounded-md border border-zinc-800 p-0.5">
+                      {(['browse', 'sql'] as const).map((m) => <button key={m} onClick={() => { setConnMode(m); setPreview(null); }} className={cn('rounded px-2 py-1 text-xs', connMode === m ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200')}>{m === 'browse' ? 'a table' : 'SQL'}</button>)}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {connMode === 'sql' ? (
+                <div><Label>Remote SQL <span className="normal-case text-zinc-600">(runs on {conn?.connector_label})</span></Label><textarea value={remoteSql} onChange={(e) => setRemoteSql(e.target.value)} rows={4} spellCheck={false} className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-100 focus:border-accent-500 focus:outline-none" placeholder="SELECT * FROM ANALYTICS.PUBLIC.ORDERS WHERE order_date >= dateadd(day, -30, current_date)" /></div>
+              ) : (
+                <div className="rounded-md border border-zinc-800">
+                  <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800 px-2 py-1 text-[11px]">
+                    <button className={cn('hover:text-zinc-100', connPath.length ? 'text-accent-300' : 'text-zinc-400')} onClick={() => { setConnPath([]); }}>{conn?.connector_label ?? 'root'}</button>
+                    {connPath.map((p, i) => <span key={i} className="flex items-center gap-1"><ChevronRight className="h-3 w-3 text-zinc-600" /><button className={cn('hover:text-zinc-100', i < connPath.length - 1 ? 'text-accent-300' : 'text-zinc-300')} onClick={() => setConnPath(connPath.slice(0, i + 1))}>{p}</button></span>)}
+                    {connBusy && <Loader2 className="ml-auto h-3 w-3 animate-spin text-zinc-500" />}
+                    {resource && !connBusy && <span className="ml-auto truncate font-mono text-accent-300" title={JSON.stringify(resource)}>✓ {describeResource(resource)}</span>}
+                  </div>
+                  <ul className="max-h-44 overflow-auto text-xs">
+                    {connEntries?.length === 0 && !connBusy && <li className="px-2 py-2 text-zinc-500">Nothing here{conn?.status === 'error' ? ' — the connection reports an error; test it from the Configured tab' : ''}.</li>}
+                    {(connEntries ?? []).map((e, i) => (
+                      <li key={i}>
+                        <button type="button" onClick={() => { if (e.path) { setConnPath(e.path); } else if (e.resource) { setResource(e.resource); setPreview(null); } }} className={cn('flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-zinc-800/60', resource && e.resource && JSON.stringify(resource) === JSON.stringify(e.resource) ? 'bg-accent-500/10 text-accent-200' : 'text-zinc-300')}>
+                          {e.path ? <Folder className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : /file|sheet|report/.test(e.type) ? <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Table2 className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
+                          <span className="truncate">{e.name}</span>
+                          <span className="text-[10px] text-zinc-600">{e.type}</span>
+                          {e.hint && <span className="ml-auto truncate text-[10px] text-zinc-500">{e.hint}</span>}
+                          {e.path && <ChevronRight className="h-3 w-3 shrink-0 text-zinc-600" />}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {conn && conn.connector === 'ga4' && resource && <p className="text-[11px] text-zinc-500">Edit the preset's dimensions, metrics and dates by hand in the resource JSON below.</p>}
+              {conn && resource && connMode === 'browse' && <details className="text-[11px] text-zinc-500"><summary className="cursor-pointer">Resource JSON</summary><textarea value={JSON.stringify(resource, null, 1)} onChange={(e) => { try { setResource(JSON.parse(e.target.value)); } catch { /* keep typing */ } }} rows={4} spellCheck={false} className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-[10.5px] text-zinc-300" /></details>}
             </div>
           )}
           {kind === 'url' && (

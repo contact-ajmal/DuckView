@@ -516,9 +516,46 @@ export const databaseConnections = sqliteTable(
   (t) => [index('database_connections_user_idx').on(t.user_id), uniqueIndex('database_connections_alias_idx').on(t.user_id, t.alias)],
 );
 
+/** A SaaS / warehouse / Google connection handled by a connector module (services/connectors). */
+export const connectorConnections = sqliteTable(
+  'connector_connections',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    connector: text('connector').notNull(),
+    name: text('name').notNull(),
+    /** Non-secret settings (account, region, instance URL, property id …). */
+    config: text('config', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    /** AES-256-GCM JSON: secret fields, or OAuth tokens { refresh_token, access_token, expires_at, email }. */
+    encrypted_credentials: text('encrypted_credentials').notNull(),
+    iv: text('iv').notNull(),
+    tag: text('tag').notNull(),
+    /** For OAuth connections: the account that authorised it. */
+    account_label: text('account_label'),
+    status: text('status', { enum: LAKEHOUSE_STATUSES }).notNull().default('unknown'),
+    last_error: text('last_error'),
+    last_tested_at: integer('last_tested_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('connector_connections_user_idx').on(t.user_id)],
+);
+
+/** Platform-wide settings set from the console (e.g. the Google OAuth client), secrets encrypted. */
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  encrypted_value: text('encrypted_value'),
+  iv: text('iv'),
+  tag: text('tag'),
+  updated_by: text('updated_by'),
+  updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
 /** Where a sync reads from. */
 export type SyncSource =
   | { kind: 'sql'; sql: string }
+  | { kind: 'connector'; connection_id: string; resource: Record<string, unknown> }
   | { kind: 'table'; database_connection_id?: string | null; lakehouse_connection_id?: string | null; catalog?: string | null; schema: string; table: string }
   | { kind: 'url'; url: string; format: 'auto' | 'csv' | 'json' | 'parquet' | 'excel'; options?: Record<string, string | number | boolean>; connection_id?: string | null };
 export type SyncSchedule = { kind: 'manual' } | { kind: 'interval'; minutes: number } | { kind: 'cron'; expression: string; timezone?: string };
@@ -610,6 +647,8 @@ export type Agent = typeof agents.$inferSelect;
 export type ChatMessage = typeof chatHistory.$inferSelect;
 export type CopilotSettingsRow = typeof copilotSettings.$inferSelect;
 export type DatabaseConnection = typeof databaseConnections.$inferSelect;
+export type ConnectorConnection = typeof connectorConnections.$inferSelect;
+export type AppSetting = typeof appSettings.$inferSelect;
 export type DataSync = typeof dataSyncs.$inferSelect;
 export type DataSyncRun = typeof dataSyncRuns.$inferSelect;
 export type CopilotUsageRow = typeof copilotUsage.$inferSelect;

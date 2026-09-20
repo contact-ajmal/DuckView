@@ -40,8 +40,10 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `list_dashboards(workspace_id?)` | Dashboards with their widgets and layouts. |
 | `create_dashboard_widget(dashboard_id \| dashboard_name, title, sql, widget_type, chart_config?, refresh_interval_sec?)` | Builds dashboards autonomously; the SQL is validated read-only and dry-run first. |
 | `create_mosaic_dashboard(spec \| spec_text, name?, description?, dashboard_id?, validate_only?, workspace_id?)` | Creates or updates an interactive Mosaic dashboard from a declarative spec (YAML/JSON). Validated structurally and every dataset/table bound with EXPLAIN before saving; errors come back as a list to fix. |
-| `list_data_sources(workspace_id?)` | Every connection with health, the syncs of a workspace, the source-type catalog. |
-| `create_data_sync(name, source, target_table, …, transform_sql?, schedule?, run_now?)` | Scheduled load of a table / URL / SELECT into a workspace table with an optional `{{raw}}` transformation, validated first. |
+| `list_data_sources(workspace_id?)` | Every connection with health (connector connections included), the syncs of a workspace, the source-type catalog. |
+| `browse_connector(connection_id, path?)` | Walks a warehouse, SaaS or Google connection one level at a time; leaves carry the `resource` for `create_data_sync`. |
+| `connector_query(connection_id, sql, limit?)` | Read-only SQL on Snowflake, BigQuery, Redshift or ClickHouse; rows capped. |
+| `create_data_sync(name, source, target_table, …, transform_sql?, schedule?, run_now?)` | Scheduled load of a table / connector resource / URL / SELECT into a workspace table with an optional `{{raw}}` transformation, validated first. |
 | `update_data_sync(sync_id, transform_sql?, schedule?, mode?, enabled?, run_now?)` | Attach a transformation, change the schedule, pause/resume. |
 | `run_data_sync(sync_id)` | Run now; rows, duration, error, recent runs. |
 

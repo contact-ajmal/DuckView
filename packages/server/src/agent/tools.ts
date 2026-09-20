@@ -450,23 +450,24 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
     define({
       name: 'list_data_sources',
       title: 'List data sources',
-      description: 'Every configured connection of the caller — object storage (S3/R2/GCS/Azure), lakehouse catalogs, databases (Postgres/MySQL/SQLite/DuckDB files, attached as alias.schema.table) and HTTP endpoints — with health, plus the syncs of a workspace and the catalog of source types DuckView supports.',
+      description: 'Every configured connection of the caller — object storage (S3/R2/GCS/Azure), lakehouse catalogs, databases (Postgres/MySQL/SQLite/DuckDB files, attached as alias.schema.table), and connector connections (Snowflake, BigQuery, Redshift, ClickHouse, Fabric, Salesforce, HubSpot, Stripe, GA4, Airtable, Notion, Google Drive, Google Sheets; browse them with browse_connector, warehouses also answer connector_query) — with health, plus the syncs of a workspace and the catalog of source types DuckView supports.',
       inputSchema: { workspace_id: z.string().optional().describe('List the syncs of this workspace too') },
       annotations: { readOnlyHint: true, openWorldHint: false },
       async handler(env, { workspace_id }) {
         const p = env.principal;
-        const [cloud, lakehouse, databases] = await Promise.all([env.ctx.cloud.list(p.userId), env.ctx.lakehouse.list(p.userId), env.ctx.databases.list(p.userId)]);
+        const [cloud, lakehouse, databases, connectors] = await Promise.all([env.ctx.cloud.list(p.userId), env.ctx.lakehouse.list(p.userId), env.ctx.databases.list(p.userId), env.ctx.connectors.list(p.userId)]);
         const ws = workspace_id ?? env.defaultWorkspaceId ?? null;
         const syncs = ws ? await env.ctx.syncs.list(p, ws) : [];
         const lines = [
           ...cloud.map((c) => `- storage **${c.name}** (${c.provider}${c.bucket ? ` · ${c.bucket}` : ''}) — files as ${c.uri_scheme}://…`),
           ...lakehouse.map((c) => `- lakehouse **${c.name}** (${c.provider}, alias \`${c.alias}\`, ${c.status}) — ${c.example_sql}`),
           ...databases.map((c) => `- database **${c.name}** (${c.engine}, alias \`${c.alias}\`, ${c.status}${c.last_error ? `: ${c.last_error}` : ''}) — ${c.example_sql}`),
+          ...connectors.map((c) => `- ${c.connector_label} **${c.name}** (\`${c.id}\`${c.account_label ? ` · ${c.account_label}` : ''}, ${c.status}${c.last_error ? `: ${c.last_error}` : ''}) — browse_connector${c.remote_sql ? ' · connector_query' : ''}; sync with source {kind:"connector", connection_id, resource}`),
         ];
         const syncLines = syncs.map((s) => `- sync **${s.name}** (\`${s.id}\`) → ${s.target_schema}.${s.target_table} · ${s.schedule.kind === 'manual' ? 'manual' : s.schedule.kind === 'interval' ? `every ${s.schedule.minutes} min` : `cron ${s.schedule.expression}`} · ${s.enabled ? 'enabled' : 'paused'} · last ${s.last_run ? `${s.last_run.status}${s.last_run.rows != null ? ` (${s.last_run.rows} rows)` : ''}` : 'never'}`);
         return {
           content: [text(`**Connections** (${lines.length})\n${lines.join('\n') || '_(none — add one under Connections)_'}${ws ? `\n\n**Syncs in workspace ${ws}** (${syncs.length})\n${syncLines.join('\n') || '_(none)_'}` : ''}\n\nSource types available: ${SOURCE_CATALOG.filter((s) => s.status === 'available').map((s) => s.label).join(', ')}.`)],
-          structuredContent: { status: 'ok', cloud: cloud.map((c) => ({ id: c.id, name: c.name, provider: c.provider, bucket: c.bucket, uri_scheme: c.uri_scheme })), lakehouse: lakehouse.map((c) => ({ id: c.id, name: c.name, provider: c.provider, alias: c.alias, status: c.status })), databases: databases.map((c) => ({ id: c.id, name: c.name, engine: c.engine, alias: c.alias, status: c.status, last_error: c.last_error })), syncs: syncs.map((s) => ({ id: s.id, name: s.name, target: `${s.target_schema}.${s.target_table}`, source: s.source, schedule: s.schedule, mode: s.mode, enabled: s.enabled, has_transform: !!s.transform_sql, last_run: s.last_run, next_run_at: s.next_run_at })), catalog: SOURCE_CATALOG.map((s) => ({ id: s.id, family: s.family, label: s.label, status: s.status, capabilities: s.capabilities })) },
+          structuredContent: { status: 'ok', cloud: cloud.map((c) => ({ id: c.id, name: c.name, provider: c.provider, bucket: c.bucket, uri_scheme: c.uri_scheme })), lakehouse: lakehouse.map((c) => ({ id: c.id, name: c.name, provider: c.provider, alias: c.alias, status: c.status })), databases: databases.map((c) => ({ id: c.id, name: c.name, engine: c.engine, alias: c.alias, status: c.status, last_error: c.last_error })), connectors: connectors.map((c) => ({ id: c.id, name: c.name, connector: c.connector, account: c.account_label, status: c.status, last_error: c.last_error, remote_sql: c.remote_sql })), syncs: syncs.map((s) => ({ id: s.id, name: s.name, target: `${s.target_schema}.${s.target_table}`, source: s.source, schedule: s.schedule, mode: s.mode, enabled: s.enabled, has_transform: !!s.transform_sql, last_run: s.last_run, next_run_at: s.next_run_at })), catalog: SOURCE_CATALOG.map((s) => ({ id: s.id, family: s.family, label: s.label, status: s.status, capabilities: s.capabilities })) },
         };
       },
     }),
@@ -474,11 +475,11 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
     define({
       name: 'create_data_sync',
       title: 'Create data sync',
-      description: 'Sets up a scheduled load of a source into a workspace table: source.kind "table" (a table of an attached database or lakehouse: schema + table + database_connection_id or catalog alias), "url" (CSV/JSON/Parquet/Excel over HTTPS, e.g. a Google Sheets CSV export) or "sql" (any read-only SELECT). Optional transform_sql is a SELECT over {{raw}} (the loaded rows) whose result becomes the target; it is validated against the source before saving. schedule: {kind:"manual"} | {kind:"interval", minutes} | {kind:"cron", expression, timezone?}. Pass run_now to load immediately.',
+      description: 'Sets up a scheduled load of a source into a workspace table: source.kind "table" (a table of an attached database or lakehouse: schema + table + database_connection_id or catalog alias), "url" (CSV/JSON/Parquet/Excel over HTTPS, e.g. a Google Sheets CSV export), "connector" (connection_id of a connector connection + the resource object a browse_connector leaf returned, or {sql} for a warehouse) or "sql" (any read-only SELECT). Optional transform_sql is a SELECT over {{raw}} (the loaded rows) whose result becomes the target; it is validated against the source before saving. schedule: {kind:"manual"} | {kind:"interval", minutes} | {kind:"cron", expression, timezone?}. Pass run_now to load immediately.',
       inputSchema: {
         workspace_id: z.string().optional(),
         name: z.string().min(1).max(160),
-        source: z.record(z.string(), z.unknown()).describe('{kind:"table", schema, table, database_connection_id?|catalog?} | {kind:"url", url, format?} | {kind:"sql", sql}'),
+        source: z.record(z.string(), z.unknown()).describe('{kind:"table", schema, table, database_connection_id?|catalog?} | {kind:"url", url, format?} | {kind:"connector", connection_id, resource} | {kind:"sql", sql}'),
         target_table: z.string().min(1).max(63),
         target_schema: z.string().max(63).optional(),
         mode: z.enum(['replace', 'append']).optional(),
@@ -538,7 +539,34 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`Sync ${run.status}${run.rows != null ? ` · ${run.rows} rows` : ''} in ${run.duration_ms} ms${run.error ? `\n\nError: ${run.error}` : ''}`)], structuredContent: { status: run.status === 'ok' ? 'ok' : 'error', run: { id: run.id, status: run.status, rows: run.rows, duration_ms: run.duration_ms, error: run.error }, recent: runs.map((r) => ({ id: r.id, status: r.status, rows: r.rows, duration_ms: r.duration_ms, started_at: r.started_at, triggered_by: r.triggered_by })) }, isError: run.status !== 'ok' };
       },
     }),
+
+    // ---------------------------------------------------------------- connectors (warehouses, SaaS, Google)
+    define({
+      name: 'browse_connector',
+      title: 'Browse connector',
+      description: 'Walks what a connector connection offers, one level at a time: Snowflake/ClickHouse databases → schemas → tables, BigQuery datasets → tables, Redshift schemas → tables, Fabric items → tables, Salesforce/HubSpot objects, Stripe resources, GA4 report presets, Airtable bases → tables, Notion databases, Drive folders → files, Sheets spreadsheets → tabs. Leaves carry the `resource` to pass to create_data_sync as source {kind:"connector", connection_id, resource}; folders carry a `path` to browse deeper.',
+      inputSchema: { connection_id: z.string().describe('A connector connection id from list_data_sources'), path: z.array(z.string()).optional().describe('The `path` of a non-leaf entry from a previous call') },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      async handler(env, { connection_id, path: p }) {
+        const r = await env.ctx.connectors.browse(env.principal.userId, connection_id, p ?? []);
+        const lines = r.entries.slice(0, 200).map((e) => `- ${e.type} **${e.name}**${e.hint ? ` — ${e.hint}` : ''}${e.resource ? ` · resource ${JSON.stringify(e.resource)}` : e.path ? ` · path ${JSON.stringify(e.path)}` : ''}`);
+        return { content: [text(`**${r.connection.name}** (${r.connection.connector})${r.path.length ? ` / ${r.path.join(' / ')}` : ''}: ${r.entries.length} entr${r.entries.length === 1 ? 'y' : 'ies'}\n${lines.join('\n')}${r.entries.length > 200 ? '\n…' : ''}`)], structuredContent: { status: 'ok', connection: r.connection, path: r.path, entries: r.entries } };
+      },
+    }),
+
+    define({
+      name: 'connector_query',
+      title: 'Query warehouse connector',
+      description: 'Runs a read-only SQL statement on a warehouse connection (Snowflake, BigQuery, Redshift, ClickHouse) and returns the rows (capped). To keep a result in DuckDB, create_data_sync with source {kind:"connector", connection_id, resource:{sql}}.',
+      inputSchema: { connection_id: z.string(), sql: z.string().min(1).max(50_000), limit: z.number().int().min(1).max(10_000).optional().describe('Default 200') },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      async handler(env, { connection_id, sql, limit }) {
+        const r = await env.ctx.connectors.query(env.principal.userId, connection_id, sql, { limit: limit ?? 200 });
+        const cols = r.rows[0] ? Object.keys(r.rows[0]) : [];
+        return { content: [text(`${r.rows.length} row${r.rows.length === 1 ? '' : 's'} from **${r.connection}**${r.truncated ? ' (truncated)' : ''}${cols.length ? `\n\n${toMarkdownTable({ columns: cols.map((n) => ({ name: n, type: 'VARCHAR', kind: 'string' as const })), rows: r.rows.slice(0, 50).map((row) => cols.map((c) => row[c])) }, 80)}` : ''}`)], structuredContent: { status: 'ok', connection: r.connection, columns: cols, rows: r.rows, truncated: r.truncated } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query'] as const;

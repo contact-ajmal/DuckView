@@ -228,30 +228,52 @@ API: `POST /api/workspaces/:id/dashboards {name, description?, kind?: grid|mosai
 
 ## Data connections & syncs
 
-**Connections** (`#/connections`) is the one place for every source: *Configured* (everything with health, last test, edit/remove), *Add a source* (the catalog) and *Syncs* (scheduled loads into the active workspace). Agents reach the same objects through `list_data_sources`, `create_data_sync`, `update_data_sync` and `run_data_sync`.
+**Connections** (`#/connections`) is the one place for every source: *Configured* (everything with health, last test, edit/remove), *Add a source* (the catalog) and *Syncs* (scheduled loads into the active workspace). Agents reach the same objects through `list_data_sources`, `browse_connector`, `connector_query`, `create_data_sync`, `update_data_sync` and `run_data_sync`.
 
 **The catalog** (`GET /api/sources/catalog`, `services/source-catalog.ts`) groups source types by family with their auth style, capabilities (browse · attach · remote SQL · sync) and fields:
 
-| Family | Available today | Planned (listed, not built) |
-|---|---|---|
-| Object storage | Amazon S3, Cloudflare R2, Google Cloud Storage, Azure Blob | |
-| Lakehouse catalogs | AWS Glue / SageMaker Lakehouse, Amazon S3 Tables, any Iceberg REST catalog (Polaris, Nessie, Tabular, Lakekeeper, Snowflake Open Catalog), Databricks (Unity Catalog + remote SQL) | |
-| Databases | PostgreSQL, MySQL / MariaDB, SQLite files, DuckDB files | Amazon Redshift (Postgres wire) |
-| Web & APIs | HTTP / REST endpoints (CSV, JSON, Parquet, Excel over HTTPS with a bearer token or headers), Google Sheets (shared links) | |
-| Warehouses | | Snowflake, BigQuery, ClickHouse, Microsoft Fabric / Synapse |
-| SaaS | | Salesforce, HubSpot, Stripe, Google Analytics 4, Airtable, Notion |
+| Family | Sources |
+|---|---|
+| Object storage | Amazon S3, Cloudflare R2, Google Cloud Storage, Azure Blob |
+| Lakehouse catalogs | AWS Glue / SageMaker Lakehouse, Amazon S3 Tables, any Iceberg REST catalog (Polaris, Nessie, Tabular, Lakekeeper, Snowflake Open Catalog), Databricks (Unity Catalog + remote SQL) |
+| Databases | PostgreSQL, MySQL / MariaDB, SQLite files, DuckDB files |
+| Web, Drive & Sheets | HTTP / REST endpoints (CSV, JSON, Parquet, Excel over HTTPS with a bearer token or headers), **Google Drive** and **Google Sheets** through a Google account, Google Sheets shared links (no sign-in) |
+| Warehouses | **Snowflake**, **Google BigQuery**, **Amazon Redshift**, **ClickHouse**, **Microsoft Fabric / OneLake** |
+| SaaS applications | **Salesforce**, **HubSpot**, **Stripe**, **Google Analytics 4**, **Airtable**, **Notion** |
+
+**Connectors** (`services/connectors/`, `connector_connections`, `/api/connectors` · `/api/connector-connections` CRUD · `/test` · `/browse?path=a/b` · `/query`) cover the warehouses, the SaaS applications and Google Drive / Sheets. Each connector module knows how to *test* a connection, *browse* what it offers one level at a time (databases → schemas → tables, bases → tables, objects, folders → files, spreadsheets → tabs …), *read* a resource as row batches and, for warehouses, run *SQL remotely*:
+
+| Connector | Transport | Credentials | Browse → resource |
+|---|---|---|---|
+| Snowflake | SQL API v2 (statements, partitions, polling) | programmatic access token or OAuth token | database → schema → table / view, or `{sql}` |
+| BigQuery | REST `jobs.query` with paging, typed rows | Google account (OAuth) or service-account key | dataset → table / view, or `{sql}` |
+| Redshift | Data API (`ExecuteStatement` → `GetStatementResult`), no VPC access needed | AWS keys or the server's credential chain; workgroup or cluster; optional Secrets Manager ARN | database → schema → table, or `{sql}` |
+| ClickHouse | HTTP interface, `FORMAT JSONEachRow` | user + password | database → table, or `{sql}` |
+| Fabric / OneLake | OneLake blob listing (`@azure/storage-blob` + service principal); the table itself is read by a scratch DuckDB with `delta_scan` over `abfss://` and copied to Parquet | Entra tenant, client id, client secret | item (Lakehouse / Warehouse) → Delta table |
+| Salesforce | REST, `describe`-driven SOQL with `nextRecordsUrl` paging | connected app (client-credentials flow) | queryable objects, or `{soql}` / `{object, where}` |
+| HubSpot | CRM v3 objects with every property, `after` paging; custom-object schemas | private-app token | contacts, companies, deals, tickets … + custom objects |
+| Stripe | `/v1/*` list endpoints, `starting_after` paging, nested objects flattened | restricted / secret key | charges, customers, invoices, subscriptions, payouts, balance transactions … |
+| GA4 | Data API `runReport` (dimensions × metrics × date range, offset paging) | Google account or service account | report presets, editable resource `{dimensions, metrics, start_date, end_date}` |
+| Airtable | meta bases / tables, records with `offset` paging | personal access token | base → table (optional view) |
+| Notion | `search` for databases, `query` with `start_cursor`; properties flattened to plain values | internal integration secret | database |
+| Google Drive | Drive v3 listing; CSV / TSV / JSON / Parquet / Excel downloaded, a Google Sheet exported as CSV | Google account | folder → file |
+| Google Sheets | Drive listing + Sheets v4 `values` (first row = header, padding rows dropped) | Google account | spreadsheet → tab |
+
+Credentials (API keys, secrets, OAuth refresh tokens, service-account keys) are AES-256-GCM encrypted with the row id as AAD, never returned by any endpoint (the API reports `credential_fields` — names only), never logged, and never reach the workspace engine: a sync **stages** the rows through the connector into a newline-delimited JSON file under `<data dir>/.duckview/sync/` (a Drive file is downloaded as is, a Fabric table is copied to Parquet by a scratch DuckDB that holds the Azure secret), loads it with `read_json_auto` / `read_csv_auto` / `read_parquet` / `read_xlsx`, and removes the file. Every connector needs `security.enable_external_access` (or full filesystem mode). Throttling (`429` / `503` with `Retry-After`) is retried with a capped back-off. Remote SQL is checked to be a single read-only statement before it is sent; on `POST /api/connector-connections/:id/query` and in the `connector_query` tool the result is capped (default 200 / 1 000 rows).
+
+**Google account sign-in** (Drive, Sheets, BigQuery, GA4). An administrator registers an OAuth client once under **Settings → Integrations** (`PUT /api/admin/integrations/google {client_id, client_secret}`; the secret is write-only and stored encrypted in `app_settings`, never in a config file or environment variable; the redirect URI is `<server.public_url>/api/oauth/google/callback`). *Connect with Google* in a connection wizard calls `POST /api/oauth/google/start {connector, name, values}` — the server creates a pending connection and returns Google's consent URL (`openid email` + the connector's read-only scopes, `access_type=offline`, `prompt=consent`); the state is a 10-minute JWT carrying the user and the connection, so multi-replica deployments need no session store. `GET /api/oauth/google/callback` exchanges the code, stores the refresh token encrypted on the connection, labels it with the account's e-mail and redirects to `#/connections?connected=<id>` (or `?google_error=` — never a 500). Access tokens are refreshed from the stored refresh token as needed and cached in memory until they expire. A **service-account key** (JSON) pasted in the wizard is the server-to-server alternative: an RS256 JWT-bearer grant, no OAuth client needed.
 
 Storage and lakehouse sources keep their existing wizards and routes; **database connections** are new (`database_connections`, `/api/database-connections` CRUD · `/test` · `/browse?schema=`): the password is AES-256-GCM encrypted, the database is attached **read-only** to every engine of the owner's workspaces through DuckDB's `postgres` / `mysql` / `sqlite` extensions (or a plain `ATTACH` for a `.duckdb` file) as `alias.schema.table`, browsed schema by schema, and hot-applied to running engines (attachment fingerprint). Network databases need `security.enable_external_access` (or full filesystem mode); file databases live inside the jail. The container image pre-installs the three extensions.
 
 **Syncs** (`data_syncs`, `data_sync_runs`) load a source into a table of a workspace on a schedule:
-- *source*: `{kind: "table", schema, table, database_connection_id | catalog}` (an attached database or lakehouse table), `{kind: "url", url, format: auto|csv|json|parquet|excel, options?}` (a Google Sheet is a CSV export URL: `GET /api/sources/google-sheet-url?spreadsheet_id=&gid=`), or `{kind: "sql", sql}` (any read-only SELECT);
+- *source*: `{kind: "table", schema, table, database_connection_id | catalog}` (an attached database or lakehouse table), `{kind: "connector", connection_id, resource}` (what a `browse` leaf returned — a warehouse table, a SaaS object, a Drive file, a Sheets tab — or `{sql}` on a warehouse), `{kind: "url", url, format: auto|csv|json|parquet|excel, options?}` (a shared Google Sheet is a CSV export URL: `GET /api/sources/google-sheet-url?spreadsheet_id=&gid=`), or `{kind: "sql", sql}` (any read-only SELECT);
 - *target*: `target_schema.target_table`, `mode: replace | append`;
 - *transformation* (optional): one SELECT over `{{raw}}` — the freshly loaded rows — whose result becomes the target. Written by a person or by an agent; **validated against the source before it is saved** (`POST /api/workspaces/:id/syncs/preview` binds source + transform with a `LIMIT`, the sync editor's *Preview* and *Draft with Copilot* use it);
 - *schedule*: `manual`, `interval` (minutes) or `cron` (5-field, UTC by default); `enabled` pauses.
 
 A run is a guarded SQL sequence on the workspace engine executed **as the workspace owner** — roles, sandbox, audit trail (`sync.run`) and data epoch apply exactly as for a person: `CREATE OR REPLACE TABLE <target>__staging AS <load>`, optionally `<target>__next AS <transform>`, then a swap (replace) or `INSERT INTO` (append); a failing load leaves the target untouched. Runs are recorded (`rows`, `duration_ms`, `error`, `triggered_by: schedule | manual | agent`) and announced on the live feed (`{type: "sync"}`), the last 200 kept per sync. The scheduler is one in-process ticker (30 s; `duckdb.sync_scheduler_enabled: false` on replicas). API: `GET/POST /api/workspaces/:id/syncs` · `GET/PATCH/DELETE /api/syncs/:id` · `POST /api/syncs/:id/run` · `GET /api/syncs/:id/runs`. Viewers see syncs and runs; editors create, run, pause and change them.
 
-**Agents.** `list_data_sources` (every connection with health, the syncs of a workspace, the catalog), `create_data_sync` (validates source and transformation, `run_now`), `update_data_sync` (attach a transformation, change the schedule, pause), `run_data_sync` (rows, duration, error, recent runs), plus the `build_data_pipeline` prompt (inspect → sync → transform → validate → verify). In the sync editor, **Draft with Copilot** asks DuckCopilot for a transformation over the previewed columns and drops the SQL in.
+**Agents.** `list_data_sources` (every connection with health — connector connections included — the syncs of a workspace, the catalog), `browse_connector(connection_id, path?)` (walk a connector to the `resource` to sync), `connector_query(connection_id, sql, limit?)` (read-only SQL on a warehouse), `create_data_sync` (validates source and transformation, `run_now`), `update_data_sync` (attach a transformation, change the schedule, pause), `run_data_sync` (rows, duration, error, recent runs), plus the `build_data_pipeline` prompt (browse → inspect → sync → transform → validate → verify). In the sync editor, **Draft with Copilot** asks DuckCopilot for a transformation over the previewed columns and drops the SQL in.
 
 ## Persistent workspaces
 
@@ -460,7 +482,7 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 211 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
+pnpm test        # 229 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +

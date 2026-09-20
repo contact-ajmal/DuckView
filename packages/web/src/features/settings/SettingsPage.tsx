@@ -16,8 +16,9 @@ import { EngineSettingsForm } from './EngineSettingsForm';
 import { AppearanceSettings } from './Appearance';
 import { TeamsPanel } from './TeamsPanel';
 import { CachePanel } from './CachePanel';
+import { IntegrationsPanel } from './IntegrationsPanel';
 
-type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'account' | 'teams' | 'users';
+type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'users';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; admin?: boolean }[] = [
   { id: 'appearance', label: 'Appearance', blurb: 'Themes, fonts, size', icon: <Palette className="h-4 w-4" /> },
   { id: 'layout', label: 'Layout', blurb: 'Show or hide components', icon: <LayoutTemplate className="h-4 w-4" /> },
@@ -25,6 +26,7 @@ const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.Reac
   { id: 'engine', label: 'Engine', blurb: 'Memory, threads, timeout', icon: <Database className="h-4 w-4" /> },
   { id: 'storage', label: 'Storage', blurb: 'Lakehouse, cloud & data connections', icon: <Cloud className="h-4 w-4" /> },
   { id: 'copilot', label: 'Copilot', blurb: 'AI provider', icon: <Bot className="h-4 w-4" /> },
+  { id: 'integrations', label: 'Integrations', blurb: 'Google sign-in for Drive, Sheets, BigQuery', icon: <Plug className="h-4 w-4" /> },
   { id: 'account', label: 'Account', blurb: 'Password & identity', icon: <UserRound className="h-4 w-4" /> },
   { id: 'teams', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
   { id: 'users', label: 'Users', blurb: 'Roles & access', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
@@ -353,6 +355,8 @@ export function SettingsPage() {
           )}
 
           {cat === 'copilot' && (copilotCfg ? <CopilotPanel cfg={copilotCfg} isAdmin={isAdmin} reload={() => { api.get<CopilotConfig>('/api/copilot/config').then(setCopilotCfg).catch(() => undefined); void cp.loadConfig(); }} /> : <p className="text-xs text-zinc-500">Loading…</p>)}
+
+          {cat === 'integrations' && <IntegrationsPanel isAdmin={!!isAdmin} />}
 
           {cat === 'account' && (
             <Card title="Account">

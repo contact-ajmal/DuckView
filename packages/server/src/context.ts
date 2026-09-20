@@ -18,6 +18,8 @@ import { CopilotAdminService } from './services/copilot-admin.js';
 import { WorkspaceCloudSync } from './services/workspace-cloud.js';
 import { DatabaseConnectionService } from './services/databases.js';
 import { DataSyncService } from './services/syncs.js';
+import { ConnectorConnectionService } from './services/connector-connections.js';
+import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
 import { GroupService } from './services/groups.js';
@@ -49,6 +51,7 @@ export interface AppContext {
   cloudSync: WorkspaceCloudSync;
   databases: DatabaseConnectionService;
   syncs: DataSyncService;
+  connectors: ConnectorConnectionService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -105,6 +108,9 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       return null;
     }
   };
+  const connectors = new ConnectorConnectionService(store, cipher, cfg);
+  syncs.connectors = connectors;
+  syncs.stageDir = path.join(engines.jail.baseDir, '.duckview', 'sync');
   if (cfg.duckdb.sync_scheduler_enabled) syncs.start();
   copilot.mosaic = mosaic;
   // Pre-aggregates are only valid for the epoch they were built in.
@@ -138,6 +144,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     cloudSync,
     databases,
     syncs,
+    connectors,
     lakehouse,
     agents,
     groups,

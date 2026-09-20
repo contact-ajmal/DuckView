@@ -385,3 +385,34 @@ export const dataSyncRuns = pgTable(
   },
   (t) => [index('data_sync_runs_sync_idx').on(t.sync_id, t.started_at)],
 );
+
+export const connectorConnections = pgTable(
+  'connector_connections',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    connector: text('connector').notNull(),
+    name: text('name').notNull(),
+    config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+    encrypted_credentials: text('encrypted_credentials').notNull(),
+    iv: text('iv').notNull(),
+    tag: text('tag').notNull(),
+    account_label: text('account_label'),
+    status: text('status', { enum: LAKEHOUSE_STATUSES }).notNull().default('unknown'),
+    last_error: text('last_error'),
+    last_tested_at: ts('last_tested_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('connector_connections_user_idx').on(t.user_id)],
+);
+
+export const appSettings = pgTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').$type<Record<string, unknown>>().notNull().default({}),
+  encrypted_value: text('encrypted_value'),
+  iv: text('iv'),
+  tag: text('tag'),
+  updated_by: text('updated_by'),
+  updated_at: ts('updated_at').notNull(),
+});

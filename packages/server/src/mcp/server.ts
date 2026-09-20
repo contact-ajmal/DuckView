@@ -178,9 +178,9 @@ Output: a short diagnosis, the rewritten SQL, a before/after plan comparison tab
             type: 'text',
             text: `Set up a data pipeline${workspace_id ? ` in workspace \`${workspace_id}\`` : ''} that loads \`${source}\`${goal ? ` and produces: ${goal}` : ''}.
 
-1. Call \`list_data_sources\` to see the connections and their aliases; if the source is a table of a database or lakehouse, it is queried as alias.schema.table.
-2. Inspect the source with \`inspect_schema\` (or \`execute_query\` with a LIMIT) — columns, types, a few rows.
-3. Call \`create_data_sync\` with the source, a target_table, a schedule (interval or cron) and run_now: true. Read the columns it reports.
+1. Call \`list_data_sources\` to see the connections and their aliases; if the source is a table of a database or lakehouse, it is queried as alias.schema.table. A warehouse or SaaS connection (Snowflake, BigQuery, Salesforce, Stripe, Google Sheets …) is walked with \`browse_connector\` until a leaf gives the \`resource\` to sync; warehouses also answer \`connector_query\`.
+2. Inspect the source with \`inspect_schema\` (or \`execute_query\` with a LIMIT; \`connector_query\` for a warehouse) — columns, types, a few rows.
+3. Call \`create_data_sync\` with the source ({kind:"connector", connection_id, resource} for a connector), a target_table, a schedule (interval or cron) and run_now: true. Read the columns it reports.
 4. Write the transformation as a single SELECT over {{raw}} — rename and cast columns, filter junk, derive fields, aggregate if the goal asks for it — and attach it with \`update_data_sync\` (transform_sql, run_now: true). It is validated against the source before it is saved; fix anything it reports.
 5. Verify with \`execute_query\` on the target table, then reply with the sync id, the schedule, the transformation and a two-line summary of the resulting table.`,
           },

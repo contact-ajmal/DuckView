@@ -16,6 +16,7 @@ const Source = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('sql'), sql: z.string().min(1).max(50_000) }),
   z.object({ kind: z.literal('table'), database_connection_id: z.string().nullable().optional(), lakehouse_connection_id: z.string().nullable().optional(), catalog: z.string().nullable().optional(), schema: z.string().min(1), table: z.string().min(1) }),
   z.object({ kind: z.literal('url'), url: z.string().min(1).max(2000), format: z.enum(['auto', 'csv', 'json', 'parquet', 'excel']).default('auto'), options: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(), connection_id: z.string().nullable().optional() }),
+  z.object({ kind: z.literal('connector'), connection_id: z.string().min(1).max(64), resource: z.record(z.string().max(64), z.unknown()) }),
 ]);
 const Schedule = z.discriminatedUnion('kind', [z.object({ kind: z.literal('manual') }), z.object({ kind: z.literal('interval'), minutes: z.coerce.number().int().min(1) }), z.object({ kind: z.literal('cron'), expression: z.string().min(5).max(100), timezone: z.string().max(64).optional() })]);
 const SyncBody = z.object({ name: z.string().max(160), source: Source, target_table: z.string().max(63), target_schema: z.string().max(63).optional(), mode: z.enum(SYNC_MODES).optional(), transform_sql: z.string().max(50_000).nullable().optional(), schedule: Schedule.optional(), enabled: z.boolean().optional() });
@@ -27,8 +28,8 @@ export async function sourceRoutes(app: FastifyInstance, ctx: AppContext) {
   app.get('/api/sources/catalog', async () => ({ families: FAMILY_LABELS, sources: SOURCE_CATALOG }));
   app.get('/api/sources', async (req) => {
     const p = req.principal!;
-    const [cloud, lakehouse, databases, http] = await Promise.all([ctx.cloud.list(p.userId), ctx.lakehouse.list(p.userId), ctx.databases.list(p.userId), ctx.connections.list(p.userId)]);
-    return { cloud, lakehouse, databases, http: http.filter((c) => c.type === 'HTTP'), mode: ctx.cfg.security.filesystem_mode, external_access: ctx.cfg.security.enable_external_access || ctx.cfg.security.filesystem_mode === 'full' };
+    const [cloud, lakehouse, databases, http, connectors] = await Promise.all([ctx.cloud.list(p.userId), ctx.lakehouse.list(p.userId), ctx.databases.list(p.userId), ctx.connections.list(p.userId), ctx.connectors.list(p.userId)]);
+    return { cloud, lakehouse, databases, http: http.filter((c) => c.type === 'HTTP'), connectors, google_configured: !!(await ctx.connectors.googleClient()), mode: ctx.cfg.security.filesystem_mode, external_access: ctx.cfg.security.enable_external_access || ctx.cfg.security.filesystem_mode === 'full' };
   });
   app.get('/api/sources/google-sheet-url', async (req) => {
     const q = z.object({ spreadsheet_id: z.string().min(5).max(200), gid: z.string().max(20).optional() }).parse(req.query ?? {});

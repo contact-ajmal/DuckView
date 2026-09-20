@@ -1,6 +1,8 @@
 /**
  * Scheduled syncs: load a source — a table of an attached database or lakehouse, a URL (CSV/JSON/Parquet/Excel over
- * HTTPS, a shared Google Sheet), or any SELECT — into a table of a workspace, on a schedule (interval or cron) or on
+ * HTTPS, a shared Google Sheet), a connector resource (a warehouse table or query, a SaaS object, a Drive file, a
+ * Sheets tab — staged to a file under <data>/.duckview/sync by the connector service), or any SELECT — into a
+ * table of a workspace, on a schedule (interval or cron) or on
  * demand, optionally through a transformation step written by a person or by an agent.
  *
  * A run is one guarded SQL sequence on the workspace engine, executed as the sync's owner (so roles, the sandbox,
@@ -11,6 +13,8 @@
  * Every run is recorded (rows, duration, error) and announced on the live feed. The scheduler is one in-process
  * ticker; syncs of a workspace run one at a time.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { and, desc, eq, lte } from 'drizzle-orm';
 import cronParser from 'cron-parser';
 import type { MetadataStore } from '../db/index.js';
@@ -23,6 +27,7 @@ import type { WorkspaceService } from './workspaces.js';
 import type { QueryService } from './query.js';
 import type { AuthService } from './auth.js';
 import type { AuditService } from './audit.js';
+import type { ConnectorConnectionService } from './connector-connections.js';
 import { badRequest, notFound } from './errors.js';
 import { analyzeSql } from '../engine/sql-guard.js';
 import { sqlString } from '../engine/duckdb.js';
@@ -83,6 +88,16 @@ export function loadSelect(source: SyncSource, aliasOf?: (dbConnectionId: string
           return `SELECT * FROM ${url}`;
       }
     }
+    case 'connector': {
+      if (!source.connection_id || typeof source.connection_id !== 'string') throw badRequest('The connector source needs a connection_id');
+      if (!source.resource || typeof source.resource !== 'object' || Array.isArray(source.resource)) throw badRequest('The connector source needs a resource (what to read: a table, an object, a file …)');
+      if (typeof source.resource.sql === 'string') {
+        const a = analyzeSql(source.resource.sql);
+        if (a.statements.length !== 1 || a.isMutating) throw badRequest('The remote SQL must be a single read-only SELECT');
+      }
+      // Rows are staged to a file by the connector service at run time (see DataSyncService.resolveLoad).
+      return `SELECT * FROM read_json_auto('<staged ${source.connection_id}>')`;
+    }
   }
 }
 
@@ -116,6 +131,9 @@ export class DataSyncService {
   private running = new Set<string>();
   /** Alias lookup for table sources; set by the context. */
   aliasOf: (userId: string, dbConnectionId: string) => Promise<string | null> = async () => null;
+  /** Connector connections (warehouses, SaaS, Google) and where their rows are staged; set by the context. */
+  connectors: ConnectorConnectionService | null = null;
+  stageDir: string | null = null;
 
   constructor(private readonly store: MetadataStore, private readonly workspaces: WorkspaceService, private readonly queries: QueryService, private readonly auth: AuthService, private readonly audit: AuditService) {}
   private get db() {
@@ -147,7 +165,7 @@ export class DataSyncService {
       out.mode = input.mode;
     }
     if (input.source !== undefined) {
-      if (!input.source || typeof input.source !== 'object' || !['sql', 'table', 'url'].includes((input.source as { kind: string }).kind)) throw badRequest('source.kind must be sql, table or url');
+      if (!input.source || typeof input.source !== 'object' || !['sql', 'table', 'url', 'connector'].includes((input.source as { kind: string }).kind)) throw badRequest('source.kind must be sql, table, url or connector');
       loadSelect(input.source, () => 'x'); // shape and read-only checks (alias resolution happens at run time)
       out.source = input.source;
     }
@@ -216,17 +234,33 @@ export class DataSyncService {
   /** A peek at the source (first rows) and, when given, the transformed shape — without touching the target. */
   async preview(p: Principal, workspaceId: string, source: SyncSource, transformSql?: string | null, limit = 50) {
     const w = await this.workspaces.get(p, workspaceId);
-    const load = await this.resolveLoad(w.user_id, source);
-    const sql = transformSql?.trim() ? bindTransform(transformSql, `(${load})`) : load;
-    const r = await this.queries.run(p, workspaceId, `SELECT * FROM (${sql}) AS _preview LIMIT ${Math.max(1, Math.min(limit, 500))}`, { cache: false, countTotal: false, maxRows: 500 });
-    return { columns: r.columns, rows: r.rows, sql };
+    const n = Math.max(1, Math.min(limit, 500));
+    const { load, cleanup } = await this.resolveLoad(w.user_id, source, { limit: n });
+    try {
+      const sql = transformSql?.trim() ? bindTransform(transformSql, `(${load})`) : load;
+      const r = await this.queries.run(p, workspaceId, `SELECT * FROM (${sql}) AS _preview LIMIT ${n}`, { cache: false, countTotal: false, maxRows: 500 });
+      return { columns: r.columns, rows: r.rows, sql };
+    } finally {
+      cleanup();
+    }
   }
 
-  /** The load SELECT with a database connection's alias resolved for the owner. */
-  private async resolveLoad(ownerId: string, source: SyncSource): Promise<string> {
+  /**
+   * The load SELECT with a database connection's alias resolved for the owner — or, for a connector source, the
+   * rows staged to a file (removed by `cleanup`).
+   */
+  private async resolveLoad(ownerId: string, source: SyncSource, opts: { limit?: number } = {}): Promise<{ load: string; cleanup: () => void }> {
+    if (source.kind === 'connector') {
+      if (!this.connectors || !this.stageDir) throw badRequest('Connector sources are not available on this server');
+      loadSelect(source); // shape checks
+      const c = await this.connectors.getOwned(ownerId, source.connection_id).catch(() => null);
+      if (!c) throw badRequest('The connection of this sync no longer exists');
+      const staged = await this.connectors.stage(c, source.resource, path.join(this.stageDir, `${newId()}`), { limit: opts.limit });
+      return { load: staged.select, cleanup: () => staged.files.forEach((f) => fs.rmSync(f, { force: true })) };
+    }
     const alias = source.kind === 'table' && source.database_connection_id ? await this.aliasOf(ownerId, source.database_connection_id) : null;
     if (source.kind === 'table' && source.database_connection_id && !alias) throw badRequest('The database connection of this sync no longer exists');
-    return loadSelect(source, () => alias);
+    return { load: loadSelect(source, () => alias), cleanup: () => undefined };
   }
 
   // ------------------------------------------------------------------ running
@@ -248,8 +282,11 @@ export class DataSyncService {
     liveEvents.publish({ type: 'sync', at: run.started_at.toISOString(), workspace_id: sync.workspace_id, sync_id: id, run_id: run.id, status: 'running', rows: null, duration_ms: null, error: null });
     this.running.add(id);
     const t0 = performance.now();
+    let cleanup = () => undefined as void;
     try {
-      const load = await this.resolveLoad(w.user_id, sync.source);
+      const resolved = await this.resolveLoad(w.user_id, sync.source);
+      const load = resolved.load;
+      cleanup = resolved.cleanup;
       const schema = q(sync.target_schema);
       const target = `${schema}.${q(sync.target_table)}`;
       const staging = `${schema}.${q(`${sync.target_table}__staging`)}`;
@@ -281,6 +318,7 @@ export class DataSyncService {
       this.audit.log({ userId: actorId ?? w.user_id, actorType: triggeredBy === 'agent' ? 'AGENT' : 'USER', action: 'sync.run', resource: `sync:${id}`, durationMs: failed.duration_ms ?? 0, ip: 'scheduler', status: 'error', error: message });
       return failed;
     } finally {
+      cleanup();
       this.running.delete(id);
     }
   }

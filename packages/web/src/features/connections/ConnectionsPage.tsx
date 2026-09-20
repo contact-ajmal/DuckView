@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Plug, Database, Cloud, Layers, Globe, Warehouse, Boxes, Plus, RefreshCw, Play, Pause, Trash2, Pencil, CheckCircle2, AlertTriangle, Clock, Bot, ExternalLink, Search } from 'lucide-react';
-import { api, timeAgo, type SourceType, type SourceFamily, type CloudConnection, type LakehouseConnection, type DatabaseConnection, type PublicConnection, type DataSync, type DataSyncRun } from '../../api/client';
+import { api, timeAgo, type SourceType, type SourceFamily, type CloudConnection, type LakehouseConnection, type DatabaseConnection, type PublicConnection, type DataSync, type DataSyncRun, type ConnectorConnection, type ConnectorSummary } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
+import { useAuth } from '../../store/auth';
 import { useCopilot } from '../../store/copilot';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { Eyebrow, PageTitle } from '../../components/layout';
@@ -10,6 +11,7 @@ import { CloudWizard } from '../explorer/CloudWizard';
 import { LakehouseWizard } from '../explorer/LakehouseWizard';
 import { DatabaseWizard } from './DatabaseWizard';
 import { SyncEditor } from './SyncEditor';
+import { ConnectorWizard } from './ConnectorWizard';
 
 const FAMILY_ICON: Record<SourceFamily, ReactNode> = { storage: <Cloud className="h-4 w-4" />, lakehouse: <Layers className="h-4 w-4" />, database: <Database className="h-4 w-4" />, web: <Globe className="h-4 w-4" />, warehouse: <Warehouse className="h-4 w-4" />, saas: <Boxes className="h-4 w-4" /> };
 
@@ -24,20 +26,24 @@ export function ConnectionsPage() {
   const wsId = ws.activeId;
   const { canEdit } = useWorkspaceAccess();
   const cp = useCopilot();
+  const isAdmin = useAuth((s) => s.user?.role === 'ADMIN');
   const [tab, setTab] = useState<Tab>((/^#\/connections\/(\w+)/.exec(location.hash)?.[1] as Tab) || 'sources');
   const [catalog, setCatalog] = useState<{ families: Record<SourceFamily, { label: string; blurb: string }>; sources: SourceType[] } | null>(null);
-  const [configured, setConfigured] = useState<{ cloud: CloudConnection[]; lakehouse: LakehouseConnection[]; databases: DatabaseConnection[]; http: PublicConnection[]; mode: string; external_access: boolean } | null>(null);
+  const [configured, setConfigured] = useState<{ cloud: CloudConnection[]; lakehouse: LakehouseConnection[]; databases: DatabaseConnection[]; http: PublicConnection[]; connectors: ConnectorConnection[]; google_configured: boolean; mode: string; external_access: boolean } | null>(null);
+  const [connectorCatalog, setConnectorCatalog] = useState<ConnectorSummary[]>([]);
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [syncs, setSyncs] = useState<DataSync[]>([]);
   const [runs, setRuns] = useState<Record<string, DataSyncRun[]>>({});
   const [filter, setFilter] = useState('');
-  const [wizard, setWizard] = useState<{ kind: 'cloud' } | { kind: 'lakehouse'; edit: LakehouseConnection | null } | { kind: 'database'; source: SourceType | null; edit: DatabaseConnection | null } | { kind: 'sync'; edit: DataSync | null } | null>(null);
+  const [wizard, setWizard] = useState<{ kind: 'cloud' } | { kind: 'lakehouse'; edit: LakehouseConnection | null } | { kind: 'database'; source: SourceType | null; edit: DatabaseConnection | null } | { kind: 'connector'; source: SourceType | null; connector: ConnectorSummary; edit: ConnectorConnection | null } | { kind: 'sync'; edit: DataSync | null; connectorId?: string } | null>(null);
   const [testing, setTesting] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [c, s] = await Promise.all([api.get<typeof catalog>('/api/sources/catalog'), api.get<typeof configured>('/api/sources')]);
+    const [c, s, k] = await Promise.all([api.get<typeof catalog>('/api/sources/catalog'), api.get<typeof configured>('/api/sources'), api.get<{ connectors: ConnectorSummary[] }>('/api/connectors')]);
     setCatalog(c);
     setConfigured(s);
+    setConnectorCatalog(k.connectors);
     if (wsId) setSyncs((await api.get<{ syncs: DataSync[] }>(`/api/workspaces/${wsId}/syncs`)).syncs);
   }, [wsId]);
   useEffect(() => void load().catch(() => undefined), [load]);
@@ -45,6 +51,14 @@ export function ConnectionsPage() {
     const on = () => setTab((/^#\/connections\/(\w+)/.exec(location.hash)?.[1] as Tab) || 'sources');
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
+  }, []);
+  // Back from Google's consent screen: #/connections?connected=<id> or ?google_error=<message>.
+  useEffect(() => {
+    const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
+    if (q.get('connected')) setNotice({ tone: 'ok', text: 'Google account connected. Schedule a sync from it under Syncs → New sync → Connector.' });
+    else if (q.get('google_error')) setNotice({ tone: 'error', text: `Google sign-in failed: ${q.get('google_error')}` });
+    else return;
+    history.replaceState(null, '', '#/connections');
   }, []);
   // Live: sync runs update the list as they happen.
   useEffect(() => subscribeLiveEvents((e) => { if (e.type === 'sync' && e.workspace_id === wsId) void api.get<{ syncs: DataSync[] }>(`/api/workspaces/${wsId}/syncs`).then((r) => setSyncs(r.syncs)).catch(() => undefined); }), [wsId]);
@@ -54,7 +68,18 @@ export function ConnectionsPage() {
     if (s.backend.family === 'cloud') setWizard({ kind: 'cloud' });
     else if (s.backend.family === 'lakehouse') setWizard({ kind: 'lakehouse', edit: null });
     else if (s.backend.family === 'database') setWizard({ kind: 'database', source: s, edit: null });
+    else if (s.backend.family === 'connector') { const c = connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector); if (c) setWizard({ kind: 'connector', source: s, connector: c, edit: null }); }
     else if (s.backend.family === 'http') { if (wsId) setWizard({ kind: 'sync', edit: null }); }
+  };
+  const testConnector = async (c: ConnectorConnection) => {
+    setTesting((t) => ({ ...t, [c.id]: 'testing…' }));
+    try {
+      const r = await api.post<{ ok: boolean; message: string }>(`/api/connector-connections/${c.id}/test`, {});
+      setTesting((t) => ({ ...t, [c.id]: r.message }));
+    } catch (e) {
+      setTesting((t) => ({ ...t, [c.id]: (e as Error).message }));
+    }
+    await load();
   };
   const testDb = async (c: DatabaseConnection) => {
     setTesting((t) => ({ ...t, [c.id]: 'testing…' }));
@@ -94,7 +119,7 @@ export function ConnectionsPage() {
   const sources = catalog?.sources ?? [];
   const q = filter.trim().toLowerCase();
   const matches = (s: SourceType) => !q || `${s.label} ${s.vendor} ${s.blurb} ${s.family}`.toLowerCase().includes(q);
-  const configuredCount = configured ? configured.cloud.length + configured.lakehouse.length + configured.databases.length + configured.http.length : 0;
+  const configuredCount = configured ? configured.cloud.length + configured.lakehouse.length + configured.databases.length + configured.http.length + configured.connectors.length : 0;
   const scheduleLabel = (s: DataSync) => (s.schedule.kind === 'manual' ? 'manual' : s.schedule.kind === 'interval' ? `every ${s.schedule.minutes} min` : `cron ${s.schedule.expression}`);
 
   return (
@@ -103,7 +128,7 @@ export function ConnectionsPage() {
         <div>
           <Eyebrow>Data</Eyebrow>
           <PageTitle>Connections</PageTitle>
-          <p className="mt-1 text-xs text-zinc-500">Object storage, lakehouse catalogs, databases and web sources — connected once, queried from every workspace, loaded on a schedule, and reachable by agents through <code className="font-mono">list_data_sources</code> and the sync tools.</p>
+          <p className="mt-1 text-xs text-zinc-500">Object storage, lakehouse catalogs, databases, warehouses, SaaS applications and Google Drive / Sheets — connected once, queried from every workspace, loaded on a schedule, and reachable by agents through <code className="font-mono">list_data_sources</code>, <code className="font-mono">browse_connector</code> and the sync tools.</p>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-zinc-800 p-0.5">
           {([['sources', `Configured (${configuredCount})`], ['catalog', 'Add a source'], ['syncs', `Syncs (${syncs.length})`]] as [Tab, string][]).map(([t, label]) => (
@@ -111,6 +136,8 @@ export function ConnectionsPage() {
           ))}
         </div>
       </div>
+
+      {notice && <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs', notice.tone === 'ok' ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-200' : 'border-red-900/60 bg-red-950/30 text-red-200')}>{notice.tone === 'ok' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{notice.text}</span><button className="ml-auto text-zinc-500 hover:text-zinc-200" onClick={() => setNotice(null)}>×</button></div>}
 
       {tab === 'sources' && configured && (
         <div className="space-y-4">
@@ -124,6 +151,19 @@ export function ConnectionsPage() {
                     <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'sync', edit: null })} disabled={!wsId || !canEdit} title="Schedule a load from this database"><Clock className="h-3.5 w-3.5" /> Sync</Button>
                     <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'database', source: sources.find((s) => s.backend.family === 'database' && s.backend.engine === c.engine) ?? null, edit: c })} title="Edit"><Pencil className="h-3.5 w-3.5" /></Button>
                     <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Remove "${c.name}"? Syncs reading from it will fail.`)) { await api.del(`/api/database-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+                  </>} />
+              ))}
+            </Section>
+          )}
+          {configured.connectors.length > 0 && (
+            <Section title="Warehouses, applications & Google" icon={FAMILY_ICON.saas} hint="Browsed from the sync editor and by agents; rows are staged into DuckDB by syncs. Credentials stay encrypted on the server.">
+              {configured.connectors.map((c) => (
+                <Row key={c.id} title={c.name} badge={<Badge>{c.connector_label}</Badge>} status={c.status} sub={<>{c.account_label ? <><span className="text-zinc-300">{c.account_label}</span> · </> : null}{c.auth_kind === 'google' ? (c.credential_fields.includes('refresh_token') ? 'Google account' : c.credential_fields.includes('service_account_key') ? 'service account' : 'not signed in') : `${c.credential_fields.length} credential${c.credential_fields.length === 1 ? '' : 's'} on file`}{c.remote_sql ? ' · remote SQL' : ''}{c.last_tested_at ? ` · tested ${timeAgo(c.last_tested_at)}` : ''}{c.last_error ? <span className={c.status === 'error' ? 'text-red-300' : 'text-amber-300'}> · {c.last_error}</span> : null}{testing[c.id] ? <span className="text-zinc-400"> · {testing[c.id]}</span> : null}{!configured.external_access ? <span className="text-amber-300"> · needs security.enable_external_access</span> : null}</>}
+                  actions={<>
+                    <Button size="sm" variant="ghost" onClick={() => void testConnector(c)} title="Test the connection"><RefreshCw className="h-3.5 w-3.5" /> Test</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'sync', edit: null, connectorId: c.id })} disabled={!wsId || !canEdit} title="Schedule a load from this connection"><Clock className="h-3.5 w-3.5" /> Sync</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { const k = connectorCatalog.find((x) => x.id === c.connector); if (k) setWizard({ kind: 'connector', source: sources.find((s) => s.backend.family === 'connector' && s.backend.connector === c.connector) ?? null, connector: k, edit: c }); }} title="Edit"><Pencil className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Remove "${c.name}"? Syncs reading from it will fail.`)) { await api.del(`/api/connector-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </>} />
               ))}
             </Section>
@@ -178,7 +218,7 @@ export function ConnectionsPage() {
                         {s.capabilities.browse && <Badge>browse</Badge>}
                         {s.capabilities.remote_sql && <Badge tone="blue">remote SQL</Badge>}
                         {s.capabilities.sync && <Badge tone="green">sync</Badge>}
-                        <Badge>{s.auth === 'keys' ? 'access keys' : s.auth === 'token' ? 'token' : s.auth === 'password' ? 'password' : s.auth === 'file' ? 'file' : s.auth === 'connection_string' ? 'connection string' : s.auth === 'oauth' ? 'OAuth' : 'no auth'}</Badge>
+                        <Badge>{s.auth === 'keys' ? 'access keys' : s.auth === 'token' ? 'token' : s.auth === 'password' ? 'password' : s.auth === 'file' ? 'file' : s.auth === 'connection_string' ? 'connection string' : s.auth === 'oauth' ? (s.backend.family === 'connector' && connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector)?.auth.kind === 'google' ? 'Google account' : 'OAuth') : 'no auth'}</Badge>
                       </div>
                     </button>
                   ))}
@@ -186,7 +226,7 @@ export function ConnectionsPage() {
               </div>
             );
           })}
-          <p className="text-[11px] text-zinc-500">Missing a source? Planned ones are listed honestly; anything that speaks Postgres wire, S3 or an Iceberg REST catalog works today through those entries. Ask for a connector at <a className="text-accent-300 hover:underline" href="https://github.com/contact-ajmal/DuckView/issues" target="_blank" rel="noreferrer">github.com/contact-ajmal/DuckView/issues <ExternalLink className="inline h-3 w-3" /></a>.</p>
+          <p className="text-[11px] text-zinc-500">Missing a source? Anything that speaks Postgres wire, S3 or an Iceberg REST catalog works through those entries; warehouses and applications go through their own APIs. Ask for a connector at <a className="text-accent-300 hover:underline" href="https://github.com/contact-ajmal/DuckView/issues" target="_blank" rel="noreferrer">github.com/contact-ajmal/DuckView/issues <ExternalLink className="inline h-3 w-3" /></a>.</p>
         </div>
       )}
 
@@ -200,7 +240,7 @@ export function ConnectionsPage() {
             </div>
           </div>
           {syncs.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-zinc-800 py-14"><Empty icon={<Clock className="h-10 w-10" />} title="No syncs yet" hint="Load a table from a connected database, a CSV/JSON endpoint, a shared Google Sheet or any SELECT into this workspace on a schedule." /></div>
+            <div className="rounded-xl border border-dashed border-zinc-800 py-14"><Empty icon={<Clock className="h-10 w-10" />} title="No syncs yet" hint="Load a table from a connected database or warehouse, an application object, a Google Sheet or Drive file, a CSV/JSON endpoint or any SELECT into this workspace on a schedule." /></div>
           ) : (
             <div className="divide-y divide-zinc-800 rounded-xl border border-zinc-800">
               {syncs.map((s) => (
@@ -224,7 +264,7 @@ export function ConnectionsPage() {
                       <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Delete sync "${s.name}"? The target table stays.`)) { await api.del(`/api/syncs/${s.id}`); await load(); } }} disabled={!canEdit} title="Delete"><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
                   </div>
-                  <div className="mt-1 font-mono text-[10.5px] text-zinc-500">{describeSource(s, configured?.databases ?? [])}</div>
+                  <div className="mt-1 font-mono text-[10.5px] text-zinc-500">{describeSource(s, configured?.databases ?? [], configured?.connectors ?? [])}</div>
                   {s.last_run?.error && <div className="mt-1 rounded-md border border-red-900/60 bg-red-950/30 px-2 py-1 font-mono text-[10.5px] text-red-200">{s.last_run.error}</div>}
                   {runs[s.id] && (
                     <ul className="mt-2 divide-y divide-zinc-800/60 rounded-md border border-zinc-800 text-[10.5px]">
@@ -242,16 +282,25 @@ export function ConnectionsPage() {
       <CloudWizard open={wizard?.kind === 'cloud'} onClose={() => setWizard(null)} onCreated={() => { void load(); go('sources'); }} />
       <LakehouseWizard open={wizard?.kind === 'lakehouse'} initial={wizard?.kind === 'lakehouse' ? wizard.edit : null} onClose={() => setWizard(null)} onCreated={() => { void load(); go('sources'); }} />
       <DatabaseWizard open={wizard?.kind === 'database'} source={wizard?.kind === 'database' ? wizard.source : null} initial={wizard?.kind === 'database' ? wizard.edit : null} onClose={() => { setWizard(null); void load(); go('sources'); }} onSaved={() => void load()} />
-      {wsId && <SyncEditor open={wizard?.kind === 'sync'} workspaceId={wsId} initial={wizard?.kind === 'sync' ? wizard.edit : null} databases={configured?.databases ?? []} lakehouses={configured?.lakehouse ?? []} onClose={() => setWizard(null)} onSaved={() => { void load(); go('syncs'); }} />}
+      <ConnectorWizard open={wizard?.kind === 'connector'} source={wizard?.kind === 'connector' ? wizard.source : null} connector={wizard?.kind === 'connector' ? wizard.connector : null} initial={wizard?.kind === 'connector' ? wizard.edit : null} googleConfigured={!!configured?.google_configured} isAdmin={!!isAdmin} onClose={() => { setWizard(null); void load(); go('sources'); }} onSaved={() => void load()} />
+      {wsId && <SyncEditor open={wizard?.kind === 'sync'} workspaceId={wsId} initial={wizard?.kind === 'sync' ? wizard.edit : null} initialConnectorId={wizard?.kind === 'sync' ? wizard.connectorId : undefined} databases={configured?.databases ?? []} lakehouses={configured?.lakehouse ?? []} connectors={configured?.connectors ?? []} onClose={() => setWizard(null)} onSaved={() => { void load(); go('syncs'); }} />}
     </div>
   );
 }
 
-function describeSource(s: DataSync, databases: DatabaseConnection[]): string {
+function describeSource(s: DataSync, databases: DatabaseConnection[], connectors: ConnectorConnection[]): string {
   const src = s.source;
   if (src.kind === 'table') return `${src.catalog ?? databases.find((d) => d.id === src.database_connection_id)?.alias ?? 'db'}.${src.schema}.${src.table}`;
   if (src.kind === 'url') return src.url;
+  if (src.kind === 'connector') { const c = connectors.find((x) => x.id === src.connection_id); return `${c ? `${c.connector_label} · ${c.name}` : 'connector'} → ${describeResource(src.resource)}`; }
   return src.sql.slice(0, 140);
+}
+/** One line for a connector resource — mirrors the server's describeResource without needing the connector. */
+export function describeResource(r: Record<string, unknown>): string {
+  if (typeof r.sql === 'string') return `SQL: ${r.sql.slice(0, 80)}`;
+  const parts = [r.database, r.dataset, r.schema, r.table_name ?? r.table, r.object, r.resource, r.name, r.spreadsheet, r.sheet, r.item, r.database_id].filter((v) => typeof v === 'string' && v) as string[];
+  if (Array.isArray(r.dimensions)) return `${(r.dimensions as string[]).join(', ')} × ${((r.metrics as string[]) ?? []).join(', ')}`;
+  return parts.join(' · ') || JSON.stringify(r).slice(0, 80);
 }
 
 function Section({ title, icon, hint, children }: { title: string; icon: ReactNode; hint: string; children: ReactNode }) {

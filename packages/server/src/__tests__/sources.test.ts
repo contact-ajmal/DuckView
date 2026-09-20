@@ -71,11 +71,11 @@ afterAll(async () => {
 });
 
 describe('source catalog', () => {
-  it('lists every family with what is available and what is planned', async () => {
+  it('lists every family with every source available', async () => {
     const r = await api('GET', '/api/sources/catalog');
     const sources = r.json.sources as { id: string; family: string; status: string; capabilities: { sync: boolean } }[];
-    expect(sources.filter((s) => s.status === 'available').map((s) => s.id)).toEqual(expect.arrayContaining(['s3', 'r2', 'gcs', 'azure', 'glue', 's3tables', 'iceberg_rest', 'databricks', 'postgres', 'mysql', 'sqlite', 'duckdb', 'http', 'google_sheets']));
-    expect(sources.filter((s) => s.status === 'planned').map((s) => s.id)).toEqual(expect.arrayContaining(['snowflake', 'bigquery', 'redshift', 'clickhouse', 'salesforce', 'hubspot', 'stripe']));
+    expect(sources.filter((s) => s.status === 'available').map((s) => s.id)).toEqual(expect.arrayContaining(['s3', 'r2', 'gcs', 'azure', 'glue', 's3tables', 'iceberg_rest', 'databricks', 'postgres', 'mysql', 'sqlite', 'duckdb', 'http', 'google_sheets', 'google_sheets_link', 'google_drive', 'snowflake', 'bigquery', 'redshift', 'clickhouse', 'fabric', 'salesforce', 'hubspot', 'stripe', 'ga4', 'airtable', 'notion']));
+    expect(sources.filter((s) => s.status === 'planned')).toEqual([]);
     expect(Object.keys(r.json.families as object)).toEqual(['storage', 'lakehouse', 'database', 'web', 'warehouse', 'saas']);
     const all = await api('GET', '/api/sources');
     expect(all.json).toMatchObject({ mode: 'full', external_access: true, cloud: [], lakehouse: [], databases: [] });

@@ -70,11 +70,14 @@ description: The complete DuckView feature list — querying, workbench, dashboa
     <div class="card">
       <h3>Connections &amp; syncs <span class="tag new">New</span></h3>
       <ul>
-        <li>One page for every source: S3 / R2 / GCS / Azure, Glue / S3 Tables / Iceberg REST / Databricks, PostgreSQL / MySQL / SQLite / DuckDB files, HTTP endpoints, Google Sheets — with tests and health</li>
+        <li>One page for every source: S3 / R2 / GCS / Azure, Glue / S3 Tables / Iceberg REST / Databricks, PostgreSQL / MySQL / SQLite / DuckDB files, HTTP endpoints — with tests and health</li>
+        <li>Warehouses — Snowflake, BigQuery, Redshift, ClickHouse, Microsoft Fabric — browsed and queried remotely, results staged into DuckDB</li>
+        <li>Applications — Salesforce, HubSpot, Stripe, Google Analytics 4, Airtable, Notion — pulled object by object on a schedule</li>
+        <li>Google Drive and Google Sheets with your Google account (admin-registered OAuth client, read-only scopes) or a service account</li>
         <li>Databases attached read-only as <code>alias.schema.table</code>; browse schemas and tables</li>
         <li>Scheduled syncs (interval or cron) into a workspace table, replace or append, with a run history</li>
         <li>Transformations over <code>{{raw}}</code>, validated before saving — drafted by Copilot or set by agents</li>
-        <li>Agents: <code>list_data_sources</code>, <code>create_data_sync</code>, <code>update_data_sync</code>, <code>run_data_sync</code></li>
+        <li>Agents: <code>list_data_sources</code>, <code>browse_connector</code>, <code>connector_query</code>, <code>create_data_sync</code>, <code>update_data_sync</code>, <code>run_data_sync</code></li>
       </ul>
     </div>
     <div class="card">
