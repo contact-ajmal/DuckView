@@ -85,5 +85,5 @@ Metadata migrations are additive and run automatically on start for both SQLite 
 
 ## CI/CD in the repository
 
-- `ci.yml` — typecheck, 237 unit and integration tests (real DuckDB engines, mock Iceberg REST catalog serving real Iceberg tables, mock Databricks workspace, MCP over every transport), build, and `scripts/smoke.mjs` against both the built server and a freshly built image.
+- `ci.yml` — typecheck, 240 unit and integration tests (real DuckDB engines, mock Iceberg REST catalog serving real Iceberg tables, mock Databricks workspace, MCP over every transport), build, and `scripts/smoke.mjs` against both the built server and a freshly built image.
 - `docker-publish.yml` — multi-arch build and push to Docker Hub + GHCR on `v*` tags, then a smoke test of the pushed tag.

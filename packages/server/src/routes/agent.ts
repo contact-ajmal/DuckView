@@ -144,6 +144,7 @@ export async function agentRoutes(app: FastifyInstance, ctx: AppContext) {
     const r = await runTool(env, tool, args);
     // Argument errors are the caller's fault; everything else is 200 with is_error so agents see the message.
     if (r.isError && (r.structuredContent as { code?: string } | undefined)?.code === 'BAD_REQUEST') reply.code(400);
-    return { text: r.content.map((c) => c.text).join('\n'), structured: r.structuredContent ?? null, is_error: !!r.isError };
+    const images = r.content.filter((c): c is { type: 'image'; data: string; mimeType: string } => c.type === 'image').map((c) => ({ mime_type: c.mimeType, data_base64: c.data }));
+    return { text: r.content.map((c) => (c.type === 'text' ? c.text : `[image ${c.mimeType}]`)).join('\n'), structured: r.structuredContent ?? null, is_error: !!r.isError, ...(images.length ? { images } : {}) };
   });
 }

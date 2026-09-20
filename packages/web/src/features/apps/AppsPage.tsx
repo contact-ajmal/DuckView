@@ -4,8 +4,8 @@ import { EditorView, keymap } from '@codemirror/view';
 import { Prec } from '@codemirror/state';
 import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { AppWindow, Plus, Play, Square, RotateCw, ExternalLink, Save, Trash2, ScrollText, Loader2, ChevronLeft, Bot } from 'lucide-react';
-import { api, timeAgo, type DataApp, type AppTemplate, type AppStatus } from '../../api/client';
+import { AppWindow, Plus, Play, Square, RotateCw, ExternalLink, Save, Trash2, ScrollText, Loader2, ChevronLeft, Bot, Wand2, CheckCircle2, LayoutDashboard, FileCode2 } from 'lucide-react';
+import { api, copilotChat, timeAgo, type DataApp, type AppTemplate, type AppStatus, type Dashboard, type SavedQuery } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useTheme } from '../../store/theme';
 import { useCopilot } from '../../store/copilot';
@@ -33,8 +33,10 @@ function Gallery() {
   const [apps, setApps] = useState<DataApp[]>([]);
   const [enabled, setEnabled] = useState(true);
   const [templates, setTemplates] = useState<AppTemplate[]>([]);
+  const [dashboards, setDashboards] = useState<Dashboard[]>([]);
+  const [queries, setQueries] = useState<SavedQuery[]>([]);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', template: 'explorer' });
+  const [form, setForm] = useState<{ name: string; description: string; from: 'template' | 'dashboard' | 'queries'; template: string; dashboard: string; queryIds: string[] }>({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [] });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -45,6 +47,11 @@ function Gallery() {
   }, [wsId]);
   useEffect(() => void load().catch((e) => setError((e as Error).message)), [load]);
   useEffect(() => void api.get<{ templates: AppTemplate[] }>('/api/apps/templates').then((r) => setTemplates(r.templates)).catch(() => undefined), []);
+  useEffect(() => {
+    if (!wsId || !creating) return;
+    void api.get<{ dashboards: Dashboard[] }>(`/api/workspaces/${wsId}/dashboards`).then((r) => setDashboards(r.dashboards)).catch(() => setDashboards([]));
+    void api.get<{ queries: SavedQuery[] }>(`/api/workspaces/${wsId}/queries`).then((r) => setQueries(r.queries)).catch(() => setQueries([]));
+  }, [wsId, creating]);
   useEffect(() => subscribeLiveEvents((e) => { if (e.type === 'app' && e.workspace_id === wsId) void load().catch(() => undefined); }), [wsId, load]);
 
   const create = async () => {
@@ -52,8 +59,8 @@ function Gallery() {
     setBusy('create');
     setError(null);
     try {
-      const t = templates.find((x) => x.id === form.template);
-      const r = await api.post<{ app: DataApp }>(`/api/workspaces/${wsId}/apps`, { name: form.name.trim() || t?.label || 'My app', description: form.description.trim() || null, files: t?.files, spec: { template: form.template } });
+      const source = form.from === 'dashboard' ? { dashboard_id: form.dashboard } : form.from === 'queries' ? { saved_query_ids: form.queryIds } : { template: form.template };
+      const r = await api.post<{ app: DataApp }>(`/api/workspaces/${wsId}/apps`, { name: form.name.trim(), description: form.description.trim() || null, source });
       setCreating(false);
       location.hash = `#/apps/${r.app.id}`;
     } catch (e) {
@@ -76,7 +83,7 @@ function Gallery() {
             <PageTitle>Data apps</PageTitle>
             <p className="mt-1 text-xs text-zinc-500">Streamlit apps written on <b className="text-zinc-300">{ws.workspaces.find((w) => w.id === wsId)?.name ?? 'the active workspace'}</b>'s tables and files — run by DuckView next to the engine, reached through <code className="font-mono">duckview.connect()</code> with a read-only token, shared with the workspace's members.</p>
           </div>
-          <Button variant="primary" disabled={!wsId || !canEdit || !enabled} onClick={() => { setForm({ name: '', description: '', template: 'explorer' }); setCreating(true); }}><Plus className="h-4 w-4" /> New app</Button>
+          <Button variant="primary" disabled={!wsId || !canEdit || !enabled} onClick={() => { setForm({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [] }); setCreating(true); }}><Plus className="h-4 w-4" /> New app</Button>
         </div>
         {!enabled && <div className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">Data apps are disabled on this server (<code className="font-mono">apps.enabled</code>). Apps run Python next to DuckView; an administrator turns them on in the configuration.</div>}
         {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
@@ -113,18 +120,42 @@ function Gallery() {
             <div><Label>Description <span className="normal-case text-zinc-600">(optional)</span></Label><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What the app shows and for whom" /></div>
             <div>
               <Label>Start from</Label>
-              <div className="grid gap-2 md:grid-cols-2">
-                {templates.map((t) => (
-                  <button key={t.id} type="button" onClick={() => setForm({ ...form, template: t.id })} className={cn('rounded-lg border p-3 text-left', form.template === t.id ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
-                    <div className="text-sm text-zinc-100">{t.label}</div>
-                    <div className="mt-1 text-[11px] text-zinc-500">{t.blurb}</div>
-                  </button>
+              <div className="mb-2 grid grid-cols-3 gap-1 rounded-md border border-zinc-800 p-0.5 text-xs">
+                {([['template', 'A template', <FileCode2 key="t" className="h-3.5 w-3.5" />], ['dashboard', 'A dashboard', <LayoutDashboard key="d" className="h-3.5 w-3.5" />], ['queries', 'Saved queries', <FileCode2 key="q" className="h-3.5 w-3.5" />]] as const).map(([id, label, icon]) => (
+                  <button key={id} type="button" onClick={() => setForm({ ...form, from: id })} className={cn('flex items-center justify-center gap-1 rounded px-2 py-1', form.from === id ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200')}>{icon} {label}</button>
                 ))}
               </div>
+              {form.from === 'template' && (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {templates.map((t) => (
+                    <button key={t.id} type="button" onClick={() => setForm({ ...form, template: t.id })} className={cn('rounded-lg border p-3 text-left', form.template === t.id ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
+                      <div className="text-sm text-zinc-100">{t.label}</div>
+                      <div className="mt-1 text-[11px] text-zinc-500">{t.blurb}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {form.from === 'dashboard' && (
+                <div>
+                  <Select value={form.dashboard} onChange={(e) => setForm({ ...form, dashboard: e.target.value })} className="w-full">
+                    <option value="">{dashboards.length ? 'Pick a dashboard…' : 'No dashboards in this workspace yet'}</option>
+                    {dashboards.map((d) => <option key={d.id} value={d.id}>{d.name} · {d.kind === 'mosaic' ? 'Mosaic' : 'grid'}</option>)}
+                  </Select>
+                  <p className="mt-1 text-[11px] text-zinc-500">A Mosaic dashboard becomes filters, KPIs, charts and tables computed in SQL; a grid dashboard becomes one section per widget. No model involved — the code is yours to edit.</p>
+                </div>
+              )}
+              {form.from === 'queries' && (
+                <div className="max-h-40 space-y-1 overflow-auto rounded-md border border-zinc-800 p-2 text-xs">
+                  {queries.length === 0 && <div className="text-zinc-500">No saved queries in this workspace yet.</div>}
+                  {queries.map((q) => (
+                    <label key={q.id} className="flex cursor-pointer items-center gap-2 text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={form.queryIds.includes(q.id)} onChange={(e) => setForm({ ...form, queryIds: e.target.checked ? [...form.queryIds, q.id] : form.queryIds.filter((x) => x !== q.id) })} /> <span className="font-medium">{q.name}</span><span className="truncate font-mono text-[10px] text-zinc-500">{q.sql_text.slice(0, 80)}</span></label>
+                  ))}
+                </div>
+              )}
             </div>
             <p className="text-[11px] text-zinc-500">The first start creates a Python environment with Streamlit, pandas, pyarrow and the DuckView SDK next to the data directory — it takes a minute once.</p>
             {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
-            <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button><Button variant="primary" loading={busy === 'create'} onClick={() => void create()}><Plus className="h-4 w-4" /> Create & open</Button></div>
+            <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button><Button variant="primary" loading={busy === 'create'} disabled={(form.from === 'dashboard' && !form.dashboard) || (form.from === 'queries' && !form.queryIds.length)} onClick={() => void create()}><Plus className="h-4 w-4" /> Create & open</Button></div>
           </div>
         </Modal>
       </div>
@@ -145,6 +176,8 @@ function AppEditor({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewKey, setPreviewKey] = useState(0);
+  const [check, setCheck] = useState<{ ok: boolean; errors: string[]; warnings: string[] } | null>(null);
+  const [drafting, setDrafting] = useState(false);
   const dirty = useMemo(() => !!app && JSON.stringify(files) !== JSON.stringify(app.files), [files, app]);
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -201,6 +234,40 @@ function AppEditor({ id }: { id: string }) {
     cp.toggle(true);
     void cp.send({ workspaceId: app.workspace_id, message: `I'm writing a Streamlit data app in DuckView (file ${active}). The app reads this workspace through the duckview SDK: \`from duckview.streamlit import connect, query, table_picker\` — \`query(sql)\` runs DuckDB SQL and returns a pandas DataFrame, \`table_picker(dv)\` is a selectbox over the tables. Suggest concrete improvements and give the full updated file in one \`\`\`python block.\n\n\`\`\`python\n${files[active] ?? ''}\n\`\`\`` });
   };
+  /** Copilot writes (or rewrites) app.py for a goal, with the SDK guide as the contract; the result lands in the editor after a static check. */
+  const draft = async () => {
+    if (!app) return;
+    const goal = window.prompt(files['app.py']?.trim() ? 'What should the app do? (Copilot rewrites app.py — the current code is sent as the starting point)' : 'What should the app do? (e.g. "explore trips by zone and hour with fare KPIs and a filterable table")', '');
+    if (goal === null || !goal.trim()) return;
+    setDrafting(true);
+    setError(null);
+    try {
+      const guide = (await api.get<{ guide: string }>('/api/apps/guide')).guide;
+      let out = '';
+      for await (const ev of copilotChat({ workspace_id: app.workspace_id, message: `Write a complete Streamlit data app (app.py) for this goal: ${goal.trim()}.\n\nFollow this guide exactly:\n\n${guide}\n\nUse the workspace's tables and files you know about (the schema is in your context). ${files['app.py']?.trim() ? `Start from the current file and keep what still applies:\n\n\`\`\`python\n${files['app.py']}\n\`\`\`\n\n` : ''}Return only one \`\`\`python block with the full file, no prose.` })) {
+        if (ev.type === 'delta') out += ev.text;
+        if (ev.type === 'error') throw new Error(ev.message);
+      }
+      const m = /```python\s*([\s\S]*?)```/i.exec(out) ?? /```\s*([\s\S]*?)```/.exec(out);
+      const code = (m ? m[1]! : out).trim() + '\n';
+      const v = await api.post<{ ok: boolean; errors: string[]; warnings: string[] }>('/api/apps/validate', { files: { ...files, 'app.py': code }, entry: app.entry });
+      setCheck(v);
+      if (!v.ok) throw new Error(`Copilot's draft did not pass the check: ${v.errors.join('; ')} — it is in the editor to fix.`);
+      setFiles((f) => ({ ...f, 'app.py': code }));
+      setActive('app.py');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDrafting(false);
+    }
+  };
+  const runCheck = async () => {
+    try {
+      setCheck(await api.post('/api/apps/validate', { files, entry: app?.entry ?? 'app.py' }));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
   if (!app) return <div className="p-5 text-xs text-zinc-500">{error ?? 'Loading…'}</div>;
   const status = app.status;
@@ -214,7 +281,9 @@ function AppEditor({ id }: { id: string }) {
         {dirty && <Badge tone="amber">unsaved</Badge>}
         <span className="text-[11px] text-zinc-500">{app.last_started_at ? `started ${timeAgo(app.last_started_at)}` : 'never started'}{app.last_error ? <span className="text-red-300"> · {app.last_error}</span> : null}</span>
         <div className="ml-auto flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={() => void draft()} loading={drafting} disabled={!canEdit || !cp.config?.can_use} title={cp.config?.can_use ? 'Let Copilot write app.py for a goal (checked before it lands in the editor)' : 'Configure Copilot under Settings → Copilot first'}><Wand2 className="h-3.5 w-3.5" /> Draft</Button>
           <Button size="sm" variant="ghost" onClick={askCopilot} title="Ask Copilot about this app"><Bot className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => void runCheck()} title="Static check: compiles, imports streamlit, no tokens"><CheckCircle2 className={cn('h-3.5 w-3.5', check?.ok ? 'text-emerald-400' : check ? 'text-red-300' : '')} /> Check</Button>
           <Button size="sm" variant="secondary" onClick={() => void save()} loading={busy === 'save'} disabled={!canEdit || !dirty} title="Save (⌘S) — a running app restarts"><Save className="h-3.5 w-3.5" /> Save</Button>
           {status === 'running' || status === 'starting' || status === 'installing' ? (
             <>
@@ -229,6 +298,7 @@ function AppEditor({ id }: { id: string }) {
         </div>
       </div>
       {error && <div className="border-b border-red-900/60 bg-red-950/40 px-4 py-1.5 font-mono text-[11px] text-red-200">{error}</div>}
+      {check && (check.errors.length || check.warnings.length) ? <div className={cn('border-b px-4 py-1.5 font-mono text-[11px]', check.ok ? 'border-amber-900/60 bg-amber-950/30 text-amber-200' : 'border-red-900/60 bg-red-950/40 text-red-200')}>{[...check.errors, ...check.warnings.map((w) => `warning: ${w}`)].join(' · ')}<button className="ml-2 text-zinc-500 hover:text-zinc-200" onClick={() => setCheck(null)}>×</button></div> : null}
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <div className="flex min-h-0 flex-col border-r border-zinc-800">
           <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1 text-[11px]">

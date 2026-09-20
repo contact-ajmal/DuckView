@@ -26,6 +26,8 @@ import type { WorkspaceService } from './workspaces.js';
 import type { AuthService } from './auth.js';
 import type { AuditService } from './audit.js';
 import { badRequest, notFound, forbidden } from './errors.js';
+import type { DashboardService, SavedQueryService } from './bi.js';
+import { appFromDashboard, appFromQueries } from './app-generator.js';
 import { logger } from '../observability/logger.js';
 import { liveEvents } from '../observability/events.js';
 
@@ -43,6 +45,15 @@ export interface AppTemplate {
   label: string;
   blurb: string;
   files: AppFiles;
+}
+/** Where an app's code comes from: a template, a dashboard, saved queries / inline SQL, or code as written. */
+export type AppSource = { template: string } | { dashboard_id: string } | { queries: { name: string; sql: string }[] } | { saved_query_ids: string[] } | { code: string; requirements?: string | null };
+export interface Generated {
+  files: AppFiles;
+  spec: Record<string, unknown>;
+  name: string;
+  description: string | null;
+  summary: string;
 }
 
 interface Proc {
@@ -119,6 +130,9 @@ export class DataAppService {
   internalUrl: string;
   /** Overridable for tests (a fake "streamlit"). */
   command: string[] | null;
+  /** Signs the /apps session cookie for a user (set by the routes; used for headless previews). */
+  signSession: ((userId: string) => string) | null = null;
+  private bi: { dashboards: DashboardService; savedQueries: SavedQueryService } | null = null;
 
   constructor(private readonly store: MetadataStore, private readonly cfg: DuckViewConfig, private readonly workspaces: WorkspaceService, private readonly auth: AuthService, private readonly audit: AuditService) {
     this.internalUrl = `http://127.0.0.1:${cfg.server.port}`;
@@ -142,6 +156,169 @@ export class DataAppService {
     if (!this.ticker) {
       this.ticker = setInterval(() => void this.reapIdle().catch(() => undefined), 60_000);
       this.ticker.unref();
+    }
+  }
+
+  bind(bi: { dashboards: DashboardService; savedQueries: SavedQueryService }): void {
+    this.bi = bi;
+  }
+
+  // ------------------------------------------------------------------ generation & validation
+
+  /** Turns a source into files (+ the spec that records where they came from). */
+  async generate(p: Principal, workspaceId: string, source: AppSource, opts: { name?: string; description?: string | null } = {}): Promise<Generated> {
+    if ('template' in source) {
+      const t = APP_TEMPLATES.find((x) => x.id === source.template);
+      if (!t) throw badRequest(`Unknown template "${source.template}" (${APP_TEMPLATES.map((x) => x.id).join(', ')})`);
+      return { files: { ...t.files }, spec: { template: t.id }, name: opts.name ?? t.label, description: opts.description ?? null, summary: t.label };
+    }
+    if ('code' in source) {
+      return { files: { 'app.py': source.code, 'requirements.txt': source.requirements ?? '' }, spec: { source: 'code' }, name: opts.name ?? 'App', description: opts.description ?? null, summary: 'code as written' };
+    }
+    if ('dashboard_id' in source) {
+      if (!this.bi) throw badRequest('Dashboards are not available');
+      const d = await this.bi.dashboards.get(p, source.dashboard_id);
+      if (d.workspace_id !== workspaceId) throw badRequest('The dashboard belongs to another workspace');
+      if (d.kind === 'mosaic' && d.spec) {
+        const g = appFromDashboard(d.spec, { name: opts.name ?? d.name, description: opts.description ?? d.description });
+        return { files: g.files, spec: { dashboard_id: d.id, kind: 'mosaic' }, name: opts.name ?? d.name, description: opts.description ?? d.description, summary: g.summary };
+      }
+      const queries: { name: string; sql: string }[] = [];
+      for (const w of d.widgets) {
+        const sql = w.custom_sql ?? (w.saved_query_id ? (await this.bi.savedQueries.get(p, workspaceId, w.saved_query_id).catch(() => null))?.sql_text : null);
+        if (sql) queries.push({ name: w.title, sql });
+      }
+      if (!queries.length) throw badRequest('The dashboard has no widgets with SQL to build from');
+      const g = appFromQueries(queries, { name: opts.name ?? d.name, description: opts.description ?? d.description });
+      return { files: g.files, spec: { dashboard_id: d.id, kind: 'grid' }, name: opts.name ?? d.name, description: opts.description ?? d.description, summary: g.summary };
+    }
+    if ('saved_query_ids' in source) {
+      if (!this.bi) throw badRequest('Saved queries are not available');
+      const queries: { name: string; sql: string }[] = [];
+      for (const id of source.saved_query_ids) {
+        const q = await this.bi.savedQueries.get(p, workspaceId, id);
+        queries.push({ name: q.name, sql: q.sql_text });
+      }
+      if (!queries.length) throw badRequest('saved_query_ids is empty');
+      const g = appFromQueries(queries, opts);
+      return { files: g.files, spec: { saved_query_ids: source.saved_query_ids }, name: opts.name ?? g.summary, description: opts.description ?? null, summary: g.summary };
+    }
+    if (!source.queries?.length) throw badRequest('queries is empty');
+    const g = appFromQueries(source.queries, opts);
+    return { files: g.files, spec: { queries: source.queries.map((q) => q.name) }, name: opts.name ?? (source.queries.length === 1 ? source.queries[0]!.name : 'Queries'), description: opts.description ?? null, summary: g.summary };
+  }
+
+  /**
+   * Static checks before code from an agent (or the editor's "Check") is saved: the entry compiles (py_compile
+   * with the apps' Python, when there is one), imports streamlit, and carries no token. Never executes the app.
+   */
+  async validateSource(files: AppFiles, entry = 'app.py'): Promise<{ ok: boolean; errors: string[]; warnings: string[] }> {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    try {
+      this.validateFiles(files, entry);
+    } catch (err) {
+      errors.push((err as Error).message);
+    }
+    const code = files[entry] ?? '';
+    if (code && !/^\s*(import|from)\s+streamlit\b/m.test(code)) errors.push(`${entry} does not import streamlit`);
+    if (/use_container_width/.test(code)) warnings.push('use_container_width is deprecated in Streamlit ≥ 1.46 — use width="stretch"');
+    const py = fs.existsSync(this.venvPython) ? this.venvPython : this.cfg.apps.python;
+    if (code && py) {
+      fs.mkdirSync(this.cfg.duckdb.temp_directory, { recursive: true });
+      const dir = fs.mkdtempSync(path.join(this.cfg.duckdb.temp_directory, 'dv-app-check-'));
+      try {
+        for (const [name, content] of Object.entries(files)) {
+          if (!name.endsWith('.py')) continue;
+          const target = path.join(dir, name);
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.writeFileSync(target, content);
+          const r = await new Promise<{ code: number | null; out: string }>((resolve) => {
+            const c = spawn(py, ['-m', 'py_compile', target], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } });
+            let out = '';
+            c.stdout?.on('data', (d) => (out += d));
+            c.stderr?.on('data', (d) => (out += d));
+            c.on('error', (e) => resolve({ code: -1, out: e.message }));
+            c.on('exit', (code) => resolve({ code, out }));
+            setTimeout(() => c.kill('SIGKILL'), 10_000);
+          });
+          if (r.code === -1) warnings.push(`Could not run ${path.basename(py)} to compile ${name}: ${r.out}`);
+          else if (r.code !== 0) errors.push(`${name} does not compile: ${r.out.replace(dir + '/', '').trim().split('\n').slice(-3).join(' ').slice(0, 500)}`);
+        }
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
+    return { ok: errors.length === 0, errors, warnings };
+  }
+
+  /**
+   * A headless screenshot of the running app for agents (Chrome via CDP, when a browser is installed; the
+   * proxy's own cookie signs the visitor in). Returns null without a browser.
+   */
+  async screenshot(app: DataApp, userId: string, baseUrl: string, opts: { width?: number; height?: number; wait_ms?: number } = {}): Promise<{ png: Buffer; text: string } | null> {
+    const chrome = findChrome(this.cfg.apps.chrome_path);
+    if (!chrome || !this.signSession) return null;
+    const { default: WebSocket } = await import('ws');
+    const os = await import('node:os');
+    const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-shot-'));
+    const port = 9400 + Math.floor(Math.random() * 400);
+    const child = spawn(chrome, [`--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', `--window-size=${opts.width ?? 1280},${opts.height ?? 900}`, 'about:blank'], { stdio: 'ignore' });
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      let target: { webSocketDebuggerUrl: string } | undefined;
+      for (let i = 0; i < 50 && !target; i++) {
+        try {
+          const list = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as { type: string; webSocketDebuggerUrl: string }[];
+          target = list.find((t) => t.type === 'page');
+        } catch {
+          await sleep(200);
+        }
+      }
+      if (!target) throw new Error('Chrome did not start');
+      const ws = new WebSocket(target.webSocketDebuggerUrl, { perMessageDeflate: false });
+      await new Promise<void>((resolve, reject) => { ws.on('open', () => resolve()); ws.on('error', reject); });
+      let id = 0;
+      const pending = new Map<number, (m: { result?: Record<string, unknown> }) => void>();
+      ws.on('message', (raw) => { const m = JSON.parse(String(raw)) as { id?: number; result?: Record<string, unknown> }; if (m.id && pending.has(m.id)) { pending.get(m.id)!(m); pending.delete(m.id); } });
+      const send = (method: string, params: Record<string, unknown> = {}) => new Promise<Record<string, unknown>>((resolve) => { const i = ++id; pending.set(i, (m) => resolve(m.result ?? {})); ws.send(JSON.stringify({ id: i, method, params })); });
+      const evaluate = async (expression: string) => ((await send('Runtime.evaluate', { expression, returnByValue: true })) as { result?: { value?: unknown } }).result?.value;
+      await send('Page.enable');
+      await send('Runtime.enable');
+      const u = new URL(baseUrl);
+      await send('Network.setCookie', { name: 'dv_app', value: this.signSession(userId), domain: u.hostname, path: '/apps', httpOnly: true });
+      await send('Page.navigate', { url: `${baseUrl.replace(/\/+$/, '')}/apps/${app.id}/` });
+      const deadline = Date.now() + (opts.wait_ms ?? 25_000);
+      let text = '';
+      while (Date.now() < deadline) {
+        await sleep(500);
+        const state = (await evaluate(`(() => { const running = !!document.querySelector('[data-testid="stStatusWidget"]'); const ready = !!document.querySelector('[data-testid="stAppViewContainer"]'); return { running, ready, text: document.body.innerText.slice(0, 4000) }; })()`)) as { running: boolean; ready: boolean; text: string } | undefined;
+        if (state) text = state.text;
+        if (state?.ready && !state.running) {
+          await sleep(1200); // charts settle after the status widget disappears
+          text = String((await evaluate('document.body.innerText.slice(0, 4000)')) ?? text);
+          break;
+        }
+      }
+      const shot = (await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })) as { data?: string };
+      ws.close();
+      if (!shot.data) throw new Error('no screenshot');
+      return { png: Buffer.from(shot.data, 'base64'), text };
+    } finally {
+      // Chrome keeps writing to its profile until it is gone: wait for the exit, then clean up (best effort).
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, 3000);
+        child.once('exit', () => { clearTimeout(t); resolve(); });
+        child.kill('SIGKILL');
+      });
+      for (let i = 0; i < 5; i++) {
+        try {
+          fs.rmSync(profile, { recursive: true, force: true });
+          break;
+        } catch {
+          await sleep(200);
+        }
+      }
     }
   }
 
@@ -226,10 +403,15 @@ export class DataAppService {
     }
     await this.db.update(this.s.dataApps).set(set).where(eq(this.s.dataApps.id, id));
     const next = { ...app, ...set };
-    // Code changed while running: restart so the next visit runs the new version.
+    // Code changed while running: restart so the next visit runs the new version (the caller waits for it).
     if ((patch.files !== undefined || patch.entry !== undefined) && this.procs.has(id)) {
       await this.stop(p, id, 'restart');
-      void this.start(p, id).catch((err) => logger().warn({ app: id, err: (err as Error).message }, 'App restart failed'));
+      try {
+        return await this.start(p, id);
+      } catch (err) {
+        logger().warn({ app: id, err: (err as Error).message }, 'App restart failed');
+        return this.toPublic({ ...next, status: 'error', last_error: (err as Error).message });
+      }
     }
     return this.toPublic(next);
   }
@@ -496,4 +678,11 @@ export class DataAppService {
     const rows = await this.db.select().from(this.s.dataApps).where(and(eq(this.s.dataApps.workspace_id, workspaceId), eq(this.s.dataApps.name, name))).limit(1);
     return rows[0] ?? null;
   }
+}
+
+/** A Chrome / Chromium binary for headless previews: configured, on PATH, or in the usual places. */
+export function findChrome(configured?: string): string | null {
+  const candidates = [configured, process.env.CHROME_PATH, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium'];
+  for (const c of candidates) if (c && fs.existsSync(c)) return c;
+  return null;
 }

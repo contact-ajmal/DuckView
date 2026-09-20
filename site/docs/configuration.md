@@ -113,6 +113,7 @@ Streamlit data apps run by DuckView (see [Data apps](apps.html)).
 | `start_timeout_seconds` | How long the health check may take (180). |
 | `token_ttl_hours` | Lifetime of the read-only, workspace-scoped token minted per start (24). |
 | `max_source_bytes` | Size limit of an app's source files (512 KiB). |
+| `chrome_path` | Chrome / Chromium for `preview_app` screenshots; auto-detected (macOS app bundle, `google-chrome`, `chromium`) when unset. The container image does not ship a browser — mount one or use a sidecar to get screenshots there. |
 
 ## observability
 

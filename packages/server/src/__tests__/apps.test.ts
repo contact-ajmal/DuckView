@@ -14,6 +14,9 @@ import { loadConfig } from '../config/index.js';
 import { initLogger } from '../observability/logger.js';
 import { createContext, type AppContext } from '../context.js';
 import { buildApp } from '../app.js';
+import { buildTools, runTool, type ToolEnv } from '../agent/tools.js';
+import { parseSpecText } from '../services/mosaic-spec.js';
+import { appFromDashboard, appFromQueries, analyzeSpec } from '../services/app-generator.js';
 import type { Principal } from '../services/principal.js';
 
 let dir: string;
@@ -234,6 +237,113 @@ describe('runner and proxy', () => {
     await api('DELETE', `/api/apps/${id}`);
     expect(fs.existsSync(runDir)).toBe(false);
     expect(ctx.apps.runningCount()).toBe(0);
+  });
+});
+
+describe('generator', () => {
+  const TAXI = fs.readFileSync(path.resolve(here, '../../../../examples/mosaic/nyc-yellow-taxi.yaml'), 'utf8');
+  it('turns a Mosaic dashboard spec into a Streamlit app: datasets, filters, KPIs, charts, tables', async () => {
+    const spec = parseSpecText(TAXI);
+    const a = analyzeSpec(spec);
+    expect(a.sources.map((s) => s.name)).toEqual(['trips']);
+    expect(a.filters.map((f) => `${f.kind}:${f.column}`)).toEqual(['menu:vendor', 'menu:payment', 'menu:rate', 'menu:passengers', 'slider:fare', 'slider:distance']);
+    const g = appFromDashboard(spec);
+    expect(g.summary).toBe('1 dataset, 6 filters, 6 KPIs, 17 charts, 1 table');
+    const code = g.files['app.py']!;
+    expect(code).toContain('from duckview.streamlit import connect, query, viewer');
+    expect(code).toContain('st.set_page_config(page_title="NYC yellow taxi · January 2026"');
+    expect(code).toContain(`kpi[0].metric("trips", fmt(scalar(f"SELECT count(*) FROM {rel('trips')}{where('trips')}")))`);
+    expect(code).toContain(`st.selectbox("Vendor", ["All"] + q(f"SELECT DISTINCT vendor AS v FROM {rel('trips')} ORDER BY 1 LIMIT 500")`);
+    expect(code).toContain('lo4, hi4 = st.slider("Max fare $", 0, 150, (0, 150), step=5');
+    expect(code).toContain(`df = q(f"SELECT hour_ts AS x, count(*) AS y FROM {rel('trips')}{where('trips')} GROUP BY 1 ORDER BY 1 LIMIT 5000")`);
+    expect(code).toContain('mark_area(opacity=0.6)');
+    expect(code).toContain('st.subheader("trips / hour by pickup hour, January 2026")');
+    expect(code).toContain(`{bins(rel('trips'), 'fare', where('trips'))} AS x`);
+    expect(code).toContain('mark_rect()'); // the hour × weekday cell chart
+    expect(code).toMatch(/st\.dataframe\(q\(f"SELECT .* FROM \{rel\('trips'\)\}\{where\('trips'\)\} LIMIT 1000"\)/);
+    // It compiles on whatever Python the machine has (no f-string nesting tricks).
+    const check = await ctx.apps.validateSource(g.files);
+    expect(check.errors, check.errors.join('; ')).toEqual([]);
+  });
+
+  it('builds a query browser from SQL, and validation catches broken code, missing imports and tokens', async () => {
+    const g = appFromQueries([{ name: 'Top zones', sql: 'SELECT zone, count(*) AS n FROM trips GROUP BY 1 ORDER BY 2 DESC;' }], { name: 'Zones' });
+    expect(g.files['app.py']).toContain('"Top zones": "SELECT zone, count(*) AS n FROM trips GROUP BY 1 ORDER BY 2 DESC"');
+    expect((await ctx.apps.validateSource(g.files)).ok).toBe(true);
+    const bad = await ctx.apps.validateSource({ 'app.py': 'import streamlit as st\nif True\n  pass\n' });
+    expect(bad.ok).toBe(false);
+    expect(bad.errors.join(' ')).toMatch(/does not compile|SyntaxError/);
+    expect((await ctx.apps.validateSource({ 'app.py': 'print(1)\n' })).errors).toEqual(['app.py does not import streamlit']);
+    expect((await ctx.apps.validateSource({ 'app.py': 'import streamlit\nKEY = "sk-abcdefghijklmnopqrstuvwxyz"\n' })).errors[0]).toMatch(/API token/);
+    expect((await ctx.apps.validateSource({ 'app.py': 'import streamlit as st\nst.dataframe(df, use_container_width=True)\n' })).warnings[0]).toMatch(/width="stretch"/);
+  });
+});
+
+describe('agent tools', () => {
+  it('create_app from a dashboard, from code (validated), update, preview, logs, publish with approval, stop', async () => {
+    const env: ToolEnv = { ctx, principal: admin, via: 'rest', defaultWorkspaceId: wsId, agent: null };
+    const tools = buildTools(ctx.cfg);
+    const t = (n: string) => tools.find((x) => x.name === n)!;
+    expect(tools.map((x) => x.name)).toEqual(expect.arrayContaining(['list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app']));
+    // A Mosaic dashboard to build from.
+    const spec = parseSpecText('meta: { title: Demo }\ndata:\n  d: { query: "SELECT n, label, n * 2 AS value FROM sdk_demo" }\nvconcat:\n  - { input: menu, label: Label, from: d, column: label }\n  - hconcat:\n      - plot: [{ mark: text, data: { from: d }, text: { count: null } }, { mark: text, text: [rows] }]\n      - plot: [{ mark: text, data: { from: d }, text: { sum: value } }, { mark: text, text: [total] }]\n  - plot: [{ mark: barY, data: { from: d }, x: label, y: { sum: value } }]\n  - { input: table, from: d }\n');
+    const dash = await ctx.dashboards.create(admin, wsId, { name: 'Demo board', description: 'demo', kind: 'mosaic', spec });
+    const created = await runTool(env, t('create_app'), { name: 'Board app', source: { dashboard_id: dash.id } });
+    expect(created.isError, JSON.stringify(created.content)).toBeFalsy();
+    const sc = created.structuredContent as { app_id: string; summary: string; app_status: string; code: string; url: string };
+    expect(sc.summary).toBe('1 dataset, 1 filter, 2 KPIs, 1 chart, 1 table');
+    expect(sc.app_status).toBe('running');
+    expect(sc.code).toContain('kpi[1].metric("total"');
+    expect((await api('GET', `/api/apps/${sc.app_id}`)).json.app).toMatchObject({ status: 'running', spec: { dashboard_id: dash.id, kind: 'mosaic' } });
+    // Bad code is refused before anything is saved.
+    const bad = await runTool(env, t('create_app'), { name: 'Broken', source: { code: 'import streamlit as st\nst.title(' } });
+    expect(bad.isError).toBe(true);
+    expect((bad.structuredContent as { status: string }).status).toBe('invalid');
+    expect((await api('GET', `/api/workspaces/${wsId}/apps`)).json.apps as unknown[]).toHaveLength(1);
+    // Code as written, not started.
+    const fromCode = await runTool(env, t('create_app'), { name: 'Hand written', source: { code: 'import streamlit as st\nst.title("hi")\n' }, run_now: false });
+    const codeId = (fromCode.structuredContent as { app_id: string; app_status: string }).app_id;
+    expect((fromCode.structuredContent as { app_status: string }).app_status).toBe('stopped');
+    const list = await runTool(env, t('list_apps'), {});
+    expect((list.structuredContent as { apps: { name: string; status: string }[] }).apps.map((a) => `${a.name}:${a.status}`).sort()).toEqual(['Board app:running', 'Hand written:stopped']);
+    // update_app re-validates, restarts the running app, and can start a stopped one.
+    const upd = await runTool(env, t('update_app'), { app_id: codeId, code: 'import streamlit as st\nst.title("v2")\n', run_now: true });
+    expect(upd.isError, JSON.stringify(upd.content)).toBeFalsy();
+    expect((upd.structuredContent as { app_status: string }).app_status).toBe('running');
+    expect((await runTool(env, t('update_app'), { app_id: codeId, code: 'nope(' })).isError).toBe(true);
+    // preview: health + (without Chrome) the log; logs tool.
+    ctx.cfg.apps.chrome_path = '/nonexistent/chrome';
+    const savedPath = process.env.CHROME_PATH;
+    delete process.env.CHROME_PATH;
+    const hasChrome = fs.existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') || fs.existsSync('/usr/bin/google-chrome') || fs.existsSync('/usr/bin/chromium');
+    const preview = await runTool(env, t('preview_app'), { app_id: codeId, wait_ms: 3000 });
+    const ps = preview.structuredContent as { status: string; health: boolean; screenshot: boolean };
+    expect(ps.health).toBe(true);
+    expect(ps.screenshot).toBe(hasChrome); // the fake app has no Streamlit DOM, so the shot is of the fake page
+    if (savedPath) process.env.CHROME_PATH = savedPath;
+    const logs = await runTool(env, t('get_app_logs'), { app_id: codeId, lines: 5 });
+    expect((logs.structuredContent as { logs: string[] }).logs.some((l) => l.includes('fake streamlit on'))).toBe(true);
+    // publish: approval first.
+    const dry = await runTool(env, t('publish_app'), { app_id: codeId, audience: 'org' });
+    expect((dry.structuredContent as { status: string }).status).toBe('approval_required');
+    expect((await api('GET', `/api/apps/${codeId}`)).json.app).toMatchObject({ visibility: 'workspace' });
+    const pub = await runTool(env, t('publish_app'), { app_id: codeId, audience: 'org', dry_run: false });
+    expect((pub.structuredContent as { visibility: string }).visibility).toBe('org');
+    expect((await api('GET', `/api/apps/${codeId}`, undefined, userJwt)).status).toBe(200);
+    // stop + run.
+    await runTool(env, t('stop_app'), { app_id: codeId });
+    expect((await api('GET', `/api/apps/${codeId}`)).json.app).toMatchObject({ status: 'stopped' });
+    expect(((await runTool(env, t('run_app'), { app_id: codeId })).structuredContent as { app_status: string }).app_status).toBe('running');
+    // Preview refuses a stopped app.
+    await runTool(env, t('stop_app'), { app_id: sc.app_id });
+    expect((await runTool(env, t('preview_app'), { app_id: sc.app_id })).isError).toBe(true);
+    // REST: generate without saving, and the guide.
+    const gen = await api('POST', `/api/workspaces/${wsId}/apps/generate`, { source: { queries: [{ name: 'q', sql: 'SELECT 1' }] } });
+    expect(gen.json).toMatchObject({ summary: '1 query', validation: { ok: true } });
+    expect(String((await api('GET', '/api/apps/guide')).json.guide)).toContain('duckview.streamlit');
+    await runTool(env, t('stop_app'), { app_id: codeId });
+    await api('DELETE', `/api/apps/${codeId}`);
+    await api('DELETE', `/api/apps/${sc.app_id}`);
   });
 });
 

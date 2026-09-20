@@ -46,6 +46,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `create_data_sync(name, source, target_table, …, transform_sql?, schedule?, run_now?)` | Scheduled load of a table / connector resource / URL / SELECT into a workspace table with an optional `{{raw}}` transformation, validated first. |
 | `update_data_sync(sync_id, transform_sql?, schedule?, mode?, enabled?, run_now?)` | Attach a transformation, change the schedule, pause/resume. |
 | `run_data_sync(sync_id)` | Run now; rows, duration, error, recent runs. |
+| `list_apps` · `create_app(name, source, …)` · `update_app` · `run_app` · `stop_app` · `get_app_logs` · `preview_app` · `publish_app` | Streamlit [data apps](apps.html): generated from a dashboard, saved queries or code (validated first), run, previewed with a screenshot, published after human approval. |
 
 **Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec).
 

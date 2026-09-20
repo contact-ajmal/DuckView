@@ -232,6 +232,8 @@ export const ConfigSchema = z.object({
       token_ttl_hours: z.coerce.number().int().min(1).default(24),
       /** Maximum size of an app's source files, in bytes. */
       max_source_bytes: z.coerce.number().int().min(1024).default(512 * 1024),
+      /** Chrome / Chromium binary for headless previews (preview_app); auto-detected when unset. */
+      chrome_path: z.string().optional(),
     })
     .default({}),
   observability: z

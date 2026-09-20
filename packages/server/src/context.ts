@@ -115,6 +115,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   syncs.stageDir = path.join(engines.jail.baseDir, '.duckview', 'sync');
   if (cfg.duckdb.sync_scheduler_enabled) syncs.start();
   const apps = new DataAppService(store, cfg, workspaces, auth, audit);
+  apps.bind({ dashboards, savedQueries });
   await apps.init();
   copilot.mosaic = mosaic;
   // Pre-aggregates are only valid for the epoch they were built in.

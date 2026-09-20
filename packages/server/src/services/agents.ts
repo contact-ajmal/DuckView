@@ -217,7 +217,7 @@ export class AgentService {
     const tool = buildTools(this.cfg).find((t) => t.name === 'list_accessible_data')!;
     const env: ToolEnv = { ctx: this.ctx, principal, via: 'rest', defaultWorkspaceId: agent.workspace_id, agent: { id: agent.id, name: agent.name, framework: agent.framework } };
     const r = await runTool(env, tool, agent.workspace_id ? { workspace_id: agent.workspace_id } : {});
-    return { ok: !r.isError, text: r.content.map((c) => c.text).join('\n'), structured: r.structuredContent };
+    return { ok: !r.isError, text: r.content.map((c) => (c.type === 'text' ? c.text : `[image ${c.mimeType}]`)).join('\n'), structured: r.structuredContent };
   }
 
   /** Streams a reply from an AWS-hosted agent (Bedrock Agents Classic or AgentCore Runtime). */

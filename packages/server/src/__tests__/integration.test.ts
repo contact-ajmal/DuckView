@@ -151,12 +151,12 @@ describe('MCP server (in-memory transport)', () => {
   });
   it('lists tools, resources, prompts', async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(['browse_connector', 'browse_storage', 'connector_query', 'create_dashboard_widget', 'create_data_sync', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'list_data_sources', 'profile_dataset', 'run_data_sync', 'save_dataset', 'update_data_sync']);
+    expect(tools).toEqual(['browse_connector', 'browse_storage', 'connector_query', 'create_app', 'create_dashboard_widget', 'create_data_sync', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'get_app_logs', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_apps', 'list_dashboards', 'list_data_sources', 'preview_app', 'profile_dataset', 'publish_app', 'run_app', 'run_data_sync', 'save_dataset', 'stop_app', 'update_app', 'update_data_sync']);
     const res = (await client.listResources()).resources.map((r) => r.uri);
     expect(res).toContain('duckdb://workspaces');
     expect(res).toContain('duckdb://system/resources');
     expect((await client.listResourceTemplates()).resourceTemplates[0]!.uriTemplate).toBe('duckdb://schemas/{workspace_id}');
-    expect((await client.listPrompts()).prompts.map((p) => p.name).sort()).toEqual(['build_data_pipeline', 'build_mosaic_dashboard', 'data_quality_audit', 'sql_optimization']);
+    expect((await client.listPrompts()).prompts.map((p) => p.name).sort()).toEqual(['build_data_app', 'build_data_pipeline', 'build_mosaic_dashboard', 'data_quality_audit', 'sql_optimization']);
   });
   it('execute_query returns markdown + structured content with limits', async () => {
     const r = await client.callTool({ name: 'execute_query', arguments: { sql: "SELECT * FROM 'seed.parquet' ORDER BY id", page_size: 5 } });
@@ -267,7 +267,7 @@ describe('HTTP API + network MCP', () => {
     const audit = await api('GET', '/api/audit?actor_type=AGENT&limit=5');
     expect((audit.json.events as unknown[]).length).toBeGreaterThan(0);
     const info = await api('GET', '/api/mcp/info');
-    expect((info.json.tools as string[]).length).toBe(17);
+    expect((info.json.tools as string[]).length).toBe(25);
   });
   it('MCP over Streamable HTTP with bearer token', async () => {
     expect((await fetch(base + '/mcp', { method: 'POST' })).status).toBe(401);
@@ -275,7 +275,7 @@ describe('HTTP API + network MCP', () => {
     const client = new Client({ name: 't', version: '0' });
     await client.connect(transport);
     const tools = await client.listTools();
-    expect(tools.tools.length).toBe(17);
+    expect(tools.tools.length).toBe(25);
     const r = await client.callTool({ name: 'execute_query', arguments: { sql: 'SELECT 42 AS answer' } });
     expect((r.structuredContent as { rows: unknown[][] }).rows[0]).toEqual([42]);
     const sessions = await api('GET', '/api/mcp/sessions');

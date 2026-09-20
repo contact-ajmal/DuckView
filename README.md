@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/DuckDB-1.5-FFF000?logo=duckdb&logoColor=black" alt="DuckDB 1.5">
   <img src="https://img.shields.io/badge/MCP-stdio%20%C2%B7%20SSE%20%C2%B7%20Streamable%20HTTP-7c3aed" alt="MCP transports">
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript strict">
-  <img src="https://img.shields.io/badge/tests-237%20passing-22c55e" alt="237 tests">
+  <img src="https://img.shields.io/badge/tests-240%20passing-22c55e" alt="240 tests">
 </p>
 
 <p align="center">
@@ -46,7 +46,7 @@ Most "SQL UIs" stop at the query box. DuckView is a complete, self-hosted data w
 | 🧠 **DuckCopilot** | An in-app assistant hydrated with your live schema, files, buckets and the SQL you're writing. Bring Anthropic, OpenAI, Ollama, Amazon Bedrock — or point it at **your own agent** on AgentCore. |
 | 📊 **From profile to dashboard** | Auto-profiling on load (KPIs, null ratios, distributions), a tabbed IDE-style workbench with charts, plans and profiles, and a drag-and-drop BI dashboard builder with auto-refresh. |
 | 🔍 **Explore, interactively** | Every column of a file, table or query becomes a linked chart — brush one and the rest cross-filter, at data-cube speed on millions of rows, computed in the workspace engine. Built on [Mosaic](https://idl.uw.edu/mosaic/). |
-| 🧩 **Data apps (Streamlit)** | Write a Streamlit app on a workspace's tables and files — `duckview.connect()`, `query(sql)` → pandas, a table picker, the viewer's identity — and DuckView runs it: Python environment created on first start, code editor with live preview, apps served under `/apps/<id>/` to the workspace's members with a read-only, workspace-scoped token. `pip install duckview` for the SDK anywhere else. |
+| 🧩 **Data apps (Streamlit)** | Write a Streamlit app on a workspace's tables and files — `duckview.connect()`, `query(sql)` → pandas, a table picker, the viewer's identity — or **generate one from a Mosaic dashboard or saved queries**, or let Copilot draft it. DuckView runs it: Python environment created on first start, code editor with live preview and static checks, apps served under `/apps/<id>/` with a read-only, workspace-scoped token. Agents do the same over MCP: `create_app` → `preview_app` (screenshot) → `update_app` → `publish_app` (approved). `pip install duckview` for the SDK anywhere else. |
 | 🔌 **Connections & syncs** | One page for every source — S3/R2/GCS/Azure, Glue/S3 Tables/Iceberg REST/Databricks, PostgreSQL/MySQL/SQLite/DuckDB files, **Snowflake, BigQuery, Redshift, ClickHouse, Fabric**, **Salesforce, HubSpot, Stripe, GA4, Airtable, Notion**, HTTP endpoints and **Google Drive / Sheets with your Google account** — with health checks, credentials encrypted and write-only, and **scheduled syncs** that load a table, object, file or SELECT into a workspace with an optional transformation (drafted by Copilot or set by an agent), recorded run by run. |
 | 🧩 **Mosaic dashboards** | Declarative, cross-filtered dashboards from a YAML/JSON spec: editor with live preview, generated from any table or file in one click, drafted by Copilot or created by agents (`create_mosaic_dashboard`), validated against your data before they are saved. |
 | ⚡ **Fast the second time** | A two-tier result cache — shared on the server, per user in the browser — keyed on file fingerprints and a workspace data epoch, so a 10 s profile of a 400 MB CSV comes back in milliseconds for everyone, and is *never* stale after a mutation. |
@@ -150,6 +150,7 @@ with duckview:
 | `lakehouse_query` | SQL on a Databricks SQL warehouse |
 | `save_dataset` · `list_dashboards` · `create_dashboard_widget` · `create_mosaic_dashboard` | Materialise results, build grid and Mosaic dashboards |
 | `list_data_sources` · `browse_connector` · `connector_query` · `create_data_sync` · `update_data_sync` · `run_data_sync` | Connections with health, warehouse/SaaS/Google browsing and remote SQL, scheduled loads with validated transformations |
+| `list_apps` · `create_app` · `update_app` · `run_app` · `stop_app` · `get_app_logs` · `preview_app` · `publish_app` | Streamlit data apps generated from dashboards, queries or code — validated, run, previewed with a screenshot, published after approval |
 
 ---
 
@@ -221,7 +222,7 @@ Full details — configuration keys, every endpoint, the MCP tool contracts, CLI
 
 ## 🧪 Quality
 
-`pnpm test` runs **237 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API), stand in for Snowflake, BigQuery, Redshift, ClickHouse, Salesforce, HubSpot, Stripe, GA4, Airtable, Notion and Google's OAuth / Drive / Sheets APIs, and exercise the agent façade against a fake AWS bridge. `scripts/smoke.mjs` verifies a running instance end to end.
+`pnpm test` runs **240 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API), stand in for Snowflake, BigQuery, Redshift, ClickHouse, Salesforce, HubSpot, Stripe, GA4, Airtable, Notion and Google's OAuth / Drive / Sheets APIs, and exercise the agent façade against a fake AWS bridge. `scripts/smoke.mjs` verifies a running instance end to end.
 
 ---
 

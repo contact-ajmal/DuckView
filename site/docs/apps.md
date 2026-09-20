@@ -21,7 +21,7 @@ st.caption(f"{len(df):,} rows · viewing as {viewer()['email']}")
 st.dataframe(df)
 ```
 
-*New app* in the gallery starts from the **Table explorer** template (pick a dataset, filter, grid, chart) or a **Blank** one. The editor has Python highlighting, ⌘S saves and restarts the running app, the preview on the right is the real app, and the logs are one click away. *Ask Copilot* sends the file with the SDK's contract for improvements.
+*New app* in the gallery starts from a **template** (the table explorer: pick a dataset, filter, grid, chart — or blank), **from a dashboard**, or **from saved queries**. A Mosaic dashboard is turned into an app deterministically — its datasets become SQL relations, its menus and sliders sidebar filters, its KPI marks metric cards, its bar / area / line / scatter / heat-map marks aggregating SQL rendered with Altair, its tables `st.dataframe` — so the app answers the same questions the dashboard does and the code is yours to take further. The editor has Python highlighting, ⌘S saves and restarts the running app, the preview on the right is the real app, *Check* runs the static checks (compiles, imports streamlit, no tokens), *Draft* lets Copilot write `app.py` for a goal with the SDK guide as its contract, and the logs are one click away.
 
 ## The SDK
 
@@ -49,6 +49,17 @@ Everything goes through DuckView's HTTP API with a bearer token — the SDK neve
 
 Apps execute Python next to the server. `apps.enabled` is on in full filesystem mode and **off in sandboxed mode**; an administrator decides. The container image ships `python3` and `venv` ready for the first start.
 
-## For agents
+## For agents and MCP clients
 
-Apps are registered next to dashboards and syncs; the same REST endpoints (`/api/workspaces/:id/apps`, `/api/apps/:id/start|stop|logs`) serve automation today, and `create_app` / `preview_app` / `publish_app` tools with a `build_data_app` prompt are the next step — connectors bring the data in, syncs keep it fresh, the dashboard and the app get generated without leaving the MCP client.
+Everything above is a tool. From Claude Code, Claude Desktop, Cursor or any MCP client connected to DuckView:
+
+| Tool | Does |
+|---|---|
+| `list_apps(workspace_id?)` | Apps with status, URL, visibility, errors. |
+| `create_app(name, source, description?, visibility?, run_now?)` | `source: {dashboard_id}` generates from a dashboard; `{saved_query_ids}` / `{queries: [{name, sql}]}` a query browser; `{template}`; `{code, requirements?}` code as written. Validated (compiles, imports streamlit, no tokens) before it is saved, started right away, returns the code and the URL. |
+| `update_app(app_id, code?, requirements?, name?, description?, run_now?)` | Re-validated; a running app restarts and the call waits until it is healthy. |
+| `run_app` · `stop_app` · `get_app_logs` | Lifecycle and diagnostics (tracebacks, install output). |
+| `preview_app(app_id, wait_ms?)` | A headless browser opens the app as a signed-in visitor, waits for Streamlit to render, and returns the visible text **and a screenshot** (an MCP image; needs Chrome/Chromium on the server) — the way an agent checks its own work. |
+| `publish_app(app_id, audience, dry_run)` | Human-in-the-loop: `dry_run` (default) says what would change; `dry_run=false` after approval makes the app visible to everyone signed in (`org`) or back to the workspace. Audited. |
+
+The resource `duckdb://guides/data-app` is the SDK contract an agent reads before writing code, and the prompt **`build_data_app(goal, data?)`** is the end-to-end recipe: connect the data and keep it fresh with a sync → profile it → build a Mosaic dashboard → `create_app` from it → `preview_app` → refine with `update_app` → `publish_app` once a person approves. The REST façade (`/api/agent/v1/tools/<name>`) exposes the same tools to LangChain, CrewAI and Strands agents, with screenshots as `images[].data_base64`.

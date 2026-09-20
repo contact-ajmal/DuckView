@@ -22,8 +22,10 @@ import { liveEvents, summarizeArgs } from '../observability/events.js';
 import { describeSpec, parseSpecText } from '../services/mosaic-spec.js';
 import { SOURCE_CATALOG } from '../services/source-catalog.js';
 import type { SyncSource, SyncSchedule } from '../db/schema/sqlite.js';
+import type { AppSource } from '../services/apps.js';
 
-export type ToolResult = { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
+export type ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+export type ToolResult = { content: ToolContent[]; structuredContent?: Record<string, unknown>; isError?: boolean };
 
 export interface ToolAnnotations {
   readOnlyHint?: boolean;
@@ -566,7 +568,167 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`${r.rows.length} row${r.rows.length === 1 ? '' : 's'} from **${r.connection}**${r.truncated ? ' (truncated)' : ''}${cols.length ? `\n\n${toMarkdownTable({ columns: cols.map((n) => ({ name: n, type: 'VARCHAR', kind: 'string' as const })), rows: r.rows.slice(0, 50).map((row) => cols.map((c) => row[c])) }, 80)}` : ''}`)], structuredContent: { status: 'ok', connection: r.connection, columns: cols, rows: r.rows, truncated: r.truncated } };
       },
     }),
+
+    // ---------------------------------------------------------------- data apps (Streamlit)
+    define({
+      name: 'list_apps',
+      title: 'List data apps',
+      description: 'The Streamlit data apps of a workspace: status (stopped / installing / starting / running / error), URL, visibility, who created them, last start and error. Apps are Python programs DuckView runs on the workspace\'s data; see the resource duckdb://guides/data-app for how they are written.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const apps = await env.ctx.apps.list(env.principal, ws);
+        const lines = apps.map((a) => `- **${a.name}** (\`${a.id}\`) · ${a.status}${a.running ? '' : ''} · ${a.visibility === 'org' ? 'everyone signed in' : 'workspace members'} · ${a.url}${a.last_error ? ` · ⚠ ${a.last_error}` : ''}`);
+        return { content: [text(`**Data apps** (${apps.length})${env.ctx.apps.enabled ? '' : ' — disabled on this server (apps.enabled)'}\n${lines.join('\n') || '_(none — create_app builds one from a dashboard, saved queries or code)_'}`)], structuredContent: { status: 'ok', enabled: env.ctx.apps.enabled, apps: apps.map((a) => ({ id: a.id, name: a.name, status: a.status, url: a.url, visibility: a.visibility, entry: a.entry, description: a.description, last_started_at: a.last_started_at, last_error: a.last_error, spec: a.spec })) } };
+      },
+    }),
+
+    define({
+      name: 'create_app',
+      title: 'Create data app',
+      description: 'Creates a Streamlit data app on the workspace\'s data. source: {dashboard_id} generates the app deterministically from a Mosaic dashboard (its datasets, filters, KPIs, charts and tables) or a grid dashboard (its widgets); {saved_query_ids} / {queries: [{name, sql}]} build a query browser; {template: "explorer" | "blank"} starts from a template; {code, requirements?} takes app.py as written (read duckdb://guides/data-app first). The code is checked before it is saved — it must compile, import streamlit and carry no token — and the app can be started right away (run_now) so preview_app can look at it.',
+      inputSchema: {
+        name: z.string().min(1).max(120),
+        source: z.record(z.string(), z.unknown()).describe('{dashboard_id} | {saved_query_ids: [...]} | {queries: [{name, sql}]} | {template} | {code, requirements?}'),
+        description: z.string().max(2000).optional(),
+        visibility: z.enum(['workspace', 'org']).optional().describe('Who can open it: workspace members (default) or everyone signed in'),
+        run_now: z.boolean().optional().describe('Start the app after creating it (default true)'),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { name, source, description, visibility, run_now, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const g = await env.ctx.apps.generate(env.principal, ws, source as unknown as AppSource, { name, description: description ?? null });
+        const check = await env.ctx.apps.validateSource(g.files, 'app.py');
+        if (!check.ok) return { content: [text(`The app was not saved — fix these and try again:\n${check.errors.map((e) => `- ${e}`).join('\n')}`)], structuredContent: { status: 'invalid', errors: check.errors, warnings: check.warnings }, isError: true };
+        const app = await env.ctx.apps.create(env.principal, ws, { name, description: description ?? g.description, files: g.files, spec: g.spec, visibility });
+        let started: { status: string; last_error: string | null } | null = null;
+        let startError: string | null = null;
+        if (run_now !== false && env.ctx.apps.enabled) {
+          try {
+            started = await env.ctx.apps.start(env.principal, app.id);
+          } catch (err) {
+            startError = (err as Error).message;
+          }
+        }
+        const logs = env.ctx.apps.logs(app.id).slice(-8);
+        return {
+          content: [text(`Created app **${app.name}** (\`${app.id}\`) from ${g.summary}; open it at ${app.url}.${check.warnings.length ? `\nWarnings: ${check.warnings.join('; ')}` : ''}${started ? `\nStatus: ${started.status}.` : startError ? `\nIt did not start: ${startError}\n\nLog:\n${logs.join('\n')}` : ''}\n\nNext: preview_app to see it, update_app to change the code, publish_app to make it visible to everyone.`)],
+          structuredContent: { status: startError ? 'error' : 'ok', app_id: app.id, workspace_id: ws, name: app.name, url: app.url, summary: g.summary, app_status: started?.status ?? (startError ? 'error' : 'stopped'), start_error: startError, warnings: check.warnings, files: Object.keys(g.files), code: g.files['app.py'] },
+          isError: !!startError,
+        };
+      },
+    }),
+
+    define({
+      name: 'update_app',
+      title: 'Update data app',
+      description: 'Changes an app: new code (app.py) and/or requirements.txt — checked like create_app — name or description. A running app restarts with the new code; pass run_now to start a stopped one.',
+      inputSchema: { app_id: z.string(), code: z.string().max(2_000_000).optional(), requirements: z.string().max(20_000).optional(), name: z.string().max(120).optional(), description: z.string().max(2000).nullable().optional(), run_now: z.boolean().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { app_id, code, requirements, name, description, run_now }) {
+        const existing = await env.ctx.apps.get(env.principal, app_id, 'EDITOR');
+        const files = code !== undefined || requirements !== undefined ? { ...existing.files, ...(code !== undefined ? { [existing.entry]: code } : {}), ...(requirements !== undefined ? { 'requirements.txt': requirements } : {}) } : undefined;
+        if (files) {
+          const check = await env.ctx.apps.validateSource(files, existing.entry);
+          if (!check.ok) return { content: [text(`Not saved — fix these first:\n${check.errors.map((e) => `- ${e}`).join('\n')}`)], structuredContent: { status: 'invalid', errors: check.errors, warnings: check.warnings }, isError: true };
+        }
+        const app = await env.ctx.apps.update(env.principal, app_id, { files, name, description });
+        let error: string | null = null;
+        if (run_now && !env.ctx.apps.status(app_id)) {
+          try {
+            await env.ctx.apps.start(env.principal, app_id);
+          } catch (err) {
+            error = (err as Error).message;
+          }
+        }
+        const status = env.ctx.apps.status(app_id) ?? (await env.ctx.apps.get(env.principal, app_id)).status;
+        return { content: [text(`Updated **${app.name}**${files ? ' with new code' : ''} · status ${status}${error ? ` · start failed: ${error}` : ''}.`)], structuredContent: { status: error ? 'error' : 'ok', app_id, app_status: status, error }, isError: !!error };
+      },
+    }),
+
+    define({
+      name: 'run_app',
+      title: 'Run data app',
+      description: 'Starts an app (creates the Python environment on the very first start) and waits until it answers its health check; returns the URL and the last log lines.',
+      inputSchema: { app_id: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { app_id }) {
+        const app = await env.ctx.apps.start(env.principal, app_id);
+        return { content: [text(`**${app.name}** is ${app.status} at ${app.url}.\n\n${env.ctx.apps.logs(app_id).slice(-5).join('\n')}`)], structuredContent: { status: 'ok', app_id, app_status: app.status, url: app.url, logs: env.ctx.apps.logs(app_id).slice(-20) } };
+      },
+    }),
+
+    define({
+      name: 'stop_app',
+      title: 'Stop data app',
+      description: 'Stops a running app and revokes its token.',
+      inputSchema: { app_id: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { app_id }) {
+        await env.ctx.apps.stop(env.principal, app_id);
+        return { content: [text(`Stopped \`${app_id}\`.`)], structuredContent: { status: 'ok', app_id, app_status: 'stopped' } };
+      },
+    }),
+
+    define({
+      name: 'get_app_logs',
+      title: 'Get app logs',
+      description: 'The last lines of an app\'s stdout/stderr (install steps, Streamlit output, tracebacks) with its status — the place to look when an app errors.',
+      inputSchema: { app_id: z.string(), lines: z.number().int().min(1).max(500).optional().describe('Default 100') },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { app_id, lines }) {
+        const app = await env.ctx.apps.get(env.principal, app_id);
+        const status = env.ctx.apps.status(app_id) ?? app.status;
+        const logs = env.ctx.apps.logs(app_id).slice(-(lines ?? 100));
+        return { content: [text(`**${app.name}** · ${status}${app.last_error ? ` · ${app.last_error}` : ''}\n\n\`\`\`\n${logs.join('\n') || '(no log lines)'}\n\`\`\``)], structuredContent: { status: 'ok', app_id, app_status: status, last_error: app.last_error, logs } };
+      },
+    }),
+
+    define({
+      name: 'preview_app',
+      title: 'Preview data app',
+      description: 'Looks at a running app the way a person would: a headless browser opens it, waits for Streamlit to finish rendering, and returns the visible text plus a screenshot (image) when a Chrome/Chromium is installed on the server — otherwise the text-only health, page state and recent logs. Use it after create_app / update_app to check that charts render and nothing errors.',
+      inputSchema: { app_id: z.string(), wait_ms: z.number().int().min(1000).max(60_000).optional().describe('How long to wait for the render (default 25 s)') },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { app_id, wait_ms }) {
+        const row = await env.ctx.apps.get(env.principal, app_id);
+        const app = env.ctx.apps.toPublic(row);
+        if (!env.ctx.apps.target(app_id)) return { content: [text(`**${app.name}** is ${env.ctx.apps.status(app_id) ?? app.status}${app.last_error ? `: ${app.last_error}` : ''} — run_app first.`)], structuredContent: { status: 'not_running', app_id, app_status: env.ctx.apps.status(app_id) ?? app.status, last_error: app.last_error }, isError: true };
+        const health = await fetch(`http://127.0.0.1:${env.ctx.apps.target(app_id)!.port}/apps/${app_id}/_stcore/health`).then((r) => r.ok).catch(() => false);
+        const logs = env.ctx.apps.logs(app_id).slice(-15);
+        const tracebacks = logs.filter((l) => /Traceback|Error/.test(l));
+        let shot: { png: Buffer; text: string } | null = null;
+        try {
+          shot = await env.ctx.apps.screenshot(row, env.principal.userId, env.ctx.apps.internalUrl, { wait_ms });
+        } catch (err) {
+          logs.push(`preview: ${(err as Error).message}`);
+        }
+        const content: ToolContent[] = [text(`**${app.name}** at ${app.url} · health ${health ? 'ok' : 'FAILED'}${tracebacks.length ? `\n\n⚠ Errors in the log:\n${tracebacks.join('\n')}` : ''}${shot ? `\n\nVisible text:\n${shot.text.slice(0, 3000)}` : '\n\n(no Chrome/Chromium on this server — set apps.chrome_path for screenshots; text below is the log)\n' + logs.join('\n')}`)];
+        if (shot) content.push({ type: 'image', data: shot.png.toString('base64'), mimeType: 'image/png' });
+        const exception = shot ? /Traceback|Error:|KeyError|NameError|SyntaxError/.test(shot.text) : tracebacks.length > 0;
+        return { content, structuredContent: { status: health && !exception ? 'ok' : 'error', app_id, url: app.url, health, screenshot: !!shot, text: shot?.text ?? null, errors: tracebacks, logs }, isError: !health };
+      },
+    }),
+
+    define({
+      name: 'publish_app',
+      title: 'Publish data app',
+      description: 'Makes an app visible beyond the workspace (audience "org": everyone signed in to DuckView) or back to "workspace". Publishing is a human-approved step: dry_run (default true) reports what would change; pass dry_run=false after approval.',
+      inputSchema: { app_id: z.string(), audience: z.enum(['workspace', 'org']), dry_run: z.boolean().optional().describe('Default true. Set false once approved.') },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { app_id, audience, dry_run }) {
+        const app = await env.ctx.apps.get(env.principal, app_id, 'EDITOR');
+        if (dry_run !== false) {
+          return { content: [text(`APPROVAL REQUIRED\n\nPublishing **${app.name}** to ${audience === 'org' ? 'everyone signed in to this DuckView' : 'the workspace\'s members only'} (currently: ${app.visibility}). Call publish_app again with dry_run=false once a person has approved.`)], structuredContent: { status: 'approval_required', app_id, from: app.visibility, to: audience, url: `/apps/${app.id}/` } };
+        }
+        const updated = await env.ctx.apps.update(env.principal, app_id, { visibility: audience });
+        env.ctx.audit.log({ userId: env.principal.userId, actorType: env.principal.actorType, action: `app.publish.${audience}`, resource: `app:${app_id}`, ip: env.principal.ip });
+        return { content: [text(`**${updated.name}** is now visible to ${audience === 'org' ? 'everyone signed in' : 'workspace members'}: ${updated.url}`)], structuredContent: { status: 'ok', app_id, visibility: updated.visibility, url: updated.url } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app'] as const;

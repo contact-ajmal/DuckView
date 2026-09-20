@@ -5,6 +5,7 @@
  */
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { DATA_APP_GUIDE } from '../services/app-generator.js';
 import { MOSAIC_SPEC_GUIDE } from '../services/mosaic-guide.js';
 import type { AppContext } from '../context.js';
 import type { Principal } from '../services/principal.js';
@@ -90,6 +91,13 @@ export function buildMcpServer(ctx: AppContext, principal: Principal, opts: { de
       ].join('\n');
       return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify({ ...r, summary: md }, null, 2) }] };
     },
+  );
+
+  server.registerResource(
+    'data-app-guide',
+    'duckdb://guides/data-app',
+    { title: 'Data app (Streamlit) guide', description: 'How to write a Streamlit data app for create_app / update_app: the duckview SDK, the skeleton, rules for SQL, filters and packages.', mimeType: 'text/markdown' },
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: DATA_APP_GUIDE }] }),
   );
 
   server.registerResource(
@@ -183,6 +191,33 @@ Output: a short diagnosis, the rewritten SQL, a before/after plan comparison tab
 3. Call \`create_data_sync\` with the source ({kind:"connector", connection_id, resource} for a connector), a target_table, a schedule (interval or cron) and run_now: true. Read the columns it reports.
 4. Write the transformation as a single SELECT over {{raw}} — rename and cast columns, filter junk, derive fields, aggregate if the goal asks for it — and attach it with \`update_data_sync\` (transform_sql, run_now: true). It is validated against the source before it is saved; fix anything it reports.
 5. Verify with \`execute_query\` on the target table, then reply with the sync id, the schedule, the transformation and a two-line summary of the resulting table.`,
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    'build_data_app',
+    {
+      title: 'Build a data app',
+      description: 'Guided workflow: bring the data in (connections and syncs), profile it, build a Mosaic dashboard, generate a Streamlit app from it, refine the code, preview it, publish it.',
+      argsSchema: { goal: z.string().describe('What the app should let people do, e.g. "explore taxi trips by zone and hour with fare and tip KPIs"'), data: z.string().optional().describe('Where the data is: a table, a file, a connection or a description'), workspace_id: z.string().optional() },
+    },
+    ({ goal, data, workspace_id }) => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Build a data app${workspace_id ? ` in workspace \`${workspace_id}\`` : ''}: ${goal}${data ? ` — the data is ${data}` : ''}.
+
+1. Data first. \`list_data_sources\` shows what is connected; if the data is not in the workspace yet, bring it in with \`create_data_sync\` (a connector resource, an attached table, a URL or SQL) with run_now: true so a materialised table exists — apps should read tables and files in the workspace, not live connectors.
+2. \`profile_dataset\` (or \`inspect_schema\` + \`execute_query\`) to learn the columns, types, ranges and a few rows.
+3. Draft the interactive shape as a Mosaic dashboard with \`create_mosaic_dashboard\` (read \`duckdb://guides/mosaic-spec\`): filters as inputs, KPIs as text marks, a few charts, a table. Validate until it saves.
+4. \`create_app\` with source {dashboard_id} — the app is generated from the dashboard (datasets, filters, KPIs, charts, tables) and started. Read the returned code.
+5. \`preview_app\` to look at it. Refine with \`update_app\` (read \`duckdb://guides/data-app\` for the SDK): better titles, formats, extra widgets, layout — keep the heavy lifting in SQL through \`query()\`. Preview again; \`get_app_logs\` when something errors.
+6. When it is right, \`publish_app\` with dry_run: false only after a person approves, then reply with the app URL, what it shows and the sync that keeps its data fresh.`,
           },
         },
       ],

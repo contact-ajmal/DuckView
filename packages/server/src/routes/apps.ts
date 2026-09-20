@@ -11,12 +11,20 @@ import WebSocket from 'ws';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { APP_VISIBILITIES } from '../db/schema/sqlite.js';
+import { DATA_APP_GUIDE } from '../services/app-generator.js';
 import type { Principal } from '../services/principal.js';
 import { logger } from '../observability/logger.js';
 
 const COOKIE = 'dv_app';
 const Files = z.record(z.string().max(200), z.string().max(2_000_000));
-const AppBody = z.object({ name: z.string().max(120), description: z.string().max(2000).nullable().optional(), files: Files.optional(), entry: z.string().max(200).optional(), spec: z.record(z.string(), z.unknown()).nullable().optional(), visibility: z.enum(APP_VISIBILITIES).optional() });
+const Source = z.union([
+  z.object({ template: z.string().max(40) }),
+  z.object({ dashboard_id: z.string().max(64) }),
+  z.object({ queries: z.array(z.object({ name: z.string().max(120), sql: z.string().max(50_000) })).max(50) }),
+  z.object({ saved_query_ids: z.array(z.string().max(64)).max(50) }),
+  z.object({ code: z.string().max(2_000_000), requirements: z.string().max(20_000).nullable().optional() }),
+]);
+const AppBody = z.object({ name: z.string().max(120), description: z.string().max(2000).nullable().optional(), files: Files.optional(), entry: z.string().max(200).optional(), spec: z.record(z.string(), z.unknown()).nullable().optional(), visibility: z.enum(APP_VISIBILITIES).optional(), source: Source.optional() });
 const HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'cookie', 'authorization']);
 
 function readCookie(header: string | undefined, name: string): string | null {
@@ -30,6 +38,7 @@ function readCookie(header: string | undefined, name: string): string | null {
 
 export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
   const secure = !!ctx.cfg.server.public_url?.startsWith('https://');
+  ctx.apps.signSession = (userId) => app.jwt.sign({ purpose: 'app', sub: userId }, { expiresIn: '10m' });
 
   /** The visitor behind a proxied request, from the /apps cookie. */
   async function visitor(req: FastifyRequest): Promise<Principal | null> {
@@ -50,6 +59,19 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
   await app.register(async (r) => {
     r.addHook('preHandler', app.authenticate);
     r.get('/api/apps/templates', async () => ({ templates: ctx.apps.templates(), enabled: ctx.apps.enabled, runtime: ctx.cfg.apps.runtime }));
+    r.get('/api/apps/guide', async () => ({ guide: DATA_APP_GUIDE }));
+    /** Static checks of app sources (compile, imports, secrets) — the editor's "Check" and agents' safety net. */
+    r.post('/api/apps/validate', async (req) => {
+      const body = z.object({ files: Files, entry: z.string().max(200).optional() }).parse(req.body ?? {});
+      return ctx.apps.validateSource(body.files, body.entry ?? 'app.py');
+    });
+    /** Generates files without saving them (the New-app dialog's preview of a dashboard-derived app). */
+    r.post('/api/workspaces/:id/apps/generate', async (req) => {
+      const { id } = req.params as { id: string };
+      const body = z.object({ source: Source, name: z.string().max(120).optional(), description: z.string().max(2000).nullable().optional() }).parse(req.body ?? {});
+      const g = await ctx.apps.generate(req.principal!, id, body.source, { name: body.name, description: body.description });
+      return { ...g, validation: await ctx.apps.validateSource(g.files) };
+    });
     r.get('/api/apps', async (req) => ({ apps: await ctx.apps.listAll(req.principal!), enabled: ctx.apps.enabled }));
     r.get('/api/workspaces/:id/apps', async (req) => {
       const { id } = req.params as { id: string };
@@ -58,6 +80,10 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
     r.post('/api/workspaces/:id/apps', async (req) => {
       const { id } = req.params as { id: string };
       const body = AppBody.parse(req.body ?? {});
+      if (body.source) {
+        const g = await ctx.apps.generate(req.principal!, id, body.source, { name: body.name || undefined, description: body.description });
+        return { app: await ctx.apps.create(req.principal!, id, { ...body, name: body.name || g.name, description: body.description ?? g.description, files: body.files ?? g.files, spec: body.spec ?? g.spec }), summary: g.summary };
+      }
       return { app: await ctx.apps.create(req.principal!, id, body) };
     });
     r.get('/api/apps/:id', async (req) => {
@@ -88,6 +114,15 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
       const { id } = req.params as { id: string };
       await ctx.apps.stop(req.principal!, id, 'restart');
       return { app: await ctx.apps.start(req.principal!, id), logs: ctx.apps.logs(id) };
+    });
+    /** A headless screenshot of the running app (needs Chrome on the server). */
+    r.post('/api/apps/:id/preview', async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const a = await ctx.apps.get(req.principal!, id);
+      if (!ctx.apps.target(id)) return reply.code(409).send({ error: 'NOT_RUNNING', message: 'Start the app first' });
+      const shot = await ctx.apps.screenshot(a, req.principal!.userId, ctx.apps.internalUrl);
+      if (!shot) return reply.code(501).send({ error: 'NO_BROWSER', message: 'No Chrome / Chromium on this server (apps.chrome_path)' });
+      return { text: shot.text, png_base64: shot.png.toString('base64') };
     });
     r.get('/api/apps/:id/logs', async (req) => {
       const { id } = req.params as { id: string };
