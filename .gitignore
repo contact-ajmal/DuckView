@@ -1,15 +1,33 @@
 node_modules/
 dist/
 *.log
-.env
-.env.local
-duckview_meta.db*
-data/*.duckdb
-data/*.duckdb.wal
-data/exports/
-/tmp/
 coverage/
 .DS_Store
+/tmp/
+
+# secrets: never commit environment files or keys
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# metadata stores and local data (workspaces, uploaded datasets, exports, app runtimes) stay on the machine
+duckview_meta.db*
+**/duckview_meta.db*
+/data/
+**/*.duckdb
+**/*.duckdb.wal
+.duckview/
+
+# python (SDK checkouts, app virtualenvs, setuptools output)
+__pycache__/
+*.pyc
+*.egg-info/
+packages/sdk-python/build/
+.venv/
+venv/
 
 # third-party design references — kept locally, not published
 docs/reference/

@@ -30,7 +30,8 @@ jobs:
           export DUCKVIEW_DATA_DIR=$RUNNER_TEMP/data DATABASE_URL=sqlite://$RUNNER_TEMP/meta.db
           export DUCKVIEW_ADMIN_EMAIL=ci@example.com DUCKVIEW_ADMIN_PASSWORD=ci-password-123 PORT=4200
           node packages/server/dist/cli.js serve & echo $! > server.pid
-          node scripts/smoke.mjs http://localhost:4200 ci@example.com ci-password-123
+          # Data apps are exercised against the image below (python3 + venv); the source run skips the pip install.
+          SMOKE_SKIP_APPS=1 node scripts/smoke.mjs http://localhost:4200 ci@example.com ci-password-123
           kill $(cat server.pid)
 
   image:

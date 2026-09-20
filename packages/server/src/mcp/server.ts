@@ -12,7 +12,7 @@ import type { Principal } from '../services/principal.js';
 import { formatBytes } from '../engine/results.js';
 import { buildTools, runTool, type ToolEnv } from '../agent/tools.js';
 
-export const MCP_SERVER_INFO = { name: 'duckview', version: '1.1.0' } as const;
+export const MCP_SERVER_INFO = { name: 'duckview', version: '1.2.0' } as const;
 
 export { summarizePlan } from '../agent/tools.js';
 

@@ -1,6 +1,6 @@
 {
   "name": "duckview-enterprise",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "DuckView Enterprise — hardened, stateful, native DuckDB data platform with an enterprise-grade MCP server",
   "license": "UNLICENSED",

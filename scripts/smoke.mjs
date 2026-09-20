@@ -3,7 +3,8 @@
  * End-to-end smoke test against a running DuckView instance.
  *   node scripts/smoke.mjs http://localhost:4200 admin@example.com password
  * Exercises: probes, metrics, login, workspace, query (sandbox + SQL), tabs, overview, upload,
- * API token, HITL challenge, MCP Streamable HTTP initialize + tools/list + tools/call.
+ * API token, HITL challenge, MCP Streamable HTTP initialize + tools/list + tools/call, and a Streamlit data app
+ * created, started (the Python environment is built on first start) and served through the proxy.
  */
 const [base = 'http://localhost:4200', email = process.env.DUCKVIEW_ADMIN_EMAIL, password = process.env.DUCKVIEW_ADMIN_PASSWORD] = process.argv.slice(2);
 if (!email || !password) {
@@ -108,11 +109,11 @@ ok('lakehouse config validation', lhBad.status === 400);
 const fw = await json('GET', '/api/agents/frameworks', undefined, jwt);
 ok('agent framework catalogue', fw.status === 200 && Object.keys(fw.data.frameworks ?? {}).length === 8);
 const oapi = await json('GET', '/api/agent/openapi.json', undefined, jwt);
-ok('OpenAPI document for agent tools', oapi.status === 200 && oapi.data.openapi === '3.0.3' && Object.keys(oapi.data.paths ?? {}).length === 11);
+ok('OpenAPI document for agent tools', oapi.status === 200 && oapi.data.openapi === '3.0.3' && Object.keys(oapi.data.paths ?? {}).length >= 26 && '/api/agent/v1/tools/create_app' in (oapi.data.paths ?? {}));
 const reg = await json('POST', '/api/agents', { name: 'smoke-strands', framework: 'strands', workspace_id: ws.id }, jwt);
 ok('agent registered with token', reg.status === 200 && String(reg.data.token).startsWith('dv_'));
 const restTools = await json('GET', '/api/agent/v1/tools', undefined, reg.data.token);
-ok('REST tool façade lists tools for the agent token', restTools.status === 200 && restTools.data.tools?.length === 10);
+ok('REST tool façade lists tools for the agent token', restTools.status === 200 && restTools.data.tools?.length >= 25 && restTools.data.tools.some((t) => t.name === 'preview_app'));
 const restCall = await json('POST', '/api/agent/v1/tools/execute_query', { sql: 'SELECT 42 AS answer' }, reg.data.token);
 ok('REST tool façade executes SQL', restCall.status === 200 && restCall.data.structured?.rows?.[0]?.[0] === 42, JSON.stringify(restCall.data).slice(0, 200));
 const selfTest = await json('POST', `/api/agents/${reg.data.agent?.id}/test`, {}, jwt);
@@ -140,7 +141,7 @@ const init = await mcp({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { 
 ok('MCP initialize', init.status === 200 && init.data?.result?.serverInfo?.name === 'duckview', init.data?.error?.message);
 await mcp({ jsonrpc: '2.0', method: 'notifications/initialized' }, init.sessionId);
 const tools = await mcp({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, init.sessionId);
-ok('MCP tools/list has 10 tools', tools.data?.result?.tools?.length === 10);
+ok('MCP tools/list has the full registry (25+ tools)', tools.data?.result?.tools?.length >= 25 && tools.data.result.tools.some((t) => t.name === 'create_app'));
 const cop = await json('GET', '/api/copilot/config', undefined, jwt);
 ok('copilot config endpoint', cop.status === 200 && typeof cop.data.allow_byok === 'boolean');
 const call = await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'execute_query', arguments: { sql: 'SELECT count(*) AS n FROM smoke_t' } } }, init.sessionId);
@@ -148,6 +149,24 @@ ok('MCP execute_query', call.data?.result?.structuredContent?.rows?.[0]?.[0] ===
 const res = await mcp({ jsonrpc: '2.0', id: 4, method: 'resources/read', params: { uri: 'duckdb://system/resources' } }, init.sessionId);
 ok('MCP system resource', !!res.data?.result?.contents?.[0]?.text);
 await fetch(`${base}/mcp`, { method: 'DELETE', headers: { authorization: `Bearer ${agentToken}`, 'mcp-session-id': init.sessionId } });
+
+// Data apps: a Streamlit app from a template is created, started (first start installs the Python environment —
+// allow a few minutes on a fresh image; SMOKE_SKIP_APPS=1 skips) and answers through the proxy with the session cookie.
+const tpl = await json('GET', '/api/apps/templates', undefined, jwt);
+ok('data app templates', tpl.status === 200 && Array.isArray(tpl.data.templates) && tpl.data.templates.length >= 2);
+if (tpl.data.enabled && !process.env.SMOKE_SKIP_APPS) {
+  const app = await json('POST', `/api/workspaces/${ws.id}/apps`, { name: 'smoke app', source: { template: 'blank' } }, jwt);
+  ok('data app created', app.status === 200 && app.data.app?.status === 'stopped', JSON.stringify(app.data).slice(0, 200));
+  const started = await json('POST', `/api/apps/${app.data.app.id}/start`, {}, jwt);
+  ok('data app started (Streamlit healthy)', started.status === 200 && started.data.app?.status === 'running', JSON.stringify(started.data).slice(0, 300));
+  const sess = await fetch(`${base}/api/apps/${app.data.app.id}/session`, { method: 'POST', headers: { authorization: `Bearer ${jwt}` } });
+  const cookie = sess.headers.get('set-cookie')?.split(';')[0] ?? '';
+  const page = await fetch(`${base}/apps/${app.data.app.id}/`, { headers: { cookie } });
+  ok('data app served through the proxy', page.status === 200 && /streamlit/i.test(await page.text()));
+  ok('data app proxy refuses without the cookie', (await fetch(`${base}/apps/${app.data.app.id}/`)).status === 401);
+  await json('POST', `/api/apps/${app.data.app.id}/stop`, {}, jwt);
+  await json('DELETE', `/api/apps/${app.data.app.id}`, undefined, jwt);
+} else console.log('  (data apps skipped)');
 
 // cleanup
 if (dash.data.dashboard) await json('DELETE', `/api/dashboards/${dash.data.dashboard.id}`, undefined, jwt);

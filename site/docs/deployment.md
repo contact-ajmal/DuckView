@@ -12,7 +12,7 @@ description: Docker Hub image, docker run, Docker Compose profiles, Kubernetes m
 | Tag | Meaning |
 |---|---|
 | `latest` | newest release |
-| `1`, `1.1` | floating major / minor |
+| `1`, `1.2` | floating major / minor |
 | `{{version}}` | pinned release — use this in production |
 
 The image is `node:20-bookworm-slim`, runs as the non-root `duckuser:duckgroup`, uses `tini` as PID 1, declares volumes for `/data` and `/app/meta`, and ships the `httpfs`, `azure`, `arrow`, `iceberg`, `delta` and `excel` DuckDB extensions pre-installed under `/app/duckdb-extensions` so no network is needed at runtime. It also carries `python3` + `venv` and the DuckView Python SDK for [data apps](apps.html); the apps' virtualenv is created under `/data/.duckview/apps` on first use (network access to PyPI needed once).

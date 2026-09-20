@@ -26,7 +26,7 @@ COPY packages/web packages/web
 COPY scripts scripts
 RUN pnpm build \
  && pnpm --filter @duckview/server deploy --prod --legacy /app/deploy \
- && rm -rf /app/deploy/src /app/deploy/vitest.config.ts /app/deploy/tsconfig.json \
+ && rm -rf /app/deploy/src /app/deploy/test /app/deploy/vitest.config.ts /app/deploy/tsconfig.json \
  # Native DuckDB extension prebuilts (httpfs for S3/R2/GCS, azure, arrow, iceberg, delta, excel) so the runtime never needs network for them.
  && node scripts/install-extensions.mjs /app/duckdb-extensions httpfs azure arrow iceberg delta excel postgres mysql sqlite || true
 
@@ -58,7 +58,8 @@ COPY --from=build --chown=duckuser:duckgroup /app/deploy/ /app/server/
 COPY --from=build --chown=duckuser:duckgroup /app/packages/web/dist /app/web
 COPY --from=build --chown=duckuser:duckgroup /app/duckdb-extensions /app/duckdb-extensions
 COPY --chown=duckuser:duckgroup duckview.config.yaml /app/duckview.config.yaml
-COPY --chown=duckuser:duckgroup packages/sdk-python /app/sdk-python
+COPY --chown=duckuser:duckgroup packages/sdk-python/duckview /app/sdk-python/duckview
+COPY --chown=duckuser:duckgroup packages/sdk-python/pyproject.toml packages/sdk-python/README.md /app/sdk-python/
 USER duckuser:duckgroup
 VOLUME ["/data", "/app/meta"]
 EXPOSE 4200
