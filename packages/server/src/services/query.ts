@@ -11,7 +11,7 @@ import type { AuditService } from './audit.js';
 import { unwrap, type ResultCache, type CacheOutcome, type CacheMeta } from './cache.js';
 import type { Principal } from './principal.js';
 import { canWrite, requireScope, roleAtLeast } from './principal.js';
-import { SandboxViolation, type JailEntry } from '../engine/sandbox.js';
+import { SandboxViolation, ensureWritableDir, type JailEntry } from '../engine/sandbox.js';
 import { analyzeSql, stripTrailingSemicolon, type SqlAnalysis } from '../engine/sql-guard.js';
 import { QueryTimeoutError, type CatalogObject } from '../engine/duckdb.js';
 import type { QueryResult, ColumnSchema } from '../engine/results.js';
@@ -240,8 +240,7 @@ export class QueryService {
     }
     const start = performance.now();
     try {
-      const { mkdirSync } = await import('node:fs');
-      mkdirSync(path.dirname(finalAbs), { recursive: true });
+      if (!ensureWritableDir(path.dirname(finalAbs))) throw badRequest(`Cannot write to ${path.dirname(finalAbs)}`);
       const res = await engine.execute(copySql, { maxRows: 1, actor: p.actorType === 'AGENT' ? 'agent' : 'user' });
       await this.workspaces.bumpVersion(workspaceId, 'dataset_saved', p.userId).catch(() => undefined);
       const rowsWritten = Number(res.rows[0]?.[0] ?? res.rowsChanged ?? 0);

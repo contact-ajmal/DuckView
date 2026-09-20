@@ -13,6 +13,7 @@ import type { GroupService } from './groups.js';
 import type { Principal } from './principal.js';
 import { assertWorkspaceScope, isPlatformAdmin, maxWorkspaceRole, requireWorkspaceRole } from './principal.js';
 import { isCloudDbUri, parseCloudUri, type WorkspaceCloudSync } from './workspace-cloud.js';
+import { ensureWritableDir } from '../engine/sandbox.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { isRemoteUri } from '../engine/sandbox.js';
 import { liveEvents } from '../observability/events.js';
@@ -312,12 +313,7 @@ export class WorkspaceService {
     if (!/\.(duckdb|ddb|db)$/i.test(v)) throw badRequest('Persistent database path must end in .duckdb');
     const resolved = this.engines.jail.resolve(v); // throws SandboxViolation on escape (any absolute path is fine in full mode)
     const dir = path.dirname(resolved.absolute);
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.accessSync(dir, fs.constants.W_OK);
-    } catch {
-      throw badRequest(`Cannot write to ${dir}: create the folder and make it writable for the DuckView process`);
-    }
+    if (!ensureWritableDir(dir)) throw badRequest(`Cannot write to ${dir}: create the folder and make it writable for the DuckView process`);
     return v;
   }
 
@@ -445,6 +441,20 @@ export class WorkspaceService {
     await this.db.update(this.s.workspaces).set({ folders, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
     await this.bumpVersion(id, 'folder_removed', p.userId);
     return folders;
+  }
+
+  /** Where uploads go: one of the mounted folders, or the data directory (`null`). */
+  async setUploadFolder(p: Principal, id: string, folderPath: string | null): Promise<WorkspaceFolder[]> {
+    const w = await this.get(p, id, 'EDITOR');
+    if (folderPath && !w.folders.some((f) => f.path === folderPath)) throw badRequest('Add the folder to the workspace first');
+    const folders = w.folders.map((f) => ({ ...f, upload_default: !!folderPath && f.path === folderPath }));
+    await this.db.update(this.s.workspaces).set({ folders, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    return folders;
+  }
+
+  /** The absolute directory uploads land in for a workspace (a mounted folder flagged as default, else the data directory). */
+  uploadDir(w: { folders: WorkspaceFolder[] }): string {
+    return w.folders.find((f) => f.upload_default)?.path ?? this.engines.jail.baseDir;
   }
 
   /**

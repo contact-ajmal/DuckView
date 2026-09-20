@@ -19,7 +19,7 @@ import { DuckDBInstance, type DuckDBConnection, type DuckDBResultReader } from '
 import { writeArrowStream } from './arrow-export.js';
 import type { DuckViewConfig } from '../config/index.js';
 import type { EngineSettings } from '../db/schema/sqlite.js';
-import { DataJail, SandboxViolation, isRemoteUri, looksLikePath } from './sandbox.js';
+import { DataJail, SandboxViolation, ensureWritableDir, isRemoteUri, looksLikePath } from './sandbox.js';
 import { guardSql, isWrappableSelect, stripTrailingSemicolon, type SqlAnalysis } from './sql-guard.js';
 import { readerToResult, type QueryResult, normalizeValue, type ColumnSchema, kindOf } from './results.js';
 import { metrics } from '../observability/metrics.js';
@@ -266,7 +266,7 @@ export class WorkspaceEngine {
       return p;
     }
     const resolved = this.jail.resolve(p);
-    fs.mkdirSync(path.dirname(resolved.absolute), { recursive: true });
+    if (!ensureWritableDir(path.dirname(resolved.absolute))) throw new Error(`Cannot write the database at ${resolved.absolute}`);
     return resolved.absolute;
   }
 
@@ -289,7 +289,13 @@ export class WorkspaceEngine {
     if (md?.values.token) options.motherduck_token = md.values.token;
 
     this.instance = await DuckDBInstance.create(dbPath, options);
+    if (this.closed) {
+      // Evicted while the database was opening.
+      this.releaseInstanceIfIdle();
+      throw new Error('Engine is closed');
+    }
     const conn = await this.instance.connect();
+    this.active.add(conn); // an eviction during set-up waits for this connection like any other
     try {
       // 2. extensions (before lock; requires external access for INSTALL of non-bundled ones)
       const implied: string[] = [];
@@ -339,8 +345,11 @@ export class WorkspaceEngine {
       }
       if (this.cfg.security.lock_configuration) await conn.run(`SET lock_configuration = true`);
     } finally {
+      this.active.delete(conn);
       conn.closeSync();
+      if (this.closed) this.releaseInstanceIfIdle();
     }
+    if (this.closed) throw new Error('Engine is closed');
     metrics.duckdbMemoryLimitBytes.set({ workspace: this.spec.workspaceId }, this.memoryLimit.bytes);
     logger().info({ workspace: this.spec.workspaceId, dbPath, memory: this.memoryLimit.display, threads: this.threads, externalAccess: this.externalAccess }, 'DuckDB engine ready');
   }
@@ -472,7 +481,24 @@ export class WorkspaceEngine {
   private async withConnection<T>(fn: (conn: DuckDBConnection) => Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
     if (this.closed) throw new Error('Engine is closed');
     this.lastUsed = Date.now();
-    const conn = await this.instance.connect();
+    this.pendingConnects++;
+    let conn: DuckDBConnection;
+    try {
+      conn = await this.instance.connect();
+    } finally {
+      this.pendingConnects--;
+    }
+    if (this.closed) {
+      // Evicted while connecting: never run on an instance that is going away (a closed-instance call can block
+      // DuckDB's worker for good on Linux).
+      try {
+        conn.closeSync();
+      } catch {
+        /* ignore */
+      }
+      this.releaseInstanceIfIdle();
+      throw new Error('Engine is closed');
+    }
     this.active.add(conn);
     let timedOut = false;
     let cancelled = false;
@@ -500,6 +526,7 @@ export class WorkspaceEngine {
       } catch {
         /* ignore */
       }
+      if (this.closed) this.releaseInstanceIfIdle();
     }
   }
 
@@ -935,7 +962,7 @@ export class WorkspaceEngine {
     if (guarded.analysis.statements.length !== 1 || guarded.analysis.isMutating) throw new SandboxViolation('Exports accept exactly one read-only statement', rawSql);
     const inner = stripTrailingSemicolon(guarded.sql);
     const timeoutMs = opts.timeoutMs ?? Math.max(this.cfg.duckdb.query_timeout_seconds, 600) * 1000;
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    if (!ensureWritableDir(path.dirname(outPath))) throw new SandboxViolation(`Cannot write to ${path.dirname(outPath)}`, outPath);
     const escapedOut = sqlString(outPath);
     return this.withConnection(
       async (conn) => {
@@ -1004,6 +1031,11 @@ export class WorkspaceEngine {
     return this.active.size;
   }
 
+  /**
+   * Stops accepting work, interrupts what is running, and closes the DuckDB instance once the last connection has
+   * been handed back. Closing the instance under a live connection (or a connect in flight) wedges DuckDB's worker
+   * thread on Linux, and with it every later DuckDB call in the process.
+   */
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -1014,12 +1046,26 @@ export class WorkspaceEngine {
         /* ignore */
       }
     }
+    this.releaseInstanceIfIdle();
+    metrics.duckdbMemoryLimitBytes.remove({ workspace: this.spec.workspaceId });
+  }
+
+  private pendingConnects = 0;
+  private released = false;
+  private resolveReleased: (() => void) | null = null;
+  /** Resolves once the DuckDB instance has actually been closed (after close(), when the last connection is back). */
+  readonly whenReleased: Promise<void> = new Promise((resolve) => {
+    this.resolveReleased = resolve;
+  });
+  private releaseInstanceIfIdle(): void {
+    if (this.released || this.active.size > 0 || this.pendingConnects > 0) return;
+    this.released = true;
     try {
       this.instance.closeSync();
     } catch {
       /* ignore */
     }
-    metrics.duckdbMemoryLimitBytes.remove({ workspace: this.spec.workspaceId });
+    this.resolveReleased?.();
   }
 }
 
@@ -1135,6 +1181,13 @@ export class EngineManager {
     if (inflight) return inflight;
     const p = (async () => {
       this.enforceCapacity();
+      // A previous engine of this workspace may still be draining a connection: opening the same database file
+      // while its old instance holds the lock deadlocks DuckDB's worker on Linux, so wait for the release first.
+      const closing = this.closing.get(spec.workspaceId);
+      if (closing) {
+        await Promise.race([closing, new Promise<void>((resolve) => setTimeout(resolve, 15_000))]);
+        this.closing.delete(spec.workspaceId);
+      }
       const eng = await WorkspaceEngine.open(spec, this.cfg, this.jail);
       this.engines.set(spec.workspaceId, eng);
       metrics.engines.set(this.engines.size);
@@ -1153,10 +1206,14 @@ export class EngineManager {
     return [...this.engines.values()];
   }
 
+  /** Engines told to close whose instance is still draining, by workspace. */
+  private closing = new Map<string, Promise<void>>();
+
   evict(workspaceId: string): void {
     const e = this.engines.get(workspaceId);
     if (e) {
       e.close();
+      this.closing.set(workspaceId, e.whenReleased);
       this.engines.delete(workspaceId);
       metrics.engines.set(this.engines.size);
     }

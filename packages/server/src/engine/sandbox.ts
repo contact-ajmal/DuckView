@@ -349,3 +349,27 @@ function dirSize(dir: string, budget = { n: 0 }): number {
   }
   return total;
 }
+
+/**
+ * Creates `dir` (and missing parents) when its nearest existing ancestor is a writable directory; false otherwise.
+ * Deliberately not fs.mkdirSync(recursive): on Linux that spins forever for paths under /proc and friends.
+ */
+export function ensureWritableDir(dir: string): boolean {
+  const missing: string[] = [];
+  let cur = path.resolve(dir);
+  while (!fs.existsSync(cur)) {
+    missing.unshift(cur);
+    const parent = path.dirname(cur);
+    if (parent === cur) return false;
+    cur = parent;
+  }
+  try {
+    if (!fs.statSync(cur).isDirectory()) return false;
+    fs.accessSync(cur, fs.constants.W_OK);
+    for (const m of missing) fs.mkdirSync(m);
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}

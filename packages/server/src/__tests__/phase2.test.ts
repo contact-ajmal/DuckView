@@ -431,6 +431,28 @@ describe('full filesystem mode: VS Code-style workspace folders', () => {
     expect(files.some((f) => f.path.endsWith('nested/outside.parquet') && f.root === fs.realpathSync(folder))).toBe(true);
     const ins = await api2('POST', '/api/storage/inspect', { workspace_id: ws2, target: `${folder}/nested/outside.parquet` });
     expect(ins.json.row_count).toBe(42);
+    // Uploads can land in a mounted folder: explicitly (absolute dir inside it) or as the workspace's default location.
+    const real = fs.realpathSync(folder);
+    const up = async (name: string, dir?: string) => {
+      const form = new FormData();
+      form.append('file', new Blob(['a,b\n1,2\n'], { type: 'text/csv' }), name);
+      const res = await fetch(`${base2}/api/workspaces/${ws2}/files${dir ? `?dir=${encodeURIComponent(dir)}` : ''}`, { method: 'POST', headers: { authorization: `Bearer ${jwt2}` }, body: form });
+      return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+    };
+    const u1 = await up('explicit.csv', path.join(real, 'nested'));
+    expect(u1.status, JSON.stringify(u1.json)).toBe(200);
+    expect((u1.json.files as { path: string; root?: string }[])[0]).toMatchObject({ path: path.join(real, 'nested', 'explicit.csv'), root: real });
+    expect((await up('nope.csv', '/etc')).status).toBe(400); // not a workspace folder
+    const def = await api2('PUT', `/api/workspaces/${ws2}/folders/upload-default`, { path: real });
+    expect(def.json.upload_dir).toBe(real);
+    expect((def.json.folders as { upload_default?: boolean }[])[0]!.upload_default).toBe(true);
+    const u2 = await up('default.csv');
+    expect((u2.json.files as { path: string; root?: string }[])[0]).toMatchObject({ path: path.join(real, 'default.csv'), root: real });
+    expect((await api2('GET', `/api/workspaces/${ws2}/folders`)).json.upload_dir).toBe(real);
+    expect((await api2('PUT', `/api/workspaces/${ws2}/folders/upload-default`, { path: '/nope' })).status).toBe(400);
+    expect((await api2('PUT', `/api/workspaces/${ws2}/folders/upload-default`, { path: null })).json.upload_dir).not.toBe(real);
+    const u3 = await up('back.csv');
+    expect((u3.json.files as { path: string }[])[0]!.path).toBe('back.csv'); // the data directory again
     const rm = await api2('DELETE', `/api/workspaces/${ws2}/folders?path=${encodeURIComponent(fs.realpathSync(folder))}`);
     expect(rm.json.folders).toEqual([]);
     expect((await api2('DELETE', `/api/workspaces/${ws2}/folders?path=/nope`)).status).toBe(404);

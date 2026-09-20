@@ -36,7 +36,7 @@ export function ConnectionsPage() {
   const [syncs, setSyncs] = useState<DataSync[]>([]);
   const [runs, setRuns] = useState<Record<string, DataSyncRun[]>>({});
   const [filter, setFilter] = useState('');
-  const [wizard, setWizard] = useState<{ kind: 'cloud'; provider: CloudConnection['provider'] | null; edit: CloudConnection | null } | { kind: 'http' } | { kind: 'lakehouse'; provider: LakehouseConnection['provider'] | null; edit: LakehouseConnection | null } | { kind: 'database'; source: SourceType | null; edit: DatabaseConnection | null } | { kind: 'connector'; source: SourceType | null; connector: ConnectorSummary; edit: ConnectorConnection | null } | { kind: 'sync'; edit: DataSync | null; connectorId?: string; sourceKind?: 'table' | 'connector' | 'url' | 'sheet' | 'sql' } | null>(null);
+  const [wizard, setWizard] = useState<{ kind: 'cloud'; provider: CloudConnection['provider'] | null; edit: CloudConnection | null } | { kind: 'http' } | { kind: 'lakehouse'; provider: LakehouseConnection['provider'] | null; edit: LakehouseConnection | null } | { kind: 'database'; source: SourceType | null; edit: DatabaseConnection | null } | { kind: 'connector'; source: SourceType | null; connector: ConnectorSummary; edit: ConnectorConnection | null } | { kind: 'sync'; edit: DataSync | null; connectorId?: string; sourceKind?: 'table' | 'connector' | 'url' | 'sheet' | 'sql'; resource?: Record<string, unknown>; name?: string } | null>(null);
   const [testing, setTesting] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   // A wizard that saved something lands on Configured when it closes; a cancelled one stays where it was.
@@ -57,6 +57,20 @@ export function ConnectionsPage() {
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
+  // The Overview's data source bar hands over a connector resource to import: #/connections/syncs?new=1 + a draft.
+  useEffect(() => {
+    const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
+    if (q.get('new') !== '1' || !wsId) return;
+    try {
+      const draft = JSON.parse(sessionStorage.getItem('duckview.syncDraft') ?? 'null') as { connection_id: string; resource: Record<string, unknown>; name: string } | null;
+      sessionStorage.removeItem('duckview.syncDraft');
+      history.replaceState(null, '', '#/connections/syncs');
+      setTab('syncs');
+      setWizard(draft ? { kind: 'sync', edit: null, connectorId: draft.connection_id, resource: draft.resource, name: draft.name } : { kind: 'sync', edit: null });
+    } catch {
+      /* no draft */
+    }
+  }, [wsId]);
   // Back from Google's consent screen: #/connections?connected=<id> or ?google_error=<message>.
   useEffect(() => {
     const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
@@ -294,7 +308,7 @@ export function ConnectionsPage() {
       <LakehouseWizard open={wizard?.kind === 'lakehouse'} initialProvider={wizard?.kind === 'lakehouse' ? wizard.provider : null} initial={wizard?.kind === 'lakehouse' ? wizard.edit : null} onClose={closeWizard} onCreated={markSaved} />
       <DatabaseWizard open={wizard?.kind === 'database'} source={wizard?.kind === 'database' ? wizard.source : null} initial={wizard?.kind === 'database' ? wizard.edit : null} onClose={closeWizard} onSaved={markSaved} />
       <ConnectorWizard open={wizard?.kind === 'connector'} source={wizard?.kind === 'connector' ? wizard.source : null} connector={wizard?.kind === 'connector' ? wizard.connector : null} initial={wizard?.kind === 'connector' ? wizard.edit : null} googleConfigured={!!configured?.google_configured} isAdmin={!!isAdmin} onClose={closeWizard} onSaved={markSaved} onGoogleConfigured={() => void load()} />
-      {wsId && <SyncEditor open={wizard?.kind === 'sync'} workspaceId={wsId} initial={wizard?.kind === 'sync' ? wizard.edit : null} initialConnectorId={wizard?.kind === 'sync' ? wizard.connectorId : undefined} initialKind={wizard?.kind === 'sync' ? wizard.sourceKind : undefined} databases={configured?.databases ?? []} lakehouses={configured?.lakehouse ?? []} connectors={configured?.connectors ?? []} onClose={() => setWizard(null)} onSaved={() => { void load(); go('syncs'); }} />}
+      {wsId && <SyncEditor open={wizard?.kind === 'sync'} workspaceId={wsId} initial={wizard?.kind === 'sync' ? wizard.edit : null} initialConnectorId={wizard?.kind === 'sync' ? wizard.connectorId : undefined} initialResource={wizard?.kind === 'sync' ? wizard.resource : undefined} initialName={wizard?.kind === 'sync' ? wizard.name : undefined} initialKind={wizard?.kind === 'sync' ? wizard.sourceKind : undefined} databases={configured?.databases ?? []} lakehouses={configured?.lakehouse ?? []} connectors={configured?.connectors ?? []} onClose={() => setWizard(null)} onSaved={() => { void load(); go('syncs'); }} />}
     </div>
     </div>
   );

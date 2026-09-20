@@ -39,6 +39,8 @@ export interface WorkspaceFolder {
   path: string; // absolute, canonical
   name: string;
   added_at: string;
+  /** Uploads land here instead of the data directory (one folder at most). */
+  upload_default?: boolean;
 }
 
 export interface ChartConfig {

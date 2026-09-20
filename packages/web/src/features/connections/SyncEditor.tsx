@@ -8,7 +8,7 @@ import { Button, Input, Label, Modal, Select, cn } from '../../components/ui';
 type SourceKind = 'table' | 'connector' | 'url' | 'sheet' | 'sql';
 
 /** Create or edit a scheduled sync: source → target, schedule, transformation (with a Copilot drafter), preview. */
-export function SyncEditor({ open, workspaceId, initial, initialConnectorId, initialKind, databases, lakehouses, connectors, onClose, onSaved }: { open: boolean; workspaceId: string; initial?: DataSync | null; initialConnectorId?: string; initialKind?: SourceKind; databases: DatabaseConnection[]; lakehouses: LakehouseConnection[]; connectors: ConnectorConnection[]; onClose: () => void; onSaved: (s: DataSync, ran?: boolean) => void }) {
+export function SyncEditor({ open, workspaceId, initial, initialConnectorId, initialResource, initialName, initialKind, databases, lakehouses, connectors, onClose, onSaved }: { open: boolean; workspaceId: string; initial?: DataSync | null; initialConnectorId?: string; initialResource?: Record<string, unknown>; initialName?: string; initialKind?: SourceKind; databases: DatabaseConnection[]; lakehouses: LakehouseConnection[]; connectors: ConnectorConnection[]; onClose: () => void; onSaved: (s: DataSync, ran?: boolean) => void }) {
   const cp = useCopilot();
   const [name, setName] = useState('');
   const [kind, setKind] = useState<SourceKind>('table');
@@ -61,7 +61,7 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
       else if (s.kind === 'url') { const m = /docs\.google\.com\/spreadsheets\/d\/([^/]+)\/export\?format=csv(?:&gid=([^&]+))?/.exec(s.url); if (m) { setKind('sheet'); setSheetId(decodeURIComponent(m[1]!)); setGid(m[2] ? decodeURIComponent(m[2]) : ''); } else { setKind('url'); setUrl(s.url); setFormat(s.format); } }
       else { setKind('sql'); setSql(s.sql); }
     } else {
-      setName(''); setKind(initialKind ?? (initialConnectorId ? 'connector' : databases.length || lakehouses.length ? 'table' : connectors.length ? 'connector' : 'url')); setConnId(initialConnectorId ?? connectors[0]?.id ?? ''); setConnPath([]); setResource(null); setRemoteSql(''); setConnMode('browse'); setDbId(databases[0]?.id ?? ''); setCatalog(lakehouses[0]?.alias ?? ''); setSchema(''); setTable(''); setUrl(''); setFormat('auto'); setSheetId(''); setGid(''); setSql(''); setTarget(''); setTargetSchema('main'); setMode('replace'); setSchedKind('interval'); setMinutes(60); setCron('0 6 * * *'); setTransform('');
+      setName(initialName ?? ''); setKind(initialKind ?? (initialConnectorId ? 'connector' : databases.length || lakehouses.length ? 'table' : connectors.length ? 'connector' : 'url')); setConnId(initialConnectorId ?? connectors[0]?.id ?? ''); setConnPath([]); setResource(initialResource ?? null); setRemoteSql(typeof initialResource?.sql === 'string' ? initialResource.sql : ''); setConnMode(typeof initialResource?.sql === 'string' ? 'sql' : 'browse'); setDbId(databases[0]?.id ?? ''); setCatalog(lakehouses[0]?.alias ?? ''); setSchema(''); setTable(''); setUrl(''); setFormat('auto'); setSheetId(''); setGid(''); setSql(''); setTarget(''); setTargetSchema('main'); setMode('replace'); setSchedKind('interval'); setMinutes(60); setCron('0 6 * * *'); setTransform('');
     }
   }, [open, initial]); // eslint-disable-line react-hooks/exhaustive-deps
 

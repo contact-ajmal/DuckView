@@ -32,7 +32,7 @@ export async function storageRoutes(app: FastifyInstance, ctx: AppContext) {
   app.get('/api/workspaces/:id/folders', async (req) => {
     const { id } = req.params as { id: string };
     const w = await ctx.workspaces.get(req.principal!, id);
-    return { folders: w.folders, data_directory: ctx.workspaces.jail.baseDir, mode: ctx.cfg.security.filesystem_mode };
+    return { folders: w.folders, data_directory: ctx.workspaces.jail.baseDir, upload_dir: ctx.workspaces.uploadDir(w), mode: ctx.cfg.security.filesystem_mode };
   });
   app.post('/api/workspaces/:id/folders', async (req) => {
     requireWrite(req.principal!);
@@ -41,6 +41,14 @@ export async function storageRoutes(app: FastifyInstance, ctx: AppContext) {
     const folders = await ctx.workspaces.addFolder(req.principal!, id, body.path, body.name);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.folder_add', resource: `folder:${body.path}`, ip: req.ip });
     return { folders };
+  });
+  /** Where uploads land: a mounted folder, or null for the data directory. */
+  app.put('/api/workspaces/:id/folders/upload-default', async (req) => {
+    requireWrite(req.principal!);
+    const { id } = req.params as { id: string };
+    const body = z.object({ path: z.string().min(1).nullable() }).parse(req.body ?? {});
+    const folders = await ctx.workspaces.setUploadFolder(req.principal!, id, body.path);
+    return { folders, upload_dir: ctx.workspaces.uploadDir({ folders }) };
   });
   app.delete('/api/workspaces/:id/folders', async (req) => {
     requireWrite(req.principal!);

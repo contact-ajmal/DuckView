@@ -10,7 +10,7 @@ import type { WorkspaceService } from './workspaces.js';
 import type { AuditService } from './audit.js';
 import type { Principal } from './principal.js';
 import { requireWrite } from './principal.js';
-import { SandboxViolation, type JailEntry } from '../engine/sandbox.js';
+import { SandboxViolation, ensureWritableDir, type JailEntry } from '../engine/sandbox.js';
 import { badRequest, notFound } from './errors.js';
 
 export class FileService {
@@ -23,17 +23,30 @@ export class FileService {
     if (!ok) throw badRequest(`File type not allowed. Accepted: ${this.cfg.security.allowed_upload_extensions.join(', ')}`);
   }
 
-  /** Streams an upload to `<jail>/<dir>/<filename>`. Writes to a temp file first, then renames atomically. */
+  /**
+   * Streams an upload to `<dir>/<filename>`: `dir` is relative to the data directory, or an absolute path inside one
+   * of the workspace's mounted folders (or that folder itself); with no `dir` the workspace's default upload
+   * location applies. Writes to a temp file first, then renames atomically.
+   */
   async upload(p: Principal, workspaceId: string, input: { filename: string; dir?: string; stream: Readable; overwrite?: boolean }): Promise<JailEntry> {
     requireWrite(p);
-    await this.workspaces.get(p, workspaceId, 'EDITOR');
+    const w = await this.workspaces.get(p, workspaceId, 'EDITOR');
     const base = path.posix.basename(input.filename.replace(/\\/g, '/')).replace(/[^\w.\-+@ ]/g, '_').trim();
     if (!base || base.startsWith('.')) throw badRequest('Invalid filename');
     this.checkExtension(base);
-    const rel = path.posix.join((input.dir ?? '').replace(/\\/g, '/').replace(/^\/+/, ''), base);
+    const dir = (input.dir ?? '').replace(/\\/g, '/').trim();
+    let rel: string;
+    if (!dir) {
+      const def = this.workspaces.uploadDir(w);
+      rel = def === this.workspaces.jail.baseDir ? base : path.join(def, base);
+    } else if (path.isAbsolute(dir)) {
+      const inside = w.folders.some((f) => dir === f.path || dir.startsWith(f.path + '/'));
+      if (!inside) throw badRequest('Uploads outside the data directory go to a folder added to the workspace');
+      rel = path.join(dir, base);
+    } else rel = path.posix.join(dir.replace(/^\/+/, ''), base);
     const target = this.workspaces.jail.resolve(rel); // SandboxViolation on escape
     if (target.exists && !input.overwrite) throw badRequest(`${target.relative} already exists`);
-    fs.mkdirSync(path.dirname(target.absolute), { recursive: true });
+    if (!ensureWritableDir(path.dirname(target.absolute))) throw badRequest(`Cannot write to ${path.dirname(target.absolute)}`);
     const tmp = `${target.absolute}.upload-${process.pid}-${Date.now()}`;
     try {
       await pipeline(input.stream, fs.createWriteStream(tmp, { flags: 'wx' }));
@@ -45,7 +58,8 @@ export class FileService {
     const stat = fs.statSync(target.absolute);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'file.upload', resource: `file:${target.relative}`, ip: p.ip, durationMs: null });
     await this.workspaces.bumpVersion(workspaceId, 'file_uploaded', p.userId).catch(() => undefined);
-    return { path: target.relative, kind: kindOf(base), size_bytes: stat.size, modified_at: stat.mtime.toISOString() };
+    const root = w.folders.find((f) => target.absolute.startsWith(f.path + path.sep))?.path;
+    return { path: target.relative, kind: kindOf(base), size_bytes: stat.size, modified_at: stat.mtime.toISOString(), ...(root ? { root } : {}) };
   }
 
   async remove(p: Principal, workspaceId: string, relPath: string): Promise<void> {

@@ -1,39 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
-import { UploadCloud, Table2, Eye, FileSpreadsheet, FileJson, Database, Box, Folder, FolderPlus, FolderOpen, Trash2, ArrowRight, ArrowUpRight, RefreshCw, ChevronDown, ChevronRight, X } from 'lucide-react';
-import { FolderPicker } from '../explorer/FolderPicker';
+import { UploadCloud, ArrowRight, ArrowUpRight } from 'lucide-react';
+import { DataSourceBar } from './DataSourceBar';
 import '../../lib/chart';
 import { withAlpha, compactNumber, useChartTheme } from '../../lib/chart';
-import { api, uploadFiles, formatBytes, type OverviewResult, type OverviewColumn, type JailEntry } from '../../api/client';
+import { uploadFiles, formatBytes, type OverviewResult, type OverviewColumn } from '../../api/client';
 import { useCached } from '../../lib/useCached';
 import { CacheChip } from '../../components/CacheChip';
 import { ExploreView, type ExploreSource } from '../explore/ExploreView';
 import { Sparkles } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { ResultsGrid } from '../workspace/ResultsGrid';
-import { Eyebrow, PageTitle, SideCard, Panel, TypePill, Tag } from '../../components/layout';
+import { Eyebrow, PageTitle, Panel, TypePill, Tag } from '../../components/layout';
 import { SplitPane } from '../../components/panes';
 import { useLayout } from '../../store/layout';
 import { HideButton } from '../../components/LayoutMenu';
 import { Empty, Spinner, cn } from '../../components/ui';
 import { quoteIdent } from '../workspace/SchemaTree';
 
-const fileIcon = (kind: string, cls = 'h-4 w-4') => {
-  switch (kind) {
-    case 'parquet':
-    case 'arrow':
-      return <Box className={cn(cls, 'text-accent-300')} />;
-    case 'csv':
-    case 'excel':
-      return <FileSpreadsheet className={cn(cls, 'text-emerald-300')} />;
-    case 'json':
-      return <FileJson className={cn(cls, 'text-amber-300')} />;
-    case 'duckdb':
-      return <Database className={cn(cls, 'text-sky-300')} />;
-    default:
-      return <Folder className={cn(cls, 'text-zinc-400')} />;
-  }
-};
 
 function Kpi({ label, value, sub, sql, onSql, tone }: { label: string; value: React.ReactNode; sub?: React.ReactNode; sql?: string; onSql?: (sql: string) => void; tone?: 'warn' | 'bad' }) {
   return (
@@ -106,12 +90,8 @@ function exploreSource(kind: string, target: string): ExploreSource {
 export function OverviewPage() {
   const ws = useWorkspace();
   const { canEdit: canWrite } = useWorkspaceAccess();
-  const [dragging, setDragging] = useState(false);
   const [explore, setExplore] = useState(false);
   const [uploads, setUploads] = useState<{ name: string; pct: number; error?: string }[]>([]);
-  const [picker, setPicker] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const fileInput = useRef<HTMLInputElement>(null);
   const wsId = ws.activeId;
   const hidden = useLayout((l) => l.hidden);
   const dataVersion = ws.workspaces.find((w) => w.id === wsId)?.data_version;
@@ -133,9 +113,11 @@ export function OverviewPage() {
       if (first) setTarget(first);
       return;
     }
-    // A remembered selection that no longer exists (file deleted, folder removed, table dropped) falls back to the first dataset.
+    // A remembered selection that no longer exists (file deleted, folder removed, table dropped) falls back to the first
+    // dataset. Remote objects (s3://…) and attached tables (alias.schema.table) live outside the catalog and are kept.
     const isQuery = /^(select|with|from)\b/i.test(target);
-    const exists = isQuery || ws.catalog.files.some((f) => f.path === target) || ws.catalog.objects.some((o) => o.name === target || `${o.schema}.${o.name}` === target);
+    const isRemote = /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || /^[A-Za-z_][\w]*\.[A-Za-z_][\w]*\.[A-Za-z_][\w]*$/.test(target);
+    const exists = isQuery || isRemote || ws.catalog.files.some((f) => f.path === target) || ws.catalog.objects.some((o) => o.name === target || `${o.schema}.${o.name}` === target);
     if (!exists) setTarget(first);
   }, [ws.catalog, target, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -154,32 +136,6 @@ export function OverviewPage() {
     }
   };
 
-  /** Mounts a folder into the workspace, refreshes the dataset list and profiles the first data file in it. */
-  const addFolder = async (folderPath: string) => {
-    if (!wsId) return;
-    const r = await api.post<{ folders: { path: string; name: string }[] }>(`/api/workspaces/${wsId}/folders`, { path: folderPath });
-    // The server canonicalises the path (realpath) and appends new folders, so the last entry is the one just added.
-    const added = r.folders.find((f) => f.path === folderPath) ?? r.folders[r.folders.length - 1];
-    await ws.loadCatalog(true);
-    const fresh = useWorkspace.getState().catalog?.files ?? [];
-    const first = added ? fresh.find((f) => f.root === added.path) : undefined;
-    if (first) setTarget(first.path);
-    else if (added) alert(`Added ${added.name}, but no data files (parquet/csv/json/duckdb/xlsx) were found in it.`);
-  };
-  const removeFolder = async (root: string) => {
-    if (!wsId || !confirm(`Remove ${root} from this workspace? Files are not deleted.`)) return;
-    await api.del(`/api/workspaces/${wsId}/folders?path=${encodeURIComponent(root)}`);
-    await ws.loadCatalog(true);
-    if (target && target.startsWith(root + '/')) setTarget(null);
-  };
-
-  const removeFile = async (f: JailEntry) => {
-    if (!wsId || !confirm(`Delete ${f.path} from the data directory?`)) return;
-    await api.del(`/api/workspaces/${wsId}/files?path=${encodeURIComponent(f.path)}`);
-    await ws.loadCatalog(true);
-    if (target === f.path) setTarget(null);
-  };
-
   /** Opens the Query tab with `sql` appended to the active editor. */
   const openInQuery = (sql: string) => {
     const tab = ws.tabs.find((t) => t.id === ws.activeTabId);
@@ -192,16 +148,6 @@ export function OverviewPage() {
   };
 
   const files = ws.catalog?.files ?? [];
-  const objects = ws.catalog?.objects ?? [];
-  const groups = useMemo(() => {
-    const byRoot = new Map<string, JailEntry[]>();
-    for (const f of files) {
-      const key = f.root ?? '';
-      if (!byRoot.has(key)) byRoot.set(key, []);
-      byRoot.get(key)!.push(f);
-    }
-    return [...byRoot.entries()].sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)));
-  }, [files]);
   const relation = overview ? (overview.kind === 'file' ? `'${overview.target}'` : overview.kind === 'query' ? `(${overview.target})` : overview.target) : '';
   const nullTone = (pct: number) => (pct > 20 ? 'var(--status-serious)' : pct > 0 ? 'var(--status-warning)' : 'var(--series-1)');
   const kindCounts = overview
@@ -227,132 +173,21 @@ export function OverviewPage() {
       className="h-full p-5"
       primary={
       <aside className="flex h-full flex-col gap-4 overflow-auto pr-2">
-        <SideCard
-          title="Your datasets"
-          hideId="overview.sidebar"
-          meta={
-            <span className="flex items-center gap-2">
-              <span>{files.length + objects.length}</span>
-              {canWrite && (
-                <button onClick={() => setPicker(true)} className="inline-flex items-center gap-1 text-accent-300 hover:underline" title="Add a folder from this computer to the workspace">
-                  <FolderPlus className="h-3 w-3" /> add folder
-                </button>
-              )}
-            </span>
-          }
-        >
-          <div
-            className={cn('flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-3 py-5 text-center transition-colors', dragging ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-700 hover:border-zinc-500', !canWrite && 'pointer-events-none opacity-50')}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
+        {wsId && (
+          <DataSourceBar
+            workspaceId={wsId}
+            target={target}
+            onSelect={setTarget}
+            onImport={(draft) => {
+              sessionStorage.setItem('duckview.syncDraft', JSON.stringify(draft));
+              location.hash = '#/connections/syncs?new=1';
             }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragging(false);
-              void onFiles([...e.dataTransfer.files]);
-            }}
-            onClick={() => fileInput.current?.click()}
-          >
-            <UploadCloud className={cn('mb-2 h-5 w-5', dragging ? 'text-accent-300' : 'text-zinc-500')} />
-            <div className="text-xs text-zinc-200">
-              <span className="font-semibold">Drop files</span> or click to browse
-            </div>
-            <div className="mt-1 font-mono text-[10px] text-zinc-500">parquet · csv · tsv · json · ndjson · duckdb · xlsx</div>
-            <input ref={fileInput} type="file" multiple className="hidden" onChange={(e) => void onFiles([...(e.target.files ?? [])])} />
-          </div>
-          {canWrite && (
-            <button onClick={() => setPicker(true)} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-800 px-3 py-2 text-xs text-zinc-300 hover:border-zinc-600 hover:text-zinc-50">
-              <FolderPlus className="h-3.5 w-3.5 text-accent-300" /> Add folder from this computer
-            </button>
-          )}
-          {uploads.length > 0 && (
-            <div className="mt-2 space-y-1">
-              {uploads.map((u) => (
-                <div key={u.name} className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[11px]">
-                  <div className="flex justify-between text-zinc-300">
-                    <span className="truncate">{u.name}</span>
-                    <span className={u.error ? 'text-red-300' : 'text-zinc-500'}>{u.error ? 'failed' : `${u.pct}%`}</span>
-                  </div>
-                  {u.error ? <div className="mt-0.5 text-red-300">{u.error}</div> : <div className="mt-1 h-1 overflow-hidden rounded bg-zinc-800"><div className="h-full bg-accent-500 transition-all" style={{ width: `${u.pct}%` }} /></div>}
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="mt-3 space-y-0.5">
-            {groups.map(([root, items]) => {
-              const isFolder = root !== '';
-              const open = !collapsed.has(root);
-              const label = isFolder ? root.split('/').filter(Boolean).pop() ?? root : 'Data directory';
-              return (
-                <div key={root || '__data'}>
-                  <div className="group/root flex items-center gap-1 rounded px-1 py-1">
-                    <button
-                      onClick={() => {
-                        const next = new Set(collapsed);
-                        if (next.has(root)) next.delete(root);
-                        else next.add(root);
-                        setCollapsed(next);
-                      }}
-                      className="flex min-w-0 flex-1 items-center gap-1 text-left"
-                      title={root || 'Files uploaded to the workspace data directory'}
-                    >
-                      {open ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
-                      {isFolder ? (open ? <FolderOpen className="h-3.5 w-3.5 text-accent-300" /> : <Folder className="h-3.5 w-3.5 text-accent-300" />) : <Database className="h-3.5 w-3.5 text-zinc-400" />}
-                      <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-zinc-400">{label}</span>
-                      <span className="font-mono text-[10px] text-zinc-600" title={ws.catalog?.truncated_folders?.includes(root) ? 'Showing the first 500 data files (4 levels deep). Use the Explorer on the Query page to browse everything.' : undefined}>
-                        {items.length}{ws.catalog?.truncated_folders?.includes(root) ? '+' : ''}
-                      </span>
-                    </button>
-                    {isFolder && canWrite && (
-                      <button onClick={() => void removeFolder(root)} className="rounded p-0.5 text-zinc-600 opacity-0 hover:text-red-300 group-hover/root:opacity-100" title="Remove folder from workspace">
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                  {open &&
-                    items.map((f) => {
-                      const display = f.root ? f.path.slice(f.root.length + 1) : f.path;
-                      return (
-                        <div key={f.path} className={cn('group ml-3 flex items-center gap-2 rounded-md px-2 py-1.5', target === f.path ? 'bg-accent-600/15' : 'hover:bg-zinc-800/60')}>
-                          <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', target === f.path ? 'bg-emerald-400' : 'bg-zinc-700')} />
-                          <button className="min-w-0 flex-1 text-left" onClick={() => setTarget(f.path)} title={f.path}>
-                            <div className="truncate font-mono text-xs text-zinc-100">{display}</div>
-                            <div className="truncate font-mono text-[10px] text-zinc-500">
-                              {f.kind.toUpperCase()} · {formatBytes(f.size_bytes)}
-                            </div>
-                          </button>
-                          {canWrite && !f.root && (
-                            <button className="rounded p-0.5 text-zinc-600 opacity-0 hover:text-red-300 group-hover:opacity-100" onClick={() => void removeFile(f)} title="Delete file">
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                </div>
-              );
-            })}
-            {objects.map((o) => {
-              const name = o.schema === 'main' ? o.name : `${o.schema}.${o.name}`;
-              return (
-                <button key={name} onClick={() => setTarget(name)} className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left', target === name ? 'bg-accent-600/15' : 'hover:bg-zinc-800/60')}>
-                  {o.type === 'VIEW' ? <Eye className="h-3.5 w-3.5 text-sky-300" /> : <Table2 className="h-3.5 w-3.5 text-accent-300" />}
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono text-xs text-zinc-100">{name}</div>
-                    <div className="font-mono text-[10px] text-zinc-500">
-                      {o.type} · {o.column_count} cols{o.estimated_rows != null ? ` · ~${o.estimated_rows.toLocaleString()} rows` : ''}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-3 text-[11px] leading-snug text-zinc-500">Uploaded files live in the data directory; added folders are read in place by DuckDB.</p>
-        </SideCard>
-        {wsId && <FolderPicker open={picker} workspaceId={wsId} onClose={() => setPicker(false)} onPick={addFolder} />}
-
+            onQuery={openInQuery}
+            onFiles={(f) => void onFiles(f)}
+            uploads={uploads}
+            canWrite={canWrite}
+          />
+        )}
       </aside>
       }
       secondary={
