@@ -1,6 +1,6 @@
 ---
 title: Agents, MCP & Copilot
-order: 9
+order: 10
 group: Guide
 description: The MCP server (stdio, SSE, Streamable HTTP), the REST/OpenAPI façade, registered agents with per-framework snippets, human-in-the-loop approval, and DuckCopilot.
 ---
@@ -40,10 +40,14 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `list_dashboards(workspace_id?)` | Dashboards with their widgets and layouts. |
 | `create_dashboard_widget(dashboard_id \| dashboard_name, title, sql, widget_type, chart_config?, refresh_interval_sec?)` | Builds dashboards autonomously; the SQL is validated read-only and dry-run first. |
 | `create_mosaic_dashboard(spec \| spec_text, name?, description?, dashboard_id?, validate_only?, workspace_id?)` | Creates or updates an interactive Mosaic dashboard from a declarative spec (YAML/JSON). Validated structurally and every dataset/table bound with EXPLAIN before saving; errors come back as a list to fix. |
+| `list_data_sources(workspace_id?)` | Every connection with health, the syncs of a workspace, the source-type catalog. |
+| `create_data_sync(name, source, target_table, …, transform_sql?, schedule?, run_now?)` | Scheduled load of a table / URL / SELECT into a workspace table with an optional `{{raw}}` transformation, validated first. |
+| `update_data_sync(sync_id, transform_sql?, schedule?, mode?, enabled?, run_now?)` | Attach a transformation, change the schedule, pause/resume. |
+| `run_data_sync(sync_id)` | Run now; rows, duration, error, recent runs. |
 
 **Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec).
 
-**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)` and `build_mosaic_dashboard(table_or_path, goal?)` encode complete agent workflows over the tools above.
+**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)`, `build_mosaic_dashboard(table_or_path, goal?)` and `build_data_pipeline(source, goal?)` encode complete agent workflows over the tools above.
 
 ## Human-in-the-loop
 

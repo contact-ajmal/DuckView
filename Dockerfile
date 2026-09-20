@@ -28,7 +28,7 @@ RUN pnpm build \
  && pnpm --filter @duckview/server deploy --prod --legacy /app/deploy \
  && rm -rf /app/deploy/src /app/deploy/vitest.config.ts /app/deploy/tsconfig.json \
  # Native DuckDB extension prebuilts (httpfs for S3/R2/GCS, azure, arrow, iceberg, delta, excel) so the runtime never needs network for them.
- && node scripts/install-extensions.mjs /app/duckdb-extensions httpfs azure arrow iceberg delta excel || true
+ && node scripts/install-extensions.mjs /app/duckdb-extensions httpfs azure arrow iceberg delta excel postgres mysql sqlite || true
 
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 ARG DUCKVIEW_VERSION=dev

@@ -85,6 +85,13 @@
       "when": 1789880089150,
       "tag": "0011_workspace_cloud_storage",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789881534890,
+      "tag": "0012_data_connections_syncs",
+      "breakpoints": true
     }
   ]
 }

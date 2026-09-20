@@ -1,6 +1,6 @@
 ---
 title: Interactive exploration & Mosaic dashboards
-order: 7
+order: 8
 group: Guide
 description: Cross-filtered charts over millions of rows — the Explore view and spec-driven Mosaic dashboards, computed in the workspace engine through Mosaic's pre-aggregation, never in the browser.
 ---

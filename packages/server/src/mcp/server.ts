@@ -164,6 +164,32 @@ Output: a short diagnosis, the rewritten SQL, a before/after plan comparison tab
   );
 
   server.registerPrompt(
+    'build_data_pipeline',
+    {
+      title: 'Build a data pipeline',
+      description: 'Guided workflow: pick a source, set up a scheduled sync into the workspace, write and validate a transformation, run it, verify the result.',
+      argsSchema: { source: z.string().describe('What to load: a table like pg.public.orders, a URL, or a description'), goal: z.string().optional().describe('What the curated table should contain'), workspace_id: z.string().optional() },
+    },
+    ({ source, goal, workspace_id }) => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Set up a data pipeline${workspace_id ? ` in workspace \`${workspace_id}\`` : ''} that loads \`${source}\`${goal ? ` and produces: ${goal}` : ''}.
+
+1. Call \`list_data_sources\` to see the connections and their aliases; if the source is a table of a database or lakehouse, it is queried as alias.schema.table.
+2. Inspect the source with \`inspect_schema\` (or \`execute_query\` with a LIMIT) — columns, types, a few rows.
+3. Call \`create_data_sync\` with the source, a target_table, a schedule (interval or cron) and run_now: true. Read the columns it reports.
+4. Write the transformation as a single SELECT over {{raw}} — rename and cast columns, filter junk, derive fields, aggregate if the goal asks for it — and attach it with \`update_data_sync\` (transform_sql, run_now: true). It is validated against the source before it is saved; fix anything it reports.
+5. Verify with \`execute_query\` on the target table, then reply with the sync id, the schedule, the transformation and a two-line summary of the resulting table.`,
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
     'build_mosaic_dashboard',
     {
       title: 'Build a Mosaic dashboard',

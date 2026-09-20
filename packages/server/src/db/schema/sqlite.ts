@@ -476,6 +476,108 @@ export const copilotSettings = sqliteTable('copilot_settings', {
 
 export const COPILOT_USAGE_STATUSES = ['ok', 'error', 'cancelled'] as const;
 
+// ---- Data connections page: databases, scheduled syncs
+
+export const DATABASE_ENGINES = ['postgres', 'mysql', 'sqlite', 'duckdb'] as const;
+export type DatabaseEngine = (typeof DATABASE_ENGINES)[number];
+export interface DatabaseConfig {
+  host?: string;
+  port?: number;
+  database?: string;
+  user?: string;
+  /** Postgres/MySQL: sslmode / ssl on. */
+  ssl?: boolean;
+  /** sqlite / duckdb: path of the database file (jailed like every other path). */
+  path?: string;
+  /** Attach read-only (default true — a source is not something to write into by accident). */
+  read_only?: boolean;
+}
+
+/** An external database attached to every engine of the owner's workspaces as `alias.schema.table`. */
+export const databaseConnections = sqliteTable(
+  'database_connections',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    engine: text('engine', { enum: DATABASE_ENGINES }).notNull(),
+    alias: text('alias').notNull(),
+    config: text('config', { mode: 'json' }).$type<DatabaseConfig>().notNull().default({}),
+    /** AES-256-GCM: { password } (empty for file databases). */
+    encrypted_credentials: text('encrypted_credentials').notNull(),
+    iv: text('iv').notNull(),
+    tag: text('tag').notNull(),
+    status: text('status', { enum: LAKEHOUSE_STATUSES }).notNull().default('unknown'),
+    last_error: text('last_error'),
+    last_tested_at: integer('last_tested_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('database_connections_user_idx').on(t.user_id), uniqueIndex('database_connections_alias_idx').on(t.user_id, t.alias)],
+);
+
+/** Where a sync reads from. */
+export type SyncSource =
+  | { kind: 'sql'; sql: string }
+  | { kind: 'table'; database_connection_id?: string | null; lakehouse_connection_id?: string | null; catalog?: string | null; schema: string; table: string }
+  | { kind: 'url'; url: string; format: 'auto' | 'csv' | 'json' | 'parquet' | 'excel'; options?: Record<string, string | number | boolean>; connection_id?: string | null };
+export type SyncSchedule = { kind: 'manual' } | { kind: 'interval'; minutes: number } | { kind: 'cron'; expression: string; timezone?: string };
+export const SYNC_MODES = ['replace', 'append'] as const;
+export type SyncMode = (typeof SYNC_MODES)[number];
+export const SYNC_RUN_STATUSES = ['running', 'ok', 'error'] as const;
+export interface SyncLastRun {
+  run_id: string;
+  status: (typeof SYNC_RUN_STATUSES)[number];
+  started_at: string;
+  finished_at: string | null;
+  rows: number | null;
+  duration_ms: number | null;
+  error: string | null;
+}
+
+/** A scheduled load of a source into a table of a workspace, with an optional transformation step. */
+export const dataSyncs = sqliteTable(
+  'data_syncs',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    source: text('source', { mode: 'json' }).$type<SyncSource>().notNull(),
+    target_schema: text('target_schema').notNull().default('main'),
+    target_table: text('target_table').notNull(),
+    mode: text('mode', { enum: SYNC_MODES }).notNull().default('replace'),
+    /** A SELECT over `{{raw}}` (the freshly loaded rows) whose result becomes the target table; null = load as is. */
+    transform_sql: text('transform_sql'),
+    schedule: text('schedule', { mode: 'json' }).$type<SyncSchedule>().notNull().default({ kind: 'manual' }),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    last_run: text('last_run', { mode: 'json' }).$type<SyncLastRun | null>(),
+    next_run_at: integer('next_run_at', { mode: 'timestamp_ms' }),
+    created_by: text('created_by'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('data_syncs_workspace_idx').on(t.workspace_id), index('data_syncs_next_run_idx').on(t.next_run_at)],
+);
+
+export const dataSyncRuns = sqliteTable(
+  'data_sync_runs',
+  {
+    id: text('id').primaryKey(),
+    sync_id: text('sync_id').notNull().references(() => dataSyncs.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    status: text('status', { enum: SYNC_RUN_STATUSES }).notNull(),
+    triggered_by: text('triggered_by').notNull(), // schedule | manual | agent
+    actor_id: text('actor_id'),
+    rows: integer('rows'),
+    duration_ms: integer('duration_ms'),
+    error: text('error'),
+    started_at: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+    finished_at: integer('finished_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => [index('data_sync_runs_sync_idx').on(t.sync_id, t.started_at)],
+);
+
 /** One row per DuckCopilot turn: who, where, which model, how many tokens. */
 export const copilotUsage = sqliteTable(
   'copilot_usage',
@@ -507,4 +609,7 @@ export type LakehouseConnection = typeof lakehouseConnections.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type ChatMessage = typeof chatHistory.$inferSelect;
 export type CopilotSettingsRow = typeof copilotSettings.$inferSelect;
+export type DatabaseConnection = typeof databaseConnections.$inferSelect;
+export type DataSync = typeof dataSyncs.$inferSelect;
+export type DataSyncRun = typeof dataSyncRuns.$inferSelect;
 export type CopilotUsageRow = typeof copilotUsage.$inferSelect;

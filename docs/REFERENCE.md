@@ -10,6 +10,8 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │ #/query          VS Code-style explorer (any local folder + S3/R2/GCS/Azure  │
 │                  + lakehouse catalogs) · schema pane · tabs · engine picker  │
 │                  (DuckDB / Databricks warehouse) · saved queries · .sql io   │
+│ #/connections    source catalog · databases (attached read-only) · lakehouse ·│
+│                  storage · scheduled syncs with transformations + run history│
 │ #/dashboards     grid dashboards (drag-and-drop KPI/chart/table/markdown,    │
 │                  auto-refresh) · Mosaic dashboards (declarative spec, editor │
 │                  + live preview, cross-filtered, generated from any dataset) │
@@ -224,6 +226,33 @@ A chart whose query fails after rendering (Mosaic keeps the rest of the view ali
 
 API: `POST /api/workspaces/:id/dashboards {name, description?, kind?: grid|mosaic, spec?}` · `PATCH /api/dashboards/:id {spec}` (editor) · `POST /api/workspaces/:id/mosaic/prepare`. The MCP `list_dashboards` tool reports `kind` and `spec`.
 
+## Data connections & syncs
+
+**Connections** (`#/connections`) is the one place for every source: *Configured* (everything with health, last test, edit/remove), *Add a source* (the catalog) and *Syncs* (scheduled loads into the active workspace). Agents reach the same objects through `list_data_sources`, `create_data_sync`, `update_data_sync` and `run_data_sync`.
+
+**The catalog** (`GET /api/sources/catalog`, `services/source-catalog.ts`) groups source types by family with their auth style, capabilities (browse · attach · remote SQL · sync) and fields:
+
+| Family | Available today | Planned (listed, not built) |
+|---|---|---|
+| Object storage | Amazon S3, Cloudflare R2, Google Cloud Storage, Azure Blob | |
+| Lakehouse catalogs | AWS Glue / SageMaker Lakehouse, Amazon S3 Tables, any Iceberg REST catalog (Polaris, Nessie, Tabular, Lakekeeper, Snowflake Open Catalog), Databricks (Unity Catalog + remote SQL) | |
+| Databases | PostgreSQL, MySQL / MariaDB, SQLite files, DuckDB files | Amazon Redshift (Postgres wire) |
+| Web & APIs | HTTP / REST endpoints (CSV, JSON, Parquet, Excel over HTTPS with a bearer token or headers), Google Sheets (shared links) | |
+| Warehouses | | Snowflake, BigQuery, ClickHouse, Microsoft Fabric / Synapse |
+| SaaS | | Salesforce, HubSpot, Stripe, Google Analytics 4, Airtable, Notion |
+
+Storage and lakehouse sources keep their existing wizards and routes; **database connections** are new (`database_connections`, `/api/database-connections` CRUD · `/test` · `/browse?schema=`): the password is AES-256-GCM encrypted, the database is attached **read-only** to every engine of the owner's workspaces through DuckDB's `postgres` / `mysql` / `sqlite` extensions (or a plain `ATTACH` for a `.duckdb` file) as `alias.schema.table`, browsed schema by schema, and hot-applied to running engines (attachment fingerprint). Network databases need `security.enable_external_access` (or full filesystem mode); file databases live inside the jail. The container image pre-installs the three extensions.
+
+**Syncs** (`data_syncs`, `data_sync_runs`) load a source into a table of a workspace on a schedule:
+- *source*: `{kind: "table", schema, table, database_connection_id | catalog}` (an attached database or lakehouse table), `{kind: "url", url, format: auto|csv|json|parquet|excel, options?}` (a Google Sheet is a CSV export URL: `GET /api/sources/google-sheet-url?spreadsheet_id=&gid=`), or `{kind: "sql", sql}` (any read-only SELECT);
+- *target*: `target_schema.target_table`, `mode: replace | append`;
+- *transformation* (optional): one SELECT over `{{raw}}` — the freshly loaded rows — whose result becomes the target. Written by a person or by an agent; **validated against the source before it is saved** (`POST /api/workspaces/:id/syncs/preview` binds source + transform with a `LIMIT`, the sync editor's *Preview* and *Draft with Copilot* use it);
+- *schedule*: `manual`, `interval` (minutes) or `cron` (5-field, UTC by default); `enabled` pauses.
+
+A run is a guarded SQL sequence on the workspace engine executed **as the workspace owner** — roles, sandbox, audit trail (`sync.run`) and data epoch apply exactly as for a person: `CREATE OR REPLACE TABLE <target>__staging AS <load>`, optionally `<target>__next AS <transform>`, then a swap (replace) or `INSERT INTO` (append); a failing load leaves the target untouched. Runs are recorded (`rows`, `duration_ms`, `error`, `triggered_by: schedule | manual | agent`) and announced on the live feed (`{type: "sync"}`), the last 200 kept per sync. The scheduler is one in-process ticker (30 s; `duckdb.sync_scheduler_enabled: false` on replicas). API: `GET/POST /api/workspaces/:id/syncs` · `GET/PATCH/DELETE /api/syncs/:id` · `POST /api/syncs/:id/run` · `GET /api/syncs/:id/runs`. Viewers see syncs and runs; editors create, run, pause and change them.
+
+**Agents.** `list_data_sources` (every connection with health, the syncs of a workspace, the catalog), `create_data_sync` (validates source and transformation, `run_now`), `update_data_sync` (attach a transformation, change the schedule, pause), `run_data_sync` (rows, duration, error, recent runs), plus the `build_data_pipeline` prompt (inspect → sync → transform → validate → verify). In the sync editor, **Draft with Copilot** asks DuckCopilot for a transformation over the previewed columns and drops the SQL in.
+
 ## Persistent workspaces
 
 A workspace's database (`active_db_path`) lives in one of five places:
@@ -347,10 +376,14 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `list_dashboards(workspace_id?)` | Dashboards with their widgets and layouts. |
 | `create_dashboard_widget(dashboard_id | dashboard_name, title, sql, widget_type, chart_config?, refresh_interval_sec?)` | Builds dashboards autonomously; the SQL is validated read-only and dry-run first. |
 | `create_mosaic_dashboard(spec | spec_text, name?, description?, dashboard_id?, validate_only?, workspace_id?)` | Creates or updates an interactive Mosaic dashboard from a declarative spec (YAML/JSON). Validated structurally and every dataset/table bound with EXPLAIN before saving; errors come back as a list to fix. |
+| `list_data_sources(workspace_id?)` | Every connection of the caller (storage, lakehouse, databases with aliases and health), the syncs of a workspace, and the source-type catalog. |
+| `create_data_sync(name, source, target_table, target_schema?, mode?, transform_sql?, schedule?, run_now?, workspace_id?)` | A scheduled load of a table / URL / SELECT into a workspace table with an optional `{{raw}}` transformation, validated first. |
+| `update_data_sync(sync_id, transform_sql?, schedule?, mode?, enabled?, name?, run_now?)` | Attach a transformation (validated), change the schedule, pause/resume. |
+| `run_data_sync(sync_id)` | Run now; rows, duration, error and recent runs. |
 
 **Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec).
 
-**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)` and `build_mosaic_dashboard(table_or_path, goal?)` encode complete agent workflows over the tools above.
+**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)`, `build_mosaic_dashboard(table_or_path, goal?)` and `build_data_pipeline(source, goal?)` encode complete agent workflows over the tools above.
 
 ## HTTP API (summary)
 
@@ -366,6 +399,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Data | `POST /api/workspaces/:id/files` (multipart upload into the jail) · `DELETE /api/workspaces/:id/files?path=` · `POST /api/workspaces/:id/overview` (KPIs, null ratios, sample, distributions) · `GET /api/workspaces/:id/catalog` |
 | Query | `POST /api/workspaces/:id/query` · `/explain` · `/profile` · `/save` · `WS /api/ws/query` (auth → run/cancel; schema → rows* → done). `query`, `explain`, `profile`, `overview`, `storage/inspect` and widget data are conditional (`ETag` / `If-None-Match` → 304, `refresh: true`). |
 | Cache | `DELETE /api/workspaces/:id/cache` · `POST /api/admin/cache/clear` · cache stats in `GET /api/system/live` |
+| Connections | `GET /api/sources/catalog` · `GET /api/sources` · `GET /api/sources/google-sheet-url` · `GET/POST /api/database-connections` · `PATCH/DELETE /api/database-connections/:id` · `POST …/:id/test` · `GET …/:id/browse?schema=` · `GET/POST /api/workspaces/:id/syncs` · `POST /api/workspaces/:id/syncs/preview` · `GET/PATCH/DELETE /api/syncs/:id` · `POST /api/syncs/:id/run` · `GET /api/syncs/:id/runs` |
 | Mosaic | `POST /api/workspaces/:id/mosaic {type: arrow\|json\|exec, sql}` · `POST /api/workspaces/:id/mosaic/prepare {spec \| spec_text, bind?}` · `GET /api/mosaic/info` |
 | Live | `WS /api/ws/events` — audit rows, MCP tool invocations and session events in real time (admins: all; others: own) · `GET /api/system/live` — CPU %, RAM, `duckdb_memory()` per engine, scratch/data disk usage |
 | Agents | `GET/POST/DELETE /api/tokens` · `GET /api/mcp/sessions` · `GET /api/mcp/info` (Claude Desktop / Cursor / Claude Code snippets) · `/api/agents…` (registered agents, snippets, self-test, invoke, discovery) · `GET /api/agent/openapi.json` · `GET/POST /api/agent/v1/tools[/:tool]` (REST façade) |
@@ -426,7 +460,7 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 204 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
+pnpm test        # 211 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +

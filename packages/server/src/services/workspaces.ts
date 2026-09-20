@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { Workspace, SessionTab, EngineSettings, ChartConfig, WorkspaceFolder, WorkspaceRole, WorkspaceMember, MemberSubjectType, CloudSyncState } from '../db/schema/sqlite.js';
 import { WORKSPACE_ROLES, MEMBER_SUBJECT_TYPES } from '../db/schema/sqlite.js';
 import { newId } from '../security/crypto.js';
-import { EngineManager, type WorkspaceEngine } from '../engine/duckdb.js';
+import { EngineManager, type WorkspaceEngine, type AttachSpec } from '../engine/duckdb.js';
 import type { ConnectionService } from './connections.js';
 import type { CloudConnectionService } from './cloud.js';
 import type { LakehouseService } from './lakehouse.js';
@@ -48,6 +48,8 @@ FROM range(90);`;
 export class WorkspaceService {
   /** Set after construction (the lakehouse service needs this service for engine access, so the dependency is two-way). */
   lakehouse: LakehouseService | null = null;
+  /** Database connections (Postgres/MySQL/SQLite/DuckDB files) attached to every engine of the owner's workspaces. */
+  databases: { resolveAttachments(userId: string): Promise<AttachSpec[]> } | null = null;
   private versionListeners: ((workspaceId: string, version: number, reason: string) => void)[] = [];
 
   /** Cloud-backed database sync (set by the context right after construction). */
@@ -549,6 +551,7 @@ export class WorkspaceService {
     const workspace = await this.get(p, workspaceId);
     // Workspace-linked data connections + every cloud storage connection the owner has configured.
     const lake = this.lakehouse ? await this.lakehouse.resolveEngineBits(workspace.user_id) : { secrets: [], attachments: [] };
+    const dbs = this.databases ? await this.databases.resolveAttachments(workspace.user_id) : [];
     const secrets = [...(await this.connections.resolveSecrets(workspace.user_id, workspace.engine_settings.connection_ids ?? [])), ...(await this.cloud.resolveSecrets(workspace.user_id)), ...lake.secrets];
     let dbPath = workspace.active_db_path;
     if (isCloudDbUri(dbPath)) {
@@ -556,7 +559,7 @@ export class WorkspaceService {
       if (!this.engines.peek(workspace.id)) await this.cloudSync.pull(workspace);
       dbPath = this.cloudSync.localPath(workspace.id);
     }
-    const engine = await this.engines.get({ workspaceId: workspace.id, dbPath, settings: workspace.engine_settings, secrets, attachments: lake.attachments });
+    const engine = await this.engines.get({ workspaceId: workspace.id, dbPath, settings: workspace.engine_settings, secrets, attachments: [...lake.attachments, ...dbs] });
     return { workspace, engine, role: workspace.role };
   }
 

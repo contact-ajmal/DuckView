@@ -11,7 +11,9 @@ export type LiveEvent =
   | { type: 'mcp_session'; at: string; user_id: string; user: string; action: 'connect' | 'disconnect'; transport: string; session_id: string }
   | { type: 'query'; at: string; user_id: string; actor: 'USER' | 'AGENT' | 'SYSTEM'; workspace_id: string; status: 'started' | 'done' | 'error'; sql: string; duration_ms?: number }
   /** The workspace's data epoch moved (mutation, upload, folder change, engine restart): clients drop cached results for it. */
-  | { type: 'workspace'; at: string; user_id: string | null; workspace_id: string; data_version: number; reason: string };
+  | { type: 'workspace'; at: string; user_id: string | null; workspace_id: string; data_version: number; reason: string }
+  /** A scheduled sync started or finished. */
+  | { type: 'sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; rows: number | null; duration_ms: number | null; error: string | null };
 
 class LiveBus extends EventEmitter {
   publish(e: LiveEvent) {

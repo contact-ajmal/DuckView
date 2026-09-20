@@ -114,6 +114,8 @@ export const ConfigSchema = z.object({
       default_database: z.enum(['file', 'memory']).default('file'),
       /** Quiet period after the last mutating statement before a cloud-backed workspace is pushed to its object. */
       cloud_sync_delay_seconds: z.coerce.number().int().min(5).default(60),
+      /** Run scheduled data syncs from this process (turn off on replicas that should not run them). */
+      sync_scheduler_enabled: z.coerce.boolean().default(true),
     })
     .default({}),
   cache: z

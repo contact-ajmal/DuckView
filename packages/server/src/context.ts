@@ -16,6 +16,8 @@ import { ChatHistoryService } from './services/chat.js';
 import { CopilotService } from './services/copilot.js';
 import { CopilotAdminService } from './services/copilot-admin.js';
 import { WorkspaceCloudSync } from './services/workspace-cloud.js';
+import { DatabaseConnectionService } from './services/databases.js';
+import { DataSyncService } from './services/syncs.js';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
 import { GroupService } from './services/groups.js';
@@ -45,6 +47,8 @@ export interface AppContext {
   copilot: CopilotService;
   copilotAdmin: CopilotAdminService;
   cloudSync: WorkspaceCloudSync;
+  databases: DatabaseConnectionService;
+  syncs: DataSyncService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -70,6 +74,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const workspaces = new WorkspaceService(store, engines, connections, cloud, groups);
   const lakehouse = new LakehouseService(cfg, store, cipher, engines);
   lakehouse.bind(workspaces, audit);
+  const databases = new DatabaseConnectionService(store, cipher, engines, cfg);
+  workspaces.databases = databases;
   const cache = new ResultCache(cfg, workspaces, engines.jail);
   workspaces.onVersion((id) => cache.invalidateWorkspace(id));
   const cloudSync = new WorkspaceCloudSync(store, engines, cloud, cfg.duckdb.cloud_sync_delay_seconds);
@@ -91,6 +97,15 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   copilot.admin = copilotAdmin;
   const agents = new AgentService(cfg, store, auth, workspaces, audit, opts.awsBridge);
   const mosaic = new MosaicService(cfg, workspaces, queries, engines, audit);
+  const syncs = new DataSyncService(store, workspaces, queries, auth, audit);
+  syncs.aliasOf = async (userId, id) => {
+    try {
+      return (await databases.getOwned(userId, id)).alias;
+    } catch {
+      return null;
+    }
+  };
+  if (cfg.duckdb.sync_scheduler_enabled) syncs.start();
   copilot.mosaic = mosaic;
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
@@ -121,6 +136,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     copilot,
     copilotAdmin,
     cloudSync,
+    databases,
+    syncs,
     lakehouse,
     agents,
     groups,
@@ -128,6 +145,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     mosaic,
     startedAt: new Date(),
     async shutdown() {
+      syncs.stop();
       await agents.flush();
       await cloudSync.flush().catch(() => undefined);
       exportsSvc.close();

@@ -68,6 +68,16 @@ description: The complete DuckView feature list — querying, workbench, dashboa
       </ul>
     </div>
     <div class="card">
+      <h3>Connections &amp; syncs <span class="tag new">New</span></h3>
+      <ul>
+        <li>One page for every source: S3 / R2 / GCS / Azure, Glue / S3 Tables / Iceberg REST / Databricks, PostgreSQL / MySQL / SQLite / DuckDB files, HTTP endpoints, Google Sheets — with tests and health</li>
+        <li>Databases attached read-only as <code>alias.schema.table</code>; browse schemas and tables</li>
+        <li>Scheduled syncs (interval or cron) into a workspace table, replace or append, with a run history</li>
+        <li>Transformations over <code>{{raw}}</code>, validated before saving — drafted by Copilot or set by agents</li>
+        <li>Agents: <code>list_data_sources</code>, <code>create_data_sync</code>, <code>update_data_sync</code>, <code>run_data_sync</code></li>
+      </ul>
+    </div>
+    <div class="card">
       <h3>Lakehouse connectors</h3>
       <ul>
         <li>AWS Glue / SageMaker Lakehouse via Glue's Iceberg REST endpoint (SigV4); federated and S3 Tables catalogs</li>
@@ -174,10 +184,11 @@ description: The complete DuckView feature list — querying, workbench, dashboa
           <tr><td><code>list_dashboards</code></td><td>Dashboards with their widgets and layouts</td></tr>
           <tr><td><code>create_dashboard_widget</code></td><td>Build dashboards autonomously; SQL validated read-only and dry-run first</td></tr>
           <tr><td><code>create_mosaic_dashboard</code></td><td>Interactive Mosaic dashboards from a declarative spec, validated and bound in the workspace before saving</td></tr>
+          <tr><td><code>list_data_sources</code> · <code>create_data_sync</code> · <code>update_data_sync</code> · <code>run_data_sync</code></td><td>Connections with health; scheduled loads with validated transformations</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="muted" style="text-align:center">Resources: <code>duckdb://workspaces</code>, <code>duckdb://schemas/{workspace_id}</code>, <code>duckdb://system/resources</code>, <code>duckdb://guides/mosaic-spec</code>. Prompts: <code>data_quality_audit</code>, <code>sql_optimization</code>, <code>build_mosaic_dashboard</code>.</p>
+    <p class="muted" style="text-align:center">Resources: <code>duckdb://workspaces</code>, <code>duckdb://schemas/{workspace_id}</code>, <code>duckdb://system/resources</code>, <code>duckdb://guides/mosaic-spec</code>. Prompts: <code>data_quality_audit</code>, <code>sql_optimization</code>, <code>build_mosaic_dashboard</code>, <code>build_data_pipeline</code>.</p>
   </div>
 </section>
 

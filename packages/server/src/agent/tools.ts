@@ -20,6 +20,8 @@ import { withSpan } from '../observability/tracing.js';
 import { HttpError } from '../services/errors.js';
 import { liveEvents, summarizeArgs } from '../observability/events.js';
 import { describeSpec, parseSpecText } from '../services/mosaic-spec.js';
+import { SOURCE_CATALOG } from '../services/source-catalog.js';
+import type { SyncSource, SyncSchedule } from '../db/schema/sqlite.js';
 
 export type ToolResult = { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
 
@@ -443,7 +445,100 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`${dashboard_id ? 'Updated' : 'Created'} Mosaic dashboard **${dashboard.name}** (\`${dashboard.id}\`; ${report}). Open it at /#/dashboards/${dashboard.id}.${prepared.warnings.length ? `\n\nWarnings:\n${prepared.warnings.map((w) => `- ${w}`).join('\n')}` : ''}`)], structuredContent: { status: 'ok', dashboard_id: dashboard.id, workspace_id: ws, name: dashboard.name, url: `/#/dashboards/${dashboard.id}`, warnings: prepared.warnings } };
       },
     }),
+
+    // ---------------------------------------------------------------- data connections & syncs
+    define({
+      name: 'list_data_sources',
+      title: 'List data sources',
+      description: 'Every configured connection of the caller — object storage (S3/R2/GCS/Azure), lakehouse catalogs, databases (Postgres/MySQL/SQLite/DuckDB files, attached as alias.schema.table) and HTTP endpoints — with health, plus the syncs of a workspace and the catalog of source types DuckView supports.',
+      inputSchema: { workspace_id: z.string().optional().describe('List the syncs of this workspace too') },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const p = env.principal;
+        const [cloud, lakehouse, databases] = await Promise.all([env.ctx.cloud.list(p.userId), env.ctx.lakehouse.list(p.userId), env.ctx.databases.list(p.userId)]);
+        const ws = workspace_id ?? env.defaultWorkspaceId ?? null;
+        const syncs = ws ? await env.ctx.syncs.list(p, ws) : [];
+        const lines = [
+          ...cloud.map((c) => `- storage **${c.name}** (${c.provider}${c.bucket ? ` · ${c.bucket}` : ''}) — files as ${c.uri_scheme}://…`),
+          ...lakehouse.map((c) => `- lakehouse **${c.name}** (${c.provider}, alias \`${c.alias}\`, ${c.status}) — ${c.example_sql}`),
+          ...databases.map((c) => `- database **${c.name}** (${c.engine}, alias \`${c.alias}\`, ${c.status}${c.last_error ? `: ${c.last_error}` : ''}) — ${c.example_sql}`),
+        ];
+        const syncLines = syncs.map((s) => `- sync **${s.name}** (\`${s.id}\`) → ${s.target_schema}.${s.target_table} · ${s.schedule.kind === 'manual' ? 'manual' : s.schedule.kind === 'interval' ? `every ${s.schedule.minutes} min` : `cron ${s.schedule.expression}`} · ${s.enabled ? 'enabled' : 'paused'} · last ${s.last_run ? `${s.last_run.status}${s.last_run.rows != null ? ` (${s.last_run.rows} rows)` : ''}` : 'never'}`);
+        return {
+          content: [text(`**Connections** (${lines.length})\n${lines.join('\n') || '_(none — add one under Connections)_'}${ws ? `\n\n**Syncs in workspace ${ws}** (${syncs.length})\n${syncLines.join('\n') || '_(none)_'}` : ''}\n\nSource types available: ${SOURCE_CATALOG.filter((s) => s.status === 'available').map((s) => s.label).join(', ')}.`)],
+          structuredContent: { status: 'ok', cloud: cloud.map((c) => ({ id: c.id, name: c.name, provider: c.provider, bucket: c.bucket, uri_scheme: c.uri_scheme })), lakehouse: lakehouse.map((c) => ({ id: c.id, name: c.name, provider: c.provider, alias: c.alias, status: c.status })), databases: databases.map((c) => ({ id: c.id, name: c.name, engine: c.engine, alias: c.alias, status: c.status, last_error: c.last_error })), syncs: syncs.map((s) => ({ id: s.id, name: s.name, target: `${s.target_schema}.${s.target_table}`, source: s.source, schedule: s.schedule, mode: s.mode, enabled: s.enabled, has_transform: !!s.transform_sql, last_run: s.last_run, next_run_at: s.next_run_at })), catalog: SOURCE_CATALOG.map((s) => ({ id: s.id, family: s.family, label: s.label, status: s.status, capabilities: s.capabilities })) },
+        };
+      },
+    }),
+
+    define({
+      name: 'create_data_sync',
+      title: 'Create data sync',
+      description: 'Sets up a scheduled load of a source into a workspace table: source.kind "table" (a table of an attached database or lakehouse: schema + table + database_connection_id or catalog alias), "url" (CSV/JSON/Parquet/Excel over HTTPS, e.g. a Google Sheets CSV export) or "sql" (any read-only SELECT). Optional transform_sql is a SELECT over {{raw}} (the loaded rows) whose result becomes the target; it is validated against the source before saving. schedule: {kind:"manual"} | {kind:"interval", minutes} | {kind:"cron", expression, timezone?}. Pass run_now to load immediately.',
+      inputSchema: {
+        workspace_id: z.string().optional(),
+        name: z.string().min(1).max(160),
+        source: z.record(z.string(), z.unknown()).describe('{kind:"table", schema, table, database_connection_id?|catalog?} | {kind:"url", url, format?} | {kind:"sql", sql}'),
+        target_table: z.string().min(1).max(63),
+        target_schema: z.string().max(63).optional(),
+        mode: z.enum(['replace', 'append']).optional(),
+        transform_sql: z.string().max(50_000).optional(),
+        schedule: z.record(z.string(), z.unknown()).optional(),
+        run_now: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { workspace_id, name, source, target_table, target_schema, mode, transform_sql, schedule, run_now }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const src = source as unknown as SyncSource;
+        // Prove the source and the transformation before anything is saved: a LIMIT 0 pass binds every column.
+        const preview = await env.ctx.syncs.preview(env.principal, ws, src, transform_sql ?? null, 1);
+        const sync = await env.ctx.syncs.create(env.principal, ws, { name, source: src, target_table, target_schema, mode, transform_sql: transform_sql ?? null, schedule: (schedule as SyncSchedule | undefined) ?? { kind: 'manual' } });
+        const run = run_now ? await env.ctx.syncs.run(sync.id, 'agent', env.principal.userId) : null;
+        return {
+          content: [text(`Created sync **${sync.name}** (\`${sync.id}\`) → ${sync.target_schema}.${sync.target_table}, ${sync.schedule.kind === 'manual' ? 'run on demand' : sync.schedule.kind === 'interval' ? `every ${sync.schedule.minutes} min` : `cron ${sync.schedule.expression}`}. Columns: ${preview.columns.map((c) => `${c.name} ${c.type}`).join(', ')}.${run ? `\n\nFirst run: ${run.status}${run.rows != null ? ` · ${run.rows} rows` : ''}${run.error ? ` · ${run.error}` : ''} in ${run.duration_ms} ms.` : ''}`)],
+          structuredContent: { status: 'ok', sync_id: sync.id, workspace_id: ws, target: `${sync.target_schema}.${sync.target_table}`, columns: preview.columns, run: run ? { id: run.id, status: run.status, rows: run.rows, duration_ms: run.duration_ms, error: run.error } : null },
+          isError: run?.status === 'error',
+        };
+      },
+    }),
+
+    define({
+      name: 'update_data_sync',
+      title: 'Update data sync',
+      description: 'Changes a sync: the transformation (validated against the current source), the schedule, the mode, or pauses/resumes it. Use this to attach a transformation an agent has written — transform_sql is a SELECT over {{raw}}.',
+      inputSchema: {
+        sync_id: z.string(),
+        transform_sql: z.string().max(50_000).nullable().optional(),
+        schedule: z.record(z.string(), z.unknown()).optional(),
+        mode: z.enum(['replace', 'append']).optional(),
+        enabled: z.boolean().optional(),
+        name: z.string().max(160).optional(),
+        run_now: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { sync_id, transform_sql, schedule, mode, enabled, name, run_now }) {
+        const existing = await env.ctx.syncs.get(env.principal, sync_id, 'EDITOR');
+        if (transform_sql !== undefined && transform_sql) await env.ctx.syncs.preview(env.principal, existing.workspace_id, existing.source, transform_sql, 1);
+        const sync = await env.ctx.syncs.update(env.principal, sync_id, { transform_sql, schedule: schedule as SyncSchedule | undefined, mode, enabled, name });
+        const run = run_now ? await env.ctx.syncs.run(sync.id, 'agent', env.principal.userId) : null;
+        return { content: [text(`Updated sync **${sync.name}**${transform_sql !== undefined ? transform_sql ? ' with a transformation' : ' (transformation removed)' : ''}.${run ? ` Run: ${run.status}${run.rows != null ? ` · ${run.rows} rows` : ''}${run.error ? ` · ${run.error}` : ''}.` : ''}`)], structuredContent: { status: 'ok', sync_id: sync.id, enabled: sync.enabled, schedule: sync.schedule, has_transform: !!sync.transform_sql, run: run ? { id: run.id, status: run.status, rows: run.rows, error: run.error } : null }, isError: run?.status === 'error' };
+      },
+    }),
+
+    define({
+      name: 'run_data_sync',
+      title: 'Run data sync',
+      description: 'Runs a sync now and reports rows loaded, duration and any error; also returns the last runs.',
+      inputSchema: { sync_id: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { sync_id }) {
+        await env.ctx.syncs.get(env.principal, sync_id, 'EDITOR');
+        const run = await env.ctx.syncs.run(sync_id, 'agent', env.principal.userId);
+        const runs = await env.ctx.syncs.runs(env.principal, sync_id, 5);
+        return { content: [text(`Sync ${run.status}${run.rows != null ? ` · ${run.rows} rows` : ''} in ${run.duration_ms} ms${run.error ? `\n\nError: ${run.error}` : ''}`)], structuredContent: { status: run.status === 'ok' ? 'ok' : 'error', run: { id: run.id, status: run.status, rows: run.rows, duration_ms: run.duration_ms, error: run.error }, recent: runs.map((r) => ({ id: r.id, status: r.status, rows: r.rows, duration_ms: r.duration_ms, started_at: r.started_at, triggered_by: r.triggered_by })) }, isError: run.status !== 'ok' };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync'] as const;

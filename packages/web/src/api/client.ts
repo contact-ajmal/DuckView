@@ -437,3 +437,17 @@ export function sqlToTabs(text: string, fallbackName: string): { title: string; 
   if (current) out.push({ title: current.title, sql: current.lines.join('\n').trim() });
   return out.filter((t) => t.sql);
 }
+
+// ---- Connections page: source catalog, database connections, syncs
+export type SourceFamily = 'storage' | 'lakehouse' | 'database' | 'web' | 'warehouse' | 'saas';
+export interface SourceField { key: string; label: string; kind: 'text' | 'secret' | 'number' | 'url' | 'path' | 'boolean' | 'select'; required?: boolean; placeholder?: string; options?: string[]; hint?: string }
+export interface SourceType { id: string; family: SourceFamily; label: string; vendor: string; blurb: string; backend: { family: 'cloud'; provider: 'S3' | 'R2' | 'GCS' | 'AZURE' } | { family: 'lakehouse'; provider: LakehouseProvider } | { family: 'database'; engine: DatabaseEngine } | { family: 'http'; type: 'HTTP' } | { family: 'planned' }; auth: string; capabilities: { browse: boolean; attach: boolean; remote_sql: boolean; sync: boolean }; fields: SourceField[]; docs?: string; status: 'available' | 'planned'; example_sql?: string }
+export type DatabaseEngine = 'postgres' | 'mysql' | 'sqlite' | 'duckdb';
+export interface DatabaseConfig { host?: string; port?: number; database?: string; user?: string; ssl?: boolean; path?: string; read_only?: boolean }
+export interface DatabaseConnection { id: string; name: string; engine: DatabaseEngine; alias: string; config: DatabaseConfig; status: 'unknown' | 'ok' | 'error'; last_error: string | null; last_tested_at: string | null; has_password: boolean; example_sql: string; needs_external_access: boolean; created_at: string; updated_at: string }
+export interface DatabaseEntry { name: string; type: 'schema' | 'table' | 'view'; qualified?: string; rows?: number | null }
+export type SyncSource = { kind: 'sql'; sql: string } | { kind: 'table'; database_connection_id?: string | null; lakehouse_connection_id?: string | null; catalog?: string | null; schema: string; table: string } | { kind: 'url'; url: string; format: 'auto' | 'csv' | 'json' | 'parquet' | 'excel'; options?: Record<string, string | number | boolean>; connection_id?: string | null };
+export type SyncSchedule = { kind: 'manual' } | { kind: 'interval'; minutes: number } | { kind: 'cron'; expression: string; timezone?: string };
+export interface SyncLastRun { run_id: string; status: 'running' | 'ok' | 'error'; started_at: string; finished_at: string | null; rows: number | null; duration_ms: number | null; error: string | null }
+export interface DataSync { id: string; workspace_id: string; user_id: string; name: string; source: SyncSource; target_schema: string; target_table: string; mode: 'replace' | 'append'; transform_sql: string | null; schedule: SyncSchedule; enabled: boolean; last_run: SyncLastRun | null; next_run_at: string | null; created_by: string | null; created_at: string; updated_at: string }
+export interface DataSyncRun { id: string; sync_id: string; workspace_id: string; status: 'running' | 'ok' | 'error'; triggered_by: string; actor_id: string | null; rows: number | null; duration_ms: number | null; error: string | null; started_at: string; finished_at: string | null }

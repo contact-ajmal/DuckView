@@ -391,12 +391,12 @@ describe('MCP: browse_storage, inspect_schema, list_dashboards, create_dashboard
     const res = await client.readResource({ uri: 'duckdb://guides/mosaic-spec' });
     expect((res.contents[0] as { text: string }).text).toContain('create_mosaic_dashboard');
     const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
-    expect(prompts).toEqual(['build_mosaic_dashboard', 'data_quality_audit', 'sql_optimization']);
+    expect(prompts).toEqual(['build_data_pipeline', 'build_mosaic_dashboard', 'data_quality_audit', 'sql_optimization']);
     const prompt = await client.getPrompt({ name: 'build_mosaic_dashboard', arguments: { table_or_path: 'orders.parquet', goal: 'revenue by customer' } });
     expect((prompt.messages[0]!.content as { text: string }).text).toContain('validate_only');
   });
-  it('exposes eleven tools', async () => {
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_storage', 'create_dashboard_widget', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'profile_dataset', 'save_dataset']);
+  it('exposes fifteen tools', async () => {
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_storage', 'create_dashboard_widget', 'create_data_sync', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'list_data_sources', 'profile_dataset', 'run_data_sync', 'save_dataset', 'update_data_sync']);
   });
   it('browse_storage local + cloud connection listing', async () => {
     const local = await client.callTool({ name: 'browse_storage', arguments: {} });

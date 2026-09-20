@@ -52,7 +52,7 @@ export interface SecretSpec {
 export interface AttachSpec {
   alias: string;
   target: string;
-  /** ATTACH options; booleans render bare, strings are quoted. TYPE is always ICEBERG for now. */
+  /** ATTACH options; booleans render bare, strings are quoted. `type` selects the catalog type (default ICEBERG). */
   options: Record<string, string | boolean>;
   /** Extensions that must be loaded before attaching (iceberg, httpfs, aws…). */
   extensions: string[];
@@ -213,10 +213,12 @@ export function attachmentsFingerprint(attachments: AttachSpec[] | undefined): s
 /** Renders ATTACH for a lakehouse catalog. Exported for tests. */
 export function attachToSql(a: AttachSpec, ifNotExists = true): string {
   const alias = a.alias.replace(/[^A-Za-z0-9_]/g, '_');
+  // TYPE defaults to ICEBERG (lakehouse catalogs); database sources pass their own (postgres, mysql, sqlite, duckdb).
+  const type = String(a.options.type ?? a.options.TYPE ?? 'ICEBERG').replace(/[^A-Za-z0-9_]/g, '').toUpperCase();
   const opts = Object.entries(a.options)
-    .filter(([, v]) => v !== undefined && v !== '' && v !== false)
+    .filter(([k, v]) => k.toLowerCase() !== 'type' && v !== undefined && v !== '' && v !== false)
     .map(([k, v]) => (v === true ? `${k.toUpperCase()} true` : k.toUpperCase() === 'SECRET' ? `SECRET ${String(v).replace(/[^A-Za-z0-9_]/g, '_')}` : `${k.toUpperCase()} ${sqlString(String(v))}`));
-  return `ATTACH${ifNotExists ? ' IF NOT EXISTS' : ''} ${sqlString(a.target)} AS ${alias} (TYPE ICEBERG${opts.length ? ', ' + opts.join(', ') : ''})`;
+  return `ATTACH${ifNotExists ? ' IF NOT EXISTS' : ''} ${sqlString(a.target)} AS ${alias} (TYPE ${type}${opts.length ? ', ' + opts.join(', ') : ''})`;
 }
 
 export class WorkspaceEngine {
@@ -384,9 +386,13 @@ export class WorkspaceEngine {
 
   private async attachOne(conn: DuckDBConnection, a: AttachSpec): Promise<void> {
     if (!this.externalAccess) {
-      this.attachErrors.set(a.alias, 'security.enable_external_access is false: lakehouse catalogs cannot be attached in sandboxed mode');
-      logger().warn({ alias: a.alias, workspace: this.spec.workspaceId }, 'Lakehouse attachment skipped: external access disabled');
-      return;
+      // File databases (duckdb/sqlite) inside the jail need no network; everything else does.
+      const t = String(a.options.type ?? 'ICEBERG').toUpperCase();
+      if (t !== 'DUCKDB' && t !== 'SQLITE') {
+        this.attachErrors.set(a.alias, 'security.enable_external_access is false: remote catalogs and databases cannot be attached in sandboxed mode');
+        logger().warn({ alias: a.alias, workspace: this.spec.workspaceId }, 'Attachment skipped: external access disabled');
+        return;
+      }
     }
     try {
       for (const ext of a.extensions) {

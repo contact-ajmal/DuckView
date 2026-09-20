@@ -137,7 +137,7 @@ describe('registered agents', () => {
     const list = await api('GET', '/api/agent/v1/tools', undefined, agentToken);
     expect(list.status).toBe(200);
     const tools = list.json.tools as { name: string; input_schema: { properties: Record<string, unknown>; required?: string[] } }[];
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(15);
     const exec = tools.find((t) => t.name === 'execute_query')!;
     expect(exec.input_schema.required).toEqual(['sql']);
     expect(Object.keys(exec.input_schema.properties)).toContain('dry_run');
@@ -212,7 +212,7 @@ describe('registered agents', () => {
     expect(r.json.openapi).toBe('3.0.3');
     const paths = r.json.paths as Record<string, { post?: { operationId: string; description: string; requestBody: { content: { 'application/json': { schema: { properties: Record<string, unknown>; required?: string[] } } } } } }>;
     const names = Object.keys(paths).filter((p) => p !== '/api/agent/v1/tools').map((p) => p.split('/').pop());
-    expect(names.sort()).toEqual(['browse_storage', 'create_dashboard_widget', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'profile_dataset', 'save_dataset']);
+    expect(names.sort()).toEqual(['browse_storage', 'create_dashboard_widget', 'create_data_sync', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_dashboards', 'list_data_sources', 'profile_dataset', 'run_data_sync', 'save_dataset', 'update_data_sync']);
     const exec = paths['/api/agent/v1/tools/execute_query']!.post!;
     expect(exec.operationId).toBe('execute_query');
     expect(exec.description.length).toBeGreaterThan(20);

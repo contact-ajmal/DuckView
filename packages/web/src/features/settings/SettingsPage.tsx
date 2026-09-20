@@ -259,6 +259,7 @@ export function SettingsPage() {
 
           {cat === 'storage' && (
             <div className="space-y-5">
+              <p className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-2.5 text-xs text-zinc-400">Every source — object storage, lakehouse catalogs, databases, web endpoints — plus scheduled syncs now lives on the <a href="#/connections" className="text-accent-300 hover:underline">Connections page</a>. The lists below stay for credentials that engines apply at start.</p>
               <Card
                 title="Lakehouse connections"
                 actions={<Button size="sm" onClick={() => setLakeWizard({ open: true, edit: null })}><Layers className="h-3.5 w-3.5" /> Connect</Button>}

@@ -57,6 +57,7 @@ duckdb:
   export_max_rows: 50000000
   default_database: "${DUCKVIEW_DEFAULT_DATABASE:-file}"   # file: new workspaces get a <name>.duckdb in the data directory · memory: scratch
   cloud_sync_delay_seconds: 60    # cloud-backed workspaces (s3:// gs:// r2:// az:// databases) are pushed this long after the last change
+  sync_scheduler_enabled: true    # run scheduled data syncs from this process (false on replicas)
 
 cache:                                   # server-side result cache (profiles, schema, plans, widgets, read-only SQL)
   enabled: ${DUCKVIEW_CACHE_ENABLED:-true}

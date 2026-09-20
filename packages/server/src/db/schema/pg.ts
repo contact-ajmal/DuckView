@@ -155,7 +155,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -322,4 +322,66 @@ export const copilotUsage = pgTable(
     created_at: ts('created_at').notNull(),
   },
   (t) => [index('copilot_usage_user_idx').on(t.user_id), index('copilot_usage_created_idx').on(t.created_at), index('copilot_usage_conversation_idx').on(t.conversation_id)],
+);
+
+export const databaseConnections = pgTable(
+  'database_connections',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    engine: text('engine', { enum: DATABASE_ENGINES }).notNull(),
+    alias: text('alias').notNull(),
+    config: jsonb('config').$type<DatabaseConfig>().notNull().default({}),
+    encrypted_credentials: text('encrypted_credentials').notNull(),
+    iv: text('iv').notNull(),
+    tag: text('tag').notNull(),
+    status: text('status', { enum: LAKEHOUSE_STATUSES }).notNull().default('unknown'),
+    last_error: text('last_error'),
+    last_tested_at: ts('last_tested_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('database_connections_user_idx').on(t.user_id), uniqueIndex('database_connections_alias_idx').on(t.user_id, t.alias)],
+);
+
+export const dataSyncs = pgTable(
+  'data_syncs',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    source: jsonb('source').$type<SyncSource>().notNull(),
+    target_schema: text('target_schema').notNull().default('main'),
+    target_table: text('target_table').notNull(),
+    mode: text('mode', { enum: SYNC_MODES }).notNull().default('replace'),
+    transform_sql: text('transform_sql'),
+    schedule: jsonb('schedule').$type<SyncSchedule>().notNull().default({ kind: 'manual' }),
+    enabled: boolean('enabled').notNull().default(true),
+    last_run: jsonb('last_run').$type<SyncLastRun | null>(),
+    next_run_at: ts('next_run_at'),
+    created_by: text('created_by'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('data_syncs_workspace_idx').on(t.workspace_id), index('data_syncs_next_run_idx').on(t.next_run_at)],
+);
+
+export const dataSyncRuns = pgTable(
+  'data_sync_runs',
+  {
+    id: text('id').primaryKey(),
+    sync_id: text('sync_id').notNull().references(() => dataSyncs.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    status: text('status', { enum: SYNC_RUN_STATUSES }).notNull(),
+    triggered_by: text('triggered_by').notNull(),
+    actor_id: text('actor_id'),
+    rows: integer('rows'),
+    duration_ms: integer('duration_ms'),
+    error: text('error'),
+    started_at: ts('started_at').notNull(),
+    finished_at: ts('finished_at'),
+  },
+  (t) => [index('data_sync_runs_sync_idx').on(t.sync_id, t.started_at)],
 );
