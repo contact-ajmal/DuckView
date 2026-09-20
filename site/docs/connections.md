@@ -5,7 +5,7 @@ group: Guide
 description: One page for every data source — object storage, lakehouse catalogs, PostgreSQL / MySQL / SQLite / DuckDB files, Snowflake / BigQuery / Redshift / ClickHouse / Fabric, Salesforce / HubSpot / Stripe / GA4 / Airtable / Notion, HTTP endpoints and Google Drive / Sheets with your Google account — with health checks, scheduled syncs into a workspace, transformations drafted by Copilot or set by agents, and a run history.
 ---
 
-**Connections** is where an analyst plugs a source in once and the whole team — and every agent — uses it: *Configured* lists everything with its health and last test, *Add a source* is the catalog, *Syncs* are the scheduled loads into the active workspace.
+**Connections** is where an analyst plugs a source in once and the whole team — and every agent — uses it: *Configured* lists everything with its health and last test (click a connection to open its settings), *Add a source* is the catalog (each card opens the form for that source), *Syncs* are the scheduled loads into the active workspace.
 
 ## The catalog
 
@@ -30,7 +30,7 @@ Snowflake, BigQuery, Redshift, ClickHouse and Fabric, the SaaS applications, and
 
 Rows are pulled through the vendor's API by the server (paging, throttling and retries handled), staged to a temporary file and loaded into the target table; a Fabric Delta table is read straight from OneLake. Credentials are encrypted at rest, reported only by name, never logged and never handed to the workspace engine.
 
-**Google account sign-in.** An administrator registers a Google OAuth client once under *Settings → Integrations* (client id + secret, the secret is write-only; the redirect URI is shown on the page). From then on *Connect with Google* in the Drive, Sheets, BigQuery and Analytics wizards opens Google's consent screen with read-only scopes and brings you back with the account connected; refresh tokens are stored encrypted per connection and renewed automatically. Prefer server-to-server? Paste a service-account key in the wizard instead.
+**Google account sign-in.** *Sign in with Google* in the Drive, Sheets, BigQuery and Analytics wizards opens Google's own sign-in page — you enter your Google e-mail and password there (2-step verification included), Google hands DuckView a read-only token, and you come back with the account connected. Google requires the app to be registered once: an administrator pastes an OAuth client id and secret (two minutes in Google Cloud; the exact redirect URI is shown) either inline in the first Google wizard or under *Settings → Integrations*. The secret is write-only; refresh tokens are stored encrypted per connection and renewed automatically. Prefer server-to-server? Paste a service-account key in the wizard instead.
 
 ## Syncs
 

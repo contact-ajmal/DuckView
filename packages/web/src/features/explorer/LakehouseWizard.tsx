@@ -11,7 +11,7 @@ const aliasOf = (name: string) => {
   return /^[a-z_]/.test(a) ? a : a ? `lh_${a}` : '';
 };
 
-export function LakehouseWizard({ open, onClose, onCreated, initial }: { open: boolean; onClose: () => void; onCreated: (c: LakehouseConnection) => void; initial?: LakehouseConnection | null }) {
+export function LakehouseWizard({ open, onClose, onCreated, initial, initialProvider }: { open: boolean; onClose: () => void; onCreated: (c: LakehouseConnection) => void; initial?: LakehouseConnection | null; initialProvider?: LakehouseProvider | null }) {
   const [meta, setMeta] = useState<Record<LakehouseProvider, LakehouseProviderMeta> | null>(null);
   const [externalAccess, setExternalAccess] = useState(true);
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -47,14 +47,14 @@ export function LakehouseWizard({ open, onClose, onCreated, initial }: { open: b
 
   useEffect(() => {
     if (!open) return;
-    setStep(initial ? 2 : 1);
+    setStep(initial || initialProvider ? 2 : 1);
     setError(null);
     setCreated(null);
     setTest(null);
     setCreds({});
     setWarehouses(null);
     setWhError(null);
-    setProvider(initial?.provider ?? 'AWS_GLUE');
+    setProvider(initial?.provider ?? initialProvider ?? 'AWS_GLUE');
     setName(initial?.name ?? '');
     setAlias(initial?.alias ?? '');
     setAliasTouched(!!initial);
@@ -63,7 +63,7 @@ export function LakehouseWizard({ open, onClose, onCreated, initial }: { open: b
       setMeta(r.providers);
       setExternalAccess(r.external_access_enabled);
     });
-  }, [open, initial]);
+  }, [open, initial, initialProvider]);
 
   useEffect(() => {
     if (!aliasTouched) setAlias(aliasOf(name));
@@ -117,9 +117,9 @@ export function LakehouseWizard({ open, onClose, onCreated, initial }: { open: b
   );
 
   return (
-    <Modal open={open} onClose={onClose} title={initial ? `Edit ${initial.name}` : 'Connect a lakehouse'} width="max-w-2xl">
+    <Modal open={open} onClose={onClose} title={initial ? `Edit ${initial.name}` : initialProvider ? `Connect ${meta?.[initialProvider]?.title ?? initialProvider}` : 'Connect a lakehouse'} width="max-w-2xl">
       <div className="mb-4 flex items-center gap-2 text-[11px] text-zinc-500">
-        {[1, 2, 3].map((s) => (
+        {(initial || initialProvider ? [2, 3] : [1, 2, 3]).map((s) => (
           <span key={s} className={cn('flex items-center gap-1', step === s && 'text-accent-300')}>
             <span className={cn('flex h-4 w-4 items-center justify-center rounded-full border text-[9px]', step >= s ? 'border-accent-500 bg-accent-600/30 text-accent-100' : 'border-zinc-700')}>{s}</span>
             {s === 1 ? 'Platform' : s === 2 ? 'Connection' : 'Verify'}
@@ -293,8 +293,8 @@ export function LakehouseWizard({ open, onClose, onCreated, initial }: { open: b
           </p>
           {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-200">{error}</div>}
           <div className="flex justify-between">
-            <Button variant="ghost" onClick={() => (initial ? onClose() : setStep(1))}>
-              {initial ? 'Cancel' : 'Back'}
+            <Button variant="ghost" onClick={() => (initial || initialProvider ? onClose() : setStep(1))}>
+              {initial || initialProvider ? 'Cancel' : 'Back'}
             </Button>
             <Button variant="primary" onClick={save} loading={busy}>
               Save & test

@@ -14,7 +14,12 @@ const PROVIDER_META: Record<Provider, { title: string; blurb: string }> = {
   AZURE: { title: 'Azure Blob Storage', blurb: 'Connection string with account key or SAS.' },
 };
 
-export function CloudWizard({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (c: CloudConnection) => void }) {
+/**
+ * Create (or edit) a cloud storage connection. With `initialProvider` the provider is fixed and the wizard opens on
+ * the credentials step (the Connections catalog opens one form per source); with `initial` it edits that connection
+ * (credentials left empty are kept).
+ */
+export function CloudWizard({ open, onClose, onCreated, initialProvider, initial }: { open: boolean; onClose: () => void; onCreated: (c: CloudConnection) => void; initialProvider?: Provider | null; initial?: CloudConnection | null }) {
   const [specs, setSpecs] = useState<Record<Provider, ProviderSpec> | null>(null);
   const [externalAccess, setExternalAccess] = useState(true);
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -29,29 +34,33 @@ export function CloudWizard({ open, onClose, onCreated }: { open: boolean; onClo
   const [created, setCreated] = useState<CloudConnection | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string; uri_example?: string } | null>(null);
 
+  const fixed = !!(initial || initialProvider);
   useEffect(() => {
     if (!open) return;
-    setStep(1);
+    setStep(fixed ? 2 : 1);
+    setProvider(initial?.provider ?? initialProvider ?? 'S3');
     setError(null);
     setCreated(null);
     setTestResult(null);
     setCreds({});
-    setName('');
-    setEndpoint('');
-    setRegion('');
-    setBucket('');
+    setName(initial?.name ?? '');
+    setEndpoint(initial?.endpoint_url ?? '');
+    setRegion(initial?.region ?? '');
+    setBucket(initial?.bucket ?? '');
     api.get<{ providers: Record<Provider, ProviderSpec>; external_access_enabled: boolean }>('/api/cloud-connections/providers').then((r) => {
       setSpecs(r.providers);
       setExternalAccess(r.external_access_enabled);
     });
-  }, [open]);
+  }, [open, initial, initialProvider]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const spec = specs?.[provider];
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.post<{ connection: CloudConnection }>('/api/cloud-connections', { name: name || `${provider} storage`, provider, endpoint_url: endpoint || null, region: region || null, bucket: bucket || null, credentials: creds });
+      const filled = Object.fromEntries(Object.entries(creds).filter(([, v]) => v.trim() !== ''));
+      const body = { name: name || `${provider} storage`, endpoint_url: endpoint || null, region: region || null, bucket: bucket || null, credentials: filled };
+      const r = initial ? await api.patch<{ connection: CloudConnection }>(`/api/cloud-connections/${initial.id}`, body) : await api.post<{ connection: CloudConnection }>('/api/cloud-connections', { ...body, provider });
       setCreated(r.connection);
       setStep(3);
       try {
@@ -68,9 +77,9 @@ export function CloudWizard({ open, onClose, onCreated }: { open: boolean; onClo
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Connect cloud storage" width="max-w-xl">
+    <Modal open={open} onClose={onClose} title={initial ? `Edit ${initial.name}` : fixed ? `Connect ${PROVIDER_META[provider].title}` : 'Connect cloud storage'} width="max-w-xl">
       <div className="mb-4 flex items-center gap-2 text-[11px] text-zinc-500">
-        {[1, 2, 3].map((s) => (
+        {(fixed ? [2, 3] : [1, 2, 3]).map((s) => (
           <span key={s} className={cn('flex items-center gap-1', step === s && 'text-accent-300')}>
             <span className={cn('flex h-4 w-4 items-center justify-center rounded-full border text-[9px]', step >= s ? 'border-accent-500 bg-accent-600/30 text-accent-100' : 'border-zinc-700')}>{s}</span>
             {s === 1 ? 'Provider' : s === 2 ? 'Credentials' : 'Verify'}
@@ -133,14 +142,14 @@ export function CloudWizard({ open, onClose, onCreated }: { open: boolean; onClo
               <Label>
                 {LABELS[f] ?? f} {spec.optional.includes(f) && <span className="normal-case text-zinc-600">(optional)</span>}
               </Label>
-              <Input type={/secret|token|connection_string/.test(f) ? 'password' : 'text'} value={creds[f] ?? ''} onChange={(e) => setCreds({ ...creds, [f]: e.target.value })} className="font-mono" autoComplete="off" />
+              <Input type={/secret|token|connection_string/.test(f) ? 'password' : 'text'} value={creds[f] ?? ''} onChange={(e) => setCreds({ ...creds, [f]: e.target.value })} className="font-mono" autoComplete="off" placeholder={initial?.fields.includes(f) ? 'unchanged' : undefined} />
             </div>
           ))}
           <p className="text-[11px] text-zinc-500">{spec.hint} Credentials are encrypted with AES-256-GCM and applied to DuckDB as a scoped <code className="font-mono">CREATE SECRET</code>; the API never returns them.</p>
           {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-200">{error}</div>}
           <div className="flex justify-between">
-            <Button variant="ghost" onClick={() => setStep(1)}>
-              Back
+            <Button variant="ghost" onClick={() => (fixed ? onClose() : setStep(1))}>
+              {fixed ? 'Cancel' : 'Back'}
             </Button>
             <Button variant="primary" onClick={save} loading={busy}>
               Save & test
