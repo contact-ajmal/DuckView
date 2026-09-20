@@ -25,7 +25,7 @@ Open **http://localhost:4200** and sign in with the admin credentials you passed
 
 ## First workspace
 
-Every user gets a **Scratchpad** workspace (an in-memory DuckDB database) on first sign-in. Create more from the workspace switcher in the top bar — choose `:memory:`, a persistent `warehouse.duckdb` file inside the data directory, or a MotherDuck `md:` database.
+Every user gets **My workspace** on first sign-in — a persistent DuckDB file (`<you>.duckdb` in the data directory), so tables, views and macros survive restarts. Create more from the workspace switcher in the top bar and pick the storage: **Persistent** (a `.duckdb` file, the default), **In-memory scratch** (fastest, cleared when the engine restarts — an amber *memory* badge in the header reminds you), or **MotherDuck** (`md:` database). An in-memory workspace can be made persistent later without losing anything: Settings → Engine → *Make persistent* copies every table, view and macro into a file while the engine is running.
 
 Each workspace is one native DuckDB engine with its own memory, thread and timeout settings (Settings → Engine).
 

@@ -148,7 +148,7 @@ export class DataJail {
    * Recursively lists data files under an added workspace folder. Paths are absolute (the folder is outside the
    * data directory). Bounded so that mounting a large folder stays cheap.
    */
-  listFilesIn(folder: string, opts: { maxEntries?: number; maxDepth?: number } = {}): JailEntry[] {
+  listFilesIn(folder: string, opts: { maxEntries?: number; maxDepth?: number; exclude?: Set<string> } = {}): JailEntry[] {
     const start = this.resolve(folder).absolute;
     const maxEntries = opts.maxEntries ?? 500;
     const maxDepth = opts.maxDepth ?? 4;
@@ -163,8 +163,9 @@ export class DataJail {
       }
       for (const e of entries) {
         if (out.length >= maxEntries) return;
-        if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+        if (e.name.startsWith('.') || e.name === 'node_modules' || isInternalFile(e.name)) continue;
         const full = path.join(dir, e.name);
+        if (opts.exclude?.has(full)) continue;
         let stat: fs.Stats;
         try {
           stat = fs.statSync(full);
@@ -217,7 +218,7 @@ export class DataJail {
   }
 
   /** Recursively list data files (and directories that look like Delta/Iceberg tables) inside the jail. */
-  listFiles(subdir = '', maxEntries = 2000): JailEntry[] {
+  listFiles(subdir = '', maxEntries = 2000, exclude?: Set<string>): JailEntry[] {
     const start = this.resolve(subdir || '.').absolute;
     const base = this.baseDir;
     const out: JailEntry[] = [];
@@ -231,8 +232,9 @@ export class DataJail {
       }
       for (const e of entries) {
         if (out.length >= maxEntries) return;
-        if (e.name.startsWith('.')) continue;
+        if (e.name.startsWith('.') || isInternalFile(e.name)) continue;
         const full = path.join(dir, e.name);
+        if (exclude?.has(full)) continue;
         let stat: fs.Stats;
         try {
           stat = fs.statSync(full);
@@ -258,7 +260,7 @@ export class DataJail {
   }
 
   /** One directory level for the explorer tree: folders first, then files (all files, with data kinds flagged). */
-  listDir(dirPath = '.', opts: { showHidden?: boolean } = {}): { path: string; absolute: string; entries: TreeEntry[] } {
+  listDir(dirPath = '.', opts: { showHidden?: boolean; exclude?: Set<string> } = {}): { path: string; absolute: string; entries: TreeEntry[] } {
     const target = this.resolve(dirPath || '.');
     let dirents: fs.Dirent[];
     try {
@@ -268,8 +270,9 @@ export class DataJail {
     }
     const entries: TreeEntry[] = [];
     for (const d of dirents) {
-      if (!opts.showHidden && d.name.startsWith('.')) continue;
+      if ((!opts.showHidden && d.name.startsWith('.')) || isInternalFile(d.name)) continue;
       const full = path.join(target.absolute, d.name);
+      if (opts.exclude?.has(full)) continue;
       let stat: fs.Stats;
       try {
         stat = fs.statSync(full);
@@ -313,6 +316,11 @@ export interface TreeEntry {
   size_bytes: number | null;
   modified_at: string;
   queryable: boolean;
+}
+
+/** DuckDB's own bookkeeping next to a database file (write-ahead log, temp files) — never something to open. */
+export function isInternalFile(name: string): boolean {
+  return /\.(wal|tmp)$/i.test(name) || /\.duckdb\.tmp\//.test(name);
 }
 
 function fileKind(name: string): JailEntry['kind'] | null {

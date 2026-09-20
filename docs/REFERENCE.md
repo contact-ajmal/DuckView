@@ -136,6 +136,7 @@ Key settings:
 | `mcp` | `default_page_size` / `max_page_size` | 50 / 200 rows per tool call; `max_cell_chars` truncates long strings. |
 | | `require_confirmation_for_mutations` | HITL gate for agents. |
 | `cache` | `enabled`, `max_bytes`, `max_entry_bytes` | Server-side result cache (default on, 256 MB LRU, entries ≤ 16 MB). See [Result cache](#result-cache). |
+| `duckdb.default_database` | `file` (default) or `memory` | Storage of a workspace created without an explicit database: a `<name>.duckdb` file in the data directory (tables, views and macros survive restarts) or an in-memory scratch database. See [Persistent workspaces](#persistent-workspaces). |
 | `mosaic` | `enabled`, `schema`, `max_rows`, `materialize_max_rows`, `rate_limit_per_minute` | Interactive visualization (uwdata/mosaic) endpoint; the schema (default `duckview_mosaic`) holds pre-aggregated views, source views are `<schema>_src_<hash>` in the main schema, dashboard datasets up to `materialize_max_rows` (20 M; `0` = never) are materialised in an attached in-memory database `<schema>_mem` — all dropped whenever the data epoch moves; `max_rows` (1 000 000) caps chart queries independently of the grid; the connector has its own budget of `rate_limit_per_minute` (6 000) requests **per session** — one brush over 25 charts is 25–75 requests — so `server.rate_limit_per_minute` (per IP) never throttles dashboards; the browser retries a `429` after `Retry-After`. See [Interactive exploration (Mosaic)](#interactive-exploration-mosaic) and [Mosaic dashboards](#mosaic-dashboards). |
 | | `ttl_seconds`, `remote_ttl_seconds` | Lifetime of versioned entries (6 h) and of entries touching remote / lakehouse / MotherDuck sources (60 s; `0` never caches them). |
 | `observability` | `metrics_enabled`, `otel.*` | Prometheus at `/metrics`; OTLP/HTTP trace export when `otel.enabled`. |
@@ -222,6 +223,14 @@ A chart whose query fails after rendering (Mosaic keeps the rest of the view ali
 `examples/mosaic/nyc-yellow-taxi.yaml` is a complete dashboard over 3.7M TLC trips — menus and sliders, headline numbers, an hourly timeline, hour × weekday heatmap, brushable histograms, a distance/fare density raster, fare-by-payment lines, top zones and the filtered rows — all on one crossfilter selection.
 
 API: `POST /api/workspaces/:id/dashboards {name, description?, kind?: grid|mosaic, spec?}` · `PATCH /api/dashboards/:id {spec}` (editor) · `POST /api/workspaces/:id/mosaic/prepare`. The MCP `list_dashboards` tool reports `kind` and `spec`.
+
+## Persistent workspaces
+
+A workspace's database is either a **file** — `<name>.duckdb` inside the data directory (`active_db_path`), where every table, view, sequence and macro survives engine restarts, idle eviction and server restarts — an **in-memory** scratch database (`:memory:`, cleared whenever the engine restarts; the data epoch moves on every start so caches never serve stale results), or a **MotherDuck** database (`md:name`). New workspaces are files by default (`duckdb.default_database`); the file name is the slugified workspace name, unique among files and other workspaces (`sales.duckdb`, `sales-2.duckdb`), and a person's first workspace ("My workspace") is `<email local part>.duckdb`. The New-workspace dialog offers the three storages; `GET /api/workspaces/suggest-db-path?name=` returns the name the server would pick.
+
+**Make persistent.** An in-memory workspace becomes a file without losing anything: Settings → Engine → *Storage* → **Make persistent** (owners only; the header shows an amber *memory* badge on such workspaces). `POST /api/workspaces/:id/persist {path?}` drops Mosaic's derived objects, `ATTACH`es the new file and runs DuckDB's `COPY FROM DATABASE memory TO …` while the engine is still up — every schema, table, view, sequence and macro is copied — then points the workspace at the file, restarts the engine on it and moves the data epoch. The response says how many tables and views were carried over (`copied: false` when no engine was running, i.e. there was nothing to copy). Refused when the workspace is already persistent or the file exists; audited as `workspace.persist`.
+
+Database files are engine-owned: the file of any workspace, and DuckDB's `.wal` / `.tmp` bookkeeping, never appear in the explorer, the catalog's file list or the Copilot context (opening them from another engine would mean lock conflicts). Back up the data directory to back up every workspace.
 
 ## Sharing & teams
 
@@ -332,7 +341,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/auth/login` · `POST /api/auth/register` · `GET /api/auth/me` · `POST /api/auth/password` · `GET /api/auth/oidc/login` · `GET /api/auth/oidc/callback` |
-| Workspaces | `GET/POST /api/workspaces` · `GET/PATCH/DELETE /api/workspaces/:id` · `POST /api/workspaces/:id/restart` · `…/tabs` CRUD (per user; `sql_content`, `chart_config`, `cursor_position`, `order_index`) |
+| Workspaces | `GET/POST /api/workspaces` · `GET/PATCH/DELETE /api/workspaces/:id` · `POST /api/workspaces/:id/restart` · `POST /api/workspaces/:id/persist` · `GET /api/workspaces/suggest-db-path` · `…/tabs` CRUD (per user; `sql_content`, `chart_config`, `cursor_position`, `order_index`) |
 | Sharing | `GET/PUT /api/workspaces/:id/members` · `DELETE …/members/:memberId` · `POST …/leave` · `POST …/transfer` · `GET /api/users/directory` · `GET/POST /api/groups` · `PATCH/DELETE /api/groups/:id` · `GET/PUT /api/groups/:id/members` · `DELETE …/members/:userId` |
 | Storage explorer | `GET/POST/DELETE /api/workspaces/:id/folders` (workspace folders) · `GET /api/storage/browse?workspace_id&path` (folder picker) · `GET /api/storage/local?workspace_id&path` (tree, one level) · `GET /api/storage/cloud?connection_id[&bucket&prefix]` (buckets / objects with folders via S3 `ListObjectsV2` delimiter or Azure hierarchy) · `POST /api/storage/inspect {workspace_id,target}` (`DESCRIBE … LIMIT 0` for files, `s3://`/`r2://`/`gs://`/`az://` objects, tables, `.duckdb` files, subqueries; Parquet row counts from the footer) |
 | Cloud connections | `GET /api/cloud-connections/providers` · `GET/POST/PATCH/DELETE /api/cloud-connections` (S3 · R2 · GCS · Azure, AES-256-GCM at rest, applied as DuckDB `CREATE SECRET` to every engine of the owner) · `POST /api/cloud-connections/:id/test` |
@@ -401,7 +410,7 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 197 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
+pnpm test        # 199 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +

@@ -110,7 +110,7 @@ describe('result cache — keys and hits', () => {
   });
 
   it('a :memory: workspace moves its epoch when the engine (re)starts, a persistent one does not', async () => {
-    const mem = await ctx.workspaces.create(admin, { name: 'mem' });
+    const mem = await ctx.workspaces.create(admin, { name: 'mem', active_db_path: ':memory:' });
     await ctx.queries.run(admin, mem.id, 'CREATE TABLE m AS SELECT 1 AS a');
     const before = await ctx.workspaces.versionOf(mem.id);
     ctx.engines.evict(mem.id);

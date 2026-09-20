@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { HardDrive, Zap, CheckCircle2 } from 'lucide-react';
 import { api, formatBytes, type LiveStats, type SystemInfo, type PublicConnection, type Workspace, type EngineSettings } from '../../api/client';
 import { Panel, Tag } from '../../components/layout';
 import { Button, Input, Label, Select } from '../../components/ui';
@@ -19,6 +20,29 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
   const [connectionIds, setConnectionIds] = useState<string[]>(s.connection_ids ?? []);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [persistPath, setPersistPath] = useState('');
+  const [persisting, setPersisting] = useState(false);
+  const [persisted, setPersisted] = useState<{ path: string; tables: number; views: number; copied: boolean } | null>(null);
+  const inMemory = workspace.active_db_path === ':memory:';
+  useEffect(() => {
+    if (!inMemory) return;
+    api.get<{ path: string }>(`/api/workspaces/suggest-db-path?name=${encodeURIComponent(workspace.name)}`).then((r) => setPersistPath(r.path)).catch(() => undefined);
+  }, [workspace.id, workspace.name, inMemory]);
+  const makePersistent = async () => {
+    if (!confirm(`Store this workspace in ${persistPath || 'a .duckdb file'}? Every table, view and macro is copied into the file, then the engine restarts on it. Members keep working; open queries finish first.`)) return;
+    setPersisting(true);
+    setMsg(null);
+    try {
+      const r = await api.post<{ path: string; tables: number; views: number; copied: boolean }>(`/api/workspaces/${workspace.id}/persist`, { path: persistPath || undefined });
+      setPersisted(r);
+      await ws.loadWorkspaces();
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setPersisting(false);
+    }
+  };
   const cpus = sys?.host.cpus ?? 8;
   const total = sys?.host.total_memory_bytes ?? 0;
 
@@ -135,6 +159,35 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
         </div>
       </Panel>
 
+      <Panel title="Storage" meta={inMemory ? 'in-memory scratch' : workspace.active_db_path}>
+        {persisted ? (
+          <div className="flex items-start gap-2 rounded-lg border border-emerald-900/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Now stored in <code className="font-mono">{persisted.path}</code>{persisted.copied ? ` — ${persisted.tables} table${persisted.tables === 1 ? '' : 's'} and ${persisted.views} view${persisted.views === 1 ? '' : 's'} carried over.` : '.'} Tables, views and macros survive restarts from here on.</span>
+          </div>
+        ) : inMemory ? (
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 text-sm text-zinc-200">
+              <Zap className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+              <span>This workspace is an <b>in-memory scratch database</b>: every table is lost when the engine restarts (idle eviction, settings changes, server restarts). Make it persistent to keep the analysts' work in a DuckDB file.</span>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[240px] flex-1">
+                <Label>File name (inside the data directory)</Label>
+                <Input value={persistPath} onChange={(e) => setPersistPath(e.target.value)} className="font-mono" placeholder="workspace.duckdb" />
+              </div>
+              <Button variant="primary" onClick={() => void makePersistent()} loading={persisting} disabled={workspace.role !== 'OWNER'}><HardDrive className="h-4 w-4" /> Make persistent</Button>
+            </div>
+            <p className="text-[11px] text-zinc-500">Copies every schema, table, view, sequence and macro into the file while the engine is running, then restarts the engine on it. Owners only.</p>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2 text-sm text-zinc-200">
+            <HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+            <span>Stored in <code className="font-mono">{workspace.active_db_path}</code> inside the data directory — tables, views and macros survive restarts. Back up the data directory to back up the workspace.</span>
+          </div>
+        )}
+      </Panel>
+
       <Panel title="Workspace">
         <div className="grid gap-4 md:grid-cols-3">
           <div>
@@ -142,7 +195,7 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <Label>Database</Label>
+            <Label>Database <span className="normal-case text-zinc-600">(advanced — switching files does not move tables)</span></Label>
             <Input value={dbPath} onChange={(e) => setDbPath(e.target.value)} className="font-mono" placeholder=":memory: | warehouse.duckdb | md:my_db" />
           </div>
           <div>

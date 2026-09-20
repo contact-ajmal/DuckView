@@ -24,7 +24,7 @@ export class StorageService {
     requireScope(p, 'read');
     await this.workspaces.get(p, workspaceId);
     const jail = this.workspaces.jail;
-    const listing = jail.listDir(dirPath || '.', { showHidden: false });
+    const listing = jail.listDir(dirPath || '.', { showHidden: false, exclude: await this.workspaces.activeDatabaseFiles() });
     // Entries under an added folder are reported with absolute paths (relativeTo() returns absolute outside the data dir).
     return { mode: this.cfg.security.filesystem_mode, root: jail.isFullFilesystem ? jail.baseDir : jail.root, ...listing };
   }

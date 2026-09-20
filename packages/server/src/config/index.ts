@@ -105,6 +105,13 @@ export const ConfigSchema = z.object({
       extension_directory: z.string().optional(),
       export_ttl_seconds: z.coerce.number().int().min(30).default(3600),
       export_max_rows: z.coerce.number().int().min(1).default(50_000_000),
+      /**
+       * Storage of a workspace created without an explicit database: `file` (a <name>.duckdb file in the data
+       * directory — tables, views and macros survive restarts) or `memory` (a scratch database that is cleared when
+       * the engine restarts). Every workspace can still be created either way, and an in-memory one can be made
+       * persistent later without losing its tables.
+       */
+      default_database: z.enum(['file', 'memory']).default('file'),
     })
     .default({}),
   cache: z

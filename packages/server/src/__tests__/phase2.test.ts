@@ -65,8 +65,9 @@ afterAll(async () => {
 });
 
 describe('DataJail explorer + full filesystem mode', () => {
-  it('lists one level, folders first, hidden files skipped, non-data files flagged', () => {
-    const root = ctx.workspaces.jail.listDir('.');
+  it('lists one level, folders first, hidden files skipped, non-data files flagged', async () => {
+    // The workspace's own database file (and DuckDB's .wal next to it) is engine-owned and never listed as data.
+    const root = ctx.workspaces.jail.listDir('.', { exclude: await ctx.workspaces.activeDatabaseFiles() });
     expect(root.entries.map((e) => e.name)).toEqual(['lake', 'warehouse.duckdb']);
     expect(root.entries[0]).toMatchObject({ type: 'dir', queryable: false });
     const lake = ctx.workspaces.jail.listDir('lake');

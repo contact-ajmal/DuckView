@@ -298,13 +298,37 @@ export class WorkspaceService {
     return v;
   }
 
+  /**
+   * A database file name for a workspace: the name slugified, `.duckdb`, unique among files in the data directory
+   * and among other workspaces ("sales-2.duckdb" when "sales.duckdb" is taken).
+   */
+  async suggestDbPath(name: string): Promise<string> {
+    const base = (name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'workspace';
+    const taken = new Set((await this.db.select({ p: this.s.workspaces.active_db_path }).from(this.s.workspaces)).map((r) => r.p));
+    for (let i = 1; i < 1000; i++) {
+      const candidate = i === 1 ? `${base}.duckdb` : `${base}-${i}.duckdb`;
+      if (taken.has(candidate)) continue;
+      try {
+        if (fs.existsSync(this.engines.jail.resolve(candidate).absolute)) continue;
+      } catch {
+        continue;
+      }
+      return candidate;
+    }
+    return `${base}-${newId().slice(0, 8)}.duckdb`;
+  }
+
   async create(p: Principal, input: { name: string; active_db_path?: string; engine_settings?: EngineSettings }): Promise<Workspace> {
     const now = new Date();
+    const name = (input.name ?? '').trim() || 'Untitled workspace';
+    // No explicit database → the configured default: a file that keeps the analyst's tables, or a scratch memory db.
+    const requested = input.active_db_path?.trim();
+    const dbPath = requested ? this.validateDbPath(requested) : this.engines.defaultDatabase === 'memory' ? ':memory:' : await this.suggestDbPath(name);
     const w: Workspace = {
       id: newId(),
       user_id: p.userId,
-      name: (input.name ?? '').trim() || 'Untitled workspace',
-      active_db_path: this.validateDbPath(input.active_db_path ?? ':memory:'),
+      name,
+      active_db_path: dbPath,
       engine_settings: this.validateSettings(input.engine_settings ?? {}),
       folders: [],
       data_version: 0,
@@ -364,14 +388,33 @@ export class WorkspaceService {
     return folders;
   }
 
+  /**
+   * Absolute paths of every workspace's database file. They belong to their engines (opening one from another
+   * workspace means lock conflicts), so listings never show them as data files.
+   */
+  async activeDatabaseFiles(): Promise<Set<string>> {
+    const rows = await this.db.select({ p: this.s.workspaces.active_db_path }).from(this.s.workspaces);
+    const out = new Set<string>();
+    for (const r of rows) {
+      if (r.p === ':memory:' || isRemoteUri(r.p)) continue;
+      try {
+        out.add(this.engines.jail.resolve(r.p).absolute);
+      } catch {
+        /* outside the jail (config changed) — nothing to hide */
+      }
+    }
+    return out;
+  }
+
   /** Data files from the data directory plus every added folder (absolute paths for the latter). */
   async listAllFiles(p: Principal, id: string) {
     const w = await this.get(p, id);
-    const files = this.engines.jail.listFiles();
+    const exclude = await this.activeDatabaseFiles();
+    const files = this.engines.jail.listFiles('', 2000, exclude);
     const truncated: string[] = [];
     for (const f of w.folders) {
       try {
-        const entries = this.engines.jail.listFilesIn(f.path, { maxEntries: 500 });
+        const entries = this.engines.jail.listFilesIn(f.path, { maxEntries: 500, exclude });
         if (entries.length >= 500) truncated.push(f.path);
         files.push(...entries);
       } catch {
@@ -390,7 +433,44 @@ export class WorkspaceService {
   async ensureDefault(p: Principal): Promise<Workspace> {
     const existing = await this.db.select().from(this.s.workspaces).where(eq(this.s.workspaces.user_id, p.userId)).limit(1);
     if (existing[0]) return existing[0];
-    return this.create(p, { name: 'Scratchpad' });
+    // One file per person: "<email local part>.duckdb", so several users' defaults never collide in the data dir.
+    const local = p.email.split('@')[0] ?? 'workspace';
+    return this.create(p, { name: 'My workspace', ...(this.engines.defaultDatabase === 'file' ? { active_db_path: await this.suggestDbPath(local) } : {}) });
+  }
+
+  /**
+   * Turns an in-memory workspace into a file-backed one without losing anything: while the engine is still up,
+   * every schema, table, view, sequence and macro is copied into the new file (DuckDB's COPY FROM DATABASE), then
+   * the workspace points at the file and the engine restarts on it. Owners only. Mosaic's derived objects must be
+   * dropped by the caller first (they reference an attached in-memory database that will not exist in the file).
+   */
+  async persist(p: Principal, id: string, requestedPath?: string): Promise<{ workspace: Workspace; path: string; tables: number; views: number; copied: boolean }> {
+    const w = await this.get(p, id, 'OWNER');
+    if (w.active_db_path !== ':memory:') throw badRequest(`This workspace is already stored in ${w.active_db_path}`);
+    const dbPath = requestedPath?.trim() ? this.validateDbPath(requestedPath) : await this.suggestDbPath(w.name);
+    if (isRemoteUri(dbPath)) throw badRequest('Persist into a .duckdb file in the data directory');
+    const target = this.engines.jail.resolve(dbPath).absolute;
+    if (fs.existsSync(target)) throw badRequest(`${dbPath} already exists — pick another file name`);
+    const engine = this.engines.peek(id);
+    let tables = 0;
+    let views = 0;
+    let copied = false;
+    if (engine) {
+      const lit = target.replace(/'/g, "''");
+      await engine.runInternal(`ATTACH '${lit}' AS __dv_persist`, 60_000);
+      try {
+        await engine.runInternal('COPY FROM DATABASE memory TO __dv_persist', 30 * 60_000);
+        tables = Number((await engine.runInternal("SELECT count(*) AS n FROM duckdb_tables() WHERE database_name = '__dv_persist' AND NOT internal", 15_000))[0]?.n ?? 0);
+        views = Number((await engine.runInternal("SELECT count(*) AS n FROM duckdb_views() WHERE database_name = '__dv_persist' AND NOT internal", 15_000))[0]?.n ?? 0);
+        copied = true;
+      } finally {
+        await engine.runInternal('DETACH __dv_persist', 60_000).catch(() => undefined);
+      }
+    }
+    await this.db.update(this.s.workspaces).set({ active_db_path: dbPath, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    this.engines.evict(id);
+    await this.bumpVersion(id, 'persisted', p.userId);
+    return { workspace: { ...w, active_db_path: dbPath }, path: dbPath, tables, views, copied };
   }
 
   /**

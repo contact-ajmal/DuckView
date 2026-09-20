@@ -58,6 +58,24 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
     return { ok: true };
   });
 
+  // In-memory → file, keeping every table: Mosaic's derived objects go first (they reference an attached in-memory
+  // database the file cannot carry), then COPY FROM DATABASE into the new file, then the engine restarts on it.
+  app.post('/api/workspaces/:id/persist', async (req) => {
+    requireWrite(req.principal!);
+    const { id } = req.params as { id: string };
+    const body = z.object({ path: z.string().max(200).optional() }).parse(req.body ?? {});
+    await ctx.workspaces.get(req.principal!, id, 'OWNER');
+    await ctx.mosaic.dropSchema(id);
+    const r = await ctx.workspaces.persist(req.principal!, id, body.path);
+    ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.persist', resource: `workspace:${id}`, ip: req.ip, queryText: r.path });
+    return { ok: true, path: r.path, tables: r.tables, views: r.views, copied: r.copied, workspace: await ctx.workspaces.describe(req.principal!, id) };
+  });
+  // A file name for a new or to-be-persisted workspace, unique in the data directory.
+  app.get('/api/workspaces/suggest-db-path', async (req) => {
+    const q = z.object({ name: z.string().max(200).default('') }).parse(req.query ?? {});
+    return { path: await ctx.workspaces.suggestDbPath(q.name), default_database: ctx.engines.defaultDatabase };
+  });
+
   app.post('/api/workspaces/:id/restart', async (req) => {
     requireWrite(req.principal!);
     const { id } = req.params as { id: string };

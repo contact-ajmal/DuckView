@@ -1100,6 +1100,10 @@ export class EngineManager {
   private pending = new Map<string, Promise<WorkspaceEngine>>();
   private sweeper: NodeJS.Timeout;
   readonly jail: DataJail;
+  /** Storage for workspaces created without an explicit database (duckdb.default_database). */
+  get defaultDatabase(): 'file' | 'memory' {
+    return this.cfg.duckdb.default_database;
+  }
   /** Fired after a fresh DuckDB instance is opened for a workspace (first use, restart, or after idle eviction). */
   onCreated: ((spec: EngineSpec) => void) | null = null;
 

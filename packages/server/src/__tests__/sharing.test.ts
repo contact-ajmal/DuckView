@@ -307,3 +307,63 @@ describe('HTTP API', () => {
     expect(widget.content[0]!.text).toMatch(/edit access/);
   });
 });
+
+describe('persistent workspaces', () => {
+  it('new workspaces get a .duckdb file by default (unique, slugified), unless :memory: is asked for', async () => {
+    const w = await ctx.workspaces.create(alice, { name: 'Q3 Sales / EMEA' });
+    expect(w.active_db_path).toBe('q3-sales-emea.duckdb');
+    const w2 = await ctx.workspaces.create(alice, { name: 'Q3 Sales EMEA' });
+    expect(w2.active_db_path).toBe('q3-sales-emea-2.duckdb');
+    const mem = await ctx.workspaces.create(alice, { name: 'scratch', active_db_path: ':memory:' });
+    expect(mem.active_db_path).toBe(':memory:');
+    const suggest = await api('GET', '/api/workspaces/suggest-db-path?name=Q3%20Sales%20EMEA', undefined, tokens.alice);
+    expect(suggest.json).toEqual({ path: 'q3-sales-emea-3.duckdb', default_database: 'file' });
+    // Tables survive an engine restart on a file-backed workspace.
+    await ctx.queries.run(alice, w.id, 'CREATE TABLE kept AS SELECT 42 AS answer');
+    ctx.engines.evict(w.id);
+    expect((await ctx.queries.run(alice, w.id, 'SELECT answer FROM kept')).rows[0]![0]).toBe(42);
+    expect(fs.existsSync(path.join(dir, 'data', 'q3-sales-emea.duckdb'))).toBe(true);
+    // The default workspace of a fresh user is a file named after them.
+    const dana = await ctx.auth.createLocalUser({ email: 'dana.k@test.local', password: 'dana-password', role: 'USER' });
+    const dw = await ctx.workspaces.ensureDefault(ctx.auth.principalFromUser(dana, 'jwt', '127.0.0.1'));
+    expect(dw).toMatchObject({ name: 'My workspace', active_db_path: 'dana-k.duckdb' });
+  });
+
+  it('an in-memory workspace becomes persistent without losing tables, views or macros; owners only; once', async () => {
+    const mem = await ctx.workspaces.create(alice, { name: 'Keep me', active_db_path: ':memory:' });
+    await ctx.workspaces.setMember(alice, mem.id, { subject_type: 'user', subject_id: bobU.id, role: 'EDITOR' });
+    await ctx.queries.run(alice, mem.id, 'CREATE SCHEMA staging');
+    await ctx.queries.run(alice, mem.id, 'CREATE TABLE staging.orders AS SELECT range AS id, range * 2.5 AS amount FROM range(1000)');
+    await ctx.queries.run(alice, mem.id, 'CREATE VIEW big AS SELECT * FROM staging.orders WHERE amount > 2000');
+    await ctx.queries.run(alice, mem.id, 'CREATE MACRO double(x) AS x * 2');
+    // Mosaic derived objects (schema, source view, in-memory database) must not get in the way.
+    await ctx.mosaic.exec(alice, mem.id, 'CREATE TABLE IF NOT EXISTS "duckview_mosaic"."preagg_ab" AS SELECT id, count(*) AS n FROM staging.orders GROUP BY 1');
+    await ctx.mosaic.exec(alice, mem.id, 'CREATE TABLE IF NOT EXISTS "duckview_mosaic_mem"."src_ab" AS SELECT * FROM staging.orders; CREATE OR REPLACE VIEW "duckview_mosaic_src_ab" AS SELECT * FROM "duckview_mosaic_mem"."src_ab"');
+    // Editors cannot persist; the owner can.
+    expect((await api('POST', `/api/workspaces/${mem.id}/persist`, {}, tokens.bob)).status).toBe(403);
+    const r = await api('POST', `/api/workspaces/${mem.id}/persist`, {}, tokens.alice);
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(r.json).toMatchObject({ ok: true, path: 'keep-me.duckdb', copied: true, tables: 1, views: 1 });
+    expect((r.json.workspace as { active_db_path: string }).active_db_path).toBe('keep-me.duckdb');
+    expect(fs.existsSync(path.join(dir, 'data', 'keep-me.duckdb'))).toBe(true);
+    // The engine restarted on the file: everything is there, for members too, and survives another restart.
+    expect((await ctx.queries.run(bob, mem.id, 'SELECT count(*) AS n FROM big')).rows[0]![0]).toBe(199);
+    expect((await ctx.queries.run(bob, mem.id, 'SELECT double(21) AS d')).rows[0]![0]).toBe(42);
+    ctx.engines.evict(mem.id);
+    expect((await ctx.queries.run(alice, mem.id, 'SELECT sum(amount) AS s FROM staging.orders')).rows[0]![0]).toBe(1248750);
+    const cat = await ctx.queries.catalog(alice, mem.id);
+    expect(cat.objects.some((o) => o.name === 'preagg_ab' || o.name.startsWith('duckview_mosaic_src_'))).toBe(false);
+    // Already persistent → refused; a taken file name → refused; the audit trail has the move.
+    expect((await api('POST', `/api/workspaces/${mem.id}/persist`, {}, tokens.alice)).status).toBe(400);
+    const other = await ctx.workspaces.create(alice, { name: 'Other', active_db_path: ':memory:' });
+    expect((await api('POST', `/api/workspaces/${other.id}/persist`, { path: 'keep-me.duckdb' }, tokens.alice)).status).toBe(400);
+    expect((await api('POST', `/api/workspaces/${other.id}/persist`, { path: '../escape.duckdb' }, tokens.alice)).status).toBeGreaterThanOrEqual(400);
+    // A workspace whose engine is not running has nothing to copy; it simply starts on the file next time.
+    const cold = await ctx.workspaces.create(alice, { name: 'Cold', active_db_path: ':memory:' });
+    const rc = await api('POST', `/api/workspaces/${cold.id}/persist`, {}, tokens.alice);
+    expect(rc.json).toMatchObject({ ok: true, path: 'cold.duckdb', copied: false, tables: 0 });
+    await ctx.queries.run(alice, cold.id, 'CREATE TABLE t AS SELECT 1 AS a');
+    ctx.engines.evict(cold.id);
+    expect((await ctx.queries.run(alice, cold.id, 'SELECT a FROM t')).rows[0]![0]).toBe(1);
+  });
+});
