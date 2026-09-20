@@ -1,0 +1,59 @@
+Metadata-Version: 2.4
+Name: duckview
+Version: 0.1.0
+Summary: Python SDK for DuckView: query workspaces, browse the catalog, build Streamlit data apps on analytics data.
+License: Apache-2.0
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Provides-Extra: pandas
+Requires-Dist: pandas>=1.5; extra == "pandas"
+Provides-Extra: arrow
+Requires-Dist: pyarrow>=12; extra == "arrow"
+Provides-Extra: streamlit
+Requires-Dist: streamlit>=1.30; extra == "streamlit"
+Requires-Dist: pandas>=1.5; extra == "streamlit"
+Requires-Dist: pyarrow>=12; extra == "streamlit"
+Provides-Extra: all
+Requires-Dist: pandas>=1.5; extra == "all"
+Requires-Dist: pyarrow>=12; extra == "all"
+Requires-Dist: streamlit>=1.30; extra == "all"
+Requires-Dist: polars>=0.20; extra == "all"
+
+# duckview — Python SDK
+
+Query DuckView workspaces from Python and build Streamlit data apps on the analytics data DuckView already holds — connectors, syncs, persistent workspaces and all.
+
+```python
+import duckview
+dv = duckview.connect()                          # DUCKVIEW_URL / DUCKVIEW_TOKEN / DUCKVIEW_WORKSPACE
+df = dv.query("SELECT zone, avg(fare) AS fare FROM trips GROUP BY 1")   # pandas (or list of dicts without pandas)
+dv.tables()                                      # tables and views with columns and row estimates
+dv.table("trips").where("fare > 10").order_by("fare DESC").limit(100).to_df()
+dv.query_arrow("SELECT * FROM trips")            # pyarrow Table through the Arrow export (large results)
+dv.copilot("Which zones have the highest average fare?")["text"]
+dv.tools()                                       # the agent façade's OpenAPI document for LangChain / CrewAI / Strands
+```
+
+Everything goes through DuckView's HTTP API with a bearer token; the SDK never opens the `.duckdb` file. Inside a DuckView data app the runner sets the three environment variables with a read-only token scoped to the app's workspace.
+
+## Streamlit
+
+```python
+import streamlit as st
+from duckview.streamlit import connect, query, table_picker, viewer
+
+dv = connect()
+name = table_picker(dv)
+df = query(f"SELECT * FROM {name} LIMIT 1000")
+st.dataframe(df)
+st.caption(f"Viewing as {viewer()['email']}")
+```
+
+`query()` is backed by `st.cache_data` (5 minutes); `viewer()` reads the visitor DuckView forwards to the app.
+
+## Install
+
+```
+pip install duckview            # core, no dependencies
+pip install "duckview[streamlit]"   # + streamlit, pandas, pyarrow
+```

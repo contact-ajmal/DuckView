@@ -13,7 +13,8 @@ export type LiveEvent =
   /** The workspace's data epoch moved (mutation, upload, folder change, engine restart): clients drop cached results for it. */
   | { type: 'workspace'; at: string; user_id: string | null; workspace_id: string; data_version: number; reason: string }
   /** A scheduled sync started or finished. */
-  | { type: 'sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; rows: number | null; duration_ms: number | null; error: string | null };
+  | { type: 'sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; rows: number | null; duration_ms: number | null; error: string | null }
+  | { type: 'app'; at: string; workspace_id: string; app_id: string; status: 'stopped' | 'installing' | 'starting' | 'running' | 'error'; error: string | null };
 
 class LiveBus extends EventEmitter {
   publish(e: LiveEvent) {

@@ -68,6 +68,15 @@ description: The complete DuckView feature list — querying, workbench, dashboa
       </ul>
     </div>
     <div class="card">
+      <h3>Data apps (Streamlit) <span class="tag new">New</span></h3>
+      <ul>
+        <li>Streamlit apps written on a workspace's tables and files; <code>pip install duckview</code> — <code>connect()</code>, <code>query(sql)</code> → pandas, Arrow for large results, a table picker, the viewer's identity</li>
+        <li>Code editor with Python highlighting next to a live preview; ⌘S saves and restarts; logs one click away; Copilot hand-off</li>
+        <li>Run by DuckView: virtualenv created on first start, <code>requirements.txt</code> installed, health-checked, idle apps stopped</li>
+        <li>Served at <code>/apps/&lt;id&gt;/</code> to the workspace's members with a read-only, workspace-scoped token; minimal environment, no server secrets</li>
+      </ul>
+    </div>
+    <div class="card">
       <h3>Connections &amp; syncs <span class="tag new">New</span></h3>
       <ul>
         <li>One page for every source: S3 / R2 / GCS / Azure, Glue / S3 Tables / Iceberg REST / Databricks, PostgreSQL / MySQL / SQLite / DuckDB files, HTTP endpoints — with tests and health</li>

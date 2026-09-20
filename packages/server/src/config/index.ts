@@ -205,6 +205,35 @@ export const ConfigSchema = z.object({
       history_limit: z.coerce.number().int().min(1).default(20),
     })
     .default({}),
+  /**
+   * Data apps: Streamlit applications built on a workspace's data, run by DuckView next to the server and served
+   * under /apps/<id>/. Apps execute Python — keep this off on servers where analysts should not run code.
+   */
+  apps: z
+    .object({
+      /** Default: on in full filesystem mode, off in sandboxed mode (resolved after parsing). */
+      enabled: z.coerce.boolean().optional(),
+      runtime: z.enum(['subprocess']).default('subprocess'),
+      /** Python interpreter used to create the apps virtualenv (needs venv + pip). */
+      python: z.string().default('python3'),
+      /** Where the shared virtualenv lives; default <data dir>/.duckview/apps/venv. */
+      venv_dir: z.string().optional(),
+      /** Create the virtualenv and install streamlit / pandas / pyarrow + the DuckView SDK on first start. */
+      auto_install: z.coerce.boolean().default(true),
+      /** Install each app's requirements.txt into the shared virtualenv before it starts. */
+      allow_requirements: z.coerce.boolean().default(true),
+      /** Command that runs an app (the entry file and --server.* flags are appended). Overridable for tests. */
+      command: z.array(z.string()).optional(),
+      max_running: z.coerce.number().int().min(1).default(5),
+      idle_stop_minutes: z.coerce.number().int().min(1).default(30),
+      port_range: z.tuple([z.coerce.number().int().min(1024), z.coerce.number().int().max(65535)]).default([8601, 8700]),
+      start_timeout_seconds: z.coerce.number().int().min(10).default(180),
+      /** Token minted for an app (read-only, scoped to its workspace) is rotated on every start and expires after this. */
+      token_ttl_hours: z.coerce.number().int().min(1).default(24),
+      /** Maximum size of an app's source files, in bytes. */
+      max_source_bytes: z.coerce.number().int().min(1024).default(512 * 1024),
+    })
+    .default({}),
   observability: z
     .object({
       metrics_enabled: z.coerce.boolean().default(true),
@@ -223,6 +252,7 @@ export const ConfigSchema = z.object({
 
 export type DuckViewConfig = z.infer<typeof ConfigSchema> & {
   security: { jwt_secret: string; encryption_key: string; data_jail_directory: string };
+  apps: z.infer<typeof ConfigSchema>['apps'] & { enabled: boolean; venv_dir: string };
   /** true when secrets were auto-generated for this process (dev only). */
   ephemeralSecrets: boolean;
   configPath: string | null;
@@ -403,6 +433,9 @@ export function loadConfig(opts: LoadOptions = {}): DuckViewConfig {
   cfg.security.data_jail_directory = path.resolve(cfg.security.data_jail_directory);
   if (cfg.duckdb.extension_directory) cfg.duckdb.extension_directory = path.resolve(cfg.duckdb.extension_directory);
   cfg.duckdb.temp_directory = path.resolve(cfg.duckdb.temp_directory);
+  // Data apps run Python: on by default only where analysts already own the machine's filesystem.
+  if (cfg.apps.enabled === undefined) cfg.apps.enabled = cfg.security.filesystem_mode === 'full';
+  cfg.apps.venv_dir = path.resolve(cfg.apps.venv_dir ?? path.join(cfg.security.data_jail_directory, '.duckview', 'apps', 'venv'));
 
   if (cfg.auth.strategy === 'oidc') {
     const o = cfg.auth.oidc;

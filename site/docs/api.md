@@ -1,6 +1,6 @@
 ---
 title: HTTP API, CLI & observability
-order: 9
+order: 11
 group: Reference
 description: Every endpoint group, the uniform error shape, the duckview CLI, Prometheus metrics and OpenTelemetry traces.
 ---
@@ -19,6 +19,7 @@ All API routes live under `/api` and take `Authorization: Bearer <jwt>` (UI sess
 | Exports | `POST /api/workspaces/:id/export {sql, format: parquet\|csv\|json\|arrow}` · `GET /api/exports` · `GET /api/exports/:id/download` · `DELETE /api/exports/:id` |
 | BI | `…/queries` CRUD · `…/dashboards` CRUD (`kind: grid\|mosaic`, `spec`) · `GET/PATCH/DELETE /api/dashboards/:id` (layout, spec) · `POST/PATCH/DELETE /api/dashboards/:id/widgets[/:wid]` · `POST /api/dashboards/:id/widgets/:wid/data` |
 | Connections | `GET /api/sources/catalog` · `GET /api/sources` · `GET/POST /api/database-connections` · `PATCH/DELETE /api/database-connections/:id` · `POST …/:id/test` · `GET …/:id/browse` · `GET/POST /api/workspaces/:id/syncs` · `POST …/syncs/preview` · `GET/PATCH/DELETE /api/syncs/:id` · `POST /api/syncs/:id/run` · `GET /api/syncs/:id/runs` |
+| Data apps | `GET /api/apps/templates` · `GET /api/apps` · `GET/POST /api/workspaces/:id/apps` · `GET/PATCH/DELETE /api/apps/:id` · `POST /api/apps/:id/start\|stop\|restart` · `GET /api/apps/:id/logs` · `POST /api/apps/:id/session` (cookie for `/apps`) · the app itself at `/apps/:id/` |
 | Connectors | `GET /api/connectors` · `GET/POST /api/connector-connections` · `PATCH/DELETE /api/connector-connections/:id` · `POST …/:id/test` · `GET …/:id/browse?path=a/b` · `POST …/:id/query {sql, limit?}` · `POST /api/oauth/google/start` · `GET /api/oauth/google/callback` · admin `GET/PUT/DELETE /api/admin/integrations/google` |
 | Mosaic | `POST /api/workspaces/:id/mosaic {type: arrow\|json\|exec, sql}` (Arrow IPC / JSON reads with ETag; admitted plumbing statements) · `POST /api/workspaces/:id/mosaic/prepare {spec \| spec_text}` (validate + bind a spec) · `GET /api/mosaic/info` |
 | Data | `POST /api/workspaces/:id/files` (multipart upload) · `DELETE /api/workspaces/:id/files?path=` · `POST /api/workspaces/:id/overview` · `GET /api/workspaces/:id/catalog` |

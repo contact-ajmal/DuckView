@@ -1,0 +1,17 @@
+
+[all]
+pandas>=1.5
+pyarrow>=12
+streamlit>=1.30
+polars>=0.20
+
+[arrow]
+pyarrow>=12
+
+[pandas]
+pandas>=1.5
+
+[streamlit]
+streamlit>=1.30
+pandas>=1.5
+pyarrow>=12

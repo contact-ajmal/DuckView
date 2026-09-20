@@ -26,6 +26,7 @@ import { copilotRoutes } from './routes/copilot.js';
 import { lakehouseRoutes } from './routes/lakehouse.js';
 import { sourceRoutes } from './routes/sources.js';
 import { connectorRoutes } from './routes/connectors.js';
+import { appRoutes } from './routes/apps.js';
 import { agentRoutes } from './routes/agent.js';
 import { groupRoutes } from './routes/groups.js';
 import { mosaicRoutes } from './routes/mosaic.js';
@@ -115,6 +116,7 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   await app.register(async (r) => lakehouseRoutes(r, ctx));
   await app.register(async (r) => sourceRoutes(r, ctx));
   await app.register(async (r) => connectorRoutes(r, ctx));
+  await app.register(async (r) => appRoutes(r, ctx));
   await app.register(async (r) => agentRoutes(r, ctx));
   await app.register(async (r) => groupRoutes(r, ctx));
   await app.register(async (r) => mosaicRoutes(r, ctx));
@@ -137,5 +139,9 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
     app.setNotFoundHandler((req, reply) => reply.code(404).send({ error: 'NOT_FOUND', message: `Route ${req.method} ${req.url} not found (web UI not built — run "pnpm build")` }));
   }
 
+  app.addHook('onListen', () => {
+    const addr = app.server.address();
+    if (addr && typeof addr === 'object') ctx.apps.internalUrl = `http://127.0.0.1:${addr.port}`;
+  });
   return { app, mcpSessions };
 }

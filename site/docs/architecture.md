@@ -1,6 +1,6 @@
 ---
 title: Architecture
-order: 10
+order: 13
 group: Reference
 description: How the pieces fit — the React app, the Fastify server and its single query choke point, one native DuckDB engine per workspace, and the Drizzle metadata store.
 ---

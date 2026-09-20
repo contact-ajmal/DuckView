@@ -455,4 +455,8 @@ export interface ConnectorSummary { id: string; label: string; auth: { kind: 'fi
 export interface ConnectorConnection { id: string; connector: string; connector_label: string; auth_kind: 'fields' | 'google'; name: string; config: Record<string, unknown>; account_label: string | null; status: 'unknown' | 'ok' | 'error'; last_error: string | null; last_tested_at: string | null; credential_fields: string[]; remote_sql: boolean; created_at: string; updated_at: string }
 export interface BrowseEntry { name: string; type: string; path?: string[]; resource?: Record<string, unknown>; hint?: string }
 export interface GoogleIntegration { configured: boolean; client_id: string | null; redirect_uri: string; updated_at: string | null; updated_by: string | null }
+// ---- data apps (Streamlit)
+export type AppStatus = 'stopped' | 'installing' | 'starting' | 'running' | 'error';
+export interface DataApp { id: string; workspace_id: string; user_id: string; name: string; description: string | null; kind: 'streamlit'; entry: string; files: Record<string, string>; spec: Record<string, unknown> | null; visibility: 'workspace' | 'org'; status: AppStatus; port: number | null; last_error: string | null; last_started_at: string | null; last_used_at: string | null; created_at: string; updated_at: string; url: string; source_bytes: number; running: boolean }
+export interface AppTemplate { id: string; label: string; blurb: string; files: Record<string, string> }
 export interface DataSyncRun { id: string; sync_id: string; workspace_id: string; status: 'running' | 'ok' | 'error'; triggered_by: string; actor_id: string | null; rows: number | null; duration_ms: number | null; error: string | null; started_at: string; finished_at: string | null }

@@ -46,7 +46,8 @@ ENV NODE_ENV=production \
     DUCKVIEW_CONFIG=/app/duckview.config.yaml \
     DUCKDB_EXTENSION_DIRECTORY=/app/duckdb-extensions \
     DUCKVIEW_TRUST_PROXY=true
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini \
+# python3 + venv: data apps (Streamlit) run from a virtualenv DuckView creates under /data/.duckview/apps on first use.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini python3 python3-venv python3-pip \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 1001 duckgroup \
  && useradd --system --uid 1001 --gid duckgroup --home-dir /app --shell /usr/sbin/nologin duckuser \
@@ -57,6 +58,7 @@ COPY --from=build --chown=duckuser:duckgroup /app/deploy/ /app/server/
 COPY --from=build --chown=duckuser:duckgroup /app/packages/web/dist /app/web
 COPY --from=build --chown=duckuser:duckgroup /app/duckdb-extensions /app/duckdb-extensions
 COPY --chown=duckuser:duckgroup duckview.config.yaml /app/duckview.config.yaml
+COPY --chown=duckuser:duckgroup packages/sdk-python /app/sdk-python
 USER duckuser:duckgroup
 VOLUME ["/data", "/app/meta"]
 EXPOSE 4200

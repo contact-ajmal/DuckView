@@ -96,6 +96,24 @@ See [Result cache](cache.html) for how keys are built.
 
 See [Interactive exploration & Mosaic dashboards](mosaic.html).
 
+## apps
+
+Streamlit data apps run by DuckView (see [Data apps](apps.html)).
+
+| Setting | Notes |
+|---|---|
+| `enabled` | Default: on in `filesystem_mode: full`, off in `sandboxed` — apps execute Python next to the server. |
+| `runtime` | `subprocess` (a `streamlit run` per app). |
+| `python` | Interpreter used to create the virtualenv (needs `venv` and `pip`; default `python3`). |
+| `venv_dir` | The shared virtualenv (default `<data dir>/.duckview/apps/venv`). |
+| `auto_install` | Create the virtualenv and install streamlit, pandas, pyarrow and the SDK on first start (default on). |
+| `allow_requirements` | Install each app's `requirements.txt` before it starts (default on). |
+| `max_running`, `idle_stop_minutes` | At most this many apps at once (5); stop an app nobody used for this long (30). |
+| `port_range` | Ports for the apps' own servers, local only (default `[8601, 8700]`). |
+| `start_timeout_seconds` | How long the health check may take (180). |
+| `token_ttl_hours` | Lifetime of the read-only, workspace-scoped token minted per start (24). |
+| `max_source_bytes` | Size limit of an app's source files (512 KiB). |
+
 ## observability
 
 `metrics_enabled`, `metrics_require_auth` (Prometheus at `/metrics`), `otel.enabled`, `otel.service_name`, `otel.exporter_otlp_endpoint`, `otel.console_exporter`.

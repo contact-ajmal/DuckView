@@ -15,7 +15,7 @@ description: Docker Hub image, docker run, Docker Compose profiles, Kubernetes m
 | `1`, `1.1` | floating major / minor |
 | `{{version}}` | pinned release — use this in production |
 
-The image is `node:20-bookworm-slim`, runs as the non-root `duckuser:duckgroup`, uses `tini` as PID 1, declares volumes for `/data` and `/app/meta`, and ships the `httpfs`, `azure`, `arrow`, `iceberg`, `delta` and `excel` DuckDB extensions pre-installed under `/app/duckdb-extensions` so no network is needed at runtime.
+The image is `node:20-bookworm-slim`, runs as the non-root `duckuser:duckgroup`, uses `tini` as PID 1, declares volumes for `/data` and `/app/meta`, and ships the `httpfs`, `azure`, `arrow`, `iceberg`, `delta` and `excel` DuckDB extensions pre-installed under `/app/duckdb-extensions` so no network is needed at runtime. It also carries `python3` + `venv` and the DuckView Python SDK for [data apps](apps.html); the apps' virtualenv is created under `/data/.duckview/apps` on first use (network access to PyPI needed once).
 
 ```bash
 docker pull {{image}}:{{version}}
@@ -85,5 +85,5 @@ Metadata migrations are additive and run automatically on start for both SQLite 
 
 ## CI/CD in the repository
 
-- `ci.yml` — typecheck, 229 unit and integration tests (real DuckDB engines, mock Iceberg REST catalog serving real Iceberg tables, mock Databricks workspace, MCP over every transport), build, and `scripts/smoke.mjs` against both the built server and a freshly built image.
+- `ci.yml` — typecheck, 237 unit and integration tests (real DuckDB engines, mock Iceberg REST catalog serving real Iceberg tables, mock Databricks workspace, MCP over every transport), build, and `scripts/smoke.mjs` against both the built server and a freshly built image.
 - `docker-publish.yml` — multi-arch build and push to Docker Hub + GHCR on `v*` tags, then a smoke test of the pushed tag.

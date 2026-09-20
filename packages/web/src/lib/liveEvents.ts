@@ -6,6 +6,7 @@ export type LiveEvent =
   | { type: 'mcp_session'; at: string; user_id: string; user: string; action: 'connect' | 'disconnect'; transport: string; session_id: string }
   | { type: 'workspace'; at: string; user_id: string | null; workspace_id: string; data_version: number; reason: string }
   | { type: 'sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; rows: number | null; duration_ms: number | null; error: string | null }
+  | { type: 'app'; at: string; workspace_id: string; app_id: string; status: 'stopped' | 'installing' | 'starting' | 'running' | 'error'; error: string | null }
   | { type: 'ready'; scope: string };
 
 /** Subscribes to /api/ws/events; reconnects with backoff. Returns an unsubscribe function. */

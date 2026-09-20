@@ -19,6 +19,7 @@ import { WorkspaceCloudSync } from './services/workspace-cloud.js';
 import { DatabaseConnectionService } from './services/databases.js';
 import { DataSyncService } from './services/syncs.js';
 import { ConnectorConnectionService } from './services/connector-connections.js';
+import { DataAppService } from './services/apps.js';
 import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
@@ -52,6 +53,7 @@ export interface AppContext {
   databases: DatabaseConnectionService;
   syncs: DataSyncService;
   connectors: ConnectorConnectionService;
+  apps: DataAppService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -112,6 +114,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   syncs.connectors = connectors;
   syncs.stageDir = path.join(engines.jail.baseDir, '.duckview', 'sync');
   if (cfg.duckdb.sync_scheduler_enabled) syncs.start();
+  const apps = new DataAppService(store, cfg, workspaces, auth, audit);
+  await apps.init();
   copilot.mosaic = mosaic;
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
@@ -145,6 +149,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     databases,
     syncs,
     connectors,
+    apps,
     lakehouse,
     agents,
     groups,
@@ -153,6 +158,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     startedAt: new Date(),
     async shutdown() {
       syncs.stop();
+      await apps.shutdown().catch(() => undefined);
       await agents.flush();
       await cloudSync.flush().catch(() => undefined);
       exportsSvc.close();

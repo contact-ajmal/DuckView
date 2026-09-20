@@ -541,6 +541,45 @@ export const connectorConnections = sqliteTable(
   (t) => [index('connector_connections_user_idx').on(t.user_id)],
 );
 
+export const APP_KINDS = ['streamlit'] as const;
+export type AppKind = (typeof APP_KINDS)[number];
+export const APP_STATUSES = ['stopped', 'installing', 'starting', 'running', 'error'] as const;
+export type AppStatus = (typeof APP_STATUSES)[number];
+export const APP_VISIBILITIES = ['workspace', 'org'] as const;
+export type AppVisibility = (typeof APP_VISIBILITIES)[number];
+/** Source files of an app by relative path (app.py, requirements.txt, helpers …). */
+export type AppFiles = Record<string, string>;
+
+/**
+ * Data apps: Streamlit applications built on a workspace's data. The source lives here (materialised to disk when
+ * the app runs); the runner records the process state so the gallery and the proxy know what is up.
+ */
+export const dataApps = sqliteTable(
+  'data_apps',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    kind: text('kind', { enum: APP_KINDS }).notNull().default('streamlit'),
+    entry: text('entry').notNull().default('app.py'),
+    files: text('files', { mode: 'json' }).$type<AppFiles>().notNull().default({}),
+    /** How the app was generated (a dashboard id, saved queries, a Copilot prompt) — informational. */
+    spec: text('spec', { mode: 'json' }).$type<Record<string, unknown> | null>(),
+    visibility: text('visibility', { enum: APP_VISIBILITIES }).notNull().default('workspace'),
+    status: text('status', { enum: APP_STATUSES }).notNull().default('stopped'),
+    port: integer('port'),
+    pid: integer('pid'),
+    last_error: text('last_error'),
+    last_started_at: integer('last_started_at', { mode: 'timestamp_ms' }),
+    last_used_at: integer('last_used_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('data_apps_workspace_idx').on(t.workspace_id)],
+);
+
 /** Platform-wide settings set from the console (e.g. the Google OAuth client), secrets encrypted. */
 export const appSettings = sqliteTable('app_settings', {
   key: text('key').primaryKey(),
@@ -648,6 +687,7 @@ export type ChatMessage = typeof chatHistory.$inferSelect;
 export type CopilotSettingsRow = typeof copilotSettings.$inferSelect;
 export type DatabaseConnection = typeof databaseConnections.$inferSelect;
 export type ConnectorConnection = typeof connectorConnections.$inferSelect;
+export type DataApp = typeof dataApps.$inferSelect;
 export type AppSetting = typeof appSettings.$inferSelect;
 export type DataSync = typeof dataSyncs.$inferSelect;
 export type DataSyncRun = typeof dataSyncRuns.$inferSelect;

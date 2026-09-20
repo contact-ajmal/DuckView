@@ -1,6 +1,6 @@
 ---
 title: Agents, MCP & Copilot
-order: 10
+order: 12
 group: Guide
 description: The MCP server (stdio, SSE, Streamable HTTP), the REST/OpenAPI façade, registered agents with per-framework snippets, human-in-the-loop approval, and DuckCopilot.
 ---

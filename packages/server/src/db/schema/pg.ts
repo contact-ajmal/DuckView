@@ -155,7 +155,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -384,6 +384,31 @@ export const dataSyncRuns = pgTable(
     finished_at: ts('finished_at'),
   },
   (t) => [index('data_sync_runs_sync_idx').on(t.sync_id, t.started_at)],
+);
+
+export const dataApps = pgTable(
+  'data_apps',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    kind: text('kind', { enum: APP_KINDS }).notNull().default('streamlit'),
+    entry: text('entry').notNull().default('app.py'),
+    files: jsonb('files').$type<AppFiles>().notNull().default({}),
+    spec: jsonb('spec').$type<Record<string, unknown> | null>(),
+    visibility: text('visibility', { enum: APP_VISIBILITIES }).notNull().default('workspace'),
+    status: text('status', { enum: APP_STATUSES }).notNull().default('stopped'),
+    port: integer('port'),
+    pid: integer('pid'),
+    last_error: text('last_error'),
+    last_started_at: ts('last_started_at'),
+    last_used_at: ts('last_used_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('data_apps_workspace_idx').on(t.workspace_id)],
 );
 
 export const connectorConnections = pgTable(

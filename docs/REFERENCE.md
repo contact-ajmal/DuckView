@@ -275,6 +275,18 @@ A run is a guarded SQL sequence on the workspace engine executed **as the worksp
 
 **Agents.** `list_data_sources` (every connection with health — connector connections included — the syncs of a workspace, the catalog), `browse_connector(connection_id, path?)` (walk a connector to the `resource` to sync), `connector_query(connection_id, sql, limit?)` (read-only SQL on a warehouse), `create_data_sync` (validates source and transformation, `run_now`), `update_data_sync` (attach a transformation, change the schedule, pause), `run_data_sync` (rows, duration, error, recent runs), plus the `build_data_pipeline` prompt (browse → inspect → sync → transform → validate → verify). In the sync editor, **Draft with Copilot** asks DuckCopilot for a transformation over the previewed columns and drops the SQL in.
 
+## Data apps (Streamlit)
+
+**Apps** (`#/apps`) are Streamlit applications written on a workspace's tables and files, registered next to dashboards (`data_apps`: name, description, `files` — `app.py`, `requirements.txt`, helpers — `entry`, `visibility`, runtime state) and **run by DuckView**. The gallery lists a workspace's apps with their status; the editor is a Python CodeMirror pane next to a live preview (the proxied app in an iframe), with Save (⌘S — a running app restarts), Run / Stop / Restart, logs, "open in a new tab" and a Copilot hand-off that sends the file with the SDK's contract. Two starter templates: *Table explorer* (pick a table, view or data file → filter → grid → chart) and *Blank*.
+
+**Python SDK** (`packages/sdk-python`, `pip install duckview`): `duckview.connect()` reads `DUCKVIEW_URL` / `DUCKVIEW_TOKEN` / `DUCKVIEW_WORKSPACE`; `dv.query(sql)` → pandas (or `format="records" | "polars" | "result"`), `dv.query_arrow(sql)` → pyarrow through the Arrow export (large results), `dv.tables()` / `dv.files()` / `dv.catalog()`, `dv.table("trips").where(…).order_by(…).limit(n).to_df()`, `dv.copilot(message)`, `dv.tools()` (the agent façade's OpenAPI) and `dv.call_tool(name, **args)`. `duckview.streamlit` adds `connect()` (`st.cache_resource`), `query()` (`st.cache_data`, 5 min), `datasets()` / `table_picker()` (tables, views and data files as SQL relations) and `viewer()` — the DuckView user behind the request, from the `X-DuckView-User` / `-Email` / `-Role` headers the proxy adds. The SDK only ever talks HTTP: it never opens the `.duckdb` file (the engine holds the lock).
+
+**Runner** (`services/apps.ts`, `apps.runtime: subprocess`): the first start creates a shared virtualenv (`apps.venv_dir`, default `<data dir>/.duckview/apps/venv`; `apps.python` must have `venv` + `pip`) and installs `streamlit`, `pandas`, `pyarrow` and the SDK (`apps.auto_install`); an app's `requirements.txt` is installed before it starts (`apps.allow_requirements`). Sources are materialised under `<data dir>/.duckview/apps/run/<id>/` and `streamlit run` is spawned on a free port of `apps.port_range` with `--server.baseUrlPath=/apps/<id>` and a **minimal environment**: `PATH`, `HOME` (the run directory), `PYTHONPATH` (the SDK) and `DUCKVIEW_URL` / `DUCKVIEW_TOKEN` / `DUCKVIEW_WORKSPACE` — never the server's secrets or config. The token is minted for the app's creator on every start with the `read` scope, **scoped to the app's workspace**, expiring after `apps.token_ttl_hours`, and revoked when the app stops; an app can query what a viewer could and nothing else. Health is polled on `/_stcore/health` (`apps.start_timeout_seconds`), stdout/stderr go to a 500-line ring buffer (`GET /api/apps/:id/logs`), a crash before readiness marks the app `error` with the last lines, idle apps stop after `apps.idle_stop_minutes`, at most `apps.max_running` run at once, everything stops at shutdown and every row is reset to `stopped` at boot. Sources are refused when a file name escapes the directory, the entry is missing, the total exceeds `apps.max_source_bytes` or the code contains what looks like an API token.
+
+**Proxy** (`/apps/:id/*`, `routes/apps.ts`): browsers reach the app from an iframe or a tab where no bearer header exists, so the UI first calls `POST /api/apps/:id/session` and receives an HttpOnly, SameSite=Lax cookie scoped to `/apps` (a 12-hour JWT naming the user). Every proxied request — HTTP streamed with the reply hijacked, and the `/_stcore/stream` WebSocket bridged message for message with the client's subprotocols — is authenticated from that cookie, checked against the app (workspace member, or anyone signed in for `visibility: org`), and forwarded with the visitor's identity. A visit to a stopped app **starts it** and shows a self-refreshing page until it is up. `apps.enabled` defaults to on in full filesystem mode and off in sandboxed mode: apps execute Python next to the server, so keep them off where analysts should not run code. Audit: `app.create` · `app.start` · `app.stop` · `app.delete`; live events `{type: "app"}` fan out to the workspace.
+
+API: `GET /api/apps/templates` · `GET /api/apps` · `GET/POST /api/workspaces/:id/apps` · `GET/PATCH/DELETE /api/apps/:id` · `POST /api/apps/:id/start|stop|restart` · `GET /api/apps/:id/logs` · `POST /api/apps/:id/session`. Editors create and change apps; viewers open and start them.
+
 ## Persistent workspaces
 
 A workspace's database (`active_db_path`) lives in one of five places:
@@ -458,6 +470,7 @@ packages/server/src
   engine/        sandbox (DataJail), sql-guard (lexer/classifier/rewriter), duckdb (engines, overview, memory stats), results
   security/      AES-256-GCM, scrypt, token hashing
   services/      audit, auth/tokens, groups (teams + SSO sync), workspaces (membership/roles, tabs, data epoch), query (authz + HITL),
+                 apps (Streamlit registry + subprocess runner), connector-connections + connectors/ (warehouses, SaaS, Google),
                  cache (result cache: keys, LRU, ETag), mosaic (connector endpoint + exec policy + spec prepare), mosaic-spec (parse, validate,
                  data → views; mosaic-names generated from vgplot), mosaic-guide (agent/Copilot authoring guide), connections, files (uploads),
                  lakehouse (Iceberg ATTACH + Databricks), databricks (UC + Statement Execution client), agents, aws (Bedrock/AgentCore bridge)
@@ -466,7 +479,9 @@ packages/server/src
   routes/        auth (local + OIDC), workspaces (+ members), groups, query (REST + WS), files, events (WS), connections, tokens, admin, system,
                  conditional (ETag / If-None-Match / refresh glue)
   observability/ pino, prom-client, OpenTelemetry, live event bus, CPU sampler
+packages/sdk-python   the `duckview` Python SDK (client, query builder, Arrow path, Streamlit helpers)
 packages/web/src
+  features/apps       gallery of data apps · editor (Python CodeMirror + live preview + logs)
   features/overview   drop zone · KPI badges · null-ratio bars · Chart.js distributions · sample grid
   features/workspace  schema tree (click-to-insert) · tabs with per-tab Stop · editor (cursor persisted) · streaming grid · chart · plan · profile
   features/settings   categorised left-nav: appearance (themes/fonts/scale) · layout · hardware gauges · engine tuning · storage · copilot · account · teams · users
@@ -482,7 +497,7 @@ packages/web/src
 ## Tests
 
 ```bash
-pnpm test        # 229 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
+pnpm test        # 237 tests: jail, SQL guard, crypto, config, sharing/teams, result cache, Mosaic endpoint, and integration suites that boot real DuckDB
                  # engines, the MCP server (in-memory, SSE, Streamable HTTP), uploads, overview profiling,
                  # the live event feed, the HTTP API, WebSocket streaming, a mock Iceberg REST catalog serving
                  # real Iceberg tables (test/fixtures/iceberg), a mock Databricks workspace (Unity Catalog +
