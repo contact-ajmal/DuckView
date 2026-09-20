@@ -17,6 +17,7 @@ import { buildApp } from '../app.js';
 import { buildTools, runTool, type ToolEnv } from '../agent/tools.js';
 import { parseSpecText } from '../services/mosaic-spec.js';
 import { appFromDashboard, appFromQueries, analyzeSpec } from '../services/app-generator.js';
+import { findChrome } from '../services/apps.js';
 import type { Principal } from '../services/principal.js';
 
 let dir: string;
@@ -311,16 +312,20 @@ describe('agent tools', () => {
     expect(upd.isError, JSON.stringify(upd.content)).toBeFalsy();
     expect((upd.structuredContent as { app_status: string }).app_status).toBe('running');
     expect((await runTool(env, t('update_app'), { app_id: codeId, code: 'nope(' })).isError).toBe(true);
-    // preview: health + (without Chrome) the log; logs tool.
+    // preview without a browser (an explicit, missing chrome_path is authoritative): health + the log.
     ctx.cfg.apps.chrome_path = '/nonexistent/chrome';
-    const savedPath = process.env.CHROME_PATH;
-    delete process.env.CHROME_PATH;
-    const hasChrome = fs.existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') || fs.existsSync('/usr/bin/google-chrome') || fs.existsSync('/usr/bin/chromium');
     const preview = await runTool(env, t('preview_app'), { app_id: codeId, wait_ms: 3000 });
     const ps = preview.structuredContent as { status: string; health: boolean; screenshot: boolean };
     expect(ps.health).toBe(true);
-    expect(ps.screenshot).toBe(hasChrome); // the fake app has no Streamlit DOM, so the shot is of the fake page
-    if (savedPath) process.env.CHROME_PATH = savedPath;
+    expect(ps.screenshot).toBe(false);
+    expect((preview.content[0] as { text: string }).text).toMatch(/no Chrome/);
+    // With a real browser (developer machines; skipped in CI): a PNG comes back as an image content block.
+    ctx.cfg.apps.chrome_path = undefined;
+    if (!process.env.CI && findChrome()) {
+      const shot = await runTool(env, t('preview_app'), { app_id: codeId, wait_ms: 3000 });
+      expect((shot.structuredContent as { screenshot: boolean }).screenshot).toBe(true);
+      expect(shot.content.some((c) => c.type === 'image' && c.mimeType === 'image/png')).toBe(true);
+    }
     const logs = await runTool(env, t('get_app_logs'), { app_id: codeId, lines: 5 });
     expect((logs.structuredContent as { logs: string[] }).logs.some((l) => l.includes('fake streamlit on'))).toBe(true);
     // publish: approval first.
