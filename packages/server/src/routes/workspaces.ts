@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { requireWrite } from '../services/principal.js';
+import { HttpError } from '../services/errors.js';
 import { WORKSPACE_ROLES, MEMBER_SUBJECT_TYPES } from '../db/schema/sqlite.js';
 
 const EngineSettings = z.object({
@@ -26,9 +27,13 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
     return { workspaces: list };
   });
 
+  const reply400 = (message: string) => {
+    throw new HttpError(400, message, 'BAD_REQUEST');
+  };
+
   app.post('/api/workspaces', async (req) => {
     requireWrite(req.principal!);
-    const body = z.object({ name: z.string().max(120), active_db_path: z.string().optional(), engine_settings: EngineSettings.optional() }).parse(req.body);
+    const body = z.object({ name: z.string().max(120), active_db_path: z.string().max(500).optional(), engine_settings: EngineSettings.optional(), cloud_connection_id: z.string().nullable().optional() }).parse(req.body);
     const w = await ctx.workspaces.create(req.principal!, body);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.create', resource: `workspace:${w.id}`, ip: req.ip });
     return { workspace: await ctx.workspaces.describe(req.principal!, w.id) };
@@ -44,7 +49,7 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
   app.patch('/api/workspaces/:id', async (req) => {
     requireWrite(req.principal!);
     const { id } = req.params as { id: string };
-    const body = z.object({ name: z.string().max(120).optional(), active_db_path: z.string().optional(), engine_settings: EngineSettings.optional() }).parse(req.body);
+    const body = z.object({ name: z.string().max(120).optional(), active_db_path: z.string().max(500).optional(), engine_settings: EngineSettings.optional(), cloud_connection_id: z.string().nullable().optional() }).parse(req.body);
     await ctx.workspaces.update(req.principal!, id, body);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.update', resource: `workspace:${id}`, ip: req.ip });
     return { workspace: await ctx.workspaces.describe(req.principal!, id) };
@@ -63,13 +68,30 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post('/api/workspaces/:id/persist', async (req) => {
     requireWrite(req.principal!);
     const { id } = req.params as { id: string };
-    const body = z.object({ path: z.string().max(200).optional() }).parse(req.body ?? {});
+    const body = z.object({ path: z.string().max(500).optional(), cloud_connection_id: z.string().nullable().optional() }).parse(req.body ?? {});
     await ctx.workspaces.get(req.principal!, id, 'OWNER');
     await ctx.mosaic.dropSchema(id);
-    const r = await ctx.workspaces.persist(req.principal!, id, body.path);
+    const r = await ctx.workspaces.persist(req.principal!, id, body.path, body.cloud_connection_id);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.persist', resource: `workspace:${id}`, ip: req.ip, queryText: r.path });
-    return { ok: true, path: r.path, tables: r.tables, views: r.views, copied: r.copied, workspace: await ctx.workspaces.describe(req.principal!, id) };
+    return { ok: true, path: r.path, tables: r.tables, views: r.views, copied: r.copied, cloud_sync: r.cloud_sync, workspace: await ctx.workspaces.describe(req.principal!, id) };
   });
+  // Cloud-backed workspaces: push the working copy to the object now (editors), and report where things stand.
+  app.post('/api/workspaces/:id/sync', async (req) => {
+    requireWrite(req.principal!);
+    const { id } = req.params as { id: string };
+    const w = await ctx.workspaces.get(req.principal!, id, 'EDITOR');
+    if (ctx.workspaces.storageOf(w) !== 'cloud') return reply400('This workspace is not stored in the cloud');
+    const state = await ctx.cloudSync.push(id, 'manual');
+    ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.cloud_sync', resource: `workspace:${id}`, ip: req.ip });
+    return { ok: true, cloud_sync: state };
+  });
+  // Storage choices for the New-workspace dialog and the Storage panel.
+  app.get('/api/workspaces/storage-options', async (req) => ({
+    mode: ctx.cfg.security.filesystem_mode,
+    default_database: ctx.engines.defaultDatabase,
+    data_directory: ctx.workspaces.jail.baseDir,
+    cloud_connections: (await ctx.cloud.list(req.principal!.userId)).map((c) => ({ id: c.id, name: c.name, provider: c.provider, bucket: c.bucket, uri_scheme: c.uri_scheme })),
+  }));
   // A file name for a new or to-be-persisted workspace, unique in the data directory.
   app.get('/api/workspaces/suggest-db-path', async (req) => {
     const q = z.object({ name: z.string().max(200).default('') }).parse(req.query ?? {});

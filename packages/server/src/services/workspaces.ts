@@ -2,7 +2,7 @@ import { eq, and, or, asc, desc, inArray, sql } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Workspace, SessionTab, EngineSettings, ChartConfig, WorkspaceFolder, WorkspaceRole, WorkspaceMember, MemberSubjectType } from '../db/schema/sqlite.js';
+import type { Workspace, SessionTab, EngineSettings, ChartConfig, WorkspaceFolder, WorkspaceRole, WorkspaceMember, MemberSubjectType, CloudSyncState } from '../db/schema/sqlite.js';
 import { WORKSPACE_ROLES, MEMBER_SUBJECT_TYPES } from '../db/schema/sqlite.js';
 import { newId } from '../security/crypto.js';
 import { EngineManager, type WorkspaceEngine } from '../engine/duckdb.js';
@@ -12,6 +12,7 @@ import type { LakehouseService } from './lakehouse.js';
 import type { GroupService } from './groups.js';
 import type { Principal } from './principal.js';
 import { assertWorkspaceScope, isPlatformAdmin, maxWorkspaceRole, requireWorkspaceRole } from './principal.js';
+import { isCloudDbUri, parseCloudUri, type WorkspaceCloudSync } from './workspace-cloud.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { isRemoteUri } from '../engine/sandbox.js';
 import { liveEvents } from '../observability/events.js';
@@ -47,7 +48,10 @@ FROM range(90);`;
 export class WorkspaceService {
   /** Set after construction (the lakehouse service needs this service for engine access, so the dependency is two-way). */
   lakehouse: LakehouseService | null = null;
-  private versionListeners: ((workspaceId: string, version: number) => void)[] = [];
+  private versionListeners: ((workspaceId: string, version: number, reason: string) => void)[] = [];
+
+  /** Cloud-backed database sync (set by the context right after construction). */
+  cloudSync: WorkspaceCloudSync | null = null;
 
   constructor(private readonly store: MetadataStore, private readonly engines: EngineManager, private readonly connections: ConnectionService, private readonly cloud: CloudConnectionService, private readonly groups: GroupService) {
     // A :memory: database loses every table when its engine is (re)created — idle eviction included — so
@@ -59,7 +63,7 @@ export class WorkspaceService {
 
   // ---------- Data epoch (cache invalidation) ----------
 
-  onVersion(fn: (workspaceId: string, version: number) => void) {
+  onVersion(fn: (workspaceId: string, version: number, reason: string) => void) {
     this.versionListeners.push(fn);
   }
 
@@ -80,7 +84,7 @@ export class WorkspaceService {
       .returning({ v: this.s.workspaces.data_version });
     const v = rows[0]?.v;
     if (v === undefined) return 0; // workspace gone
-    for (const fn of this.versionListeners) fn(id, v);
+    for (const fn of this.versionListeners) fn(id, v, reason);
     liveEvents.publish({ type: 'workspace', at: new Date().toISOString(), user_id: actorId, workspace_id: id, data_version: v, reason });
     return v;
   }
@@ -286,16 +290,60 @@ export class WorkspaceService {
     return out;
   }
 
+  /**
+   * Accepted database locations: `:memory:`; a `.duckdb` file inside the data directory, or anywhere on the host
+   * when `security.filesystem_mode` is `full` (the jail is the whole filesystem then); an `md:` MotherDuck
+   * database; or a cloud object (`s3://`, `gs://`, `r2://`, `az://` … `.duckdb`) held by one of the owner's cloud
+   * connections, worked on through a local copy that is synced (see WorkspaceCloudSync).
+   */
   validateDbPath(p: string): string {
     const v = (p ?? '').trim() || ':memory:';
     if (v === ':memory:') return v;
+    if (isCloudDbUri(v)) {
+      if (!/\.(duckdb|ddb|db)$/i.test(v)) throw badRequest('A cloud database must be an object ending in .duckdb (e.g. s3://bucket/team/analytics.duckdb)');
+      return v;
+    }
     if (isRemoteUri(v)) {
-      if (!v.toLowerCase().startsWith('md:')) throw badRequest('Only ":memory:", a .duckdb file inside the data directory, or an "md:" MotherDuck database are supported');
+      if (!v.toLowerCase().startsWith('md:')) throw badRequest('Only ":memory:", a .duckdb file, an s3:// gs:// r2:// az:// object, or an "md:" MotherDuck database are supported');
       return v;
     }
     if (!/\.(duckdb|ddb|db)$/i.test(v)) throw badRequest('Persistent database path must end in .duckdb');
-    this.engines.jail.resolve(v); // throws SandboxViolation on escape
+    const resolved = this.engines.jail.resolve(v); // throws SandboxViolation on escape (any absolute path is fine in full mode)
+    const dir = path.dirname(resolved.absolute);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.W_OK);
+    } catch {
+      throw badRequest(`Cannot write to ${dir}: create the folder and make it writable for the DuckView process`);
+    }
     return v;
+  }
+
+  /** Raw row without an access check — for internal listeners. */
+  async rowById(id: string): Promise<Workspace | null> {
+    const rows = await this.db.select().from(this.s.workspaces).where(eq(this.s.workspaces.id, id)).limit(1);
+    return rows[0] ?? null;
+  }
+
+  /** What kind of place a workspace's database lives in. */
+  storageOf(w: Pick<Workspace, 'active_db_path'>): 'memory' | 'data' | 'folder' | 'cloud' | 'motherduck' {
+    const p = w.active_db_path;
+    if (p === ':memory:') return 'memory';
+    if (isCloudDbUri(p)) return 'cloud';
+    if (isRemoteUri(p)) return 'motherduck';
+    try {
+      return this.engines.jail.resolve(p).absolute.startsWith(this.engines.jail.baseDir + path.sep) ? 'data' : 'folder';
+    } catch {
+      return 'folder';
+    }
+  }
+
+  /** Resolves and records the cloud connection for a cloud URI (owner's connections only). */
+  private async bindCloud(ownerId: string, dbPath: string, connectionId?: string | null): Promise<string | null> {
+    const uri = parseCloudUri(dbPath);
+    if (!uri) return null;
+    if (!this.cloudSync) throw badRequest('Cloud-backed workspaces are not available');
+    return (await this.cloudSync.connectionFor(ownerId, uri, connectionId)).id;
   }
 
   /**
@@ -318,12 +366,13 @@ export class WorkspaceService {
     return `${base}-${newId().slice(0, 8)}.duckdb`;
   }
 
-  async create(p: Principal, input: { name: string; active_db_path?: string; engine_settings?: EngineSettings }): Promise<Workspace> {
+  async create(p: Principal, input: { name: string; active_db_path?: string; engine_settings?: EngineSettings; cloud_connection_id?: string | null }): Promise<Workspace> {
     const now = new Date();
     const name = (input.name ?? '').trim() || 'Untitled workspace';
     // No explicit database → the configured default: a file that keeps the analyst's tables, or a scratch memory db.
     const requested = input.active_db_path?.trim();
     const dbPath = requested ? this.validateDbPath(requested) : this.engines.defaultDatabase === 'memory' ? ':memory:' : await this.suggestDbPath(name);
+    const cloudConnectionId = await this.bindCloud(p.userId, dbPath, input.cloud_connection_id);
     const w: Workspace = {
       id: newId(),
       user_id: p.userId,
@@ -332,6 +381,8 @@ export class WorkspaceService {
       engine_settings: this.validateSettings(input.engine_settings ?? {}),
       folders: [],
       data_version: 0,
+      cloud_connection_id: cloudConnectionId,
+      cloud_sync: cloudConnectionId ? { etag: null, synced_at: null, size_bytes: null, dirty: false, last_error: null } : null,
       created_at: now,
       updated_at: now,
     };
@@ -340,11 +391,17 @@ export class WorkspaceService {
     return w;
   }
 
-  async update(p: Principal, id: string, patch: { name?: string; active_db_path?: string; engine_settings?: EngineSettings }): Promise<Workspace> {
+  async update(p: Principal, id: string, patch: { name?: string; active_db_path?: string; engine_settings?: EngineSettings; cloud_connection_id?: string | null }): Promise<Workspace> {
     const w = await this.get(p, id, 'OWNER');
     const set: Partial<Workspace> = { updated_at: new Date() };
     if (patch.name !== undefined) set.name = patch.name.trim() || w.name;
-    if (patch.active_db_path !== undefined) set.active_db_path = this.validateDbPath(patch.active_db_path);
+    if (patch.active_db_path !== undefined) {
+      set.active_db_path = this.validateDbPath(patch.active_db_path);
+      if (set.active_db_path !== w.active_db_path || patch.cloud_connection_id !== undefined) {
+        set.cloud_connection_id = await this.bindCloud(w.user_id, set.active_db_path, patch.cloud_connection_id ?? (set.active_db_path === w.active_db_path ? w.cloud_connection_id : null));
+        set.cloud_sync = set.cloud_connection_id ? (set.active_db_path === w.active_db_path ? w.cloud_sync : { etag: null, synced_at: null, size_bytes: null, dirty: false, last_error: null }) : null;
+      }
+    }
     if (patch.engine_settings !== undefined) set.engine_settings = this.validateSettings(patch.engine_settings);
     await this.db.update(this.s.workspaces).set(set).where(eq(this.s.workspaces.id, id));
     // Engine settings changed → the cached engine is stale; next query rebuilds it.
@@ -396,7 +453,7 @@ export class WorkspaceService {
     const rows = await this.db.select({ p: this.s.workspaces.active_db_path }).from(this.s.workspaces);
     const out = new Set<string>();
     for (const r of rows) {
-      if (r.p === ':memory:' || isRemoteUri(r.p)) continue;
+      if (r.p === ':memory:' || isRemoteUri(r.p) || isCloudDbUri(r.p)) continue;
       try {
         out.add(this.engines.jail.resolve(r.p).absolute);
       } catch {
@@ -444,12 +501,20 @@ export class WorkspaceService {
    * the workspace points at the file and the engine restarts on it. Owners only. Mosaic's derived objects must be
    * dropped by the caller first (they reference an attached in-memory database that will not exist in the file).
    */
-  async persist(p: Principal, id: string, requestedPath?: string): Promise<{ workspace: Workspace; path: string; tables: number; views: number; copied: boolean }> {
+  async persist(p: Principal, id: string, requestedPath?: string, cloudConnectionId?: string | null): Promise<{ workspace: Workspace; path: string; tables: number; views: number; copied: boolean; cloud_sync: CloudSyncState | null }> {
     const w = await this.get(p, id, 'OWNER');
     if (w.active_db_path !== ':memory:') throw badRequest(`This workspace is already stored in ${w.active_db_path}`);
     const dbPath = requestedPath?.trim() ? this.validateDbPath(requestedPath) : await this.suggestDbPath(w.name);
-    if (isRemoteUri(dbPath)) throw badRequest('Persist into a .duckdb file in the data directory');
-    const target = this.engines.jail.resolve(dbPath).absolute;
+    const cloud = parseCloudUri(dbPath);
+    if (!cloud && isRemoteUri(dbPath)) throw badRequest('Persist into a .duckdb file (data directory, a folder, or an s3:// gs:// r2:// az:// object)');
+    let connectionId: string | null = null;
+    if (cloud) {
+      if (!this.cloudSync) throw badRequest('Cloud-backed workspaces are not available');
+      const conn = await this.cloudSync.connectionFor(w.user_id, cloud, cloudConnectionId);
+      if (await this.cloud.headObject(conn, cloud.bucket, cloud.key)) throw badRequest(`${dbPath} already exists — pick another object name`);
+      connectionId = conn.id;
+    }
+    const target = cloud ? this.cloudSync!.localPath(id) : this.engines.jail.resolve(dbPath).absolute;
     if (fs.existsSync(target)) throw badRequest(`${dbPath} already exists — pick another file name`);
     const engine = this.engines.peek(id);
     let tables = 0;
@@ -467,10 +532,13 @@ export class WorkspaceService {
         await engine.runInternal('DETACH __dv_persist', 60_000).catch(() => undefined);
       }
     }
-    await this.db.update(this.s.workspaces).set({ active_db_path: dbPath, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    const cloud_sync: CloudSyncState | null = cloud ? { etag: null, synced_at: null, size_bytes: null, dirty: true, last_error: null } : null;
+    await this.db.update(this.s.workspaces).set({ active_db_path: dbPath, cloud_connection_id: connectionId, cloud_sync, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
     this.engines.evict(id);
     await this.bumpVersion(id, 'persisted', p.userId);
-    return { workspace: { ...w, active_db_path: dbPath }, path: dbPath, tables, views, copied };
+    // The file must exist before the first push; a cold workspace gets its file on the first engine start instead.
+    const synced = cloud && copied ? await this.cloudSync!.push(id, 'persisted') : cloud_sync;
+    return { workspace: { ...w, active_db_path: dbPath, cloud_connection_id: connectionId, cloud_sync: synced }, path: dbPath, tables, views, copied, cloud_sync: synced };
   }
 
   /**
@@ -482,7 +550,13 @@ export class WorkspaceService {
     // Workspace-linked data connections + every cloud storage connection the owner has configured.
     const lake = this.lakehouse ? await this.lakehouse.resolveEngineBits(workspace.user_id) : { secrets: [], attachments: [] };
     const secrets = [...(await this.connections.resolveSecrets(workspace.user_id, workspace.engine_settings.connection_ids ?? [])), ...(await this.cloud.resolveSecrets(workspace.user_id)), ...lake.secrets];
-    const engine = await this.engines.get({ workspaceId: workspace.id, dbPath: workspace.active_db_path, settings: workspace.engine_settings, secrets, attachments: lake.attachments });
+    let dbPath = workspace.active_db_path;
+    if (isCloudDbUri(dbPath)) {
+      if (!this.cloudSync) throw badRequest('Cloud-backed workspaces are not available');
+      if (!this.engines.peek(workspace.id)) await this.cloudSync.pull(workspace);
+      dbPath = this.cloudSync.localPath(workspace.id);
+    }
+    const engine = await this.engines.get({ workspaceId: workspace.id, dbPath, settings: workspace.engine_settings, secrets, attachments: lake.attachments });
     return { workspace, engine, role: workspace.role };
   }
 

@@ -63,6 +63,18 @@ export const users = sqliteTable(
   (t) => [uniqueIndex('users_email_idx').on(t.email)],
 );
 
+/** Where a cloud-backed workspace stands relative to its object: last pushed ETag, when, size, unsynced changes, last problem. */
+export interface CloudSyncState {
+  etag: string | null;
+  synced_at: string | null;
+  size_bytes: number | null;
+  /** Local changes not yet pushed. */
+  dirty: boolean;
+  last_error: string | null;
+  /** Milliseconds the last push took. */
+  last_push_ms?: number;
+}
+
 export const workspaces = sqliteTable(
   'workspaces',
   {
@@ -74,6 +86,10 @@ export const workspaces = sqliteTable(
     folders: text('folders', { mode: 'json' }).$type<WorkspaceFolder[]>().notNull().default([]),
     /** Monotonic data epoch: bumped on every mutation, file/folder change and :memory: engine (re)start. Cache keys embed it. */
     data_version: integer('data_version').notNull().default(0),
+    /** For cloud-backed databases (active_db_path is s3:// gs:// r2:// az://): the owner's connection that holds the file. */
+    cloud_connection_id: text('cloud_connection_id'),
+    /** Sync bookkeeping of the local working copy against the cloud object. */
+    cloud_sync: text('cloud_sync', { mode: 'json' }).$type<CloudSyncState | null>(),
     created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },

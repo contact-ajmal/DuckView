@@ -5,7 +5,11 @@
  *  - Querying uses DuckDB httpfs/azure via CREATE SECRET, applied to every engine of the owning user.
  */
 import { eq, and, desc } from 'drizzle-orm';
-import { S3Client, ListBucketsCommand, ListObjectsV2Command, HeadBucketCommand } from '@aws-sdk/client-s3';
+import { S3Client, ListBucketsCommand, ListObjectsV2Command, HeadBucketCommand, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
+import fs from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import type { Readable } from 'node:stream';
 import { BlobServiceClient } from '@azure/storage-blob';
 import type { MetadataStore } from '../db/index.js';
 import type { CloudConnection, CloudProvider } from '../db/schema/sqlite.js';
@@ -72,6 +76,11 @@ export class CloudConnectionService {
   async list(userId: string): Promise<PublicCloudConnection[]> {
     const rows = await this.db.select().from(this.s.cloudConnections).where(eq(this.s.cloudConnections.user_id, userId)).orderBy(desc(this.s.cloudConnections.created_at));
     return rows.map((r) => this.toPublic(r));
+  }
+
+  /** Every connection a user owns, credentials still encrypted (for matching a cloud URI to a connection). */
+  async listOwned(userId: string): Promise<CloudConnection[]> {
+    return this.db.select().from(this.s.cloudConnections).where(eq(this.s.cloudConnections.user_id, userId)).orderBy(desc(this.s.cloudConnections.created_at));
   }
 
   async getOwned(userId: string, id: string): Promise<CloudConnection> {
@@ -242,6 +251,65 @@ export class CloudConnectionService {
         entries.push({ name, path: o.Key, uri: `${scheme}://${bucket}/${o.Key}`, type: 'file', kind, size_bytes: o.Size ?? null, modified_at: o.LastModified?.toISOString() ?? null, queryable: kind !== 'other' });
       }
       return { bucket, prefix: dirPrefix, entries: sortEntries(entries), next_token: res.IsTruncated ? (res.NextContinuationToken ?? null) : null };
+    } catch (err) {
+      throw wrapCloudError(err, c);
+    }
+  }
+
+  // ---------------------------------------------------------------- single objects (cloud-backed workspace files)
+
+  /** Metadata of one object, or null when it does not exist. */
+  async headObject(c: CloudConnection, bucket: string, key: string): Promise<{ etag: string | null; size_bytes: number | null; modified_at: string | null } | null> {
+    try {
+      if (c.provider === 'AZURE') {
+        const blob = this.azureClient(c).getContainerClient(bucket).getBlockBlobClient(key);
+        if (!(await blob.exists())) return null;
+        const props = await blob.getProperties();
+        return { etag: props.etag ?? null, size_bytes: props.contentLength ?? null, modified_at: props.lastModified?.toISOString() ?? null };
+      }
+      const res = await this.s3Client(c).send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      return { etag: res.ETag ?? null, size_bytes: res.ContentLength ?? null, modified_at: res.LastModified?.toISOString() ?? null };
+    } catch (err) {
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number }; statusCode?: number };
+      if (e.name === 'NotFound' || e.name === 'NoSuchKey' || e.$metadata?.httpStatusCode === 404 || e.statusCode === 404) return null;
+      throw wrapCloudError(err, c);
+    }
+  }
+
+  /** Streams an object into a local file (written to a temp name, renamed when complete). */
+  async downloadObject(c: CloudConnection, bucket: string, key: string, toFile: string): Promise<{ etag: string | null; size_bytes: number }> {
+    const tmp = `${toFile}.download-${process.pid}`;
+    try {
+      let etag: string | null = null;
+      if (c.provider === 'AZURE') {
+        const blob = this.azureClient(c).getContainerClient(bucket).getBlockBlobClient(key);
+        const res = await blob.downloadToFile(tmp);
+        etag = res.etag ?? null;
+      } else {
+        const res = await this.s3Client(c).send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+        await pipeline(res.Body as Readable, fs.createWriteStream(tmp));
+        etag = res.ETag ?? null;
+      }
+      fs.renameSync(tmp, toFile);
+      return { etag, size_bytes: fs.statSync(toFile).size };
+    } catch (err) {
+      fs.rmSync(tmp, { force: true });
+      throw wrapCloudError(err, c);
+    }
+  }
+
+  /** Uploads a local file as one object (multipart for large files); returns the new ETag. */
+  async uploadObject(c: CloudConnection, bucket: string, key: string, fromFile: string): Promise<{ etag: string | null; size_bytes: number }> {
+    const size_bytes = fs.statSync(fromFile).size;
+    try {
+      if (c.provider === 'AZURE') {
+        const blob = this.azureClient(c).getContainerClient(bucket).getBlockBlobClient(key);
+        const res = await blob.uploadFile(fromFile, { blockSize: 8 * 1024 * 1024, concurrency: 4 });
+        return { etag: res.etag ?? null, size_bytes };
+      }
+      const up = new Upload({ client: this.s3Client(c), params: { Bucket: bucket, Key: key, Body: fs.createReadStream(fromFile), ContentType: 'application/octet-stream' }, partSize: 16 * 1024 * 1024, queueSize: 4 });
+      const res = (await up.done()) as { ETag?: string };
+      return { etag: res.ETag ?? null, size_bytes };
     } catch (err) {
       throw wrapCloudError(err, c);
     }

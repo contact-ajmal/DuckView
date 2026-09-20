@@ -112,6 +112,8 @@ export const ConfigSchema = z.object({
        * persistent later without losing its tables.
        */
       default_database: z.enum(['file', 'memory']).default('file'),
+      /** Quiet period after the last mutating statement before a cloud-backed workspace is pushed to its object. */
+      cloud_sync_delay_seconds: z.coerce.number().int().min(5).default(60),
     })
     .default({}),
   cache: z

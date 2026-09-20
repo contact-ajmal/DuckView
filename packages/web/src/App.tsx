@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { LogOut, Plus, ChevronDown, Users, Eye, HardDrive, Zap, Cloud } from 'lucide-react';
-import { api } from './api/client';
+import { LogOut, Plus, ChevronDown, Users, Eye, HardDrive, Zap, Cloud, FolderOpen, AlertTriangle, Loader2 } from 'lucide-react';
+import { storageKindOf } from './api/client';
+import { StorageChooser, toDbPath, loadStorageOptions, type StorageChoice } from './features/workspace/StorageChooser';
 import { useAuth } from './store/auth';
 import { useWorkspace } from './store/workspace';
 import { LoginPage } from './features/auth/LoginPage';
@@ -37,6 +38,32 @@ function parseRoute(): Route {
   return 'overview';
 }
 
+/** Header chip: where the active workspace's database lives, and for cloud databases how the sync stands. */
+function StorageBadge({ path, sync }: { path: string; sync: { dirty: boolean; last_error: string | null; synced_at: string | null } | null }) {
+  const kind = storageKindOf(path);
+  if (kind === 'memory') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded border border-amber-900/60 bg-amber-950/40 px-1 py-0.5 text-[10px] uppercase tracking-wide text-amber-300" title="In-memory scratch database: tables are cleared when the engine restarts. Settings → Engine → Make persistent keeps them.">
+        <Zap className="h-3 w-3" /> memory
+      </span>
+    );
+  }
+  if (kind === 'cloud') {
+    const tone = sync?.last_error ? 'border-red-900/60 bg-red-950/40 text-red-300' : sync?.dirty ? 'border-amber-900/60 bg-amber-950/40 text-amber-300' : 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300';
+    const title = sync?.last_error ? `Cloud sync problem: ${sync.last_error}` : sync?.dirty ? 'Changes not yet pushed to the cloud (pushed after a quiet minute, or Settings → Engine → Sync now)' : `Synced with ${path}${sync?.synced_at ? ` at ${new Date(sync.synced_at).toLocaleTimeString()}` : ''}`;
+    return (
+      <span className={cn('inline-flex items-center gap-1 rounded border px-1 py-0.5 text-[10px] uppercase tracking-wide', tone)} title={title}>
+        {sync?.last_error ? <AlertTriangle className="h-3 w-3" /> : sync?.dirty ? <Loader2 className="h-3 w-3" /> : <Cloud className="h-3 w-3" />} {sync?.last_error ? 'sync error' : sync?.dirty ? 'pending sync' : 'cloud'}
+      </span>
+    );
+  }
+  return (
+    <span className="hidden items-center gap-1 font-mono text-[11px] text-zinc-500 xl:inline-flex" title={kind === 'folder' ? 'Stored in a folder on the server' : kind === 'motherduck' ? 'MotherDuck database' : 'Stored as a DuckDB file in the data directory — tables survive restarts'}>
+      {kind === 'folder' ? <FolderOpen className="h-3 w-3" /> : <HardDrive className="h-3 w-3" />} {path.length > 40 ? `…${path.slice(-38)}` : path}
+    </span>
+  );
+}
+
 export default function App() {
   const auth = useAuth();
   const ws = useWorkspace();
@@ -44,8 +71,7 @@ export default function App() {
   const [route, setRoute] = useState<Route>(parseRoute);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newPath, setNewPath] = useState('');
-  const [newStorage, setNewStorage] = useState<'file' | 'memory' | 'motherduck'>('file');
+  const [newStorage, setNewStorage] = useState<StorageChoice>({ kind: 'data', path: '' });
   const [wsMenu, setWsMenu] = useState(false);
   const [sharing, setSharing] = useState(false);
 
@@ -112,15 +138,7 @@ export default function App() {
                   {active.role === 'VIEWER' ? <Eye className="h-3 w-3" /> : <Users className="h-3 w-3" />} {active.role.toLowerCase()}
                 </span>
               )}
-              {active?.active_db_path === ':memory:' ? (
-                <span className="inline-flex items-center gap-1 rounded border border-amber-900/60 bg-amber-950/40 px-1 py-0.5 text-[10px] uppercase tracking-wide text-amber-300" title="In-memory scratch database: tables are cleared when the engine restarts. Settings → Engine → Make persistent keeps them in a file.">
-                  <Zap className="h-3 w-3" /> memory
-                </span>
-              ) : (
-                <span className="hidden items-center gap-1 font-mono text-[11px] text-zinc-500 xl:inline-flex" title="Stored as a DuckDB file in the data directory — tables survive restarts">
-                  <HardDrive className="h-3 w-3" /> {active?.active_db_path}
-                </span>
-              )}
+              {active && <StorageBadge path={active.active_db_path} sync={active.cloud_sync} />}
               <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
             </button>
             {wsMenu && (
@@ -201,34 +219,16 @@ export default function App() {
 
       <ShareDialog open={sharing} onClose={() => setSharing(false)} workspace={active ?? null} />
 
-      <Modal open={creating} onClose={() => setCreating(false)} title="New workspace">
+      <Modal open={creating} onClose={() => setCreating(false)} title="New workspace" width="max-w-3xl">
         <div className="space-y-3">
           <div>
             <Label>Name</Label>
-            <Input autoFocus value={newName} onChange={(e) => { setNewName(e.target.value); if (newStorage === 'file') setNewPath(''); }} placeholder="Marketing analytics" />
+            <Input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Marketing analytics" />
           </div>
           <div>
             <Label>Storage</Label>
-            <div className="grid gap-2 md:grid-cols-3">
-              {([
-                ['file', 'Persistent', 'A .duckdb file in the data directory. Tables, views and macros survive restarts — the default for analysts\' work.', <HardDrive key="f" className="h-4 w-4" />],
-                ['memory', 'In-memory scratch', 'Fastest; everything is cleared when the engine restarts. Can be made persistent later without losing tables.', <Zap key="m" className="h-4 w-4" />],
-                ['motherduck', 'MotherDuck', 'A cloud database (md:name) through your MotherDuck token.', <Cloud key="d" className="h-4 w-4" />],
-              ] as const).map(([k, label, hint, icon]) => (
-                <button key={k} type="button" onClick={() => { setNewStorage(k); setNewPath(k === 'memory' ? ':memory:' : k === 'motherduck' ? 'md:' : ''); }} className={cn('rounded-lg border p-2.5 text-left', newStorage === k ? 'border-accent-500 bg-accent-500/10' : 'border-zinc-800 hover:border-zinc-600')}>
-                  <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">{icon} {label}</div>
-                  <div className="mt-1 text-[11px] leading-snug text-zinc-500">{hint}</div>
-                </button>
-              ))}
-            </div>
+            <StorageChooser value={newStorage} onChange={setNewStorage} suggestedName={newName} compact />
           </div>
-          {newStorage !== 'memory' && (
-            <div>
-              <Label>{newStorage === 'file' ? 'File name' : 'Database'}</Label>
-              <Input value={newPath} onChange={(e) => setNewPath(e.target.value)} onFocus={async () => { if (newStorage === 'file' && !newPath) { try { setNewPath((await api.get<{ path: string }>(`/api/workspaces/suggest-db-path?name=${encodeURIComponent(newName)}`)).path); } catch { /* keep empty: the server picks one */ } } }} className="font-mono" placeholder={newStorage === 'file' ? 'chosen from the name (e.g. marketing-analytics.duckdb)' : 'md:my_database'} />
-              {newStorage === 'file' && <p className="mt-1 text-[11px] text-zinc-500">Leave empty to name it after the workspace. Stored inside the data directory; the file is never listed as a data file.</p>}
-            </div>
-          )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setCreating(false)}>
               Cancel
@@ -237,11 +237,10 @@ export default function App() {
               variant="primary"
               onClick={async () => {
                 try {
-                  await ws.createWorkspace({ name: newName, ...(newStorage === 'file' && !newPath.trim() ? {} : { active_db_path: newPath }) });
+                  await ws.createWorkspace({ name: newName, ...toDbPath(newStorage, await loadStorageOptions().catch(() => null)) });
                   setCreating(false);
                   setNewName('');
-                  setNewPath('');
-                  setNewStorage('file');
+                  setNewStorage({ kind: 'data', path: '' });
                 } catch (e) {
                   alert((e as Error).message);
                 }

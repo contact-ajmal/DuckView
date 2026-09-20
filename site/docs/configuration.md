@@ -55,6 +55,7 @@ The final object is validated with zod; the process refuses to start on invalid 
 | `max_result_rows` | Hard cap for UI result grids (default 5 000). |
 | `max_cached_engines`, `engine_idle_ttl_seconds` | Engine LRU size and idle eviction (default 32 / 30 min). |
 | `default_database` | Storage of a workspace created without an explicit database: `file` (default — a `<name>.duckdb` in the data directory that survives restarts) or `memory` (scratch). |
+| `cloud_sync_delay_seconds` | Quiet period after the last change before a cloud-backed workspace (s3:// gs:// r2:// az:// database) is pushed to its object (default 60). |
 | `extension_directory`, `preload_extensions` | Where extensions live (pre-populated in the image) and which to load at start. |
 | `export_ttl_seconds`, `export_max_rows` | Server-side export files expire after the TTL. |
 

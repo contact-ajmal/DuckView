@@ -15,6 +15,7 @@ import { SavedQueryService, DashboardService } from './services/bi.js';
 import { ChatHistoryService } from './services/chat.js';
 import { CopilotService } from './services/copilot.js';
 import { CopilotAdminService } from './services/copilot-admin.js';
+import { WorkspaceCloudSync } from './services/workspace-cloud.js';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
 import { GroupService } from './services/groups.js';
@@ -43,6 +44,7 @@ export interface AppContext {
   chat: ChatHistoryService;
   copilot: CopilotService;
   copilotAdmin: CopilotAdminService;
+  cloudSync: WorkspaceCloudSync;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -70,6 +72,13 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   lakehouse.bind(workspaces, audit);
   const cache = new ResultCache(cfg, workspaces, engines.jail);
   workspaces.onVersion((id) => cache.invalidateWorkspace(id));
+  const cloudSync = new WorkspaceCloudSync(store, engines, cloud, cfg.duckdb.cloud_sync_delay_seconds);
+  workspaces.cloudSync = cloudSync;
+  // Mutating SQL on a cloud-backed workspace schedules a push once things go quiet.
+  workspaces.onVersion((id, _v, reason) => {
+    if (!reason.startsWith('sql:')) return;
+    void workspaces.rowById(id).then((w) => w && workspaces.storageOf(w) === 'cloud' && cloudSync.markDirty(w)).catch(() => undefined);
+  });
   const queries = new QueryService(cfg, workspaces, audit, cache);
   const files = new FileService(cfg, workspaces, audit);
   const storage = new StorageService(cfg, workspaces, cloud, audit, cache);
@@ -111,6 +120,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     chat,
     copilot,
     copilotAdmin,
+    cloudSync,
     lakehouse,
     agents,
     groups,
@@ -119,6 +129,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     startedAt: new Date(),
     async shutdown() {
       await agents.flush();
+      await cloudSync.flush().catch(() => undefined);
       exportsSvc.close();
       engines.closeAll();
       await store.close();

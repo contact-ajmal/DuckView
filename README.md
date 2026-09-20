@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/DuckDB-1.5-FFF000?logo=duckdb&logoColor=black" alt="DuckDB 1.5">
   <img src="https://img.shields.io/badge/MCP-stdio%20%C2%B7%20SSE%20%C2%B7%20Streamable%20HTTP-7c3aed" alt="MCP transports">
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript strict">
-  <img src="https://img.shields.io/badge/tests-199%20passing-22c55e" alt="199 tests">
+  <img src="https://img.shields.io/badge/tests-204%20passing-22c55e" alt="204 tests">
 </p>
 
 <p align="center">
@@ -218,7 +218,7 @@ Full details — configuration keys, every endpoint, the MCP tool contracts, CLI
 
 ## 🧪 Quality
 
-`pnpm test` runs **199 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API) and exercise the agent façade against a fake AWS bridge. `scripts/smoke.mjs` verifies a running instance end to end.
+`pnpm test` runs **204 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API) and exercise the agent façade against a fake AWS bridge. `scripts/smoke.mjs` verifies a running instance end to end.
 
 ---
 

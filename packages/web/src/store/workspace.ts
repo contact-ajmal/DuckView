@@ -382,7 +382,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   startLiveInvalidation() {
     if (liveUnsubscribe) return liveUnsubscribe;
     liveUnsubscribe = subscribeLiveEvents((e) => {
-      if (e.type === 'workspace') get().setDataVersion(e.workspace_id, e.data_version);
+      if (e.type !== 'workspace') return;
+      // Cloud sync state changes carry no new epoch (data_version -1): refresh the workspace row instead.
+      if (e.reason === 'cloud_sync') {
+        api.get<{ workspace: Workspace }>(`/api/workspaces/${e.workspace_id}`).then((r) => set({ workspaces: get().workspaces.map((w) => (w.id === r.workspace.id ? { ...w, cloud_sync: r.workspace.cloud_sync, cloud_connection_id: r.workspace.cloud_connection_id, active_db_path: r.workspace.active_db_path } : w)) })).catch(() => undefined);
+        return;
+      }
+      get().setDataVersion(e.workspace_id, e.data_version);
     });
     return () => {
       liveUnsubscribe?.();

@@ -98,6 +98,17 @@ export const api = {
 
 // ------------------------------------------------------------------ types
 export interface User { id: string; email: string; role: 'ADMIN' | 'USER' | 'READ_ONLY'; auth_provider: string; display_name: string | null; created_at: string }
+export interface CloudSyncState { etag: string | null; synced_at: string | null; size_bytes: number | null; dirty: boolean; last_error: string | null; last_push_ms?: number }
+export interface StorageOptions { mode: 'sandboxed' | 'full'; default_database: 'file' | 'memory'; data_directory: string; cloud_connections: { id: string; name: string; provider: 'S3' | 'R2' | 'GCS' | 'AZURE'; bucket: string | null; uri_scheme: string }[] }
+export type StorageKind = 'data' | 'folder' | 'cloud' | 'memory' | 'motherduck';
+/** Where a workspace's database lives, derived from its path. */
+export function storageKindOf(activeDbPath: string, dataDirectory?: string | null): StorageKind {
+  if (activeDbPath === ':memory:') return 'memory';
+  if (/^(s3|gs|r2|az|azure):\/\//i.test(activeDbPath)) return 'cloud';
+  if (/^md:/i.test(activeDbPath)) return 'motherduck';
+  if (activeDbPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(activeDbPath)) return dataDirectory && activeDbPath.startsWith(dataDirectory.replace(/\/+$/, '') + '/') ? 'data' : 'folder';
+  return 'data';
+}
 export interface EngineSettings { memory_limit?: string; threads?: number | 'auto'; query_timeout_seconds?: number; temp_directory?: string; extensions?: string[]; connection_ids?: string[] }
 export type WorkspaceRole = 'OWNER' | 'EDITOR' | 'VIEWER';
 export interface Workspace {
@@ -110,6 +121,9 @@ export interface Workspace {
   member_count: number;
   /** Data epoch — moves on every mutation; cached results keyed on an older epoch are stale. */
   data_version: number;
+  /** Cloud-backed databases (s3:// gs:// r2:// az://): the owner's connection and where the local copy stands. */
+  cloud_connection_id: string | null;
+  cloud_sync: CloudSyncState | null;
 }
 export interface WorkspaceMember { id: string; workspace_id: string; subject_type: 'user' | 'group'; subject_id: string; role: WorkspaceRole; added_by: string | null; created_at: string; name: string; email: string | null; external: boolean }
 export interface Group { id: string; name: string; description: string | null; external_id: string | null; created_by: string | null; created_at: string; updated_at: string; member_count: number; my_role: 'MANAGER' | 'MEMBER' | null }
