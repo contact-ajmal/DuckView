@@ -1,6 +1,6 @@
 ---
 title: Features
-description: The complete DuckView feature list — querying, workbench, dashboards, lakehouse connectors, AI agents & MCP, DuckCopilot, sharing & teams, result cache, security, observability and themes.
+description: The complete DuckView feature list — querying, the data source bar, workbench, Mosaic dashboards, data apps, connections & syncs, lakehouse connectors, AI agents & MCP, DuckCopilot, sharing & teams, result cache, security, observability and themes.
 ---
 <section class="hero-small">
   <div class="container">
@@ -27,6 +27,7 @@ description: The complete DuckView feature list — querying, workbench, dashboa
     <div class="card">
       <h3>Overview & profiling</h3>
       <ul>
+        <li>The data source bar: <em>Local</em> (data directory, folders mounted from this computer, workspace tables — uploads go to the folder you choose) and <em>Remote</em> (every connection, browsable in place: buckets, catalogs, databases, warehouses, applications, Drive and Sheets) <span class="tag new">New</span></li>
         <li>Auto-profile on selection: row/column counts, type mix, null ratios, duplicate rows</li>
         <li>Per-column min / max / avg / median and equi-width histograms, category and timeline distributions</li>
         <li><code>SUMMARIZE</code> profiles of any table, file, remote object or SELECT</li>
@@ -103,7 +104,8 @@ description: The complete DuckView feature list — querying, workbench, dashboa
     <div class="card">
       <h3>AI agents & MCP</h3>
       <ul>
-        <li>MCP server over stdio, legacy SSE and Streamable HTTP; 10 tools, 3 resources, 2 guided prompts</li>
+        <li>MCP server over stdio, legacy SSE and Streamable HTTP; 25 tools, 4 resources, 5 guided prompts (data quality audit, SQL optimisation, Mosaic dashboard, data pipeline, data app)</li>
+        <li>Tools for every layer: query, profile, browse storage, lakehouse SQL, dashboards, connections and syncs, connector browsing and warehouse SQL, data apps (create, preview with a screenshot, publish after approval)</li>
         <li>REST façade <code>POST /api/agent/v1/tools/&lt;tool&gt;</code> and generated OpenAPI 3.0</li>
         <li>Human-in-the-loop: mutations return an approval challenge until re-issued with <code>dry_run=false</code></li>
         <li>Registered agents with workspace-scoped tokens, per-framework snippets, self-test and live inspector</li>
@@ -115,7 +117,7 @@ description: The complete DuckView feature list — querying, workbench, dashboa
       <ul>
         <li>Context hydrated with tables, columns, files, buckets, the active tab's SQL and <code>SUMMARIZE</code> stats</li>
         <li>Claude, ChatGPT / OpenAI, Gemini, DeepSeek, OpenRouter, Kimi, Groq, Mistral, Grok, Ollama, any OpenAI-compatible endpoint, Amazon Bedrock, Bedrock Agent and AgentCore</li>
-        <li>Settings console: pick a vendor, paste a key, test, save for everyone — encrypted at rest, live immediately; or bring your own key (kept in the browser)</li>
+        <li>Settings console: pick a vendor, paste a key, fetch models, test, save for everyone — encrypted at rest, write-only (never shown, logged or returned), live immediately; or bring your own key (kept in the browser), which administrators can switch off</li>
         <li>Usage: sessions running now, tokens per day, per model and per person</li>
         <li>Insert into tab, open in a new tab, run &amp; inspect, fix my query, suggest questions, build dashboard</li>
         <li>Conversations persisted with the context snapshot of each turn</li>
@@ -147,7 +149,8 @@ description: The complete DuckView feature list — querying, workbench, dashboa
       <ul>
         <li>Two sandbox layers: a Node filesystem jail and DuckDB's <code>allowed_directories</code> / <code>enable_external_access</code> / <code>lock_configuration</code></li>
         <li>One choke point for every query: authorization → SQL guard → HITL → audit</li>
-        <li>AES-256-GCM credential vault with the row id as AAD; scrypt passwords; SHA-256 API tokens shown once</li>
+        <li>AES-256-GCM credential vault with the row id as AAD — cloud, lakehouse, database and connector credentials, Copilot keys, Google refresh tokens; write-only, redacted from logs, scrubbed from provider errors; scrypt passwords; SHA-256 API tokens shown once</li>
+        <li>Data apps run apart: separate processes, no server secrets, read-only workspace-scoped tokens rotated per start, cookie-authenticated proxy, off in sandboxed mode</li>
         <li>Roles ADMIN / USER / READ_ONLY, scoped tokens <code>read</code> / <code>write</code> / <code>mcp</code> / <code>admin</code> with workspace pinning and expiry</li>
         <li>Local login, OIDC (Authorization Code + PKCE) with group → role mapping</li>
         <li>Per-workspace memory, thread and timeout limits; extension allow-list; rate limiting</li>

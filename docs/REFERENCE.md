@@ -35,7 +35,12 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Exports: COPY … TO (parquet/csv/json) + streaming Arrow IPC writer          │
 │  Copilot: schema/SUMMARIZE/active-SQL context → provider bridge (SSE)        │
 │  Lakehouse: Iceberg ATTACH (Glue/S3 Tables/REST/UC) · Databricks SQL API     │
-│  Agent tools: one registry → MCP (10 tools · 3 resources · 2 prompts)        │
+│  Connections: databases ATTACHed · 13 connectors (warehouses, SaaS, Google)  │
+│               · scheduled syncs with validated transformations              │
+│  Mosaic: exec-policed connector · materialised datasets · spec validation    │
+│  Data apps: Streamlit runner (venv, tokens, health) · cookie proxy /apps/:id │
+│  Copilot: 14 providers, keys write-only · usage per session and token       │
+│  Agent tools: one registry → MCP (25 tools · 4 resources · 5 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -423,9 +428,13 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `update_data_sync(sync_id, transform_sql?, schedule?, mode?, enabled?, name?, run_now?)` | Attach a transformation (validated), change the schedule, pause/resume. |
 | `run_data_sync(sync_id)` | Run now; rows, duration, error and recent runs. |
 
-**Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec).
+| `browse_connector(connection_id, path?)` | Walks a warehouse, SaaS or Google connection one level at a time; leaves carry the `resource` for `create_data_sync`. |
+| `connector_query(connection_id, sql, limit?)` | Read-only SQL on Snowflake, BigQuery, Redshift or ClickHouse; rows capped. |
+| `list_apps` · `create_app(name, source, …)` · `update_app` · `run_app` · `stop_app` · `get_app_logs` · `preview_app` · `publish_app` | Streamlit data apps: generated from a dashboard, saved queries or code (validated first), run, previewed with a screenshot, published after human approval — see [Data apps](#data-apps-streamlit). |
 
-**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)`, `build_mosaic_dashboard(table_or_path, goal?)` and `build_data_pipeline(source, goal?)` encode complete agent workflows over the tools above.
+**Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec), `duckdb://guides/data-app` (how to write a Streamlit data app with the SDK).
+
+**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)`, `build_mosaic_dashboard(table_or_path, goal?)`, `build_data_pipeline(source, goal?)` and `build_data_app(goal, data?)` encode complete agent workflows over the tools above.
 
 ## HTTP API (summary)
 

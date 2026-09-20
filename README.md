@@ -25,10 +25,11 @@
   <a href="https://contact-ajmal.github.io/DuckView/docs/index.html"><b>Docs</b></a> ·
   <a href="#-quick-start">Quick start</a> ·
   <a href="#-what-you-get">Features</a> ·
+  <a href="#-connections--syncs">Connections</a> ·
+  <a href="#-data-apps-streamlit">Data apps</a> ·
   <a href="#-lakehouse-connectors">Lakehouse</a> ·
   <a href="#-built-for-ai-agents">Agents & MCP</a> ·
   <a href="#-duckcopilot">Copilot</a> ·
-  <a href="#-themes">Themes</a> ·
   <a href="#-security-model">Security</a> ·
   <a href="docs/REFERENCE.md">Technical reference</a>
 </p>
@@ -41,16 +42,16 @@ Most "SQL UIs" stop at the query box. DuckView is a complete, self-hosted data w
 
 |  |  |
 |---|---|
-| ⚡ **Query anything, instantly** | Parquet, CSV, JSON, Excel, DuckDB files, S3 / R2 / GCS / Azure objects — and now **Iceberg catalogs on AWS Glue, S3 Tables, any Iceberg REST catalog and Databricks**. Drop a file or add a folder and it's queryable in seconds. |
-| 🤖 **Agent-native from day one** | A hardened **MCP server** plus a **REST / OpenAPI façade** expose the same tools to Claude Desktop, Cursor, Claude Code, Strands, LangGraph, LangChain, CrewAI, Bedrock AgentCore and Bedrock Agents. Every mutation is held for **human approval**. |
-| 🧠 **DuckCopilot** | An in-app assistant hydrated with your live schema, files, buckets and the SQL you're writing. Bring Anthropic, OpenAI, Ollama, Amazon Bedrock — or point it at **your own agent** on AgentCore. |
+| ⚡ **Query anything, instantly** | Parquet, CSV, JSON, Excel, DuckDB files, S3 / R2 / GCS / Azure objects, Iceberg catalogs on AWS Glue, S3 Tables, any Iceberg REST catalog and Databricks. Drop a file, add a folder from anywhere on the machine, or pick a bucket — it's queryable in seconds. |
+| 🔌 **Every source, one page** | **Connections** covers object storage, lakehouse catalogs, PostgreSQL / MySQL / SQLite / DuckDB files, **Snowflake · BigQuery · Redshift · ClickHouse · Microsoft Fabric**, **Salesforce · HubSpot · Stripe · Google Analytics 4 · Airtable · Notion**, HTTP endpoints and **Google Drive / Sheets with your Google account** — health-checked, browsable in place, credentials encrypted and write-only. **Syncs** load any of them into a workspace table on a schedule, with a transformation validated before it is saved. |
+| 🧩 **Data apps (Streamlit)** | Build Streamlit apps on a workspace's data with the `duckview` Python SDK — or generate one from a dashboard or saved queries, or let Copilot draft it. DuckView runs them (Python environment on first start, editor with live preview and static checks) and serves them at `/apps/<id>/` with a read-only, workspace-scoped token. Agents do the same over MCP: `create_app` → `preview_app` (screenshot) → `update_app` → `publish_app`. |
+| 🔍 **Explore & Mosaic dashboards** | Every column of a file, table or query becomes a linked chart — brush one and the rest cross-filter at data-cube speed on millions of rows. Declarative, cross-filtered **Mosaic dashboards** from a YAML/JSON spec: live-preview editor, generated from any dataset in one click, drafted by Copilot or created by agents, validated against your data before they are saved. |
+| 🤖 **Agent-native from day one** | A hardened **MCP server** plus a **REST / OpenAPI façade** expose **25 tools**, 4 resources and 5 guided prompts to Claude Desktop, Cursor, Claude Code, Strands, LangGraph, LangChain, CrewAI, Bedrock AgentCore and Bedrock Agents. Every mutation is held for **human approval**. |
+| 🧠 **DuckCopilot** | An in-app assistant hydrated with your live schema, files, buckets and the SQL you're writing. **14 providers** — Claude, ChatGPT, Gemini, DeepSeek, OpenRouter, Kimi, Groq, Mistral, Grok, Ollama, any OpenAI-compatible endpoint, Amazon Bedrock, Bedrock Agent, AgentCore — configured from the console; keys stored encrypted and write-only; sessions and tokens tracked. |
+| 💾 **Workspaces that persist, anywhere** | A workspace's DuckDB database lives in the data directory, in **any folder on the server**, or as an object in **S3 / R2 / GCS / Azure** kept in sync (local working copy, pushed after every quiet minute); an in-memory scratch workspace becomes persistent later without losing a table. |
 | 📊 **From profile to dashboard** | Auto-profiling on load (KPIs, null ratios, distributions), a tabbed IDE-style workbench with charts, plans and profiles, and a drag-and-drop BI dashboard builder with auto-refresh. |
-| 🔍 **Explore, interactively** | Every column of a file, table or query becomes a linked chart — brush one and the rest cross-filter, at data-cube speed on millions of rows, computed in the workspace engine. Built on [Mosaic](https://idl.uw.edu/mosaic/). |
-| 🧩 **Data apps (Streamlit)** | Write a Streamlit app on a workspace's tables and files — `duckview.connect()`, `query(sql)` → pandas, a table picker, the viewer's identity — or **generate one from a Mosaic dashboard or saved queries**, or let Copilot draft it. DuckView runs it: Python environment created on first start, code editor with live preview and static checks, apps served under `/apps/<id>/` with a read-only, workspace-scoped token. Agents do the same over MCP: `create_app` → `preview_app` (screenshot) → `update_app` → `publish_app` (approved). `pip install duckview` for the SDK anywhere else. |
-| 🔌 **Connections & syncs** | One page for every source — S3/R2/GCS/Azure, Glue/S3 Tables/Iceberg REST/Databricks, PostgreSQL/MySQL/SQLite/DuckDB files, **Snowflake, BigQuery, Redshift, ClickHouse, Fabric**, **Salesforce, HubSpot, Stripe, GA4, Airtable, Notion**, HTTP endpoints and **Google Drive / Sheets with your Google account** — with health checks, credentials encrypted and write-only, and **scheduled syncs** that load a table, object, file or SELECT into a workspace with an optional transformation (drafted by Copilot or set by an agent), recorded run by run. |
-| 🧩 **Mosaic dashboards** | Declarative, cross-filtered dashboards from a YAML/JSON spec: editor with live preview, generated from any table or file in one click, drafted by Copilot or created by agents (`create_mosaic_dashboard`), validated against your data before they are saved. |
 | ⚡ **Fast the second time** | A two-tier result cache — shared on the server, per user in the browser — keyed on file fingerprints and a workspace data epoch, so a 10 s profile of a 400 MB CSV comes back in milliseconds for everyone, and is *never* stale after a mutation. |
-| 👥 **Built for teams** | Share a workspace with people or teams as **viewer / editor / owner**. Dashboards and saved queries are shared; tabs stay personal. Teams mirror your IdP groups over OIDC, so `okta:finance` is a share target on day one. |
+| 👥 **Built for teams** | Share a workspace with people or teams as **viewer / editor / owner**. Dashboards, saved queries, apps and syncs are shared; tabs stay personal. Teams mirror your IdP groups over OIDC, so `okta:finance` is a share target on day one. |
 | 🔒 **Enterprise hardening** | Filesystem jail, DuckDB `lock_configuration`, per-workspace memory/thread limits, AES-256-GCM credential vault, scoped API tokens, audit log, Prometheus + OpenTelemetry, OIDC with group → role mapping. |
 | 🎨 **Yours to shape** | Six themes (three dark, three light incl. a *Professional* corporate look), resizable IDE panes, and the ability to hide any component and bring it back. |
 
@@ -83,11 +84,11 @@ docker run -p 4200:4200 -v duckview-data:/data -v duckview-meta:/app/meta \
 
 ## ✨ What you get
 
-### Overview — your data, profiled on arrival
+### Overview — every source in one bar, profiled on arrival
 
-Drop a file or add a folder from anywhere on your machine (VS Code-style workspace folders). DuckView profiles it immediately: row/column counts, type mix, null ratios, duplicate rows, min/max/avg per column and equi-width distributions — all computed by DuckDB, never sampled by hand.
+The **data source bar** is the workspace's data map: **Local** (the data directory, folders mounted from this computer and read in place, the workspace's tables — uploads go to whichever folder you choose) and **Remote** (every connection you configured, browsable in place: buckets, catalogs, databases, warehouses, applications, Drive and Sheets). Pick anything and DuckView profiles it immediately: row/column counts, type mix, null ratios, duplicate rows, min/max/avg per column and equi-width distributions — all computed by DuckDB, never sampled by hand.
 
-<p align="center"><img src="docs/screenshots/overview.png" alt="Overview page with KPIs, schema profile and distributions" width="92%"></p>
+<p align="center"><img src="docs/screenshots/overview.png" alt="Overview page with the data source bar, KPIs, schema profile and distributions" width="92%"></p>
 
 ### Workbench — an IDE for SQL
 
@@ -95,11 +96,56 @@ Tabs with per-tab *Stop*, cursor and draft persistence, a schema explorer that o
 
 <p align="center"><img src="docs/screenshots/copilot.png" alt="Workbench with the DuckCopilot drawer docked on the right" width="92%"></p>
 
-### Dashboards — from query to executive view in minutes
+### Mosaic dashboards — cross-filter millions of rows
 
-KPI, chart, table and Markdown widgets on a drag-and-drop grid with auto-refresh. Widgets run the same guarded queries as the workbench — and agents can build dashboards for you through `create_dashboard_widget`.
+A declarative YAML/JSON spec becomes a dashboard where every chart filters every other: menus, sliders, KPI cards, timelines, histograms, heat maps and tables share one crossfilter, computed as data cubes in the workspace engine (datasets are materialised once in memory, so a 3.7-million-row month of taxi trips answers every brush in milliseconds). Write the spec in the editor with a live preview, **generate** it from any table or file, let Copilot draft it, or have an agent create it with `create_mosaic_dashboard` — it is validated against your data before it is saved. Classic **grid dashboards** (KPI, chart, table and Markdown widgets with auto-refresh) are still there for the executive view.
 
-<p align="center"><img src="docs/screenshots/dashboard.png" alt="BI dashboard with KPIs, bar and line charts" width="92%"></p>
+<p align="center"><img src="docs/screenshots/mosaic.png" alt="Mosaic dashboard over 3.5 million taxi trips with filters, KPIs, a timeline and heat maps" width="92%"></p>
+
+---
+
+## 🔌 Connections & syncs
+
+One page for every source. Each card in the catalog opens the form for that exact source; configured connections show their health and open their settings; everything is reachable by agents through `list_data_sources`, `browse_connector` and the sync tools.
+
+| Family | Sources |
+|---|---|
+| Object storage | Amazon S3, Cloudflare R2, Google Cloud Storage, Azure Blob |
+| Lakehouse catalogs | AWS Glue / SageMaker Lakehouse, Amazon S3 Tables, any Iceberg REST catalog, Databricks |
+| Databases | PostgreSQL, MySQL / MariaDB, SQLite files, DuckDB files — attached read-only as `alias.schema.table` |
+| Warehouses | Snowflake (SQL API), Google BigQuery, Amazon Redshift (Data API), ClickHouse, Microsoft Fabric / OneLake — browse, run SQL remotely, land the result in DuckDB |
+| SaaS applications | Salesforce, HubSpot, Stripe, Google Analytics 4, Airtable, Notion — objects pulled page by page on a schedule |
+| Web, Drive & Sheets | HTTP / REST endpoints, Google Drive and Google Sheets with your Google account (admin-registered OAuth client, read-only scopes) or a service account, shared-link sheets |
+
+<p align="center"><img src="docs/screenshots/connections.png" alt="The Connections catalog: object storage, lakehouse catalogs, databases, warehouses, SaaS applications, Drive and Sheets" width="92%"></p>
+
+**Syncs** load a source — an attached table, a warehouse table or query, an application object, a Drive file, a Sheets tab, a URL, or any SELECT — into a workspace table on a schedule (interval or cron) or on demand, in *replace* or *append* mode. An optional **transformation** (one SELECT over `{{raw}}`) shapes the target and is validated against the live source before it is saved; **Draft with Copilot** writes a first version. Runs execute on the server as the workspace owner with the same guards as a typed query, are recorded one by one, and show up live. Credentials (API keys, secrets, OAuth refresh tokens, service-account keys) are encrypted at rest, reported by field name only, never logged and never handed to the DuckDB engine: rows are staged through the connector to a file the engine reads.
+
+<p align="center"><img src="docs/screenshots/sync-editor.png" alt="The sync editor browsing a ClickHouse warehouse, with a transformation over the loaded rows" width="92%"></p>
+
+---
+
+## 🧩 Data apps (Streamlit)
+
+Write a Streamlit app on a workspace's tables and files — and DuckView runs it.
+
+```python
+import streamlit as st
+from duckview.streamlit import connect, query, table_picker, viewer
+
+dv = connect()                                   # from the runner's environment
+rel = table_picker(dv)                           # tables, views and data files of the workspace
+df = query(f"SELECT * FROM {rel} LIMIT 1000")    # DuckDB SQL → pandas, cached
+st.dataframe(df)
+st.caption(f"Viewing as {viewer()['email']}")
+```
+
+- **Generate** an app from a Mosaic dashboard (datasets, filters, KPIs, charts and tables become sidebar widgets, metric cards and Altair charts computed in SQL), from saved queries, or from a template — no model needed; or let **Copilot draft** `app.py` for a goal against the SDK guide.
+- The editor has Python highlighting, a **live preview** of the real app, ⌘S saves and restarts, static **checks** (compiles, imports streamlit, no tokens) and the logs one click away.
+- The **runner** creates a Python environment on first start (streamlit, pandas, pyarrow, the SDK), installs each app's `requirements.txt`, health-checks it, stops idle apps, and serves it at `/apps/<id>/` to the workspace's members — with a **read-only, workspace-scoped token** rotated on every start and a minimal environment that never sees the server's secrets. The visitor's identity is forwarded to the app.
+- `pip install duckview` for the SDK anywhere else: `query()`, `query_arrow()` for large results, a table builder, `copilot()`, and the agent façade's OpenAPI for LangChain / CrewAI / Strands.
+
+<p align="center"><img src="docs/screenshots/apps.png" alt="The data app editor: Python code next to the live Streamlit preview generated from the taxi dashboard" width="92%"></p>
 
 ---
 
@@ -124,7 +170,7 @@ Browsing is lazy — DuckView lists namespaces and tables without loading table 
 
 DuckView treats agents as first-class users. **One tool registry** backs three surfaces, so they can never drift:
 
-- **MCP server** — stdio, legacy SSE and Streamable HTTP; 10 tools, 3 resources, 2 guided prompts.
+- **MCP server** — stdio, legacy SSE and Streamable HTTP; **25 tools**, 4 resources (workspaces, schemas, system resources, the Mosaic and data-app guides) and 5 guided prompts (`data_quality_audit`, `sql_optimization`, `build_mosaic_dashboard`, `build_data_pipeline`, `build_data_app`).
 - **REST façade** — `POST /api/agent/v1/tools/<tool>` for frameworks that prefer plain HTTPS.
 - **OpenAPI 3.0** — generated on the fly for Bedrock Agents action groups and AgentCore Gateway targets.
 
@@ -140,7 +186,7 @@ with duckview:
     Agent(tools=duckview.list_tools_sync())("Which region grew fastest last quarter?")
 ```
 
-**Safety is not optional.** Results are capped, long strings truncated, paths jailed, and every mutating statement — local or on a Databricks warehouse — returns an *approval challenge* until a human re-issues it with `dry_run=false`.
+**Safety is not optional.** Results are capped, long strings truncated, paths jailed, and every mutating statement — local or on a warehouse — returns an *approval challenge* until a human re-issues it with `dry_run=false`; publishing an app to the whole organisation goes through the same `dry_run` gate.
 
 | Tool | What it does |
 |---|---|
@@ -166,7 +212,9 @@ Ask in plain English; get DuckDB SQL you can insert, open in a tab, or *run & in
 | **Amazon Bedrock** | Converse streaming with model / inference-profile discovery |
 | **Bedrock Agent** · **AgentCore runtime** | Route the drawer to *your* deployed agent; DuckView passes the workspace context along |
 
-**Settings → Copilot** is the console: pick a vendor card, paste a key (the card links to where you get one), *Test connection*, *Save for everyone* — stored encrypted, live immediately. People can also bring their own key (browser-only). The **Usage** panel shows the sessions running right now and tokens per day, model and person.
+**Settings → Copilot** is the console: pick a vendor card, paste a key (the card links to where you get one), *Fetch models*, *Test connection*, *Save for everyone* — stored encrypted, live immediately, never shown again (administrators see the last four characters), never in a config file, a log or an API response. People can also bring their own key (browser-only), or administrators can switch that off. The **Usage** panel shows the sessions running right now and tokens per day, model and person.
+
+<p align="center"><img src="docs/screenshots/copilot-settings.png" alt="Settings → Copilot: vendor cards, key entry and model picker" width="92%"></p>
 
 ---
 
@@ -193,7 +241,8 @@ Six themes decide both colour and typeface, applied through runtime CSS variable
 
 - **Two layers of sandboxing** — a Node-side filesystem jail *and* DuckDB's own `allowed_directories` / `enable_external_access` / `lock_configuration`, so even `SET` and `PRAGMA` can't loosen the box. `filesystem_mode: full` for a personal workstation, `sandboxed` for multi-tenant.
 - **A single choke point** — every query, from the UI or an agent, passes authorization → SQL guard → HITL → audit.
-- **Secrets never leave the server** — cloud, lakehouse and data-connection credentials are AES-256-GCM encrypted with the row id as AAD and applied to DuckDB as scoped `CREATE SECRET`s; the API never returns them.
+- **Secrets never leave the server** — cloud, lakehouse, database and connector credentials, Copilot keys, Google refresh tokens and the Google OAuth client are AES-256-GCM encrypted with the row id as AAD and are write-only: the API reports field names, never values; logs are redacted; provider errors are scrubbed. Connector rows are staged to files the engine reads, so warehouse and SaaS credentials never reach DuckDB.
+- **Data apps run apart** — separate processes with a minimal environment (no server secrets, no config), a read-only token scoped to their workspace that is rotated on every start and revoked on stop, a cookie-authenticated proxy that checks workspace membership, and `apps.enabled` off in sandboxed mode.
 - **Scoped tokens** — `read` / `write` / `mcp` / `admin`, optional workspace pinning and expiry, SHA-256 at rest, revocable per agent.
 - **Workspace roles** — every access resolves to owner / editor / viewer through direct or team grants; non-members get a 404, viewers can't mutate even with an approved agent call, and members query through the owner's connections (stated in the share dialog, not hidden).
 - **Observability** — Prometheus metrics, OpenTelemetry traces, liveness/readiness probes, real-time audit feed.
@@ -207,11 +256,13 @@ React 19 · Vite · Tailwind v4 · Chart.js · CodeMirror
         │  REST · WebSocket (rows, live events) · SSE (Copilot, MCP) · Streamable HTTP
 Fastify 5 (TypeScript strict)
   auth (local · OIDC · API tokens)   sharing (owner / editor / viewer, teams)
-  QueryService (authz → guard → HITL → audit)
-  Lakehouse (Iceberg ATTACH · Databricks SQL API)   Agent tool registry → MCP + REST + OpenAPI
-  Copilot bridge (Claude · OpenAI-compatible vendors · Ollama · Bedrock · Bedrock Agent · AgentCore)
+  QueryService (authz → guard → HITL → audit)   result cache (server LRU + browser IndexedDB)
+  Connections: cloud secrets · lakehouse ATTACH · database ATTACH · 13 connectors (warehouses, SaaS, Google) · syncs
+  Mosaic connector (exec policy, materialised datasets)   Data apps (Streamlit runner + cookie proxy) ─ duckview SDK
+  Agent tool registry (25 tools) → MCP + REST + OpenAPI   Copilot bridge (14 providers, write-only keys)
         │
-EngineManager — one native DuckDB instance per workspace (LRU + idle TTL), jailed and locked
+EngineManager — one native DuckDB instance per workspace (LRU + idle TTL), jailed and locked;
+                databases in the data directory, any folder, or S3 / R2 / GCS / Azure (synced working copy)
         │
 Metadata (Drizzle) — SQLite by default, PostgreSQL via DATABASE_URL
 ```
@@ -222,13 +273,13 @@ Full details — configuration keys, every endpoint, the MCP tool contracts, CLI
 
 ## 🧪 Quality
 
-`pnpm test` runs **240 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API), stand in for Snowflake, BigQuery, Redshift, ClickHouse, Salesforce, HubSpot, Stripe, GA4, Airtable, Notion and Google's OAuth / Drive / Sheets APIs, and exercise the agent façade against a fake AWS bridge. `scripts/smoke.mjs` verifies a running instance end to end.
+`pnpm test` runs **240 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API), stand in for Snowflake, BigQuery, Redshift, ClickHouse, Salesforce, HubSpot, Stripe, GA4, Airtable, Notion and Google's OAuth / Drive / Sheets APIs, run the data-app runner and proxy against a fake Streamlit, drive the Python SDK against the server, and exercise the agent façade against a fake AWS bridge. CI runs it on Linux; `scripts/smoke.mjs` verifies a running instance (or the Docker image) end to end, a Streamlit app included.
 
 ---
 
 ## 🗺 Roadmap
 
-- Delta Lake browsing via the `delta` extension
+- Data apps: container / Kubernetes runtime tiers, in-browser apps (stlite), Dash and Gradio behind the same runner
 - Scheduled dashboard snapshots & alerts
 - Row-level access policies per workspace
 - Per-user data directories (isolation inside the jail)

@@ -25,7 +25,12 @@ description: How the pieces fit — the React app, the Fastify server and its si
 │  ResultCache ─ LRU keyed on file stat + workspace data epoch · ETag/304      │
 │  Storage: jailed tree · S3/Azure SDK listings · DESCRIBE-based inspection     │
 │  Lakehouse: Iceberg ATTACH (Glue/S3 Tables/REST/UC) · Databricks SQL API     │
-│  Agent tools: one registry → MCP (10 tools · 3 resources · 2 prompts)        │
+│  Connections: databases ATTACHed · 13 connectors (warehouses, SaaS, Google)  │
+│               · scheduled syncs with validated transformations              │
+│  Mosaic: exec-policed connector · materialised datasets · spec validation    │
+│  Data apps: Streamlit runner (venv, tokens, health) · cookie proxy /apps/:id │
+│  Copilot: 14 providers, keys write-only · usage per session and token       │
+│  Agent tools: one registry → MCP (25 tools · 4 resources · 5 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -34,7 +39,9 @@ description: How the pieces fit — the React app, the Fastify server and its si
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ Metadata store (Drizzle): SQLite by default · PostgreSQL via DATABASE_URL    │
 │  users · groups · workspaces · workspace_members · session_tabs (per user)   │
-│  saved_queries · dashboards · widgets · connections (AES-256-GCM) · agents   │
+│  saved_queries · dashboards (grid + mosaic specs) · widgets · agents         │
+│  · connections / cloud / lakehouse / database / connector (AES-256-GCM)      │
+│  · data_syncs + runs · data_apps · copilot_settings + usage · app_settings   │
 │  · chat_history · tokens · audit_logs                                        │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```

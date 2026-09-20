@@ -7,7 +7,7 @@ description: The MCP server (stdio, SSE, Streamable HTTP), the REST/OpenAPI faç
 
 DuckView treats agents as first-class users. **One tool registry** backs three surfaces, so they can never drift:
 
-- **MCP server** — stdio, legacy SSE and Streamable HTTP; 10 tools, 3 resources, 2 guided prompts.
+- **MCP server** — stdio, legacy SSE and Streamable HTTP; 25 tools, 4 resources, 5 guided prompts.
 - **REST façade** — `GET /api/agent/v1/tools` (names, descriptions, JSON-schema inputs) and `POST /api/agent/v1/tools/<tool>` (returns `{text, structured, is_error}`; invalid arguments → 400).
 - **OpenAPI 3.0** — `GET /api/agent/openapi.json`, generated on the fly for Bedrock Agents action groups and AgentCore Gateway targets.
 

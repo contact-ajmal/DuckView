@@ -35,7 +35,7 @@ Three ways, all ending in the same place — a file the engine can read:
 
 1. **Drop files** onto the Overview page (Parquet, CSV/TSV, JSON/NDJSON, Excel, Arrow, `.duckdb`). They land in the workspace data directory.
 2. **Add a folder** from your machine (VS Code-style workspace folders). Files stay where they are; the explorer lists them and SQL can read them by path.
-3. **Connect storage** — S3, Cloudflare R2, GCS or Azure buckets, or a lakehouse catalog (AWS Glue, S3 Tables, Iceberg REST, Databricks). See [Lakehouse connectors](lakehouse.html).
+3. **Connect a source** — the **Connections** page covers S3 / R2 / GCS / Azure buckets, lakehouse catalogs (AWS Glue, S3 Tables, Iceberg REST, Databricks), PostgreSQL / MySQL / SQLite / DuckDB files, Snowflake, BigQuery, Redshift, ClickHouse, Fabric, Salesforce, HubSpot, Stripe, GA4, Airtable, Notion, HTTP endpoints, and Google Drive / Sheets with your Google account. Buckets, catalogs and databases are queried in place; warehouse tables, application objects, Drive files and Sheets tabs are loaded into workspace tables by a **sync** that keeps them fresh on a schedule. See [Connections & syncs](connections.html) and [Lakehouse connectors](lakehouse.html).
 
 The Overview page profiles whichever dataset is selected: row and column counts, type mix, null ratios, duplicate rows, min / max / avg per column and distributions — all computed by DuckDB.
 
@@ -53,7 +53,11 @@ Results stream in over WebSocket; press **Stop** on the tab to interrupt. Switch
 
 ## Dashboards
 
-**Dashboards → New dashboard**, then add widgets bound to saved queries or ad-hoc SQL: KPI cards, bar / line / area / scatter / pie charts, tables and Markdown notes on a drag-and-drop grid. Each widget can auto-refresh; thanks to the [result cache](cache.html) a refresh costs nothing when the underlying data has not changed.
+**Dashboards → New dashboard**, then either a **grid** (KPI cards, bar / line / area / scatter / pie charts, tables and Markdown notes on a drag-and-drop grid, each widget auto-refreshing) or a **Mosaic** dashboard — a declarative spec where every chart cross-filters every other, generated from any table or file in one click, drafted by Copilot, or created by an agent. See [Interactive exploration & Mosaic dashboards](mosaic.html).
+
+## Data apps
+
+**Apps → New app** starts a Streamlit app from a template, from a dashboard or from saved queries. Edit `app.py` next to the live preview — it reads the workspace through the `duckview` SDK — press ⌘S, and share the URL with the workspace. Agents build apps the same way over MCP. See [Data apps](apps.html).
 
 ## Share with your team
 
@@ -68,7 +72,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp \
   --header "Authorization: Bearer dv_…"
 ```
 
-Ask it to profile a dataset — it will call `list_accessible_data`, `profile_dataset` and `execute_query`, and any mutating statement comes back to you as an approval challenge first. See [Agents & MCP](agents.html).
+Ask it to profile a dataset — it will call `list_accessible_data`, `profile_dataset` and `execute_query`, and any mutating statement comes back to you as an approval challenge first. Ask for a dashboard, a pipeline or an app and it walks the `build_mosaic_dashboard`, `build_data_pipeline` or `build_data_app` prompt. See [Agents & MCP](agents.html).
 
 ## Where things live
 
