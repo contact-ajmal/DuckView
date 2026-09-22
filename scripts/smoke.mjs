@@ -159,11 +159,16 @@ if (tpl.data.enabled && !process.env.SMOKE_SKIP_APPS) {
   ok('data app created', app.status === 200 && app.data.app?.status === 'stopped', JSON.stringify(app.data).slice(0, 200));
   const started = await json('POST', `/api/apps/${app.data.app.id}/start`, {}, jwt);
   ok('data app started (Streamlit healthy)', started.status === 200 && started.data.app?.status === 'running', JSON.stringify(started.data).slice(0, 300));
-  const sess = await fetch(`${base}/api/apps/${app.data.app.id}/session`, { method: 'POST', headers: { authorization: `Bearer ${jwt}` } });
-  const cookie = sess.headers.get('set-cookie')?.split(';')[0] ?? '';
-  const page = await fetch(`${base}/apps/${app.data.app.id}/`, { headers: { cookie } });
-  ok('data app served through the proxy', page.status === 200 && /streamlit/i.test(await page.text()));
-  ok('data app proxy refuses without the cookie', (await fetch(`${base}/apps/${app.data.app.id}/`)).status === 401);
+  // Apps live on their own origin (apps.isolation): the session call returns a one-time link that sets the cookie there.
+  const sess = await json('POST', `/api/apps/${app.data.app.id}/session`, {}, jwt);
+  const appUrl = new URL(sess.data.app_url ?? `/apps/${app.data.app.id}/`, base).href;
+  const handoff = await fetch(new URL(sess.data.url, base), { redirect: 'manual' });
+  const cookie = handoff.headers.get('set-cookie')?.split(';')[0] ?? '';
+  ok('data app handoff sets the app cookie on the apps origin', !!cookie, `${handoff.status} ${sess.data.url?.split('?')[0]}`);
+  const page = await fetch(appUrl, { headers: { cookie } });
+  ok('data app served through the proxy', page.status === 200 && /streamlit/i.test(await page.text()), `${appUrl} → ${page.status}`);
+  ok('data app proxy refuses without the cookie', (await fetch(appUrl)).status === 401);
+  ok('the UI origin does not serve apps', (await fetch(`${base}/apps/${app.data.app.id}/_stcore/health`)).status === 404 || !sess.data.app_url?.startsWith('http'));
   await json('POST', `/api/apps/${app.data.app.id}/stop`, {}, jwt);
   await json('DELETE', `/api/apps/${app.data.app.id}`, undefined, jwt);
 } else console.log('  (data apps skipped)');

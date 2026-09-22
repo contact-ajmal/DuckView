@@ -114,7 +114,7 @@ jobs:
           set -euo pipefail
           image="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
           echo "Testing $image"
-          docker run -d --name dv -p 4200:4200 \
+          docker run -d --name dv -p 4200:4200 -p 4201:4201 \
             -e JWT_SECRET=ci-jwt-secret-0123456789abcdef \
             -e ENCRYPTION_KEY=$(openssl rand -hex 32) \
             -e DUCKVIEW_ADMIN_EMAIL=ci@example.com -e DUCKVIEW_ADMIN_PASSWORD=ci-password-123 \
