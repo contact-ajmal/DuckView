@@ -7,4 +7,5 @@ resources:
   - pvc.yaml
   - deployment.yaml
   - service.yaml
+  - apps-rbac.yaml   # data apps as pods: service account, role, NetworkPolicy
   # - secret.yaml   # create from secret.example.yaml (or use ExternalSecrets / SealedSecrets)

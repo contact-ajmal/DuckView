@@ -4,8 +4,9 @@ import { EditorView, keymap } from '@codemirror/view';
 import { Prec } from '@codemirror/state';
 import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { AppWindow, Plus, Play, Square, RotateCw, ExternalLink, Save, Trash2, ScrollText, Loader2, ChevronLeft, Bot, Wand2, CheckCircle2, LayoutDashboard, FileCode2 } from 'lucide-react';
+import { AppWindow, Plus, Play, Square, RotateCw, ExternalLink, Save, Trash2, ScrollText, Loader2, ChevronLeft, Bot, Wand2, CheckCircle2, LayoutDashboard, FileCode2, Globe, Users, Pin } from 'lucide-react';
 import { api, copilotChat, timeAgo, type DataApp, type AppTemplate, type AppStatus, type Dashboard, type SavedQuery } from '../../api/client';
+import { useAuth } from '../../store/auth';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useTheme } from '../../store/theme';
 import { useCopilot } from '../../store/copilot';
@@ -25,6 +26,15 @@ export function AppsPage() {
 }
 
 const STATUS_TONE: Record<AppStatus, 'zinc' | 'green' | 'amber' | 'red' | 'blue'> = { stopped: 'zinc', installing: 'amber', starting: 'amber', running: 'green', error: 'red' };
+const RUNTIME_LABEL = { subprocess: 'next to the server', docker: 'in its own container', kubernetes: 'in its own pod' } as const;
+
+/** Who sees the app, with a pending or rejected request to publish it. */
+function Audience({ app }: { app: DataApp }) {
+  if (app.publish_status === 'pending') return <Badge tone="amber" className="gap-1"><Globe className="h-3 w-3" /> awaiting review</Badge>;
+  if (app.visibility === 'org') return <Badge tone="blue" className="gap-1"><Globe className="h-3 w-3" /> everyone</Badge>;
+  if (app.publish_status === 'rejected') return <Badge tone="red" className="gap-1"><Users className="h-3 w-3" /> workspace · not approved</Badge>;
+  return <Badge className="gap-1"><Users className="h-3 w-3" /> workspace</Badge>;
+}
 
 function Gallery() {
   const ws = useWorkspace();
@@ -33,6 +43,7 @@ function Gallery() {
   const [apps, setApps] = useState<DataApp[]>([]);
   const [enabled, setEnabled] = useState(true);
   const [templates, setTemplates] = useState<AppTemplate[]>([]);
+  const [runtime, setRuntime] = useState<keyof typeof RUNTIME_LABEL>('subprocess');
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [queries, setQueries] = useState<SavedQuery[]>([]);
   const [creating, setCreating] = useState(false);
@@ -46,7 +57,7 @@ function Gallery() {
     setEnabled(r.enabled);
   }, [wsId]);
   useEffect(() => void load().catch((e) => setError((e as Error).message)), [load]);
-  useEffect(() => void api.get<{ templates: AppTemplate[] }>('/api/apps/templates').then((r) => setTemplates(r.templates)).catch(() => undefined), []);
+  useEffect(() => void api.get<{ templates: AppTemplate[]; runtime: keyof typeof RUNTIME_LABEL }>('/api/apps/templates').then((r) => { setTemplates(r.templates); setRuntime(r.runtime); }).catch(() => undefined), []);
   useEffect(() => {
     if (!wsId || !creating) return;
     void api.get<{ dashboards: Dashboard[] }>(`/api/workspaces/${wsId}/dashboards`).then((r) => setDashboards(r.dashboards)).catch(() => setDashboards([]));
@@ -81,7 +92,7 @@ function Gallery() {
           <div>
             <Eyebrow>Build</Eyebrow>
             <PageTitle>Data apps</PageTitle>
-            <p className="mt-1 text-xs text-zinc-500">Streamlit apps written on <b className="text-zinc-300">{ws.workspaces.find((w) => w.id === wsId)?.name ?? 'the active workspace'}</b>'s tables and files — run by DuckView next to the engine, reached through <code className="font-mono">duckview.connect()</code> with a read-only token, shared with the workspace's members.</p>
+            <p className="mt-1 text-xs text-zinc-500">Streamlit apps written on <b className="text-zinc-300">{ws.workspaces.find((w) => w.id === wsId)?.name ?? 'the active workspace'}</b>'s tables and files — each run by DuckView {RUNTIME_LABEL[runtime]}, reached through <code className="font-mono">duckview.connect()</code> with a read-only token, shared with the workspace's members.</p>
           </div>
           <Button variant="primary" disabled={!wsId || !canEdit || !enabled} onClick={() => { setForm({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [] }); setCreating(true); }}><Plus className="h-4 w-4" /> New app</Button>
         </div>
@@ -99,7 +110,7 @@ function Gallery() {
                   <Badge tone={STATUS_TONE[a.status]} className="ml-auto">{a.status}</Badge>
                 </div>
                 <p className="mt-1 line-clamp-2 min-h-[2rem] text-[11px] text-zinc-500">{a.description || `${a.entry} · ${(a.source_bytes / 1024).toFixed(1)} KB`}</p>
-                <div className="mt-2 text-[10.5px] text-zinc-600">{a.last_started_at ? `started ${timeAgo(a.last_started_at)}` : 'never started'}{a.visibility === 'org' ? ' · everyone' : ' · workspace'}{a.last_error ? <span className="text-red-300"> · {a.last_error}</span> : null}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10.5px] text-zinc-600"><Audience app={a} />{a.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}<span>{a.last_started_at ? `started ${timeAgo(a.last_started_at)}` : 'never started'}</span>{a.last_error ? <span className="truncate text-red-300">· {a.last_error}</span> : null}</div>
                 <div className="mt-3 flex items-center gap-1">
                   <Button size="sm" variant="secondary" onClick={() => void openInTab(a)} title="Open the app in a new tab"><ExternalLink className="h-3.5 w-3.5" /> Open</Button>
                   <Button size="sm" variant="ghost" onClick={() => (location.hash = `#/apps/${a.id}`)} title="Edit and preview">Edit</Button>
@@ -153,7 +164,7 @@ function Gallery() {
                 </div>
               )}
             </div>
-            <p className="text-[11px] text-zinc-500">The first start creates a Python environment with Streamlit, pandas, pyarrow and the DuckView SDK next to the data directory — it takes a minute once.</p>
+            <p className="text-[11px] text-zinc-500">{runtime === 'subprocess' ? 'The first start creates a Python environment with Streamlit, pandas, pyarrow and the DuckView SDK next to the data directory — it takes a minute once.' : `Each app runs ${RUNTIME_LABEL[runtime]} from the DuckView app-runtime image (Streamlit, pandas, pyarrow and the SDK); the first start may pull the image.`}</p>
             {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
             <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button><Button variant="primary" loading={busy === 'create'} disabled={(form.from === 'dashboard' && !form.dashboard) || (form.from === 'queries' && !form.queryIds.length)} onClick={() => void create()}><Plus className="h-4 w-4" /> Create & open</Button></div>
           </div>
@@ -167,7 +178,9 @@ function AppEditor({ id }: { id: string }) {
   const kind = useTheme((t) => t.theme.kind);
   const cp = useCopilot();
   const { canEdit } = useWorkspaceAccess();
+  const isAdmin = useAuth((a) => a.user?.role === 'ADMIN');
   const [app, setApp] = useState<DataApp | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const [files, setFiles] = useState<Record<string, string>>({});
   const [active, setActive] = useState('app.py');
   const [logs, setLogs] = useState<string[]>([]);
@@ -279,6 +292,8 @@ function AppEditor({ id }: { id: string }) {
         <span className="text-sm font-semibold text-zinc-100">{app.name}</span>
         <Badge tone={STATUS_TONE[status]}>{status}</Badge>
         {dirty && <Badge tone="amber">unsaved</Badge>}
+        <button type="button" onClick={() => setPublishing(true)} title="Who sees this app" className="disabled:opacity-50" disabled={!canEdit}><Audience app={app} /></button>
+        {app.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}
         <span className="text-[11px] text-zinc-500">{app.last_started_at ? `started ${timeAgo(app.last_started_at)}` : 'never started'}{app.last_error ? <span className="text-red-300"> · {app.last_error}</span> : null}</span>
         <div className="ml-auto flex items-center gap-1">
           <Button size="sm" variant="ghost" onClick={() => void draft()} loading={drafting} disabled={!canEdit || !cp.config?.can_use} title={cp.config?.can_use ? 'Let Copilot write app.py for a goal (checked before it lands in the editor)' : 'Configure Copilot under Settings → Copilot first'}><Wand2 className="h-3.5 w-3.5" /> Draft</Button>
@@ -295,8 +310,11 @@ function AppEditor({ id }: { id: string }) {
           )}
           <Button size="sm" variant="ghost" onClick={() => { void api.post(`/api/apps/${id}/session`, {}).then(() => window.open(app.url, '_blank', 'noopener')); }} title="Open in a new tab"><ExternalLink className="h-3.5 w-3.5" /></Button>
           <Button size="sm" variant="ghost" onClick={() => setShowLogs((v) => !v)} title="Logs" className={showLogs ? 'text-accent-300' : ''}><ScrollText className="h-3.5 w-3.5" /></Button>
+          {isAdmin && <Button size="sm" variant="ghost" className={app.always_on ? 'text-accent-300' : ''} onClick={async () => { try { setApp((await api.post<{ app: DataApp }>(`/api/apps/${id}/always-on`, { on: !app.always_on })).app); } catch (e) { setError((e as Error).message); } }} title={app.always_on ? 'Always on: starts with the server, never stopped for idleness, restarted after a crash — click to let it scale to zero' : 'Keep always on (administrators): starts with the server, never idles out, restarts after a crash'}><Pin className="h-3.5 w-3.5" /></Button>}
+          <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setPublishing(true)} title="Share beyond the workspace"><Globe className="h-3.5 w-3.5" /> Publish</Button>
         </div>
       </div>
+      <PublishDialog open={publishing} app={app} isAdmin={isAdmin} onClose={() => setPublishing(false)} onChanged={(a) => setApp(a)} />
       {error && <div className="border-b border-red-900/60 bg-red-950/40 px-4 py-1.5 font-mono text-[11px] text-red-200">{error}</div>}
       {check && (check.errors.length || check.warnings.length) ? <div className={cn('border-b px-4 py-1.5 font-mono text-[11px]', check.ok ? 'border-amber-900/60 bg-amber-950/30 text-amber-200' : 'border-red-900/60 bg-red-950/40 text-red-200')}>{[...check.errors, ...check.warnings.map((w) => `warning: ${w}`)].join(' · ')}<button className="ml-2 text-zinc-500 hover:text-zinc-200" onClick={() => setCheck(null)}>×</button></div> : null}
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
@@ -328,5 +346,57 @@ function AppEditor({ id }: { id: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Workspace members only, or everyone signed in — the latter reviewed by an administrator when the server asks for it. */
+function PublishDialog({ open, app, isAdmin, onClose, onChanged }: { open: boolean; app: DataApp; isAdmin: boolean; onClose: () => void; onChanged: (a: DataApp) => void }) {
+  const [audience, setAudience] = useState<'workspace' | 'org'>(app.visibility);
+  const [note, setNote] = useState('');
+  const [review, setReview] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    setAudience(app.publish_status === 'pending' ? 'org' : app.visibility);
+    setNote('');
+    setMsg(null);
+    void api.get<{ publish_requires_approval: boolean }>('/api/apps/templates').then((r) => setReview(r.publish_requires_approval)).catch(() => undefined);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const needsReview = audience === 'org' && review && !isAdmin;
+  const unchanged = audience === 'org' ? app.visibility === 'org' : app.visibility === 'workspace' && app.publish_status === 'none';
+  const submit = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api.post<{ app: DataApp; outcome: 'published' | 'pending' | 'unpublished' }>(`/api/apps/${app.id}/publish`, { audience, note: note.trim() || null });
+      onChanged(r.app);
+      if (r.outcome === 'pending') setMsg({ ok: true, text: 'Request sent. An administrator reviews it under Settings → Data apps; until then only the workspace sees the app.' });
+      else onClose();
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal open={open} onClose={onClose} title={`Share “${app.name}”`} width="max-w-md">
+      <div className="space-y-3 text-xs">
+        {app.publish_status === 'pending' && <div className="rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-amber-200">Waiting for an administrator{app.publish_requested_at ? ` since ${timeAgo(app.publish_requested_at)}` : ''}{app.publish_note ? ` — “${app.publish_note}”` : ''}.</div>}
+        {app.publish_status === 'rejected' && <div className="rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-red-200">Not approved{app.publish_note ? `: “${app.publish_note}”` : ''}. Change the app and ask again.</div>}
+        {([['workspace', <Users key="w" className="h-4 w-4" />, 'Workspace members', 'Everyone the workspace is shared with — viewers included.'], ['org', <Globe key="o" className="h-4 w-4" />, 'Everyone signed in', review ? (isAdmin ? 'Published at once (you are an administrator). A later code change by an editor sends it back to review.' : 'An administrator reviews the request first. Changing the code later sends it back to review.') : 'Anyone with a DuckView account can open it (read-only).']] as const).map(([id, icon, label, hint]) => (
+          <button key={id} type="button" onClick={() => setAudience(id)} className={cn('flex w-full items-start gap-3 rounded-lg border p-3 text-left', audience === id ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
+            <span className="mt-0.5 text-accent-300">{icon}</span>
+            <span><span className="block text-sm text-zinc-100">{label}</span><span className="text-[11px] text-zinc-500">{hint}</span></span>
+          </button>
+        ))}
+        {needsReview && <div><Label>Note for the reviewer <span className="normal-case text-zinc-600">(optional)</span></Label><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Who it is for, what data it shows" /></div>}
+        {msg && <div className={cn('rounded-md border px-3 py-2', msg.ok ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-200' : 'border-red-900 bg-red-950/50 text-red-200')}>{msg.text}</div>}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>{msg?.ok ? 'Close' : 'Cancel'}</Button>
+          <Button variant="primary" loading={busy} disabled={!!msg?.ok || unchanged} onClick={() => void submit()}>{needsReview ? (app.publish_status === 'pending' ? 'Update request' : 'Request review') : audience === 'org' ? 'Publish' : app.publish_status === 'pending' ? 'Withdraw request' : 'Keep to the workspace'}</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

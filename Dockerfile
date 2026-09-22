@@ -30,6 +30,9 @@ RUN pnpm build \
  # Native DuckDB extension prebuilts (httpfs for S3/R2/GCS, azure, arrow, iceberg, delta, excel) so the runtime never needs network for them.
  && node scripts/install-extensions.mjs /app/duckdb-extensions httpfs azure arrow iceberg delta excel postgres mysql sqlite || true
 
+# The Docker CLI alone (no daemon): data apps with apps.runtime=docker, when the host's socket is mounted.
+FROM docker:27-cli AS dockercli
+
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 ARG DUCKVIEW_VERSION=dev
 LABEL org.opencontainers.image.title="DuckView Enterprise" \
@@ -60,6 +63,7 @@ COPY --from=build --chown=duckuser:duckgroup /app/duckdb-extensions /app/duckdb-
 COPY --chown=duckuser:duckgroup duckview.config.yaml /app/duckview.config.yaml
 COPY --chown=duckuser:duckgroup packages/sdk-python/duckview /app/sdk-python/duckview
 COPY --chown=duckuser:duckgroup packages/sdk-python/pyproject.toml packages/sdk-python/README.md /app/sdk-python/
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 USER duckuser:duckgroup
 VOLUME ["/data", "/app/meta"]
 EXPOSE 4200

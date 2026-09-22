@@ -20,6 +20,8 @@ spec:
         prometheus.io/port: "4200"
         prometheus.io/path: "/metrics"
     spec:
+      # Its Role (k8s/apps-rbac.yaml) lets DuckView run data apps as pods (apps.runtime: kubernetes).
+      serviceAccountName: duckview
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001

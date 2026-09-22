@@ -3,6 +3,9 @@
 #   docker compose --profile postgres up --build    → + PostgreSQL metadata store (set DATABASE_URL in .env, see below)
 #   docker compose --profile observability up       → + Prometheus on :9090
 #   docker compose --profile ollama up              → + local Ollama for DuckCopilot (COPILOT_PROVIDER=ollama, COPILOT_BASE_URL=http://ollama:11434)
+# Data apps in their own containers (apps.runtime=docker): uncomment the three DUCKVIEW__apps__* lines, the socket
+# mount and group_add below. Apps then run from anbproject/duckview-app-runtime on this compose network. Mounting the
+# Docker socket gives DuckView control of the host's Docker — prefer the Kubernetes runtime for shared clusters.
 # Secrets & admin credentials come from .env (see .env.example).
 services:
   duckview:
@@ -26,9 +29,14 @@ services:
       DUCKVIEW_TRUST_PROXY: "true"
       DUCKDB_MEMORY_LIMIT: ${DUCKDB_MEMORY_LIMIT:-70%}
       DUCKDB_EXTENSION_DIRECTORY: /app/duckdb-extensions
+      # DUCKVIEW__apps__runtime: docker
+      # DUCKVIEW__apps__docker__network: duckview_default   # <project>_default: apps reach DuckView as http://duckview:4200
+      # DUCKVIEW__apps__docker__duckview_url: http://duckview:4200
+    # group_add: ["${DOCKER_GID:-999}"]                    # the socket's group on the host (stat -c %g /var/run/docker.sock)
     volumes:
       - ./data:/data
       - duckview-meta:/app/meta
+      # - /var/run/docker.sock:/var/run/docker.sock
     tmpfs:
       - /tmp/duckview_spill:size=${DUCKVIEW_SPILL_SIZE:-4g}
     deploy:

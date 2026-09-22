@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, ChevronRight, Layers, Pencil } from 'lucide-react';
+import { Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, ChevronRight, Layers, Pencil, AppWindow } from 'lucide-react';
 import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type CloudConnection, type CopilotConfig, type LakehouseConnection } from '../../api/client';
 import { Gauge } from '../../components/Gauge';
 import { Eyebrow, PageTitle, SideCard, Panel, KvRows, Tag } from '../../components/layout';
@@ -17,8 +17,9 @@ import { AppearanceSettings } from './Appearance';
 import { TeamsPanel } from './TeamsPanel';
 import { CachePanel } from './CachePanel';
 import { IntegrationsPanel } from './IntegrationsPanel';
+import { AppsAdminPanel } from './AppsAdminPanel';
 
-type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'users';
+type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; admin?: boolean }[] = [
   { id: 'appearance', label: 'Appearance', blurb: 'Themes, fonts, size', icon: <Palette className="h-4 w-4" /> },
   { id: 'layout', label: 'Layout', blurb: 'Show or hide components', icon: <LayoutTemplate className="h-4 w-4" /> },
@@ -29,6 +30,7 @@ const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.Reac
   { id: 'integrations', label: 'Integrations', blurb: 'Google sign-in for Drive, Sheets, BigQuery', icon: <Plug className="h-4 w-4" /> },
   { id: 'account', label: 'Account', blurb: 'Password & identity', icon: <UserRound className="h-4 w-4" /> },
   { id: 'teams', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
+  { id: 'apps', label: 'Data apps', blurb: 'Runtime, running apps, publish requests', icon: <AppWindow className="h-4 w-4" />, admin: true },
   { id: 'users', label: 'Users', blurb: 'Roles & access', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
 ];
 
@@ -389,6 +391,8 @@ export function SettingsPage() {
           )}
 
           {cat === 'teams' && <TeamsPanel />}
+
+          {cat === 'apps' && isAdmin && <AppsAdminPanel />}
 
           {cat === 'users' && isAdmin && (
             <Card title="Users" actions={<Button size="sm" onClick={() => setNewUser({ open: true, email: '', password: '', role: 'USER' })}><Users className="h-3.5 w-3.5" /> Add</Button>}>

@@ -549,6 +549,9 @@ export const APP_STATUSES = ['stopped', 'installing', 'starting', 'running', 'er
 export type AppStatus = (typeof APP_STATUSES)[number];
 export const APP_VISIBILITIES = ['workspace', 'org'] as const;
 export type AppVisibility = (typeof APP_VISIBILITIES)[number];
+/** Publishing to everyone ("org") can wait for an administrator: none → pending → approved | rejected. */
+export const APP_PUBLISH_STATUSES = ['none', 'pending', 'approved', 'rejected'] as const;
+export type AppPublishStatus = (typeof APP_PUBLISH_STATUSES)[number];
 /** Source files of an app by relative path (app.py, requirements.txt, helpers …). */
 export type AppFiles = Record<string, string>;
 
@@ -571,6 +574,16 @@ export const dataApps = sqliteTable(
     spec: text('spec', { mode: 'json' }).$type<Record<string, unknown> | null>(),
     visibility: text('visibility', { enum: APP_VISIBILITIES }).notNull().default('workspace'),
     status: text('status', { enum: APP_STATUSES }).notNull().default('stopped'),
+    /** Kept running: started at boot, never stopped for idleness, restarted after a crash. */
+    always_on: integer('always_on', { mode: 'boolean' }).notNull().default(false),
+    /** The runtime that last ran the app (subprocess, docker, kubernetes). */
+    runtime: text('runtime'),
+    publish_status: text('publish_status', { enum: APP_PUBLISH_STATUSES }).notNull().default('none'),
+    publish_requested_by: text('publish_requested_by'),
+    publish_requested_at: integer('publish_requested_at', { mode: 'timestamp_ms' }),
+    publish_reviewed_by: text('publish_reviewed_by'),
+    publish_reviewed_at: integer('publish_reviewed_at', { mode: 'timestamp_ms' }),
+    publish_note: text('publish_note'),
     port: integer('port'),
     pid: integer('pid'),
     last_error: text('last_error'),

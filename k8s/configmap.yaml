@@ -40,6 +40,16 @@ data:
       max_result_rows: 5000
     mcp:
       require_confirmation_for_mutations: true
+    apps:
+      # Streamlit data apps run Python: off unless DUCKVIEW_APPS_ENABLED=true. On Kubernetes each app is its own
+      # hardened pod (k8s/apps-rbac.yaml), reached by DuckView's proxy; publishing to everyone needs an admin.
+      enabled: ${DUCKVIEW_APPS_ENABLED:-false}
+      runtime: kubernetes
+      publish_requires_approval: true
+      resources: { cpu: "1", memory: "1Gi" }
+      kubernetes:
+        image: "${DUCKVIEW_APP_IMAGE:-anbproject/duckview-app-runtime:latest}"
+        allow_requirements: false
     observability:
       metrics_enabled: true
       otel:

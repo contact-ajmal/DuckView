@@ -10,9 +10,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import WebSocket from 'ws';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
-import { APP_VISIBILITIES } from '../db/schema/sqlite.js';
+import { APP_VISIBILITIES, APP_PUBLISH_STATUSES } from '../db/schema/sqlite.js';
 import { DATA_APP_GUIDE } from '../services/app-generator.js';
-import type { Principal } from '../services/principal.js';
+import { isPlatformAdmin, type Principal } from '../services/principal.js';
+import { forbidden } from '../services/errors.js';
 import { logger } from '../observability/logger.js';
 
 const COOKIE = 'dv_app';
@@ -58,7 +59,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
   // ---------------------------------------------------------------- registry API (bearer)
   await app.register(async (r) => {
     r.addHook('preHandler', app.authenticate);
-    r.get('/api/apps/templates', async () => ({ templates: ctx.apps.templates(), enabled: ctx.apps.enabled, runtime: ctx.cfg.apps.runtime }));
+    r.get('/api/apps/templates', async () => ({ templates: ctx.apps.templates(), enabled: ctx.apps.enabled, runtime: ctx.cfg.apps.runtime, publish_requires_approval: ctx.cfg.apps.publish_requires_approval }));
     r.get('/api/apps/guide', async () => ({ guide: DATA_APP_GUIDE }));
     /** Static checks of app sources (compile, imports, secrets) — the editor's "Check" and agents' safety net. */
     r.post('/api/apps/validate', async (req) => {
@@ -115,6 +116,33 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
       await ctx.apps.stop(req.principal!, id, 'restart');
       return { app: await ctx.apps.start(req.principal!, id), logs: ctx.apps.logs(id) };
     });
+    /** Who sees the app: "workspace", or "org" (everyone signed in) — a request for review unless an administrator publishes. */
+    r.post('/api/apps/:id/publish', async (req) => {
+      const { id } = req.params as { id: string };
+      const body = z.object({ audience: z.enum(APP_VISIBILITIES), note: z.string().max(1000).nullable().optional() }).parse(req.body ?? {});
+      return ctx.apps.publish(req.principal!, id, body.audience, body.note);
+    });
+    r.post('/api/apps/:id/always-on', async (req) => {
+      const { id } = req.params as { id: string };
+      const body = z.object({ on: z.boolean() }).parse(req.body ?? {});
+      return { app: await ctx.apps.setAlwaysOn(req.principal!, id, body.on) };
+    });
+    // Administrators: every app on the server, the runtime, and publish requests to review.
+    r.get('/api/admin/apps', async (req) => {
+      const q = z.object({ publish_status: z.enum(APP_PUBLISH_STATUSES).optional() }).parse(req.query ?? {});
+      return { apps: await ctx.apps.adminList(req.principal!, q), runtime: ctx.apps.runtimeInfo() };
+    });
+    r.post('/api/admin/apps/:id/review', async (req) => {
+      const { id } = req.params as { id: string };
+      const body = z.object({ decision: z.enum(['approve', 'reject']), note: z.string().max(1000).nullable().optional() }).parse(req.body ?? {});
+      return { app: await ctx.apps.review(req.principal!, id, body.decision, body.note) };
+    });
+    r.post('/api/admin/apps/:id/stop', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isPlatformAdmin(req.principal!)) throw forbidden('Administrator role required');
+      await ctx.apps.stop(req.principal!, id, 'manual');
+      return { ok: true };
+    });
     /** A headless screenshot of the running app (needs Chrome on the server). */
     r.post('/api/apps/:id/preview', async (req, reply) => {
       const { id } = req.params as { id: string };
@@ -167,8 +195,11 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
         if (!ctx.apps.enabled) return deny(reply, 503, 'Data apps are disabled on this server');
         const target = ctx.apps.target(id);
         if (!target) {
-          // Not up: start it (once) and let the browser retry.
+          // Not up: a person opening the page starts it (scale from zero) and the page retries. Background requests
+          // — a Streamlit tab left open polling /_stcore/health after a stop — never do, or a stop would not stick.
           const st = ctx.apps.status(id);
+          const navigation = req.method === 'GET' && (req.headers['sec-fetch-mode'] === 'navigate' || /text\/html/.test(String(req.headers.accept ?? '')));
+          if (!navigation) return reply.code(503).header('retry-after', '2').type('text/plain').send('app not running');
           if (!st) void ctx.apps.start(p, id).catch((err) => logger().warn({ app: id, err: (err as Error).message }, 'App auto-start failed'));
           const fresh = await ctx.apps.get(p, id).catch(() => a);
           const failed = fresh.status === 'error' && !st;
@@ -176,7 +207,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
         }
         ctx.apps.touch(id);
         const role = (await ctx.workspaces.get(p, a.workspace_id).catch(() => null))?.role ?? 'VIEWER';
-        return proxy(req, reply, target.port, p, role);
+        return proxy(req, reply, target, p, role);
       },
     });
 
@@ -194,7 +225,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
         const target = ctx.apps.target(id);
         if (!target) return socket.close(1013, 'app not running');
         const role = (await ctx.workspaces.get(p, a.workspace_id).catch(() => null))?.role ?? 'VIEWER';
-        bridge(socket, req, target.port, p, role, () => ctx.apps.touch(id));
+        bridge(socket, req, target, p, role, () => ctx.apps.touch(id));
       })().catch((err) => {
         logger().warn({ err: (err as Error).message }, 'App websocket failed');
         try {
@@ -208,11 +239,11 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
 }
 
 /** Forwards one HTTP request to the app's Streamlit server, streaming the answer straight to the socket. */
-function proxy(req: FastifyRequest, reply: FastifyReply, port: number, p: Principal, role: string): Promise<void> {
+function proxy(req: FastifyRequest, reply: FastifyReply, { host, port }: { host: string; port: number }, p: Principal, role: string): Promise<void> {
   return new Promise((resolve) => {
     const headers: Record<string, string | string[]> = {};
     for (const [k, v] of Object.entries(req.headers)) if (v !== undefined && !HOP.has(k.toLowerCase())) headers[k] = v;
-    headers.host = `127.0.0.1:${port}`;
+    headers.host = `${hostPart(host)}:${port}`;
     headers['x-duckview-user'] = p.userId;
     headers['x-duckview-email'] = p.email;
     headers['x-duckview-role'] = role;
@@ -220,7 +251,7 @@ function proxy(req: FastifyRequest, reply: FastifyReply, port: number, p: Princi
     headers['x-forwarded-for'] = req.ip;
     reply.hijack();
     const raw = reply.raw;
-    const upstream = http.request({ host: '127.0.0.1', port, method: req.method, path: req.raw.url, headers }, (res) => {
+    const upstream = http.request({ host, port, method: req.method, path: req.raw.url, headers }, (res) => {
       const out: Record<string, string | string[]> = {};
       for (const [k, v] of Object.entries(res.headers)) if (v !== undefined && !['connection', 'keep-alive', 'transfer-encoding'].includes(k)) out[k] = v;
       raw.writeHead(res.statusCode ?? 502, out);
@@ -243,11 +274,11 @@ function proxy(req: FastifyRequest, reply: FastifyReply, port: number, p: Princi
 }
 
 /** Pipes a browser WebSocket to the app's, both ways, with the visitor's headers on the upstream handshake. */
-function bridge(client: WebSocket, req: FastifyRequest, port: number, p: Principal, role: string, touch: () => void): void {
+function bridge(client: WebSocket, req: FastifyRequest, { host, port }: { host: string; port: number }, p: Principal, role: string, touch: () => void): void {
   const protocols = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const headers: Record<string, string> = { 'x-duckview-user': p.userId, 'x-duckview-email': p.email, 'x-duckview-role': role, 'x-forwarded-for': req.ip };
   for (const k of ['user-agent', 'accept-language', 'origin']) if (req.headers[k]) headers[k] = String(req.headers[k]);
-  const upstream = new WebSocket(`ws://127.0.0.1:${port}${req.raw.url}`, protocols, { headers, perMessageDeflate: false });
+  const upstream = new WebSocket(`ws://${hostPart(host)}:${port}${req.raw.url}`, protocols, { headers, perMessageDeflate: false });
   const queue: { data: WebSocket.RawData; binary: boolean }[] = [];
   upstream.on('open', () => {
     for (const m of queue) upstream.send(m.data, { binary: m.binary });
@@ -282,6 +313,9 @@ function bridge(client: WebSocket, req: FastifyRequest, port: number, p: Princip
     closeBoth(1011);
   });
 }
+
+/** An IPv6 pod address needs brackets in a URL or Host header. */
+const hostPart = (host: string) => (host.includes(':') ? `[${host}]` : host);
 
 function page(title: string, detail: string, refresh = false): string {
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c);

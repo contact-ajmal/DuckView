@@ -143,6 +143,9 @@ st.caption(f"Viewing as {viewer()['email']}")
 - **Generate** an app from a Mosaic dashboard (datasets, filters, KPIs, charts and tables become sidebar widgets, metric cards and Altair charts computed in SQL), from saved queries, or from a template — no model needed; or let **Copilot draft** `app.py` for a goal against the SDK guide.
 - The editor has Python highlighting, a **live preview** of the real app, ⌘S saves and restarts, static **checks** (compiles, imports streamlit, no tokens) and the logs one click away.
 - The **runner** creates a Python environment on first start (streamlit, pandas, pyarrow, the SDK), installs each app's `requirements.txt`, health-checks it, stops idle apps, and serves it at `/apps/<id>/` to the workspace's members — with a **read-only, workspace-scoped token** rotated on every start and a minimal environment that never sees the server's secrets. The visitor's identity is forwarded to the app.
+- **Three runtimes** (`apps.runtime`): `subprocess` (a shared virtualenv next to the server — the default), `docker` (one hardened container per app from `anbproject/duckview-app-runtime`: read-only root, no capabilities, uid 1001, CPU / memory / pid limits, source streamed in, token passed by name) or `kubernetes` (one pod per app with its source in a ConfigMap and its token in a Secret — `k8s/apps-rbac.yaml` has the role and a NetworkPolicy).
+- **Scale to zero**: idle apps stop and wake on the next page load; at `apps.max_running` the least recently used idle app makes room. Administrators pin apps **always on** — started with the server, never idled out, restarted with backoff after a crash.
+- **Publishing is reviewed**: an editor (or an agent's `publish_app`) asks to show an app to everyone signed in; an administrator approves or rejects it under **Settings → Data apps**, where every app, its instance and the runtime are listed. Changing an approved app's code sends it back to review.
 - `pip install duckview` for the SDK anywhere else: `query()`, `query_arrow()` for large results, a table builder, `copilot()`, and the agent façade's OpenAPI for LangChain / CrewAI / Strands.
 
 <p align="center"><img src="docs/screenshots/apps.png" alt="The data app editor: Python code next to the live Streamlit preview generated from the taxi dashboard" width="92%"></p>
@@ -242,7 +245,7 @@ Six themes decide both colour and typeface, applied through runtime CSS variable
 - **Two layers of sandboxing** — a Node-side filesystem jail *and* DuckDB's own `allowed_directories` / `enable_external_access` / `lock_configuration`, so even `SET` and `PRAGMA` can't loosen the box. `filesystem_mode: full` for a personal workstation, `sandboxed` for multi-tenant.
 - **A single choke point** — every query, from the UI or an agent, passes authorization → SQL guard → HITL → audit.
 - **Secrets never leave the server** — cloud, lakehouse, database and connector credentials, Copilot keys, Google refresh tokens and the Google OAuth client are AES-256-GCM encrypted with the row id as AAD and are write-only: the API reports field names, never values; logs are redacted; provider errors are scrubbed. Connector rows are staged to files the engine reads, so warehouse and SaaS credentials never reach DuckDB.
-- **Data apps run apart** — separate processes with a minimal environment (no server secrets, no config), a read-only token scoped to their workspace that is rotated on every start and revoked on stop, a cookie-authenticated proxy that checks workspace membership, and `apps.enabled` off in sandboxed mode.
+- **Data apps run apart** — separate processes, containers or pods with a minimal environment (no server secrets, no config), a read-only token scoped to their workspace that is rotated on every start and revoked on stop, a cookie-authenticated proxy that checks workspace membership, `apps.enabled` off in sandboxed mode, and publishing to everyone reviewed by an administrator.
 - **Scoped tokens** — `read` / `write` / `mcp` / `admin`, optional workspace pinning and expiry, SHA-256 at rest, revocable per agent.
 - **Workspace roles** — every access resolves to owner / editor / viewer through direct or team grants; non-members get a 404, viewers can't mutate even with an approved agent call, and members query through the owner's connections (stated in the share dialog, not hidden).
 - **Observability** — Prometheus metrics, OpenTelemetry traces, liveness/readiness probes, real-time audit feed.
@@ -279,7 +282,7 @@ Full details — configuration keys, every endpoint, the MCP tool contracts, CLI
 
 ## 🗺 Roadmap
 
-- Data apps: container / Kubernetes runtime tiers, in-browser apps (stlite), Dash and Gradio behind the same runner
+- Data apps: in-browser apps (stlite), Dash and Gradio behind the same runtimes
 - Scheduled dashboard snapshots & alerts
 - Row-level access policies per workspace
 - Per-user data directories (isolation inside the jail)

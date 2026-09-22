@@ -1,7 +1,8 @@
 name: Publish Docker image
 
 # Publishes a multi-arch image (linux/amd64 + linux/arm64) to Docker Hub — and mirrors it to GitHub Container
-# Registry — on every v* tag, or on demand from the Actions tab.
+# Registry — on every v* tag, or on demand from the Actions tab. A second job publishes the data-app runtime image
+# (docker/app-runtime.Dockerfile) as <image>-app-runtime, which the docker and kubernetes app runtimes start.
 #
 # Required repository secrets for Docker Hub:
 #   DOCKERHUB_USERNAME  your Docker Hub username / organisation (also the image namespace)
@@ -135,3 +136,74 @@ jobs:
           short-description: "DuckDB workspace: lakehouse, dashboards, MCP for AI agents. Docs at contact-ajmal.github.io/DuckView"
           readme-filepath: ./docs/DOCKERHUB.md
           enable-url-completion: true
+
+  app-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image names
+        id: names
+        run: |
+          set -euo pipefail
+          images="$(echo "${GHCR_IMAGE}-app-runtime" | tr '[:upper:]' '[:lower:]')"
+          if [ -n "${DOCKERHUB_USERNAME}" ]; then
+            hub="${{ vars.DOCKERHUB_IMAGE }}"
+            [ -n "$hub" ] || hub="${DOCKERHUB_USERNAME}/duckview"
+            images="docker.io/${hub}-app-runtime"$'\n'"${images}"
+            echo "hub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "hub=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "images<<EOF"
+            echo "$images"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: steps.names.outputs.hub == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.names.outputs.images }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
+            type=raw,value=latest
+
+      - name: Build and push (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/app-runtime.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            DUCKVIEW_VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=app-runtime
+          cache-to: type=gha,mode=max,scope=app-runtime
+
+      - name: Smoke test (Streamlit and the SDK import as uid 1001 on a read-only root)
+        run: |
+          image="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
+          docker run --rm --read-only --tmpfs /tmp "$image" python -c "import streamlit, pandas, pyarrow, duckview.streamlit; print('ok', streamlit.__version__)"

@@ -213,7 +213,11 @@ export const ConfigSchema = z.object({
     .object({
       /** Default: on in full filesystem mode, off in sandboxed mode (resolved after parsing). */
       enabled: z.coerce.boolean().optional(),
-      runtime: z.enum(['subprocess']).default('subprocess'),
+      /**
+       * Where apps run: `subprocess` (a shared virtualenv next to the server), `docker` (one hardened container per
+       * app, from apps.docker.image) or `kubernetes` (one Pod per app, through the API server).
+       */
+      runtime: z.enum(['subprocess', 'docker', 'kubernetes']).default('subprocess'),
       /** Python interpreter used to create the apps virtualenv (needs venv + pip). */
       python: z.string().default('python3'),
       /** Where the shared virtualenv lives; default <data dir>/.duckview/apps/venv. */
@@ -234,6 +238,53 @@ export const ConfigSchema = z.object({
       max_source_bytes: z.coerce.number().int().min(1024).default(512 * 1024),
       /** Chrome / Chromium binary for headless previews (preview_app); auto-detected when unset. */
       chrome_path: z.string().optional(),
+      /** Publishing an app to everyone signed in ("org") waits for an administrator's approval. */
+      publish_requires_approval: z.coerce.boolean().default(true),
+      /** When max_running is reached, stop the least recently used app idle for at least this long instead of refusing. */
+      evict_idle_seconds: z.coerce.number().int().min(0).default(120),
+      /** Always-on apps that crash are restarted this many times in a row (with backoff) before they are left in error. */
+      max_restarts: z.coerce.number().int().min(0).default(5),
+      /** Per-app limits for the container runtimes (Docker --cpus / --memory, Kubernetes limits). */
+      resources: z.object({ cpu: z.string().default('1'), memory: z.string().default('1Gi') }).default({}),
+      docker: z
+        .object({
+          binary: z.string().default('docker'),
+          /** Image with Python, Streamlit, pandas, pyarrow and the DuckView SDK (docker/app-runtime.Dockerfile). */
+          image: z.string().default('anbproject/duckview-app-runtime:latest'),
+          /** Command inside the image that runs an app (the entry file and --server.* flags are appended). */
+          command: z.array(z.string()).default(['streamlit', 'run']),
+          /**
+           * A Docker network to attach apps to (DuckView itself in a container on that network): apps are reached by
+           * container name, nothing is published on the host. Unset: each app publishes a port on 127.0.0.1.
+           */
+          network: z.string().optional(),
+          /** DuckView's URL as seen from an app container; default http://host.docker.internal:<port> (or http://duckview:<port> on a network). */
+          duckview_url: z.string().optional(),
+          /** Let apps pip-install their requirements.txt at start (needs egress to PyPI). */
+          allow_requirements: z.coerce.boolean().default(true),
+          pids_limit: z.coerce.number().int().min(16).default(256),
+        })
+        .default({}),
+      kubernetes: z
+        .object({
+          /** API server; default the in-cluster service (https://kubernetes.default.svc) with the pod's service account. */
+          api_url: z.string().optional(),
+          token_file: z.string().default('/var/run/secrets/kubernetes.io/serviceaccount/token'),
+          ca_file: z.string().default('/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'),
+          /** Namespace for app pods; default the server's own namespace. */
+          namespace: z.string().optional(),
+          image: z.string().default('anbproject/duckview-app-runtime:latest'),
+          image_pull_policy: z.enum(['Always', 'IfNotPresent', 'Never']).default('IfNotPresent'),
+          command: z.array(z.string()).default(['streamlit', 'run']),
+          container_port: z.coerce.number().int().min(1).max(65535).default(8501),
+          /** DuckView's URL from an app pod; default http://duckview.<namespace>.svc (the k8s/service.yaml Service). */
+          duckview_url: z.string().optional(),
+          allow_requirements: z.coerce.boolean().default(true),
+          node_selector: z.record(z.string(), z.string()).optional(),
+          /** Extra labels on app pods (e.g. to match a NetworkPolicy). */
+          labels: z.record(z.string(), z.string()).optional(),
+        })
+        .default({}),
     })
     .default({}),
   observability: z

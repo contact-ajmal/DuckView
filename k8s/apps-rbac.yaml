@@ -1,0 +1,65 @@
+# Data apps on Kubernetes (apps.runtime: kubernetes): DuckView starts one Pod per app, with the app's source in a
+# ConfigMap and its read-only token in a Secret, in its own namespace. This grants exactly that and fences the pods:
+#   - ServiceAccount `duckview` (the Deployment runs as it) with a Role on pods, pods/log, configmaps and secrets;
+#   - NetworkPolicy: app pods accept traffic only from DuckView (the proxy) and may only call DuckView and DNS.
+#     Uncomment the PyPI egress rule if apps may pip-install their requirements.txt.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: duckview
+  namespace: duckview
+  labels: { app.kubernetes.io/name: duckview }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: duckview-apps
+  namespace: duckview
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "configmaps", "secrets"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: duckview-apps
+  namespace: duckview
+subjects:
+  - kind: ServiceAccount
+    name: duckview
+    namespace: duckview
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: duckview-apps
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: duckview-apps
+  namespace: duckview
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: duckview-app }
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: duckview } }
+      ports:
+        - { protocol: TCP, port: 8501 }
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: duckview } }
+      ports:
+        - { protocol: TCP, port: 4200 }
+    - to:
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # - ports: [{ protocol: TCP, port: 443 }]   # PyPI, for requirements.txt (apps.kubernetes.allow_requirements)

@@ -142,6 +142,7 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   app.addHook('onListen', () => {
     const addr = app.server.address();
     if (addr && typeof addr === 'object') ctx.apps.internalUrl = `http://127.0.0.1:${addr.port}`;
+    void ctx.apps.startAlwaysOn().catch((err) => logger().warn({ err: (err as Error).message }, 'Always-on apps did not start'));
   });
   return { app, mcpSessions };
 }

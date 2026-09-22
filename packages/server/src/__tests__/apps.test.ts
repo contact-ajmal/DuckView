@@ -43,7 +43,8 @@ const sessionCookie = async (id: string, token = jwt) => {
   expect(c).toMatch(/^dv_app=.*; Path=\/apps; HttpOnly; SameSite=Lax; Max-Age=43200$/);
   return c.split(';')[0]!;
 };
-const visit = (id: string, cookie: string | null, pathname = '/') => fetch(`${base}/apps/${id}${pathname}`, { headers: cookie ? { cookie } : {}, redirect: 'manual' });
+/** A page load, as a browser sends it (only navigations wake a stopped app). */
+const visit = (id: string, cookie: string | null, pathname = '/') => fetch(`${base}/apps/${id}${pathname}`, { headers: { accept: 'text/html,application/xhtml+xml', ...(cookie ? { cookie } : {}) }, redirect: 'manual' });
 const info = async (res: Response) => {
   const text = await res.text();
   const m = /<script id="info" type="application\/json">(.*?)<\/script>/.exec(text);
@@ -191,6 +192,12 @@ describe('runner and proxy', () => {
     // Stop, then visit: the proxy starts it and shows a waiting page until it is up.
     expect((await api('POST', `/api/apps/${id}/stop`, {})).json).toEqual({ ok: true });
     expect((await api('GET', `/api/apps/${id}`)).json.app).toMatchObject({ status: 'stopped', running: false });
+    // A tab left open keeps polling in the background: that must not undo the stop.
+    const poll = await fetch(`${base}/apps/${id}/_stcore/health`, { headers: { cookie, 'sec-fetch-mode': 'cors' } });
+    expect(poll.status).toBe(503);
+    expect((await fetch(`${base}/apps/${id}/_stcore/host-config`, { headers: { cookie } })).status).toBe(503);
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await api('GET', `/api/apps/${id}`)).json.app).toMatchObject({ status: 'stopped' });
     const waiting = await visit(id, cookie);
     expect(waiting.status).toBe(503);
     expect(await waiting.text()).toMatch(/Starting Explorer/);

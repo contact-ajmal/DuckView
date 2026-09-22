@@ -715,17 +715,18 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
     define({
       name: 'publish_app',
       title: 'Publish data app',
-      description: 'Makes an app visible beyond the workspace (audience "org": everyone signed in to DuckView) or back to "workspace". Publishing is a human-approved step: dry_run (default true) reports what would change; pass dry_run=false after approval.',
-      inputSchema: { app_id: z.string(), audience: z.enum(['workspace', 'org']), dry_run: z.boolean().optional().describe('Default true. Set false once approved.') },
+      description: 'Makes an app visible beyond the workspace (audience "org": everyone signed in to DuckView) or back to "workspace". Publishing is a human-approved step: dry_run (default true) reports what would change; pass dry_run=false after approval. On servers with publish review (apps.publish_requires_approval) an agent\'s publish becomes a request an administrator approves in DuckView — the result says "pending".',
+      inputSchema: { app_id: z.string(), audience: z.enum(['workspace', 'org']), note: z.string().max(1000).optional().describe('What the app is for, shown to the reviewer.'), dry_run: z.boolean().optional().describe('Default true. Set false once approved.') },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      async handler(env, { app_id, audience, dry_run }) {
+      async handler(env, { app_id, audience, note, dry_run }) {
         const app = await env.ctx.apps.get(env.principal, app_id, 'EDITOR');
+        const review = audience === 'org' && env.ctx.cfg.apps.publish_requires_approval;
         if (dry_run !== false) {
-          return { content: [text(`APPROVAL REQUIRED\n\nPublishing **${app.name}** to ${audience === 'org' ? 'everyone signed in to this DuckView' : 'the workspace\'s members only'} (currently: ${app.visibility}). Call publish_app again with dry_run=false once a person has approved.`)], structuredContent: { status: 'approval_required', app_id, from: app.visibility, to: audience, url: `/apps/${app.id}/` } };
+          return { content: [text(`APPROVAL REQUIRED\n\nPublishing **${app.name}** to ${audience === 'org' ? 'everyone signed in to this DuckView' : 'the workspace\'s members only'} (currently: ${app.visibility}${app.publish_status === 'pending' ? ', a publish request is pending' : ''}).${review ? ' This server also has administrators review publish requests: after dry_run=false the app stays with the workspace until one approves it.' : ''} Call publish_app again with dry_run=false once a person has approved.`)], structuredContent: { status: 'approval_required', app_id, from: app.visibility, to: audience, review, url: `/apps/${app.id}/` } };
         }
-        const updated = await env.ctx.apps.update(env.principal, app_id, { visibility: audience });
-        env.ctx.audit.log({ userId: env.principal.userId, actorType: env.principal.actorType, action: `app.publish.${audience}`, resource: `app:${app_id}`, ip: env.principal.ip });
-        return { content: [text(`**${updated.name}** is now visible to ${audience === 'org' ? 'everyone signed in' : 'workspace members'}: ${updated.url}`)], structuredContent: { status: 'ok', app_id, visibility: updated.visibility, url: updated.url } };
+        const { app: updated, outcome } = await env.ctx.apps.publish(env.principal, app_id, audience, note);
+        const message = outcome === 'pending' ? `Publish request for **${updated.name}** sent: an administrator approves it under Settings → Data apps; until then it stays visible to workspace members only (${updated.url}).` : `**${updated.name}** is now visible to ${audience === 'org' ? 'everyone signed in' : 'workspace members'}: ${updated.url}`;
+        return { content: [text(message)], structuredContent: { status: outcome === 'pending' ? 'pending' : 'ok', outcome, app_id, visibility: updated.visibility, publish_status: updated.publish_status, url: updated.url } };
       },
     }),
   ];

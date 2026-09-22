@@ -155,7 +155,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -400,6 +400,16 @@ export const dataApps = pgTable(
     spec: jsonb('spec').$type<Record<string, unknown> | null>(),
     visibility: text('visibility', { enum: APP_VISIBILITIES }).notNull().default('workspace'),
     status: text('status', { enum: APP_STATUSES }).notNull().default('stopped'),
+    /** Kept running: started at boot, never stopped for idleness, restarted after a crash. */
+    always_on: boolean('always_on').notNull().default(false),
+    /** The runtime that last ran the app (subprocess, docker, kubernetes). */
+    runtime: text('runtime'),
+    publish_status: text('publish_status', { enum: APP_PUBLISH_STATUSES }).notNull().default('none'),
+    publish_requested_by: text('publish_requested_by'),
+    publish_requested_at: ts('publish_requested_at'),
+    publish_reviewed_by: text('publish_reviewed_by'),
+    publish_reviewed_at: ts('publish_reviewed_at'),
+    publish_note: text('publish_note'),
     port: integer('port'),
     pid: integer('pid'),
     last_error: text('last_error'),

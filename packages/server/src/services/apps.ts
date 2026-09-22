@@ -1,27 +1,32 @@
 /**
  * Data apps: Streamlit applications built on a workspace's data, registered next to dashboards and run by DuckView.
  *
- * The source lives in the metadata store and is materialised under <data>/.duckview/apps/run/<id>/ when the app
- * starts. The subprocess runtime spawns `streamlit run` from a shared virtualenv that DuckView creates on first use
- * (streamlit, pandas, pyarrow + the DuckView SDK), with a minimal environment: no server secrets, only
- * DUCKVIEW_URL / DUCKVIEW_TOKEN / DUCKVIEW_WORKSPACE, where the token is read-only, scoped to the app's workspace,
- * minted for the app's creator on every start and revoked when it stops. Health is polled on Streamlit's
- * /_stcore/health, logs are kept in a ring buffer, idle apps are stopped by a ticker, and every row is reset to
- * `stopped` when the server boots (processes do not survive it).
+ * The source lives in the metadata store and is handed to a runtime (app-runtimes.ts: a subprocess from a shared
+ * virtualenv, a Docker container, or a Kubernetes pod) when the app starts, with a minimal environment: no server
+ * secrets, only DUCKVIEW_URL / DUCKVIEW_TOKEN / DUCKVIEW_WORKSPACE, where the token is read-only, scoped to the app's
+ * workspace, minted for the app's creator on every start and revoked when it stops. Health is polled on Streamlit's
+ * /_stcore/health, logs are kept in a ring buffer, and every row is reset to `stopped` when the server boots.
+ *
+ * Scaling: apps scale to zero — a ticker stops idle ones and the proxy starts them on the next visit; when
+ * apps.max_running is reached the least recently used idle app is evicted; `always_on` apps start with the server,
+ * are never stopped for idleness and are restarted (with backoff) after a crash.
+ *
+ * Publishing: an app is visible to its workspace; making it visible to everyone signed in ("org") waits for an
+ * administrator when apps.publish_requires_approval is set, and a code change to an approved app sends it back to
+ * review.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { and, eq } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
-import type { DataApp, AppFiles, AppStatus, AppVisibility } from '../db/schema/sqlite.js';
+import type { DataApp, AppFiles, AppStatus, AppVisibility, AppPublishStatus } from '../db/schema/sqlite.js';
 import { APP_VISIBILITIES } from '../db/schema/sqlite.js';
 import type { DuckViewConfig } from '../config/index.js';
 import { newId } from '../security/crypto.js';
 import type { Principal } from './principal.js';
-import { requireWrite } from './principal.js';
+import { requireWrite, isPlatformAdmin } from './principal.js';
 import type { WorkspaceService } from './workspaces.js';
 import type { AuthService } from './auth.js';
 import type { AuditService } from './audit.js';
@@ -30,8 +35,12 @@ import type { DashboardService, SavedQueryService } from './bi.js';
 import { appFromDashboard, appFromQueries } from './app-generator.js';
 import { logger } from '../observability/logger.js';
 import { liveEvents } from '../observability/events.js';
+import { createRuntime, SubprocessRuntime, type AppRuntime, type Exit, type Instance } from './app-runtimes.js';
 
-export type PublicApp = Omit<DataApp, 'pid'> & { url: string; source_bytes: number; running: boolean };
+export type PublicApp = Omit<DataApp, 'pid'> & { url: string; source_bytes: number; running: boolean; runtime_ref: string | null };
+/** One row of the administrators' view: the app without its source, with its owner and workspace. */
+export type AdminApp = Omit<PublicApp, 'files'> & { owner_email: string | null; workspace_name: string | null; requested_by_email: string | null; last_used_ms: number | null };
+export type StopReason = 'manual' | 'idle' | 'restart' | 'delete' | 'shutdown' | 'evicted';
 export interface AppInput {
   name: string;
   description?: string | null;
@@ -57,14 +66,16 @@ export interface Generated {
 }
 
 interface Proc {
-  child: ChildProcess;
-  port: number;
-  tokenId: string;
+  /** null while the runtime is still launching it. */
+  inst: Instance | null;
+  tokenId: string | null;
   ownerId: string;
   logs: string[];
   startedAt: number;
   lastUsed: number;
   healthy: boolean;
+  alwaysOn: boolean;
+  stopping: boolean;
 }
 
 const LOG_LINES = 500;
@@ -124,8 +135,12 @@ st.dataframe(df)
 
 export class DataAppService {
   private procs = new Map<string, Proc>();
-  private installing: Promise<void> | null = null;
   private ticker: NodeJS.Timeout | null = null;
+  /** Consecutive crash restarts of always-on apps, and the pending timer. */
+  private restarts = new Map<string, { count: number; timer: NodeJS.Timeout | null }>();
+  /** Apps being deleted: nothing may start them meanwhile. */
+  private removing = new Set<string>();
+  readonly runtime: AppRuntime;
   /** Where apps reach this server; set after listen (tests bind port 0). */
   internalUrl: string;
   /** Overridable for tests (a fake "streamlit"). */
@@ -137,6 +152,13 @@ export class DataAppService {
   constructor(private readonly store: MetadataStore, private readonly cfg: DuckViewConfig, private readonly workspaces: WorkspaceService, private readonly auth: AuthService, private readonly audit: AuditService) {
     this.internalUrl = `http://127.0.0.1:${cfg.server.port}`;
     this.command = cfg.apps.command ?? null;
+    this.runtime = createRuntime(cfg, {
+      command: () => this.command,
+      sdkDir: () => DataAppService.sdkDir(),
+      usedPorts: () => new Set([...this.procs.values()].flatMap((p) => (p.inst && p.inst.host === '127.0.0.1' ? [p.inst.port] : []))),
+      runDir: (id) => this.runDir(id),
+      internalPort: () => Number(new URL(this.internalUrl).port) || cfg.server.port,
+    });
   }
   private get db() {
     return this.store.db;
@@ -153,10 +175,63 @@ export class DataAppService {
     await this.db.update(this.s.dataApps).set({ status: 'stopped', port: null, pid: null }).where(eq(this.s.dataApps.status, 'running'));
     await this.db.update(this.s.dataApps).set({ status: 'stopped', port: null, pid: null }).where(eq(this.s.dataApps.status, 'starting'));
     await this.db.update(this.s.dataApps).set({ status: 'stopped', port: null, pid: null }).where(eq(this.s.dataApps.status, 'installing'));
+    if (this.enabled) {
+      const n = await this.runtime.cleanup().catch((err) => {
+        logger().warn({ runtime: this.runtime.name, err: (err as Error).message }, 'Could not clean up app instances of a previous run');
+        return 0;
+      });
+      if (n) logger().info({ runtime: this.runtime.name, removed: n }, 'Removed app instances left by a previous run');
+    }
     if (!this.ticker) {
       this.ticker = setInterval(() => void this.reapIdle().catch(() => undefined), 60_000);
       this.ticker.unref();
     }
+  }
+
+  /** Once the server listens (apps call back into it): start the always-on apps. */
+  async startAlwaysOn(): Promise<string[]> {
+    if (!this.enabled) return [];
+    const rows = await this.db.select({ id: this.s.dataApps.id }).from(this.s.dataApps).where(eq(this.s.dataApps.always_on, true));
+    for (const r of rows) void this.startAsOwner(r.id);
+    return rows.map((r) => r.id);
+  }
+
+  /** Starts an app on its creator's behalf (boot, crash restarts). */
+  private async startAsOwner(id: string): Promise<void> {
+    const row = (await this.db.select().from(this.s.dataApps).where(eq(this.s.dataApps.id, id)).limit(1))[0];
+    if (!row || !row.always_on || this.procs.has(id)) return;
+    const owner = await this.auth.findById(row.user_id);
+    if (!owner) return;
+    try {
+      await this.start(this.auth.principalFromUser(owner, 'jwt', 'always-on'), id);
+    } catch (err) {
+      logger().warn({ app: id, err: (err as Error).message }, 'Always-on app did not start');
+      this.scheduleRestart(id);
+    }
+  }
+
+  private scheduleRestart(id: string): void {
+    const r = this.restarts.get(id) ?? { count: 0, timer: null };
+    if (r.timer) return;
+    if (r.count >= this.cfg.apps.max_restarts) {
+      this.log(id, `not restarting: ${r.count} restarts in a row failed (apps.max_restarts)`);
+      return;
+    }
+    const delay = Math.min(5_000 * 2 ** r.count, 300_000);
+    r.count++;
+    this.log(id, `restarting in ${Math.round(delay / 1000)} s (attempt ${r.count} of ${this.cfg.apps.max_restarts})`);
+    r.timer = setTimeout(() => {
+      r.timer = null;
+      void this.startAsOwner(id);
+    }, delay);
+    r.timer.unref();
+    this.restarts.set(id, r);
+  }
+
+  private clearRestarts(id: string): void {
+    const r = this.restarts.get(id);
+    if (r?.timer) clearTimeout(r.timer);
+    this.restarts.delete(id);
   }
 
   bind(bi: { dashboards: DashboardService; savedQueries: SavedQueryService }): void {
@@ -223,7 +298,8 @@ export class DataAppService {
     const code = files[entry] ?? '';
     if (code && !/^\s*(import|from)\s+streamlit\b/m.test(code)) errors.push(`${entry} does not import streamlit`);
     if (/use_container_width/.test(code)) warnings.push('use_container_width is deprecated in Streamlit ≥ 1.46 — use width="stretch"');
-    const py = fs.existsSync(this.venvPython) ? this.venvPython : this.cfg.apps.python;
+    const venvPy = SubprocessRuntime.venvPython(this.cfg);
+    const py = fs.existsSync(venvPy) ? venvPy : this.cfg.apps.python;
     if (code && py) {
       fs.mkdirSync(this.cfg.duckdb.temp_directory, { recursive: true });
       const dir = fs.mkdtempSync(path.join(this.cfg.duckdb.temp_directory, 'dv-app-check-'));
@@ -347,7 +423,8 @@ export class DataAppService {
 
   toPublic(a: DataApp): PublicApp {
     const { pid: _p, ...rest } = a;
-    return { ...rest, url: `/apps/${a.id}/`, source_bytes: Object.values(a.files).reduce((n, f) => n + Buffer.byteLength(f), 0), running: this.procs.get(a.id)?.healthy === true };
+    const proc = this.procs.get(a.id);
+    return { ...rest, url: `/apps/${a.id}/`, source_bytes: Object.values(a.files).reduce((n, f) => n + Buffer.byteLength(f), 0), running: proc?.healthy === true, runtime_ref: proc?.inst?.ref ?? null };
   }
 
   templates(): AppTemplate[] {
@@ -379,7 +456,8 @@ export class DataAppService {
     const files = this.validateFiles(input.files ?? APP_TEMPLATES[0]!.files, entry);
     if (input.visibility && !APP_VISIBILITIES.includes(input.visibility)) throw badRequest(`visibility must be ${APP_VISIBILITIES.join(' or ')}`);
     const now = new Date();
-    const row: DataApp = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name, description: input.description?.trim() || null, kind: 'streamlit', entry, files, spec: input.spec ?? null, visibility: input.visibility ?? 'workspace', status: 'stopped', port: null, pid: null, last_error: null, last_started_at: null, last_used_at: null, created_at: now, updated_at: now };
+    const row: DataApp = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name, description: input.description?.trim() || null, kind: 'streamlit', entry, files, spec: input.spec ?? null, visibility: 'workspace', status: 'stopped', port: null, pid: null, last_error: null, last_started_at: null, last_used_at: null, always_on: false, runtime: null, publish_status: 'none', publish_requested_by: null, publish_requested_at: null, publish_reviewed_by: null, publish_reviewed_at: null, publish_note: null, created_at: now, updated_at: now };
+    if (input.visibility === 'org') Object.assign(row, this.publishFields(p, 'org', null, now));
     await this.db.insert(this.s.dataApps).values(row);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'app.create', resource: `app:${row.id}`, ip: p.ip });
     return this.toPublic(row);
@@ -418,9 +496,16 @@ export class DataAppService {
     if (patch.files !== undefined) set.files = this.validateFiles(patch.files, set.entry ?? app.entry);
     else if (set.entry && !app.files[set.entry]) throw badRequest(`The entry file "${set.entry}" is missing`);
     if (patch.spec !== undefined) set.spec = patch.spec;
-    if (patch.visibility !== undefined) {
+    if (patch.visibility !== undefined && patch.visibility !== app.visibility) {
       if (!APP_VISIBILITIES.includes(patch.visibility)) throw badRequest(`visibility must be ${APP_VISIBILITIES.join(' or ')}`);
-      set.visibility = patch.visibility;
+      Object.assign(set, this.publishFields(p, patch.visibility, null, set.updated_at!));
+      this.audit.log({ userId: p.userId, actorType: p.actorType, action: `app.publish.${set.publish_status === 'pending' ? 'request' : patch.visibility}`, resource: `app:${id}`, ip: p.ip });
+    }
+    // Reviewed code changed: everyone else stops seeing it until an administrator looks again.
+    const codeChanged = (patch.files !== undefined && JSON.stringify(set.files) !== JSON.stringify(app.files)) || (patch.entry !== undefined && patch.entry !== app.entry);
+    if (codeChanged && (set.visibility ?? app.visibility) === 'org' && this.cfg.apps.publish_requires_approval && !isPlatformAdmin(p)) {
+      Object.assign(set, { visibility: 'workspace', publish_status: 'pending', publish_requested_by: p.userId, publish_requested_at: set.updated_at, publish_reviewed_by: null, publish_reviewed_at: null, publish_note: 'The code changed after it was approved' } satisfies Partial<DataApp>);
+      this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'app.publish.rereview', resource: `app:${id}`, ip: p.ip });
     }
     await this.db.update(this.s.dataApps).set(set).where(eq(this.s.dataApps.id, id));
     const next = { ...app, ...set };
@@ -440,8 +525,14 @@ export class DataAppService {
   async remove(p: Principal, id: string): Promise<void> {
     requireWrite(p);
     await this.get(p, id, 'EDITOR');
-    await this.stop(p, id, 'delete').catch(() => undefined);
-    await this.db.delete(this.s.dataApps).where(eq(this.s.dataApps.id, id));
+    this.clearRestarts(id);
+    this.removing.add(id);
+    try {
+      await this.stop(p, id, 'delete').catch(() => undefined);
+      await this.db.delete(this.s.dataApps).where(eq(this.s.dataApps.id, id));
+    } finally {
+      this.removing.delete(id);
+    }
     fs.rmSync(this.runDir(id), { recursive: true, force: true });
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'app.delete', resource: `app:${id}`, ip: p.ip });
   }
@@ -450,9 +541,6 @@ export class DataAppService {
 
   private runDir(id: string): string {
     return path.join(this.cfg.security.data_jail_directory, '.duckview', 'apps', 'run', id);
-  }
-  private get venvPython(): string {
-    return path.join(this.cfg.apps.venv_dir, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
   }
   /** The SDK source directory (monorepo checkout or the container image). */
   static sdkDir(): string | null {
@@ -484,10 +572,10 @@ export class DataAppService {
     if (row) liveEvents.publish({ type: 'app', at: new Date().toISOString(), workspace_id: row.workspace_id, app_id: id, status, error: extra.last_error ?? null });
   }
 
-  /** Reachable port for the proxy, when the app is up. */
-  target(id: string): { port: number } | null {
+  /** Where the proxy reaches the app, when it is up. */
+  target(id: string): { host: string; port: number } | null {
     const proc = this.procs.get(id);
-    return proc?.healthy ? { port: proc.port } : null;
+    return proc?.healthy && proc.inst ? { host: proc.inst.host, port: proc.inst.port } : null;
   }
   touch(id: string): void {
     const proc = this.procs.get(id);
@@ -499,137 +587,98 @@ export class DataAppService {
     return proc.healthy ? 'running' : 'starting';
   }
 
-  /** Makes sure a Python with streamlit exists (creates the virtualenv and installs on first use). */
-  private async ensureRuntime(id: string): Promise<string[]> {
-    if (this.command) return this.command;
-    const py = this.venvPython;
-    const has = (interp: string) => new Promise<boolean>((resolve) => { const c = spawn(interp, ['-c', 'import streamlit, pandas'], { stdio: 'ignore' }); c.on('error', () => resolve(false)); c.on('exit', (code) => resolve(code === 0)); });
-    if (!(await has(py))) {
-      if (!this.cfg.apps.auto_install) throw badRequest(`No Python with streamlit at ${py}; set apps.auto_install or create the virtualenv yourself`);
-      if (!this.installing) {
-        this.installing = (async () => {
-          await this.setStatus(id, 'installing');
-          this.log(id, `Creating the apps virtualenv at ${this.cfg.apps.venv_dir} (first run: installs streamlit, pandas, pyarrow and the DuckView SDK)`);
-          fs.mkdirSync(path.dirname(this.cfg.apps.venv_dir), { recursive: true });
-          if (!fs.existsSync(py)) await this.exec(id, this.cfg.apps.python, ['-m', 'venv', this.cfg.apps.venv_dir]);
-          const sdk = DataAppService.sdkDir();
-          await this.exec(id, py, ['-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', 'streamlit>=1.46', 'pandas', 'pyarrow', ...(sdk ? [sdk] : [])]);
-          if (!(await has(py))) throw new Error('streamlit is still not importable after the install — see the app log');
-        })().finally(() => { this.installing = null; });
-      } else this.log(id, 'Waiting for the apps virtualenv being prepared by another app…');
-      await this.installing;
-    }
-    return [py, '-m', 'streamlit', 'run'];
-  }
-
-  private exec(id: string, cmd: string, args: string[], cwd?: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.log(id, `$ ${path.basename(cmd)} ${args.join(' ')}`);
-      const c = spawn(cmd, args, { cwd, env: this.childEnv(id, null, null), stdio: ['ignore', 'pipe', 'pipe'] });
-      c.stdout?.on('data', (d) => this.log(id, String(d)));
-      c.stderr?.on('data', (d) => this.log(id, String(d)));
-      c.on('error', (err) => reject(new Error(`${cmd}: ${err.message}`)));
-      c.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${path.basename(cmd)} ${args[0] ?? ''} exited with ${code}`))));
-    });
-  }
-
-  /** The app's environment: no server secrets, only what the SDK needs. */
-  private childEnv(id: string, token: string | null, workspaceId: string | null): NodeJS.ProcessEnv {
-    const sdk = DataAppService.sdkDir();
-    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: this.runDir(id), LANG: process.env.LANG ?? 'C.UTF-8', PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', DUCKVIEW_APP_ID: id, STREAMLIT_BROWSER_GATHER_USAGE_STATS: 'false', STREAMLIT_SERVER_HEADLESS: 'true' };
-    if (sdk) env.PYTHONPATH = sdk;
-    if (process.env.SYSTEMROOT) env.SYSTEMROOT = process.env.SYSTEMROOT;
-    if (token) env.DUCKVIEW_TOKEN = token;
-    if (workspaceId) env.DUCKVIEW_WORKSPACE = workspaceId;
-    env.DUCKVIEW_URL = this.internalUrl;
-    return env;
-  }
-
-  private async freePort(): Promise<number> {
-    const [lo, hi] = this.cfg.apps.port_range;
-    const used = new Set([...this.procs.values()].map((p) => p.port));
-    for (let port = lo; port <= hi; port++) {
-      if (used.has(port)) continue;
-      const free = await new Promise<boolean>((resolve) => { const srv = net.createServer(); srv.once('error', () => resolve(false)); srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(true))); });
-      if (free) return port;
-    }
-    throw badRequest(`No free port in apps.port_range ${lo}-${hi}`);
+  /** Stops the least recently used idle app (never an always-on one) to make room, or refuses. */
+  private async makeRoom(): Promise<void> {
+    const now = Date.now();
+    const idleFor = this.cfg.apps.evict_idle_seconds * 1000;
+    const victim = [...this.procs.entries()].filter(([, p]) => p.healthy && !p.alwaysOn && now - p.lastUsed >= idleFor).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+    if (!victim) throw badRequest(`${this.cfg.apps.max_running} apps are already running (apps.max_running) and none has been idle for ${this.cfg.apps.evict_idle_seconds} s — stop one first`);
+    logger().info({ app: victim[0], idle_s: Math.round((now - victim[1].lastUsed) / 1000) }, 'Evicting the least recently used app to make room');
+    await this.stop(null, victim[0], 'evicted');
   }
 
   /** Starts the app (viewers may: the code belongs to the workspace). Resolves once Streamlit answers its health check. */
   async start(p: Principal, id: string): Promise<PublicApp> {
     if (!this.enabled) throw forbidden('Data apps are disabled on this server (apps.enabled)');
+    if (this.removing.has(id)) throw notFound('App');
     const app = await this.get(p, id);
     if (this.procs.has(id)) return this.toPublic({ ...app, status: this.status(id) ?? 'starting' });
-    if (this.procs.size >= this.cfg.apps.max_running) throw badRequest(`${this.cfg.apps.max_running} apps are already running (apps.max_running) — stop one first`);
+    if (this.procs.size >= this.cfg.apps.max_running) await this.makeRoom();
+    if (this.procs.has(id)) return this.toPublic({ ...app, status: this.status(id) ?? 'starting' });
     const owner = await this.auth.findById(app.user_id);
     if (!owner) throw badRequest('The app\'s creator no longer exists');
-    this.lastLogs.set(id, []);
+    // Registered before the (possibly slow) launch so a second visit waits instead of starting a twin.
+    const proc: Proc = { inst: null, tokenId: null, ownerId: owner.id, logs: [], startedAt: Date.now(), lastUsed: Date.now(), healthy: false, alwaysOn: app.always_on, stopping: false };
+    this.procs.set(id, proc);
+    this.lastLogs.delete(id);
     try {
-      const command = await this.ensureRuntime(id);
-      const dir = this.runDir(id);
-      fs.rmSync(dir, { recursive: true, force: true });
-      fs.mkdirSync(dir, { recursive: true });
-      for (const [name, content] of Object.entries(app.files)) {
-        const target = path.join(dir, name);
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.writeFileSync(target, content);
-      }
-      fs.mkdirSync(path.join(dir, '.streamlit'), { recursive: true });
-      fs.writeFileSync(path.join(dir, '.streamlit', 'config.toml'), '[browser]\ngatherUsageStats = false\n[server]\nheadless = true\n[client]\ntoolbarMode = "minimal"\n');
-      if (app.files['requirements.txt']?.trim() && !this.command) {
-        if (!this.cfg.apps.allow_requirements) throw badRequest('requirements.txt is not allowed on this server (apps.allow_requirements)');
-        await this.setStatus(id, 'installing');
-        await this.exec(id, this.venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', '-r', 'requirements.txt'], dir);
-      }
-      const port = await this.freePort();
+      await this.setStatus(id, 'starting', { last_started_at: new Date(), last_error: null, runtime: this.runtime.name, port: null, pid: null });
       const minted = await this.auth.createToken(owner, { name: `app:${app.name}`, scopes: ['read'], workspaceId: app.workspace_id, expiresAt: new Date(Date.now() + this.cfg.apps.token_ttl_hours * 3_600_000) });
-      const args = [...command.slice(1), app.entry, '--server.headless=true', `--server.port=${port}`, '--server.address=127.0.0.1', `--server.baseUrlPath=/apps/${id}`, '--browser.gatherUsageStats=false', '--server.enableXsrfProtection=false', '--server.enableCORS=false', '--server.fileWatcherType=none', '--client.toolbarMode=minimal'];
-      this.log(id, `$ ${path.basename(command[0]!)} ${args.join(' ')}`);
-      const child = spawn(command[0]!, args, { cwd: dir, env: this.childEnv(id, minted.token, app.workspace_id), stdio: ['ignore', 'pipe', 'pipe'] });
-      const proc: Proc = { child, port, tokenId: minted.record.id, ownerId: owner.id, logs: this.lastLogs.get(id) ?? [], startedAt: Date.now(), lastUsed: Date.now(), healthy: false };
-      this.procs.set(id, proc);
-      this.lastLogs.delete(id);
-      child.stdout?.on('data', (d) => this.log(id, String(d)));
-      child.stderr?.on('data', (d) => this.log(id, String(d)));
-      child.on('error', (err) => this.log(id, `process error: ${err.message}`));
-      child.on('exit', (code, signal) => {
-        this.log(id, `process exited (${code ?? signal})`);
-        const current = this.procs.get(id);
-        if (current === proc) {
-          this.procs.delete(id);
-          this.lastLogs.set(id, proc.logs);
-          void this.auth.revokeToken(owner.id, minted.record.id).catch(() => undefined);
-          void this.setStatus(id, code === 0 || signal ? 'stopped' : 'error', { port: null, pid: null, last_error: code === 0 || signal ? null : `exited with ${code}: ${proc.logs.slice(-3).join(' · ').slice(0, 500)}` });
-        }
+      proc.tokenId = minted.record.id;
+      const inst = await this.runtime.launch({
+        id,
+        name: app.name,
+        files: app.files,
+        entry: app.entry,
+        env: { DUCKVIEW_APP_ID: id, DUCKVIEW_URL: this.internalUrl, DUCKVIEW_TOKEN: minted.token, DUCKVIEW_WORKSPACE: app.workspace_id },
+        baseUrlPath: `/apps/${id}`,
+        log: (line) => this.log(id, line),
+        installing: () => this.setStatus(id, 'installing'),
       });
-      await this.setStatus(id, 'starting', { port, pid: child.pid ?? null, last_started_at: new Date(), last_error: null });
+      proc.inst = inst;
+      void inst.exited.then((e) => this.onExit(id, proc, e));
+      if (proc.stopping) throw new Error('stopped while starting');
+      await this.setStatus(id, 'starting', { port: inst.port, pid: inst.pid });
       await this.waitHealthy(id, proc);
       proc.healthy = true;
       await this.setStatus(id, 'running', { last_used_at: new Date() });
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'app.start', resource: `app:${id}`, ip: p.ip });
-      return this.toPublic({ ...app, status: 'running', port, last_started_at: new Date() });
+      return this.toPublic({ ...app, status: 'running', port: inst.port, last_started_at: new Date(), runtime: this.runtime.name });
     } catch (err) {
       const message = ((err as Error).message ?? String(err)).split('\n')[0]!.slice(0, 500);
       this.log(id, `start failed: ${message}`);
-      const proc = this.procs.get(id);
-      if (proc) {
-        proc.child.kill('SIGTERM');
+      if (this.procs.get(id) === proc) {
         this.procs.delete(id);
         this.lastLogs.set(id, proc.logs);
-        await this.auth.revokeToken(proc.ownerId, proc.tokenId).catch(() => undefined);
+      }
+      proc.stopping = true;
+      await proc.inst?.stop().catch(() => undefined);
+      if (proc.tokenId) await this.auth.revokeToken(proc.ownerId, proc.tokenId).catch(() => undefined);
+      if (message === 'stopped while starting') {
+        await this.setStatus(id, 'stopped', { port: null, pid: null });
+        throw badRequest('The app was stopped while it was starting');
       }
       await this.setStatus(id, 'error', { port: null, pid: null, last_error: message });
       throw err instanceof Error && 'statusCode' in err ? err : badRequest(message);
     }
   }
 
+  /** The instance went away on its own (a stop removes it from `procs` first). */
+  private onExit(id: string, proc: Proc, e: Exit): void {
+    this.log(id, `process exited (${e.code ?? e.signal})`);
+    if (this.procs.get(id) !== proc || proc.stopping) return;
+    this.procs.delete(id);
+    this.lastLogs.set(id, proc.logs);
+    if (proc.tokenId) void this.auth.revokeToken(proc.ownerId, proc.tokenId).catch(() => undefined);
+    // Our own stops never get here: anything else — a non-zero code, a signal, a pod deleted under us — is a crash.
+    const clean = e.code === 0;
+    void this.setStatus(id, clean ? 'stopped' : 'error', { port: null, pid: null, last_error: clean ? null : `exited with ${e.code ?? e.signal}: ${proc.logs.slice(-3).join(' · ').slice(0, 500)}` });
+    if (!clean && proc.alwaysOn) {
+      // An app that ran for a while before crashing starts a fresh series of retries.
+      if (proc.healthy && Date.now() - proc.startedAt > 600_000) this.restarts.delete(id);
+      this.scheduleRestart(id);
+    }
+  }
+
   private async waitHealthy(id: string, proc: Proc): Promise<void> {
+    const inst = proc.inst!;
+    const host = inst.host.includes(':') ? `[${inst.host}]` : inst.host;
     const deadline = Date.now() + this.cfg.apps.start_timeout_seconds * 1000;
     while (Date.now() < deadline) {
-      if (proc.child.exitCode !== null) throw new Error(`the app exited before it was ready: ${proc.logs.slice(-3).join(' · ')}`);
+      if (inst.exit) throw new Error(`the app exited before it was ready: ${proc.logs.slice(-3).join(' · ')}`);
+      if (proc.stopping) throw new Error('stopped while starting');
       try {
-        const res = await fetch(`http://127.0.0.1:${proc.port}/apps/${id}/_stcore/health`, { signal: AbortSignal.timeout(2000) });
+        const res = await fetch(`http://${host}:${inst.port}/apps/${id}/_stcore/health`, { signal: AbortSignal.timeout(2000) });
         if (res.ok) return;
       } catch {
         /* not up yet */
@@ -639,7 +688,8 @@ export class DataAppService {
     throw new Error(`the app did not answer its health check within ${this.cfg.apps.start_timeout_seconds} s`);
   }
 
-  async stop(p: Principal | null, id: string, reason: 'manual' | 'idle' | 'restart' | 'delete' | 'shutdown' = 'manual'): Promise<void> {
+  async stop(p: Principal | null, id: string, reason: StopReason = 'manual'): Promise<void> {
+    if (reason !== 'restart' && reason !== 'evicted' && reason !== 'idle') this.clearRestarts(id);
     const proc = this.procs.get(id);
     if (!proc) {
       if (p) await this.get(p, id);
@@ -648,26 +698,97 @@ export class DataAppService {
     }
     this.procs.delete(id);
     this.lastLogs.set(id, proc.logs);
+    proc.stopping = true;
     this.log(id, `stopping (${reason})`);
-    await new Promise<void>((resolve) => {
-      const t = setTimeout(() => { proc.child.kill('SIGKILL'); resolve(); }, 5000);
-      proc.child.once('exit', () => { clearTimeout(t); resolve(); });
-      proc.child.kill('SIGTERM');
-    });
-    await this.auth.revokeToken(proc.ownerId, proc.tokenId).catch(() => undefined);
+    // Still launching: start() sees `stopping`, stops what it launched and revokes the token.
+    if (!proc.inst) return;
+    await proc.inst.stop().catch((err) => this.log(id, `stop: ${(err as Error).message}`));
+    if (proc.tokenId) await this.auth.revokeToken(proc.ownerId, proc.tokenId).catch(() => undefined);
     await this.setStatus(id, 'stopped', { port: null, pid: null });
     if (p) this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'app.stop', resource: `app:${id}`, ip: p.ip });
   }
 
+  /** Scale to zero: stops apps nobody used for apps.idle_stop_minutes (always-on apps stay). */
   async reapIdle(now = Date.now()): Promise<string[]> {
     const stopped: string[] = [];
     for (const [id, proc] of this.procs) {
+      if (proc.alwaysOn || !proc.healthy) continue;
       if (now - proc.lastUsed > this.cfg.apps.idle_stop_minutes * 60_000) {
         await this.stop(null, id, 'idle');
         stopped.push(id);
       }
     }
     return stopped;
+  }
+
+  /** Keeps an app running (administrators: it holds resources for good). Starts it when switched on. */
+  async setAlwaysOn(p: Principal, id: string, on: boolean): Promise<PublicApp> {
+    if (!isPlatformAdmin(p)) throw forbidden('Only an administrator signed in to DuckView can keep apps always on');
+    const app = await this.get(p, id);
+    await this.db.update(this.s.dataApps).set({ always_on: on }).where(eq(this.s.dataApps.id, id));
+    const proc = this.procs.get(id);
+    if (proc) proc.alwaysOn = on;
+    this.clearRestarts(id);
+    this.audit.log({ userId: p.userId, actorType: p.actorType, action: on ? 'app.always_on' : 'app.always_on.off', resource: `app:${id}`, ip: p.ip });
+    if (on && !proc && this.enabled) void this.startAsOwner(id);
+    return this.toPublic({ ...app, always_on: on });
+  }
+
+  // ------------------------------------------------------------------ publishing
+
+  /** The publish columns for a change of audience by `p` (administrators and servers without review publish at once). */
+  private publishFields(p: Principal, audience: AppVisibility, note: string | null, now: Date): Partial<DataApp> {
+    if (audience === 'workspace') return { visibility: 'workspace', publish_status: 'none', publish_requested_by: null, publish_requested_at: null, publish_reviewed_by: null, publish_reviewed_at: null, publish_note: null };
+    if (!this.cfg.apps.publish_requires_approval || isPlatformAdmin(p)) return { visibility: 'org', publish_status: 'approved', publish_requested_by: p.userId, publish_requested_at: now, publish_reviewed_by: p.userId, publish_reviewed_at: now, publish_note: note };
+    return { publish_status: 'pending', publish_requested_by: p.userId, publish_requested_at: now, publish_reviewed_by: null, publish_reviewed_at: null, publish_note: note };
+  }
+
+  /** Changes who sees the app; "org" becomes a request for review unless the caller may publish outright. */
+  async publish(p: Principal, id: string, audience: AppVisibility, note?: string | null): Promise<{ app: PublicApp; outcome: 'published' | 'pending' | 'unpublished' }> {
+    requireWrite(p);
+    if (!APP_VISIBILITIES.includes(audience)) throw badRequest(`audience must be ${APP_VISIBILITIES.join(' or ')}`);
+    const app = await this.get(p, id, 'EDITOR');
+    const now = new Date();
+    const set = { ...this.publishFields(p, audience, note?.trim().slice(0, 1000) || null, now), updated_at: now };
+    await this.db.update(this.s.dataApps).set(set).where(eq(this.s.dataApps.id, id));
+    const outcome = audience === 'workspace' ? 'unpublished' : set.publish_status === 'pending' ? 'pending' : 'published';
+    this.audit.log({ userId: p.userId, actorType: p.actorType, action: outcome === 'pending' ? 'app.publish.request' : `app.publish.${audience}`, resource: `app:${id}`, ip: p.ip });
+    liveEvents.publish({ type: 'app', at: now.toISOString(), workspace_id: app.workspace_id, app_id: id, status: this.status(id) ?? app.status, error: null });
+    return { app: this.toPublic({ ...app, ...set }), outcome };
+  }
+
+  /** An administrator approves (the app becomes visible to everyone signed in) or rejects a pending request. */
+  async review(p: Principal, id: string, decision: 'approve' | 'reject', note?: string | null): Promise<PublicApp> {
+    if (!isPlatformAdmin(p)) throw forbidden('Only an administrator signed in to DuckView can review publish requests');
+    const app = (await this.db.select().from(this.s.dataApps).where(eq(this.s.dataApps.id, id)).limit(1))[0];
+    if (!app) throw notFound('App');
+    if (app.publish_status !== 'pending') throw badRequest(`Nothing to review: the app is ${app.publish_status === 'approved' ? 'already published' : 'not waiting for review'}`);
+    const now = new Date();
+    const set: Partial<DataApp> = { publish_status: decision === 'approve' ? 'approved' : 'rejected', publish_reviewed_by: p.userId, publish_reviewed_at: now, publish_note: note?.trim().slice(0, 1000) || (decision === 'approve' ? null : app.publish_note), updated_at: now };
+    if (decision === 'approve') set.visibility = 'org';
+    await this.db.update(this.s.dataApps).set(set).where(eq(this.s.dataApps.id, id));
+    this.audit.log({ userId: p.userId, actorType: p.actorType, action: `app.publish.${decision}`, resource: `app:${id}`, ip: p.ip });
+    liveEvents.publish({ type: 'app', at: now.toISOString(), workspace_id: app.workspace_id, app_id: id, status: this.status(id) ?? app.status, error: null });
+    return this.toPublic({ ...app, ...set });
+  }
+
+  /** Every app on the server, without sources, with owners and workspaces (administrators). */
+  async adminList(p: Principal, filter: { publish_status?: AppPublishStatus } = {}): Promise<AdminApp[]> {
+    if (!isPlatformAdmin(p)) throw forbidden('Administrator role required');
+    const rows = filter.publish_status ? await this.db.select().from(this.s.dataApps).where(eq(this.s.dataApps.publish_status, filter.publish_status)) : await this.db.select().from(this.s.dataApps);
+    const users = new Map((await this.db.select({ id: this.s.users.id, email: this.s.users.email }).from(this.s.users)).map((u) => [u.id, u.email]));
+    const spaces = new Map((await this.db.select({ id: this.s.workspaces.id, name: this.s.workspaces.name }).from(this.s.workspaces)).map((w) => [w.id, w.name]));
+    return rows
+      .map((r) => {
+        const { files: _f, ...pub } = this.toPublic(r);
+        const proc = this.procs.get(r.id);
+        return { ...pub, status: proc ? (proc.healthy ? 'running' : 'starting') : r.status, owner_email: users.get(r.user_id) ?? null, workspace_name: spaces.get(r.workspace_id) ?? null, requested_by_email: r.publish_requested_by ? users.get(r.publish_requested_by) ?? null : null, last_used_ms: proc ? Date.now() - proc.lastUsed : null } as AdminApp;
+      })
+      .sort((a, b) => Number(b.running) - Number(a.running) || (b.publish_requested_at?.getTime() ?? 0) - (a.publish_requested_at?.getTime() ?? 0) || b.updated_at.getTime() - a.updated_at.getTime());
+  }
+
+  runtimeInfo(): Record<string, unknown> {
+    return { ...this.runtime.describe(), enabled: this.enabled, running: this.procs.size, max_running: this.cfg.apps.max_running, idle_stop_minutes: this.cfg.apps.idle_stop_minutes, evict_idle_seconds: this.cfg.apps.evict_idle_seconds, publish_requires_approval: this.cfg.apps.publish_requires_approval };
   }
 
   runningCount(): number {
@@ -677,6 +798,7 @@ export class DataAppService {
   async shutdown(): Promise<void> {
     if (this.ticker) clearInterval(this.ticker);
     this.ticker = null;
+    for (const id of [...this.restarts.keys()]) this.clearRestarts(id);
     await Promise.all([...this.procs.keys()].map((id) => this.stop(null, id, 'shutdown').catch(() => undefined)));
   }
 
