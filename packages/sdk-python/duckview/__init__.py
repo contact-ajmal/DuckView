@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -35,6 +36,17 @@ class DuckViewError(Exception):
         self.code = code
         self.message = message
         self.details = details
+
+
+def _raise_for(status: int, text: str) -> None:
+    """Raises the DuckViewError for an error response (JSON {error, message, details} or plain text)."""
+    try:
+        j = json.loads(text)
+    except ValueError:
+        raise DuckViewError(status, text[:500]) from None
+    if isinstance(j, dict):
+        raise DuckViewError(status, j.get("message") or j.get("error") or text, j.get("error") or "ERROR", j.get("details")) from None
+    raise DuckViewError(status, text[:500]) from None
 
 
 @dataclass
@@ -104,6 +116,8 @@ class Client:
             hdrs["content-type"] = "application/json"
         if headers:
             hdrs.update(headers)
+        if sys.platform == "emscripten":  # Pyodide (an app run in the browser): no sockets, the browser does HTTP
+            return self._request_browser(method, path, data, hdrs, raw)
         req = urllib.request.Request(self.url + path, data=data, method=method, headers=hdrs)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as res:
@@ -112,14 +126,37 @@ class Client:
                     return payload
                 return json.loads(payload.decode("utf-8")) if payload else {}
         except urllib.error.HTTPError as e:
-            text = e.read().decode("utf-8", "replace")
-            try:
-                j = json.loads(text)
-                raise DuckViewError(e.code, j.get("message") or j.get("error") or text, j.get("error") or "ERROR", j.get("details")) from None
-            except ValueError:
-                raise DuckViewError(e.code, text[:500]) from None
+            _raise_for(e.code, e.read().decode("utf-8", "replace"))
         except urllib.error.URLError as e:
             raise DuckViewError(0, f"DuckView unreachable at {self.url}: {e.reason}", "UNREACHABLE") from None
+
+    def _request_browser(self, method: str, path: str, data: Optional[bytes], hdrs: Dict[str, str], raw: bool) -> Any:
+        """
+        HTTP from Pyodide through a synchronous XMLHttpRequest (allowed in the web worker stlite runs Python in).
+        Unlike a patched urllib, error statuses raise DuckViewError exactly as on the server.
+        """
+        from js import XMLHttpRequest, Uint8Array  # type: ignore[import-not-found]
+
+        xhr = XMLHttpRequest.new()
+        xhr.open(method, self.url + path, False)
+        if raw:
+            xhr.responseType = "arraybuffer"
+        for k, v in hdrs.items():
+            if k.lower() != "user-agent":  # a forbidden header in browsers
+                xhr.setRequestHeader(k, v)
+        try:
+            xhr.send(data.decode("utf-8") if data is not None else None)
+        except Exception as e:  # network error, or the API's CORS policy refused this origin
+            raise DuckViewError(0, f"DuckView unreachable at {self.url}: {e}", "UNREACHABLE") from None
+        status = int(xhr.status)
+        if status == 0:
+            raise DuckViewError(0, f"DuckView unreachable at {self.url} (network or CORS)", "UNREACHABLE")
+        payload = bytes(Uint8Array.new(xhr.response).to_py()) if raw else str(xhr.responseText).encode("utf-8")
+        if status >= 400:
+            _raise_for(status, payload.decode("utf-8", "replace"))
+        if raw:
+            return payload
+        return json.loads(payload.decode("utf-8")) if payload else {}
 
     def _ws(self, workspace: Optional[str] = None) -> str:
         ws = workspace or self.workspace

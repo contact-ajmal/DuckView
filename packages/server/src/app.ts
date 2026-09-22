@@ -53,7 +53,8 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   });
 
   await app.register(cors, {
-    origin: cfg.server.cors_origins.length ? cfg.server.cors_origins : true,
+    // In-browser data apps call the API from the apps origin: it joins an explicit allow-list.
+    origin: cfg.server.cors_origins.length ? [...cfg.server.cors_origins, ...(cfg.apps.public_url ? [cfg.apps.public_url] : [])] : true,
     credentials: true,
     exposedHeaders: ['mcp-session-id', 'x-request-id'],
     allowedHeaders: ['authorization', 'content-type', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id'],

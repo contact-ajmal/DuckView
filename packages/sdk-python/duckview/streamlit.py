@@ -13,6 +13,7 @@ X-DuckView-Email and X-DuckView-Role — `viewer()` returns them.
 """
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
@@ -65,9 +66,14 @@ def table_picker(dv: Optional[Client] = None, label: str = "Dataset", key: str =
 
 
 def viewer() -> Dict[str, Optional[str]]:
-    """The DuckView user viewing the app (set by the proxy) — {"id", "email", "role"}."""
+    """
+    The DuckView user viewing the app — {"id", "email", "role"}: from the proxy's headers for apps run on the server,
+    from the page's environment for apps run in the viewer's browser.
+    """
     try:
         h = st.context.headers
-        return {"id": h.get("X-Duckview-User"), "email": h.get("X-Duckview-Email"), "role": h.get("X-Duckview-Role")}
-    except Exception:  # older Streamlit, or run outside DuckView
-        return {"id": None, "email": None, "role": None}
+        if h.get("X-Duckview-Email"):
+            return {"id": h.get("X-Duckview-User"), "email": h.get("X-Duckview-Email"), "role": h.get("X-Duckview-Role")}
+    except Exception:  # older Streamlit, stlite, or run outside DuckView
+        pass
+    return {"id": os.environ.get("DUCKVIEW_VIEWER_ID"), "email": os.environ.get("DUCKVIEW_VIEWER_EMAIL"), "role": os.environ.get("DUCKVIEW_VIEWER_ROLE")}

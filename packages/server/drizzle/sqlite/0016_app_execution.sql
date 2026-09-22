@@ -1,0 +1,1 @@
+ALTER TABLE `data_apps` ADD `execution` text DEFAULT 'server' NOT NULL;

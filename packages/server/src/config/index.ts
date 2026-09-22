@@ -252,6 +252,21 @@ export const ConfigSchema = z.object({
        * scheme and host with apps.port.
        */
       public_url: z.string().url().optional(),
+      /**
+       * Apps that run in the viewer's browser (stlite: Streamlit on Pyodide). Nothing runs on the server; the app
+       * reads the workspace with the viewer's own access (a short-lived, read-only credential for that workspace).
+       */
+      stlite: z
+        .object({
+          enabled: z.coerce.boolean().default(true),
+          /** Where @stlite/browser's build lives (stlite.js / stlite.css): the CDN, or a self-hosted copy. */
+          url: z.string().default('https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.1/build'),
+          /** A self-hosted Pyodide (…/pyodide.js); default stlite's CDN choice. */
+          pyodide_url: z.string().optional(),
+          /** Lifetime of the viewer's read-only credential handed to the page. */
+          token_ttl_minutes: z.coerce.number().int().min(5).default(240),
+        })
+        .default({}),
       /** Publishing an app to everyone signed in ("org") waits for an administrator's approval. */
       publish_requires_approval: z.coerce.boolean().default(true),
       /** When max_running is reached, stop the least recently used app idle for at least this long instead of refusing. */

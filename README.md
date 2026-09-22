@@ -145,6 +145,7 @@ st.caption(f"Viewing as {viewer()['email']}")
 - The **runner** creates a Python environment on first start (streamlit, pandas, pyarrow, the SDK), installs each app's `requirements.txt`, health-checks it, stops idle apps, and serves it at `/apps/<id>/` to the workspace's members — with a **read-only, workspace-scoped token** rotated on every start and a minimal environment that never sees the server's secrets. The visitor's identity is forwarded to the app.
 - **Three runtimes** (`apps.runtime`): `subprocess` (a shared virtualenv next to the server — the default), `docker` (one hardened container per app from `anbproject/duckview-app-runtime`: read-only root, no capabilities, uid 1001, CPU / memory / pid limits, source streamed in, token passed by name) or `kubernetes` (one pod per app with its source in a ConfigMap and its token in a Secret — `k8s/apps-rbac.yaml` has the role and a NetworkPolicy).
 - **Scale to zero**: idle apps stop and wake on the next page load; at `apps.max_running` the least recently used idle app makes room. Administrators pin apps **always on** — started with the server, never idled out, restarted with backoff after a crash.
+- **Or in the viewer's browser**: mark an app `execution: browser` and it runs on **stlite** (Streamlit on Pyodide) — nothing on the server, each viewer reading the workspace with their own read-only access; the same `duckview` SDK works unchanged.
 - **Their own origin**: apps are served from a second port (`4201`) or host (`apps.public_url`), never the UI's, so script an app renders cannot reach the viewer's DuckView session; a one-time handoff signs the browser in there, and shared app links work as they are.
 - **Publishing is reviewed**: an editor (or an agent's `publish_app`) asks to show an app to everyone signed in; an administrator approves or rejects it under **Settings → Data apps**, where every app, its instance and the runtime are listed. Changing an approved app's code sends it back to review.
 - `pip install duckview` for the SDK anywhere else: `query()`, `query_arrow()` for large results, a table builder, `copilot()`, and the agent façade's OpenAPI for LangChain / CrewAI / Strands.
@@ -283,7 +284,7 @@ Full details — configuration keys, every endpoint, the MCP tool contracts, CLI
 
 ## 🗺 Roadmap
 
-- Data apps: in-browser apps (stlite), Dash and Gradio behind the same runtimes
+- Data apps: Dash and Gradio behind the same runtimes
 - Scheduled dashboard snapshots & alerts
 - Row-level access policies per workspace
 - Per-user data directories (isolation inside the jail)

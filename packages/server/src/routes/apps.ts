@@ -10,7 +10,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import WebSocket from 'ws';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
-import { APP_VISIBILITIES, APP_PUBLISH_STATUSES } from '../db/schema/sqlite.js';
+import type { DataApp } from '../db/schema/sqlite.js';
+import { APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS } from '../db/schema/sqlite.js';
+import { DataAppService } from '../services/apps.js';
+import { stlitePage, sdkFiles } from '../services/app-stlite.js';
 import { DATA_APP_GUIDE } from '../services/app-generator.js';
 import { isPlatformAdmin, type Principal } from '../services/principal.js';
 import { forbidden } from '../services/errors.js';
@@ -26,7 +29,7 @@ const Source = z.union([
   z.object({ saved_query_ids: z.array(z.string().max(64)).max(50) }),
   z.object({ code: z.string().max(2_000_000), requirements: z.string().max(20_000).nullable().optional() }),
 ]);
-const AppBody = z.object({ name: z.string().max(120), description: z.string().max(2000).nullable().optional(), files: Files.optional(), entry: z.string().max(200).optional(), spec: z.record(z.string(), z.unknown()).nullable().optional(), visibility: z.enum(APP_VISIBILITIES).optional(), source: Source.optional() });
+const AppBody = z.object({ name: z.string().max(120), description: z.string().max(2000).nullable().optional(), files: Files.optional(), entry: z.string().max(200).optional(), spec: z.record(z.string(), z.unknown()).nullable().optional(), visibility: z.enum(APP_VISIBILITIES).optional(), execution: z.enum(APP_EXECUTIONS).optional(), source: Source.optional() });
 const HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'cookie', 'authorization']);
 
 function readCookie(header: string | undefined, name: string): string | null {
@@ -45,7 +48,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
   // ---------------------------------------------------------------- registry API (bearer)
   await app.register(async (r) => {
     r.addHook('preHandler', app.authenticate);
-    r.get('/api/apps/templates', async () => ({ templates: ctx.apps.templates(), enabled: ctx.apps.enabled, runtime: ctx.cfg.apps.runtime, publish_requires_approval: ctx.cfg.apps.publish_requires_approval }));
+    r.get('/api/apps/templates', async () => ({ templates: ctx.apps.templates(), enabled: ctx.apps.enabled, runtime: ctx.cfg.apps.runtime, publish_requires_approval: ctx.cfg.apps.publish_requires_approval, browser: ctx.apps.browserReady }));
     r.get('/api/apps/guide', async () => ({ guide: DATA_APP_GUIDE }));
     /** Static checks of app sources (compile, imports, secrets) — the editor's "Check" and agents' safety net. */
     r.post('/api/apps/validate', async (req) => {
@@ -133,7 +136,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
     r.post('/api/apps/:id/preview', async (req, reply) => {
       const { id } = req.params as { id: string };
       const a = await ctx.apps.get(req.principal!, id);
-      if (!ctx.apps.target(id)) return reply.code(409).send({ error: 'NOT_RUNNING', message: 'Start the app first' });
+      if (a.execution !== 'browser' && !ctx.apps.target(id)) return reply.code(409).send({ error: 'NOT_RUNNING', message: 'Start the app first' });
       const shot = await ctx.apps.screenshot(a, req.principal!.userId, ctx.apps.proxyUrl);
       if (!shot) return reply.code(501).send({ error: 'NO_BROWSER', message: 'No Chrome / Chromium on this server (apps.chrome_path)' });
       return { text: shot.text, png_base64: shot.png.toString('base64') };
@@ -199,6 +202,7 @@ export async function registerAppProxy(r: FastifyInstance, ctx: AppContext, opts
         return deny(reply, 404, 'No such app, or you are not a member of its workspace');
       }
       if (!ctx.apps.enabled) return deny(reply, 503, 'Data apps are disabled on this server');
+      if (a.execution === 'browser') return browserApp(r, ctx, req, reply, a, p);
       const target = ctx.apps.target(id);
       if (!target) {
         // Not up: a person opening the page starts it (scale from zero) and the page retries. Background requests
@@ -241,6 +245,28 @@ export async function registerAppProxy(r: FastifyInstance, ctx: AppContext, opts
       }
     });
   });
+}
+
+/**
+ * An in-browser app: the stlite page, with the viewer's own read-only credential for the app's workspace (the app
+ * reads as the person looking at it — so someone who is not a member of the workspace gets an explanation).
+ */
+async function browserApp(r: FastifyInstance, ctx: AppContext, req: FastifyRequest, reply: FastifyReply, a: DataApp, p: Principal) {
+  if (((req.params as Record<string, string>)['*'] ?? '') !== '' || req.method !== 'GET') return reply.code(404).type('text/plain').send('not found');
+  if (!ctx.apps.browserReady) return deny(reply, 503, 'In-browser apps are disabled on this server');
+  const member = await ctx.workspaces.get(p, a.workspace_id).catch(() => null);
+  if (!member) return reply.code(403).type('text/html').send(page(`${a.name} runs in your browser, with your own access`, 'It reads its workspace as you, and you are not a member of that workspace — ask its owner to share it with you.'));
+  const s = ctx.cfg.apps.stlite;
+  const token = r.jwt.sign({ purpose: 'app-browser', sub: p.userId, ws: a.workspace_id }, { expiresIn: `${s.token_ttl_minutes}m` });
+  const env = { DUCKVIEW_URL: apiBase(req, ctx), DUCKVIEW_TOKEN: token, DUCKVIEW_WORKSPACE: a.workspace_id, DUCKVIEW_APP_ID: a.id, DUCKVIEW_VIEWER_ID: p.userId, DUCKVIEW_VIEWER_EMAIL: p.email, DUCKVIEW_VIEWER_ROLE: member.role ?? 'VIEWER' };
+  reply.header('cache-control', 'no-store');
+  return reply.type('text/html; charset=utf-8').send(stlitePage({ app: a, sdk: sdkFiles(DataAppService.sdkDir()), env, stliteUrl: s.url, pyodideUrl: s.pyodide_url }));
+}
+
+/** DuckView's API as the browser reaches it from an app page (the UI's origin). */
+function apiBase(req: FastifyRequest, ctx: AppContext): string {
+  if (!ctx.cfg.apps.isolation) return `${req.protocol}://${req.host}`;
+  return (ctx.cfg.server.public_url ?? `${req.protocol}://${hostPart(req.hostname)}:${ctx.cfg.server.port}`).replace(/\/+$/, '');
 }
 
 /** A person opening a page (not a script polling in the background). */

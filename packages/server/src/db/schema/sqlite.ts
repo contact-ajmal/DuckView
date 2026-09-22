@@ -550,6 +550,8 @@ export type AppStatus = (typeof APP_STATUSES)[number];
 export const APP_VISIBILITIES = ['workspace', 'org'] as const;
 export type AppVisibility = (typeof APP_VISIBILITIES)[number];
 /** Publishing to everyone ("org") can wait for an administrator: none → pending → approved | rejected. */
+export const APP_EXECUTIONS = ['server', 'browser'] as const;
+export type AppExecution = (typeof APP_EXECUTIONS)[number];
 export const APP_PUBLISH_STATUSES = ['none', 'pending', 'approved', 'rejected'] as const;
 export type AppPublishStatus = (typeof APP_PUBLISH_STATUSES)[number];
 /** Source files of an app by relative path (app.py, requirements.txt, helpers …). */
@@ -574,6 +576,8 @@ export const dataApps = sqliteTable(
     spec: text('spec', { mode: 'json' }).$type<Record<string, unknown> | null>(),
     visibility: text('visibility', { enum: APP_VISIBILITIES }).notNull().default('workspace'),
     status: text('status', { enum: APP_STATUSES }).notNull().default('stopped'),
+    /** Where the Python runs: on the server (a runtime process) or in the viewer's browser (stlite / Pyodide). */
+    execution: text('execution', { enum: APP_EXECUTIONS }).notNull().default('server'),
     /** Kept running: started at boot, never stopped for idleness, restarted after a crash. */
     always_on: integer('always_on', { mode: 'boolean' }).notNull().default(false),
     /** The runtime that last ran the app (subprocess, docker, kubernetes). */

@@ -21,8 +21,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { and, eq } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
-import type { DataApp, AppFiles, AppStatus, AppVisibility, AppPublishStatus } from '../db/schema/sqlite.js';
-import { APP_VISIBILITIES } from '../db/schema/sqlite.js';
+import type { DataApp, AppFiles, AppStatus, AppVisibility, AppPublishStatus, AppExecution } from '../db/schema/sqlite.js';
+import { APP_VISIBILITIES, APP_EXECUTIONS } from '../db/schema/sqlite.js';
 import type { DuckViewConfig } from '../config/index.js';
 import { newId } from '../security/crypto.js';
 import type { Principal } from './principal.js';
@@ -46,6 +46,8 @@ export interface AppInput {
   description?: string | null;
   files?: AppFiles;
   entry?: string;
+  /** "server" (a runtime process, the default) or "browser" (stlite in the viewer's browser). */
+  execution?: AppExecution;
   spec?: Record<string, unknown> | null;
   visibility?: AppVisibility;
 }
@@ -426,8 +428,21 @@ export class DataAppService {
 
   toPublic(a: DataApp): PublicApp {
     const { pid: _p, ...rest } = a;
+    // In-browser apps have no process: they are ready whenever someone opens them.
+    if (a.execution === 'browser') return { ...rest, status: this.browserReady ? 'running' : 'stopped', port: null, url: `/apps/${a.id}/`, source_bytes: Object.values(a.files).reduce((n, f) => n + Buffer.byteLength(f), 0), running: this.browserReady, runtime_ref: null };
     const proc = this.procs.get(a.id);
     return { ...rest, url: `/apps/${a.id}/`, source_bytes: Object.values(a.files).reduce((n, f) => n + Buffer.byteLength(f), 0), running: proc?.healthy === true, runtime_ref: proc?.inst?.ref ?? null };
+  }
+
+  /** In-browser apps can be served (apps and stlite enabled). */
+  get browserReady(): boolean {
+    return this.enabled && this.cfg.apps.stlite.enabled;
+  }
+
+  private checkExecution(execution: AppExecution | undefined): void {
+    if (execution === undefined) return;
+    if (!APP_EXECUTIONS.includes(execution)) throw badRequest(`execution must be ${APP_EXECUTIONS.join(' or ')}`);
+    if (execution === 'browser' && !this.cfg.apps.stlite.enabled) throw badRequest('In-browser apps are disabled on this server (apps.stlite.enabled)');
   }
 
   templates(): AppTemplate[] {
@@ -458,8 +473,9 @@ export class DataAppService {
     if (!SAFE_FILE.test(entry) || !entry.endsWith('.py')) throw badRequest('entry must be a .py file');
     const files = this.validateFiles(input.files ?? APP_TEMPLATES[0]!.files, entry);
     if (input.visibility && !APP_VISIBILITIES.includes(input.visibility)) throw badRequest(`visibility must be ${APP_VISIBILITIES.join(' or ')}`);
+    this.checkExecution(input.execution);
     const now = new Date();
-    const row: DataApp = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name, description: input.description?.trim() || null, kind: 'streamlit', entry, files, spec: input.spec ?? null, visibility: 'workspace', status: 'stopped', port: null, pid: null, last_error: null, last_started_at: null, last_used_at: null, always_on: false, runtime: null, publish_status: 'none', publish_requested_by: null, publish_requested_at: null, publish_reviewed_by: null, publish_reviewed_at: null, publish_note: null, created_at: now, updated_at: now };
+    const row: DataApp = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name, description: input.description?.trim() || null, kind: 'streamlit', entry, files, spec: input.spec ?? null, visibility: 'workspace', status: 'stopped', port: null, pid: null, last_error: null, last_started_at: null, last_used_at: null, execution: input.execution ?? 'server', always_on: false, runtime: null, publish_status: 'none', publish_requested_by: null, publish_requested_at: null, publish_reviewed_by: null, publish_reviewed_at: null, publish_note: null, created_at: now, updated_at: now };
     if (input.visibility === 'org') Object.assign(row, this.publishFields(p, 'org', null, now));
     await this.db.insert(this.s.dataApps).values(row);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'app.create', resource: `app:${row.id}`, ip: p.ip });
@@ -499,6 +515,15 @@ export class DataAppService {
     if (patch.files !== undefined) set.files = this.validateFiles(patch.files, set.entry ?? app.entry);
     else if (set.entry && !app.files[set.entry]) throw badRequest(`The entry file "${set.entry}" is missing`);
     if (patch.spec !== undefined) set.spec = patch.spec;
+    if (patch.execution !== undefined && patch.execution !== app.execution) {
+      this.checkExecution(patch.execution);
+      set.execution = patch.execution;
+      if (patch.execution === 'browser') {
+        set.always_on = false;
+        this.clearRestarts(id);
+        if (this.procs.has(id)) await this.stop(p, id, 'manual');
+      }
+    }
     if (patch.visibility !== undefined && patch.visibility !== app.visibility) {
       if (!APP_VISIBILITIES.includes(patch.visibility)) throw badRequest(`visibility must be ${APP_VISIBILITIES.join(' or ')}`);
       Object.assign(set, this.publishFields(p, patch.visibility, null, set.updated_at!));
@@ -605,6 +630,10 @@ export class DataAppService {
     if (!this.enabled) throw forbidden('Data apps are disabled on this server (apps.enabled)');
     if (this.removing.has(id)) throw notFound('App');
     const app = await this.get(p, id);
+    if (app.execution === 'browser') {
+      if (!this.browserReady) throw forbidden('In-browser apps are disabled on this server (apps.stlite.enabled)');
+      return this.toPublic(app); // nothing to start: it runs in each viewer's browser
+    }
     if (this.procs.has(id)) return this.toPublic({ ...app, status: this.status(id) ?? 'starting' });
     if (this.procs.size >= this.cfg.apps.max_running) await this.makeRoom();
     if (this.procs.has(id)) return this.toPublic({ ...app, status: this.status(id) ?? 'starting' });
@@ -728,6 +757,7 @@ export class DataAppService {
   async setAlwaysOn(p: Principal, id: string, on: boolean): Promise<PublicApp> {
     if (!isPlatformAdmin(p)) throw forbidden('Only an administrator signed in to DuckView can keep apps always on');
     const app = await this.get(p, id);
+    if (on && app.execution === 'browser') throw badRequest('An in-browser app has no server process to keep on');
     await this.db.update(this.s.dataApps).set({ always_on: on }).where(eq(this.s.dataApps.id, id));
     const proc = this.procs.get(id);
     if (proc) proc.alwaysOn = on;

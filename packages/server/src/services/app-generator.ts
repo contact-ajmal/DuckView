@@ -372,6 +372,11 @@ A data app is a Streamlit script that reads a DuckView workspace through the \`d
 the SDK reads: DUCKVIEW_URL, DUCKVIEW_TOKEN (read-only, scoped to the workspace) and DUCKVIEW_WORKSPACE. Never put
 tokens or credentials in the code; never open .duckdb files directly (the engine holds the lock).
 
+Apps run on the server by default. With execution "browser" (create_app) the same script runs in each viewer's
+browser instead (stlite on Pyodide): nothing runs on the server, the SDK reads as the viewer (read-only, the app's
+workspace), \`viewer()\` still works, and requirements.txt may only list pure-Python packages (or ones Pyodide ships).
+Keep queries aggregated there — results travel to the browser.
+
 ## Skeleton
 
 \`\`\`python

@@ -87,6 +87,7 @@ beforeAll(async () => {
   ({ app, appsServer } = await buildApp(ctx));
   await app.listen({ port: 0, host: '127.0.0.1' });
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  ctx.cfg.server.port = (app.server.address() as { port: number }).port; // what the apps origin links back to
   await appsServer!.listen({ port: 0, host: '127.0.0.1' });
   ctx.cfg.apps.port = (appsServer!.server.address() as { port: number }).port;
   appsBase = `http://127.0.0.1:${ctx.cfg.apps.port}`;
@@ -296,6 +297,65 @@ describe('runner and proxy', () => {
     await api('DELETE', `/api/apps/${id}`);
     expect(fs.existsSync(runDir)).toBe(false);
     expect(ctx.apps.runningCount()).toBe(0);
+  });
+});
+
+describe('in-browser apps (stlite)', () => {
+  it('serves a stlite page with the SDK and the viewer\'s own read-only credential; nothing runs on the server', async () => {
+    const running = ctx.apps.runningCount();
+    const code = 'import streamlit as st\nfrom duckview.streamlit import query\nst.write("</script><b>x</b>")\n';
+    const created = await api('POST', `/api/workspaces/${wsId}/apps`, { name: 'In the browser', execution: 'browser', files: { 'app.py': code, 'requirements.txt': '# plotting\nplotly>=5\n\n-r other.txt\n' } });
+    expect(created.status, JSON.stringify(created.json)).toBe(200);
+    const a = created.json.app as { id: string; execution: string; status: string; running: boolean };
+    expect(a).toMatchObject({ execution: 'browser', status: 'running', running: true });
+    // Starting is a no-op: no process, no token.
+    expect((await api('POST', `/api/apps/${a.id}/start`, {})).json.app).toMatchObject({ execution: 'browser' });
+    expect(ctx.apps.runningCount()).toBe(running);
+    expect((await api('POST', `/api/apps/${a.id}/always-on`, { on: true })).status).toBe(400);
+    // The page.
+    const cookie = await sessionCookie(a.id);
+    const res = await visit(a.id, cookie);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const html = await res.text();
+    expect(html).toContain('https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.1/build/stlite.js');
+    expect(html).not.toContain('</script><b>'); // app code cannot break out of the embedding
+    const opts = JSON.parse(/<script id="dv-app" type="application\/json">(.*?)<\/script>/s.exec(html)![1]!) as { entrypoint: string; files: Record<string, string>; requirements: string[]; env: Record<string, string> };
+    expect(opts.entrypoint).toBe('app.py');
+    expect(opts.files['app.py']).toBe(code);
+    expect(opts.files['duckview/__init__.py']).toContain('_request_browser');
+    expect(opts.files['duckview/streamlit.py']).toContain('def viewer');
+    expect(opts.files).not.toHaveProperty('requirements.txt');
+    expect(opts.requirements).toEqual(['plotly>=5']);
+    expect(opts.env).toMatchObject({ DUCKVIEW_URL: base, DUCKVIEW_WORKSPACE: wsId, DUCKVIEW_APP_ID: a.id, DUCKVIEW_VIEWER_EMAIL: 'admin@test.local', DUCKVIEW_VIEWER_ROLE: 'OWNER' });
+    // The credential is the viewer's: read the app's workspace, nothing else.
+    const tok = opts.env.DUCKVIEW_TOKEN!;
+    expect((await api('POST', `/api/workspaces/${wsId}/query`, { sql: 'SELECT 1 AS one' }, tok)).status).toBe(200);
+    expect((await api('POST', `/api/workspaces/${wsId}/query`, { sql: 'CREATE TABLE from_browser AS SELECT 1' }, tok)).status).toBe(403);
+    expect((await api('POST', `/api/workspaces/${otherWsId}/query`, { sql: 'SELECT 1' }, tok)).status).toBe(403);
+    // The API answers the apps origin's preflight (the page calls it cross-origin).
+    const pre = await fetch(`${base}/api/workspaces/${wsId}/query`, { method: 'OPTIONS', headers: { origin: appsBase, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type' } });
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get('access-control-allow-origin')).toBe(appsBase);
+    // Nothing else lives under an in-browser app.
+    expect((await visit(a.id, cookie, '/_stcore/health')).status).toBe(404);
+    // Published to everyone, it still reads as the viewer: a non-member is told why instead of getting a broken app.
+    await api('POST', `/api/apps/${a.id}/publish`, { audience: 'org' });
+    const outsider = await visit(a.id, await sessionCookie(a.id, userJwt));
+    expect(outsider.status).toBe(403);
+    expect(await outsider.text()).toMatch(/runs in your browser, with your own access/);
+    // Switching a running server app to the browser stops its process.
+    const srv = (await api('POST', `/api/workspaces/${wsId}/apps`, { name: 'Moves to the browser', files: { 'app.py': 'import streamlit as st\n' } })).json.app as { id: string };
+    await api('POST', `/api/apps/${srv.id}/start`, {});
+    expect(ctx.apps.target(srv.id)).not.toBeNull();
+    expect((await api('PATCH', `/api/apps/${srv.id}`, { execution: 'browser' })).json.app).toMatchObject({ execution: 'browser', status: 'running' });
+    expect(ctx.apps.target(srv.id)).toBeNull();
+    // Off switch.
+    ctx.cfg.apps.stlite.enabled = false;
+    expect((await api('POST', `/api/workspaces/${wsId}/apps`, { name: 'nope', execution: 'browser' })).status).toBe(400);
+    expect((await visit(a.id, cookie)).status).toBe(503);
+    ctx.cfg.apps.stlite.enabled = true;
+    for (const x of [a.id, srv.id]) await api('DELETE', `/api/apps/${x}`);
   });
 });
 

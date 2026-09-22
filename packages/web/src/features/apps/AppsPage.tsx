@@ -4,7 +4,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import { Prec } from '@codemirror/state';
 import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { AppWindow, Plus, Play, Square, RotateCw, ExternalLink, Save, Trash2, ScrollText, Loader2, ChevronLeft, Bot, Wand2, CheckCircle2, LayoutDashboard, FileCode2, Globe, Users, Pin } from 'lucide-react';
+import { AppWindow, Plus, Play, Square, RotateCw, ExternalLink, Save, Trash2, ScrollText, Loader2, ChevronLeft, Bot, Wand2, CheckCircle2, LayoutDashboard, FileCode2, Globe, Users, Pin, Monitor, Server } from 'lucide-react';
 import { api, appLaunchUrl, openAppInTab, copilotChat, timeAgo, type DataApp, type AppTemplate, type AppStatus, type Dashboard, type SavedQuery } from '../../api/client';
 import { useAuth } from '../../store/auth';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
@@ -52,10 +52,11 @@ function Gallery() {
   const [enabled, setEnabled] = useState(true);
   const [templates, setTemplates] = useState<AppTemplate[]>([]);
   const [runtime, setRuntime] = useState<keyof typeof RUNTIME_LABEL>('subprocess');
+  const [browserOk, setBrowserOk] = useState(false);
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [queries, setQueries] = useState<SavedQuery[]>([]);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState<{ name: string; description: string; from: 'template' | 'dashboard' | 'queries'; template: string; dashboard: string; queryIds: string[] }>({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [] });
+  const [form, setForm] = useState<{ name: string; description: string; from: 'template' | 'dashboard' | 'queries'; template: string; dashboard: string; queryIds: string[]; execution: 'server' | 'browser' }>({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [], execution: 'server' });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -65,7 +66,7 @@ function Gallery() {
     setEnabled(r.enabled);
   }, [wsId]);
   useEffect(() => void load().catch((e) => setError((e as Error).message)), [load]);
-  useEffect(() => void api.get<{ templates: AppTemplate[]; runtime: keyof typeof RUNTIME_LABEL }>('/api/apps/templates').then((r) => { setTemplates(r.templates); setRuntime(r.runtime); }).catch(() => undefined), []);
+  useEffect(() => void api.get<{ templates: AppTemplate[]; runtime: keyof typeof RUNTIME_LABEL; browser: boolean }>('/api/apps/templates').then((r) => { setTemplates(r.templates); setRuntime(r.runtime); setBrowserOk(r.browser); }).catch(() => undefined), []);
   useEffect(() => {
     if (!wsId || !creating) return;
     void api.get<{ dashboards: Dashboard[] }>(`/api/workspaces/${wsId}/dashboards`).then((r) => setDashboards(r.dashboards)).catch(() => setDashboards([]));
@@ -79,7 +80,7 @@ function Gallery() {
     setError(null);
     try {
       const source = form.from === 'dashboard' ? { dashboard_id: form.dashboard } : form.from === 'queries' ? { saved_query_ids: form.queryIds } : { template: form.template };
-      const r = await api.post<{ app: DataApp }>(`/api/workspaces/${wsId}/apps`, { name: form.name.trim(), description: form.description.trim() || null, source });
+      const r = await api.post<{ app: DataApp }>(`/api/workspaces/${wsId}/apps`, { name: form.name.trim(), description: form.description.trim() || null, source, execution: form.execution });
       setCreating(false);
       location.hash = `#/apps/${r.app.id}`;
     } catch (e) {
@@ -99,7 +100,7 @@ function Gallery() {
             <PageTitle>Data apps</PageTitle>
             <p className="mt-1 text-xs text-zinc-500">Streamlit apps written on <b className="text-zinc-300">{ws.workspaces.find((w) => w.id === wsId)?.name ?? 'the active workspace'}</b>'s tables and files — each run by DuckView {RUNTIME_LABEL[runtime]}, reached through <code className="font-mono">duckview.connect()</code> with a read-only token, shared with the workspace's members.</p>
           </div>
-          <Button variant="primary" disabled={!wsId || !canEdit || !enabled} onClick={() => { setForm({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [] }); setCreating(true); }}><Plus className="h-4 w-4" /> New app</Button>
+          <Button variant="primary" disabled={!wsId || !canEdit || !enabled} onClick={() => { setForm({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [], execution: 'server' }); setCreating(true); }}><Plus className="h-4 w-4" /> New app</Button>
         </div>
         {!enabled && <div className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">Data apps are disabled on this server (<code className="font-mono">apps.enabled</code>). Apps run Python next to DuckView; an administrator turns them on in the configuration.</div>}
         {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
@@ -112,14 +113,14 @@ function Gallery() {
                 <div className="flex items-center gap-2">
                   <AppWindow className="h-4 w-4 text-accent-300" />
                   <a href={`#/apps/${a.id}`} className="truncate text-sm font-semibold text-zinc-100 hover:underline">{a.name}</a>
-                  <Badge tone={STATUS_TONE[a.status]} className="ml-auto">{a.status}</Badge>
+                  <Badge tone={STATUS_TONE[a.status]} className="ml-auto">{a.execution === 'browser' && a.status === 'running' ? 'ready' : a.status}</Badge>
                 </div>
                 <p className="mt-1 line-clamp-2 min-h-[2rem] text-[11px] text-zinc-500">{a.description || `${a.entry} · ${(a.source_bytes / 1024).toFixed(1)} KB`}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10.5px] text-zinc-600"><Audience app={a} />{a.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}<span>{a.last_started_at ? `started ${timeAgo(a.last_started_at)}` : 'never started'}</span>{a.last_error ? <span className="truncate text-red-300">· {a.last_error}</span> : null}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10.5px] text-zinc-600"><Audience app={a} />{a.execution === 'browser' && <Badge tone="violet" className="gap-1"><Monitor className="h-3 w-3" /> in browser</Badge>}{a.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}<span>{a.execution === 'browser' ? 'runs in the viewer\'s browser' : a.last_started_at ? `started ${timeAgo(a.last_started_at)}` : 'never started'}</span>{a.last_error ? <span className="truncate text-red-300">· {a.last_error}</span> : null}</div>
                 <div className="mt-3 flex items-center gap-1">
                   <Button size="sm" variant="secondary" onClick={() => void openInTab(a)} title="Open the app in a new tab"><ExternalLink className="h-3.5 w-3.5" /> Open</Button>
                   <Button size="sm" variant="ghost" onClick={() => (location.hash = `#/apps/${a.id}`)} title="Edit and preview">Edit</Button>
-                  {a.status === 'running' || a.status === 'starting' ? (
+                  {a.execution === 'browser' ? null : a.status === 'running' || a.status === 'starting' ? (
                     <Button size="sm" variant="ghost" loading={busy === a.id} onClick={async () => { setBusy(a.id); try { await api.post(`/api/apps/${a.id}/stop`, {}); } finally { setBusy(null); await load(); } }} title="Stop"><Square className="h-3.5 w-3.5" /></Button>
                   ) : (
                     <Button size="sm" variant="ghost" loading={busy === a.id} disabled={!enabled} onClick={async () => { setBusy(a.id); setError(null); try { await api.post(`/api/apps/${a.id}/start`, {}); } catch (e) { setError((e as Error).message); } finally { setBusy(null); await load(); } }} title="Start"><Play className="h-3.5 w-3.5" /></Button>
@@ -169,7 +170,20 @@ function Gallery() {
                 </div>
               )}
             </div>
-            <p className="text-[11px] text-zinc-500">{runtime === 'subprocess' ? 'The first start creates a Python environment with Streamlit, pandas, pyarrow and the DuckView SDK next to the data directory — it takes a minute once.' : `Each app runs ${RUNTIME_LABEL[runtime]} from the DuckView app-runtime image (Streamlit, pandas, pyarrow and the SDK); the first start may pull the image.`}</p>
+            {browserOk && (
+              <div>
+                <Label>Runs</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([['server', <Server key="s" className="h-4 w-4" />, 'On the server', `A Python process ${RUNTIME_LABEL[runtime]}; any package, reads with the app's own token.`], ['browser', <Monitor key="b" className="h-4 w-4" />, "In the viewer's browser", 'stlite (Pyodide): nothing runs on the server; reads with each viewer\'s own access. Pure-Python packages only.']] as const).map(([id, icon, label, hint]) => (
+                    <button key={id} type="button" onClick={() => setForm({ ...form, execution: id })} className={cn('rounded-lg border p-2.5 text-left', form.execution === id ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
+                      <span className="flex items-center gap-1.5 text-xs text-zinc-100"><span className="text-accent-300">{icon}</span>{label}</span>
+                      <span className="mt-1 block text-[10.5px] text-zinc-500">{hint}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {form.execution === 'server' && <p className="text-[11px] text-zinc-500">{runtime === 'subprocess' ? 'The first start creates a Python environment with Streamlit, pandas, pyarrow and the DuckView SDK next to the data directory — it takes a minute once.' : `Each app runs ${RUNTIME_LABEL[runtime]} from the DuckView app-runtime image (Streamlit, pandas, pyarrow and the SDK); the first start may pull the image.`}</p>}
             {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
             <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button><Button variant="primary" loading={busy === 'create'} disabled={(form.from === 'dashboard' && !form.dashboard) || (form.from === 'queries' && !form.queryIds.length)} onClick={() => void create()}><Plus className="h-4 w-4" /> Create & open</Button></div>
           </div>
@@ -231,6 +245,7 @@ function AppEditor({ id }: { id: string }) {
     try {
       const r = await api.patch<{ app: DataApp }>(`/api/apps/${id}`, { files: filesRef.current });
       setApp(r.app);
+      if (r.app.execution === 'browser') setPreviewKey((k) => k + 1); // no server restart: the preview reloads the new code
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -301,17 +316,25 @@ function AppEditor({ id }: { id: string }) {
         <a href="#/apps" className="text-zinc-500 hover:text-zinc-200" title="Back to the gallery"><ChevronLeft className="h-4 w-4" /></a>
         <AppWindow className="h-4 w-4 text-accent-300" />
         <span className="text-sm font-semibold text-zinc-100">{app.name}</span>
-        <Badge tone={STATUS_TONE[status]}>{status}</Badge>
+        <Badge tone={STATUS_TONE[status]}>{app.execution === 'browser' && status === 'running' ? 'ready' : status}</Badge>
         {dirty && <Badge tone="amber">unsaved</Badge>}
         <button type="button" onClick={() => setPublishing(true)} title="Who sees this app" className="disabled:opacity-50" disabled={!canEdit}><Audience app={app} /></button>
         {app.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}
-        <span className="text-[11px] text-zinc-500">{app.last_started_at ? `started ${timeAgo(app.last_started_at)}` : 'never started'}{app.last_error ? <span className="text-red-300"> · {app.last_error}</span> : null}</span>
+        {canEdit && (
+          <Select value={app.execution} title="Where the app's Python runs" className="h-6 py-0 text-[11px]" onChange={async (e) => { try { setApp((await api.patch<{ app: DataApp }>(`/api/apps/${id}`, { execution: e.target.value })).app); setPreviewKey((k) => k + 1); } catch (err) { setError((err as Error).message); } }}>
+            <option value="server">runs on the server</option>
+            <option value="browser">runs in the viewer's browser</option>
+          </Select>
+        )}
+        <span className="text-[11px] text-zinc-500">{app.execution === 'browser' ? 'Python runs in each viewer\'s browser' : app.last_started_at ? `started ${timeAgo(app.last_started_at)}` : 'never started'}{app.last_error ? <span className="text-red-300"> · {app.last_error}</span> : null}</span>
         <div className="ml-auto flex items-center gap-1">
           <Button size="sm" variant="ghost" onClick={() => void draft()} loading={drafting} disabled={!canEdit || !cp.config?.can_use} title={cp.config?.can_use ? 'Let Copilot write app.py for a goal (checked before it lands in the editor)' : 'Configure Copilot under Settings → Copilot first'}><Wand2 className="h-3.5 w-3.5" /> Draft</Button>
           <Button size="sm" variant="ghost" onClick={askCopilot} title="Ask Copilot about this app"><Bot className="h-3.5 w-3.5" /></Button>
           <Button size="sm" variant="ghost" onClick={() => void runCheck()} title="Static check: compiles, imports streamlit, no tokens"><CheckCircle2 className={cn('h-3.5 w-3.5', check?.ok ? 'text-emerald-400' : check ? 'text-red-300' : '')} /> Check</Button>
           <Button size="sm" variant="secondary" onClick={() => void save()} loading={busy === 'save'} disabled={!canEdit || !dirty} title="Save (⌘S) — a running app restarts"><Save className="h-3.5 w-3.5" /> Save</Button>
-          {status === 'running' || status === 'starting' || status === 'installing' ? (
+          {app.execution === 'browser' ? (
+            <Button size="sm" variant="ghost" onClick={() => setPreviewKey((k) => k + 1)} title="Reload the preview (the app runs in your browser)"><RotateCw className="h-3.5 w-3.5" /></Button>
+          ) : status === 'running' || status === 'starting' || status === 'installing' ? (
             <>
               <Button size="sm" variant="ghost" onClick={() => void action('restart')} loading={busy === 'restart'} title="Restart"><RotateCw className="h-3.5 w-3.5" /></Button>
               <Button size="sm" variant="ghost" onClick={() => void action('stop')} loading={busy === 'stop'} title="Stop"><Square className="h-3.5 w-3.5" /> Stop</Button>
@@ -321,7 +344,7 @@ function AppEditor({ id }: { id: string }) {
           )}
           <Button size="sm" variant="ghost" onClick={() => void openAppInTab(id).catch((e) => setError((e as Error).message))} title="Open in a new tab"><ExternalLink className="h-3.5 w-3.5" /></Button>
           <Button size="sm" variant="ghost" onClick={() => setShowLogs((v) => !v)} title="Logs" className={showLogs ? 'text-accent-300' : ''}><ScrollText className="h-3.5 w-3.5" /></Button>
-          {isAdmin && <Button size="sm" variant="ghost" className={app.always_on ? 'text-accent-300' : ''} onClick={async () => { try { setApp((await api.post<{ app: DataApp }>(`/api/apps/${id}/always-on`, { on: !app.always_on })).app); } catch (e) { setError((e as Error).message); } }} title={app.always_on ? 'Always on: starts with the server, never stopped for idleness, restarted after a crash — click to let it scale to zero' : 'Keep always on (administrators): starts with the server, never idles out, restarts after a crash'}><Pin className="h-3.5 w-3.5" /></Button>}
+          {isAdmin && app.execution !== 'browser' && <Button size="sm" variant="ghost" className={app.always_on ? 'text-accent-300' : ''} onClick={async () => { try { setApp((await api.post<{ app: DataApp }>(`/api/apps/${id}/always-on`, { on: !app.always_on })).app); } catch (e) { setError((e as Error).message); } }} title={app.always_on ? 'Always on: starts with the server, never stopped for idleness, restarted after a crash — click to let it scale to zero' : 'Keep always on (administrators): starts with the server, never idles out, restarts after a crash'}><Pin className="h-3.5 w-3.5" /></Button>}
           <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setPublishing(true)} title="Share beyond the workspace"><Globe className="h-3.5 w-3.5" /> Publish</Button>
         </div>
       </div>
@@ -332,7 +355,7 @@ function AppEditor({ id }: { id: string }) {
         <div className="flex min-h-0 flex-col border-r border-zinc-800">
           <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1 text-[11px]">
             {Object.keys(files).map((f) => <button key={f} onClick={() => setActive(f)} className={cn('rounded px-2 py-0.5 font-mono', active === f ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200')}>{f}</button>)}
-            <span className="ml-auto text-zinc-600">Python · ⌘S saves and restarts</span>
+            <span className="ml-auto text-zinc-600">Python · ⌘S saves and {app.execution === 'browser' ? 'reloads' : 'restarts'}</span>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             <CodeMirror value={files[active] ?? ''} height="100%" theme={kind === 'dark' ? oneDark : 'light'} extensions={extensions} onChange={(v) => setFiles((f) => ({ ...f, [active]: v }))} editable={canEdit} basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, autocompletion: false }} className="h-full text-[12.5px]" />

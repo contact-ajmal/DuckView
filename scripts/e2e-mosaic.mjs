@@ -10,7 +10,9 @@
  * dashboard through the UI, generates its spec from the first data file, saves it, brushes, reloads and deletes it.
  * The data-apps scenario creates a Streamlit app, has a non-admin editor request publishing it, approves it in
  * Settings → Data apps, runs it from the editor (whatever apps.runtime the server uses — with docker it checks the
- * container too) and waits for Streamlit to render the app's table and chart in the preview.
+ * container too) and waits for Streamlit to render the app's table and chart in the preview. The browser-app
+ * scenario creates an app that runs in the viewer's browser (stlite) through the New-app dialog, waits for Pyodide
+ * to render it in the editor's preview and checks that it reads as the viewer, read-only.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -230,6 +232,38 @@ try {
     report.details.reconnectErrorsIgnored = errors.splice(errorsBefore).length;
     report.details.afterDelete = { app: (await authed(`/api/apps/${appId}`)).status, containers: app.runtime === 'docker' ? execFileSync('docker', ['ps', '-aq', '--filter', `label=duckview.app=${appId}`]).toString().trim().split(/\s+/).filter(Boolean).length : null };
   }
+  else if (scenario === 'browser-app') {
+    const wsList = await (await authed('/api/workspaces')).json();
+    const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
+    // Through the New-app dialog, choosing "In the viewer's browser".
+    await send('Page.navigate', { url: `${BASE}/#/apps` });
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New app')`, 20000, 'gallery');
+    await clickButton('New app');
+    await waitFor(`!!document.querySelector('input[placeholder="Sales explorer"]')`, 10000, 'new-app dialog');
+    await setField('input[placeholder="Sales explorer"]', 'E2E browser app');
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.includes("In the viewer's browser")).click(); true`);
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.includes('Blank')).click(); true`);
+    await clickButton('Create & open');
+    await waitFor(`/#\\/apps\\/[0-9a-f-]{36}$/.test(location.hash)`, 20000, 'editor opened');
+    const appId = /#\/apps\/([0-9a-f-]{36})/.exec(await evaluate('location.hash'))[1];
+    cleanup = async () => { await authed(`/api/apps/${appId}`, { method: 'DELETE' }); };
+    report.details.created = (await (await authed(`/api/apps/${appId}`)).json()).app.execution;
+    // The code: reads the workspace as the viewer, tries to write.
+    const code = 'import streamlit as st\nfrom duckview.streamlit import connect, query, viewer\n\nst.title("E2E browser app")\ndv = connect()\ndf = query("SELECT range AS n, range * range AS sq FROM range(9)")\nst.metric("Rows", len(df))\nst.caption(f"viewer {viewer()[\'email\']}")\nst.bar_chart(df, x="n", y="sq")\ntry:\n    dv.query("CREATE TABLE e2e_browser_write AS SELECT 1")\n    st.write("WRITE-ALLOWED")\nexcept Exception as e:\n    st.write(f"write refused {getattr(e, \'status\', \'?\')}")\n';
+    await authed(`/api/apps/${appId}`, { method: 'PATCH', body: JSON.stringify({ files: { 'app.py': code, 'requirements.txt': '' } }) });
+    await send('Page.reload');
+    const appsOrigin = new URL((await (await authed(`/api/apps/${appId}/session`, { method: 'POST', body: '{}' })).json()).app_url, BASE).origin;
+    const t0 = Date.now();
+    await waitForFrame(appsOrigin, `document.body.innerText.includes('write refused') || document.body.innerText.includes('WRITE-ALLOWED') || !!document.querySelector('[data-testid="stException"]')`, 180000, 'stlite rendered in the preview');
+    await waitForFrame(appsOrigin, `!!document.querySelector('[data-testid="stVegaLiteChart"] canvas, [data-testid="stVegaLiteChart"] svg, .vega-embed')`, 60000, 'chart rendered');
+    await sleep(1500);
+    report.details.bootSeconds = Math.round((Date.now() - t0) / 1000);
+    report.details.rendered = await frameEval(appsOrigin, `(() => { const d = document; return { metric: d.querySelector('[data-testid="stMetricValue"]')?.textContent, text: d.body.innerText.slice(0, 400), chart: !!d.querySelector('[data-testid="stVegaLiteChart"]'), exception: d.querySelector('[data-testid="stException"]')?.innerText ?? null }; })()`);
+    report.details.controls = { runButton: await evaluate(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Run')`), badge: await evaluate(`document.body.innerText.includes("runs in the viewer's browser")`) };
+    report.details.serverProcess = (await (await authed(`/api/apps/${appId}`)).json()).app.runtime_ref;
+    report.details.writeHappened = (await (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql: "SELECT count(*) FROM information_schema.tables WHERE table_name = 'e2e_browser_write'" }) })).json()).rows?.[0]?.[0];
+    report.details.charts = report.details.rendered?.chart ? 1 : 0;
+  }
   else if (scenario === 'mosaic-dashboard') {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
@@ -302,6 +336,14 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'browser-app') {
+    if (d.created !== 'browser') problems.push('the dialog did not create an in-browser app');
+    if (d.rendered?.metric !== '9') problems.push(`the app did not read its data (metric ${d.rendered?.metric})`);
+    if (!/viewer admin@example\.com/.test(d.rendered?.text ?? '')) problems.push('the app does not know its viewer');
+    if (!/write refused 403/.test(d.rendered?.text ?? '') || d.writeHappened !== 0) problems.push(`the viewer credential was not read-only (${d.rendered?.text}, table count ${d.writeHappened})`);
+    if (d.rendered?.exception) problems.push(`the app raised: ${d.rendered.exception}`);
+    if (d.controls?.runButton || d.serverProcess) problems.push('an in-browser app shows server controls or has a process');
+  }
   if (scenario === 'data-apps') {
     if (d.request?.outcome !== 'pending' || d.request?.visibility !== 'workspace') problems.push(`the editor's publish was not held for review (${JSON.stringify(d.request)})`);
     if (d.approved !== 'org') problems.push('approval did not publish the app');
