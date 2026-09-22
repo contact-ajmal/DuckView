@@ -67,11 +67,12 @@ program
     await initTracing(cfg);
     const ctx = await createContext(cfg);
     const { buildApp } = await import('./app.js');
-    const { app } = await buildApp(ctx);
+    const { app, appsServer } = await buildApp(ctx);
     const shutdown = async (signal: string) => {
       logger().info({ signal }, 'Shutting down');
       try {
         await app.close();
+        await appsServer?.close();
         await ctx.shutdown();
         await shutdownTracing();
       } finally {
@@ -81,6 +82,10 @@ program
     process.on('SIGTERM', () => void shutdown('SIGTERM'));
     process.on('SIGINT', () => void shutdown('SIGINT'));
     await app.listen({ port: cfg.server.port, host: cfg.server.host });
+    if (appsServer) {
+      await appsServer.listen({ port: cfg.apps.port!, host: cfg.server.host });
+      logger().info({ port: cfg.apps.port, public_url: cfg.apps.public_url ?? null }, 'Data apps listening on their own origin');
+    }
     logger().info({ port: cfg.server.port, host: cfg.server.host, dataDir: cfg.security.data_jail_directory, metadata: ctx.store.dialect, auth: cfg.auth.strategy, filesystemMode: cfg.security.filesystem_mode, externalAccess: cfg.security.enable_external_access || cfg.security.filesystem_mode === 'full', config: cfg.configPath }, 'DuckView Enterprise listening');
   });
 

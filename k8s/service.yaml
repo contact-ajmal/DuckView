@@ -8,6 +8,8 @@ spec:
   selector: { app.kubernetes.io/name: duckview }
   ports:
     - { name: http, port: 80, targetPort: http }
+    # Data apps on their own origin (apps.isolation): the Ingress routes apps.<domain> here.
+    - { name: apps, port: 8080, targetPort: apps }
   # Sticky sessions keep an agent's /mcp/sse stream and /mcp/messages POSTs on the same pod when scaled out.
   sessionAffinity: ClientIP
 ---
@@ -24,7 +26,7 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: ["duckview.example.com"]
+    - hosts: ["duckview.example.com", "apps.duckview.example.com"]
       secretName: duckview-tls
   rules:
     - host: duckview.example.com
@@ -34,3 +36,12 @@ spec:
             pathType: Prefix
             backend:
               service: { name: duckview, port: { name: http } }
+    # Data apps get their own host (same registrable domain as the UI, so the app cookie reaches iframes); set
+    # DUCKVIEW_APPS_PUBLIC_URL to it.
+    - host: apps.duckview.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: duckview, port: { name: apps } }

@@ -14,9 +14,10 @@ import { APP_VISIBILITIES, APP_PUBLISH_STATUSES } from '../db/schema/sqlite.js';
 import { DATA_APP_GUIDE } from '../services/app-generator.js';
 import { isPlatformAdmin, type Principal } from '../services/principal.js';
 import { forbidden } from '../services/errors.js';
+import { newId } from '../security/crypto.js';
 import { logger } from '../observability/logger.js';
 
-const COOKIE = 'dv_app';
+export const COOKIE = 'dv_app';
 const Files = z.record(z.string().max(200), z.string().max(2_000_000));
 const Source = z.union([
   z.object({ template: z.string().max(40) }),
@@ -40,21 +41,6 @@ function readCookie(header: string | undefined, name: string): string | null {
 export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
   const secure = !!ctx.cfg.server.public_url?.startsWith('https://');
   ctx.apps.signSession = (userId) => app.jwt.sign({ purpose: 'app', sub: userId }, { expiresIn: '10m' });
-
-  /** The visitor behind a proxied request, from the /apps cookie. */
-  async function visitor(req: FastifyRequest): Promise<Principal | null> {
-    const raw = readCookie(req.headers.cookie, COOKIE);
-    if (!raw) return null;
-    try {
-      const claims = app.jwt.verify<{ purpose?: string; sub?: string }>(raw);
-      if (claims.purpose !== 'app' || !claims.sub) return null;
-      const user = await ctx.auth.findById(claims.sub);
-      if (!user) return null;
-      return ctx.auth.principalFromUser(user, 'jwt', req.ip);
-    } catch {
-      return null;
-    }
-  }
 
   // ---------------------------------------------------------------- registry API (bearer)
   await app.register(async (r) => {
@@ -148,7 +134,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
       const { id } = req.params as { id: string };
       const a = await ctx.apps.get(req.principal!, id);
       if (!ctx.apps.target(id)) return reply.code(409).send({ error: 'NOT_RUNNING', message: 'Start the app first' });
-      const shot = await ctx.apps.screenshot(a, req.principal!.userId, ctx.apps.internalUrl);
+      const shot = await ctx.apps.screenshot(a, req.principal!.userId, ctx.apps.proxyUrl);
       if (!shot) return reply.code(501).send({ error: 'NO_BROWSER', message: 'No Chrome / Chromium on this server (apps.chrome_path)' });
       return { text: shot.text, png_base64: shot.png.toString('base64') };
     });
@@ -163,80 +149,130 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
       const p = req.principal!;
       if (p.actorType !== 'USER') return reply.code(400).send({ error: 'BAD_REQUEST', message: 'App sessions are for people in a browser' });
       await ctx.apps.get(p, id);
-      const token = app.jwt.sign({ purpose: 'app', sub: p.userId }, { expiresIn: '12h' });
-      reply.header('set-cookie', `${COOKIE}=${encodeURIComponent(token)}; Path=/apps; HttpOnly; SameSite=Lax; Max-Age=43200${secure ? '; Secure' : ''}`);
-      return { url: `/apps/${id}/` };
+      if (!ctx.cfg.apps.isolation) {
+        reply.header('set-cookie', appCookie(app, p.userId, secure));
+        return { url: `/apps/${id}/`, app_url: `/apps/${id}/` };
+      }
+      // Isolated: the cookie belongs to the apps origin, so the browser picks it up there with a one-time handoff.
+      const base = appsBase(req, ctx);
+      const t = app.jwt.sign({ purpose: 'app-handoff', sub: p.userId, app: id, jti: newId() }, { expiresIn: '60s' });
+      return { url: `${base}/_duckview/session?app=${encodeURIComponent(id)}&t=${encodeURIComponent(t)}`, app_url: `${base}/apps/${id}/` };
     });
   });
 
-  // ---------------------------------------------------------------- proxy (cookie)
-  await app.register(async (r) => {
-    // Bodies pass through untouched (Streamlit uploads are multipart; its API is JSON/protobuf).
-    r.removeAllContentTypeParsers();
-    r.addContentTypeParser('*', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
+  if (!ctx.cfg.apps.isolation) {
+    await app.register(async (r) => registerAppProxy(r, ctx, { signIn: (_req, reply) => deny(reply, 401, 'Sign in to DuckView to open this app') }));
+    return;
+  }
+  // Isolated: apps live on their own origin; old links on the UI's origin are sent there.
+  const elsewhere = async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as { id: string };
+    if (req.method === 'GET' && isNavigation(req)) return reply.redirect(`${appsBase(req, ctx)}/apps/${encodeURIComponent(id)}/`);
+    return reply.code(404).send({ error: 'NOT_FOUND', message: `Apps are served from ${appsBase(req, ctx)}` });
+  };
+  app.get('/apps/:id', elsewhere);
+  app.all('/apps/:id/*', elsewhere);
+}
 
-    const deny = (reply: FastifyReply, status: number, message: string) => reply.code(status).type('text/html').send(page(message, status === 401 ? 'Open the app from DuckView to sign in.' : ''));
+/**
+ * The proxy that serves running apps under /apps/<id>/ (HTTP and the /_stcore/stream WebSocket), authenticated by
+ * the /apps cookie. Mounted on the apps listener (isolation, the default) or on the UI's (apps.isolation: false).
+ */
+export async function registerAppProxy(r: FastifyInstance, ctx: AppContext, opts: { signIn: (req: FastifyRequest, reply: FastifyReply, id: string) => unknown }) {
+  // Bodies pass through untouched (Streamlit uploads are multipart; its API is JSON/protobuf).
+  r.removeAllContentTypeParsers();
+  r.addContentTypeParser('*', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
 
-    r.get('/apps/:id', async (req, reply) => reply.redirect(`/apps/${(req.params as { id: string }).id}/`));
+  r.get('/apps/:id', async (req, reply) => reply.redirect(`/apps/${(req.params as { id: string }).id}/`));
 
-    r.route({
-      method: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
-      url: '/apps/:id/*',
-      handler: async (req, reply) => {
-        const { id } = req.params as { id: string };
-        const p = await visitor(req);
-        if (!p) return deny(reply, 401, 'Sign in to DuckView to open this app');
-        let a;
-        try {
-          a = await ctx.apps.get(p, id);
-        } catch {
-          return deny(reply, 404, 'No such app, or you are not a member of its workspace');
-        }
-        if (!ctx.apps.enabled) return deny(reply, 503, 'Data apps are disabled on this server');
-        const target = ctx.apps.target(id);
-        if (!target) {
-          // Not up: a person opening the page starts it (scale from zero) and the page retries. Background requests
-          // — a Streamlit tab left open polling /_stcore/health after a stop — never do, or a stop would not stick.
-          const st = ctx.apps.status(id);
-          const navigation = req.method === 'GET' && (req.headers['sec-fetch-mode'] === 'navigate' || /text\/html/.test(String(req.headers.accept ?? '')));
-          if (!navigation) return reply.code(503).header('retry-after', '2').type('text/plain').send('app not running');
-          if (!st) void ctx.apps.start(p, id).catch((err) => logger().warn({ app: id, err: (err as Error).message }, 'App auto-start failed'));
-          const fresh = await ctx.apps.get(p, id).catch(() => a);
-          const failed = fresh.status === 'error' && !st;
-          return reply.code(failed ? 500 : 503).header('retry-after', '2').type('text/html').send(page(failed ? `${a.name} failed to start` : `Starting ${a.name}…`, failed ? fresh.last_error ?? 'See the app log in DuckView.' : 'Installing or booting the app; this page refreshes by itself.', !failed));
-        }
-        ctx.apps.touch(id);
-        const role = (await ctx.workspaces.get(p, a.workspace_id).catch(() => null))?.role ?? 'VIEWER';
-        return proxy(req, reply, target, p, role);
-      },
-    });
-
-    r.get('/apps/:id/_stcore/stream', { websocket: true }, (socket, req) => {
+  r.route({
+    method: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
+    url: '/apps/:id/*',
+    handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      void (async () => {
-        const p = await visitor(req);
-        if (!p) return socket.close(1008, 'unauthorized');
-        let a;
-        try {
-          a = await ctx.apps.get(p, id);
-        } catch {
-          return socket.close(1008, 'forbidden');
-        }
-        const target = ctx.apps.target(id);
-        if (!target) return socket.close(1013, 'app not running');
-        const role = (await ctx.workspaces.get(p, a.workspace_id).catch(() => null))?.role ?? 'VIEWER';
-        bridge(socket, req, target, p, role, () => ctx.apps.touch(id));
-      })().catch((err) => {
-        logger().warn({ err: (err as Error).message }, 'App websocket failed');
-        try {
-          socket.close(1011);
-        } catch {
-          /* closed */
-        }
-      });
+      const p = await visitor(r, ctx, req);
+      if (!p) return opts.signIn(req, reply, id);
+      let a;
+      try {
+        a = await ctx.apps.get(p, id);
+      } catch {
+        return deny(reply, 404, 'No such app, or you are not a member of its workspace');
+      }
+      if (!ctx.apps.enabled) return deny(reply, 503, 'Data apps are disabled on this server');
+      const target = ctx.apps.target(id);
+      if (!target) {
+        // Not up: a person opening the page starts it (scale from zero) and the page retries. Background requests
+        // — a Streamlit tab left open polling /_stcore/health after a stop — never do, or a stop would not stick.
+        const st = ctx.apps.status(id);
+        const navigation = isNavigation(req);
+        if (!navigation) return reply.code(503).header('retry-after', '2').type('text/plain').send('app not running');
+        if (!st) void ctx.apps.start(p, id).catch((err) => logger().warn({ app: id, err: (err as Error).message }, 'App auto-start failed'));
+        const fresh = await ctx.apps.get(p, id).catch(() => a);
+        const failed = fresh.status === 'error' && !st;
+        return reply.code(failed ? 500 : 503).header('retry-after', '2').type('text/html').send(page(failed ? `${a.name} failed to start` : `Starting ${a.name}…`, failed ? fresh.last_error ?? 'See the app log in DuckView.' : 'Installing or booting the app; this page refreshes by itself.', !failed));
+      }
+      ctx.apps.touch(id);
+      const role = (await ctx.workspaces.get(p, a.workspace_id).catch(() => null))?.role ?? 'VIEWER';
+      return proxy(req, reply, target, p, role);
+    },
+  });
+
+  r.get('/apps/:id/_stcore/stream', { websocket: true }, (socket, req) => {
+    const { id } = req.params as { id: string };
+    void (async () => {
+      const p = await visitor(r, ctx, req);
+      if (!p) return socket.close(1008, 'unauthorized');
+      let a;
+      try {
+        a = await ctx.apps.get(p, id);
+      } catch {
+        return socket.close(1008, 'forbidden');
+      }
+      const target = ctx.apps.target(id);
+      if (!target) return socket.close(1013, 'app not running');
+      const role = (await ctx.workspaces.get(p, a.workspace_id).catch(() => null))?.role ?? 'VIEWER';
+      bridge(socket, req, target, p, role, () => ctx.apps.touch(id));
+    })().catch((err) => {
+      logger().warn({ err: (err as Error).message }, 'App websocket failed');
+      try {
+        socket.close(1011);
+      } catch {
+        /* closed */
+      }
     });
   });
 }
+
+/** A person opening a page (not a script polling in the background). */
+export const isNavigation = (req: FastifyRequest) => req.method === 'GET' && (req.headers['sec-fetch-mode'] === 'navigate' || /text\/html/.test(String(req.headers.accept ?? '')));
+
+/** Where browsers reach the apps listener: apps.public_url, or the UI's scheme and host on apps.port. */
+export function appsBase(req: FastifyRequest, ctx: AppContext): string {
+  return ctx.cfg.apps.public_url ?? `${req.protocol}://${hostPart(req.hostname)}:${ctx.cfg.apps.port}`;
+}
+
+/** The /apps cookie: a 12-hour JWT naming the visitor, only good for the proxy. */
+export function appCookie(app: FastifyInstance, userId: string, secure: boolean): string {
+  const token = app.jwt.sign({ purpose: 'app', sub: userId }, { expiresIn: '12h' });
+  return `${COOKIE}=${encodeURIComponent(token)}; Path=/apps; HttpOnly; SameSite=Lax; Max-Age=43200${secure ? '; Secure' : ''}`;
+}
+
+/** The visitor behind a proxied request, from the /apps cookie. */
+export async function visitor(app: FastifyInstance, ctx: AppContext, req: FastifyRequest): Promise<Principal | null> {
+  const raw = readCookie(req.headers.cookie, COOKIE);
+  if (!raw) return null;
+  try {
+    const claims = app.jwt.verify<{ purpose?: string; sub?: string }>(raw);
+    if (claims.purpose !== 'app' || !claims.sub) return null;
+    const user = await ctx.auth.findById(claims.sub);
+    if (!user) return null;
+    return ctx.auth.principalFromUser(user, 'jwt', req.ip);
+  } catch {
+    return null;
+  }
+}
+
+const deny = (reply: FastifyReply, status: number, message: string) => reply.code(status).type('text/html').send(page(message, status === 401 ? 'Open the app from DuckView to sign in.' : ''));
 
 /** Forwards one HTTP request to the app's Streamlit server, streaming the answer straight to the socket. */
 function proxy(req: FastifyRequest, reply: FastifyReply, { host, port }: { host: string; port: number }, p: Principal, role: string): Promise<void> {
@@ -315,9 +351,9 @@ function bridge(client: WebSocket, req: FastifyRequest, { host, port }: { host: 
 }
 
 /** An IPv6 pod address needs brackets in a URL or Host header. */
-const hostPart = (host: string) => (host.includes(':') ? `[${host}]` : host);
+export const hostPart = (host: string) => (host.includes(':') ? `[${host}]` : host);
 
-function page(title: string, detail: string, refresh = false): string {
+export function page(title: string, detail: string, refresh = false): string {
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c);
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>${refresh ? '<meta http-equiv="refresh" content="2">' : ''}<style>body{font-family:system-ui,sans-serif;background:#0b0b0e;color:#e4e4e7;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}main{max-width:32rem;text-align:center}h1{font-size:1.1rem;font-weight:600}p{color:#a1a1aa;font-size:.9rem}.dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;background:#8b5cf6;animation:pulse 1s infinite alternate}@keyframes pulse{to{opacity:.2}}</style></head><body><main>${refresh ? '<div class="dot"></div>' : ''}<h1>${esc(title)}</h1><p>${esc(detail)}</p></main></body></html>`;
 }

@@ -15,6 +15,7 @@ import { buildMcpServer, agentRef } from './server.js';
 import { metrics } from '../observability/metrics.js';
 import { logger } from '../observability/logger.js';
 import { liveEvents } from '../observability/events.js';
+import { principalFromBearer } from '../routes/auth-plugin.js';
 
 interface SessionRecord {
   id: string;
@@ -65,19 +66,9 @@ async function authenticate(ctx: AppContext, req: FastifyRequest): Promise<Princ
   const m = /^Bearer\s+(.+)$/i.exec(header);
   const raw = m?.[1]?.trim() ?? (typeof (req.query as Record<string, string>)?.token === 'string' ? (req.query as Record<string, string>).token! : '');
   if (!raw) return null;
-  if (raw.startsWith('dv_')) {
-    const p = await ctx.auth.verifyToken(raw, req.ip);
-    return p && p.scopes.includes('mcp') ? p : null;
-  }
-  try {
-    const decoded = req.server.jwt.verify<{ sub: string }>(raw);
-    const user = await ctx.auth.findById(decoded.sub);
-    if (!user) return null;
-    const p = ctx.auth.principalFromUser(user, 'jwt', req.ip);
-    return { ...p, actorType: 'AGENT' };
-  } catch {
-    return null;
-  }
+  const p = await principalFromBearer(ctx, req.server, raw, req.ip);
+  if (!p || !p.scopes.includes('mcp')) return null;
+  return p.via === 'jwt' ? { ...p, actorType: 'AGENT' } : p;
 }
 
 export async function registerMcpHttp(app: FastifyInstance, ctx: AppContext, registry: McpSessionRegistry) {

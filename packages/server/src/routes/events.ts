@@ -7,7 +7,7 @@ import type { AppContext } from '../context.js';
 import type { Principal } from '../services/principal.js';
 import { isAdmin } from '../services/principal.js';
 import { liveEvents, type LiveEvent } from '../observability/events.js';
-import type { JwtClaims } from './auth-plugin.js';
+import { principalFromBearer } from './auth-plugin.js';
 
 function eventUserId(e: LiveEvent): string | null {
   switch (e.type) {
@@ -40,12 +40,7 @@ export async function eventRoutes(app: FastifyInstance, ctx: AppContext) {
       if (msg.type !== 'auth' || principal) return;
       const token = String(msg.token ?? '');
       try {
-        if (token.startsWith('dv_')) principal = await ctx.auth.verifyToken(token, req.ip);
-        else {
-          const claims = app.jwt.verify<JwtClaims>(token);
-          const user = await ctx.auth.findById(claims.sub);
-          principal = user ? ctx.auth.principalFromUser(user, 'jwt', req.ip) : null;
-        }
+        principal = await principalFromBearer(ctx, app, token, req.ip);
       } catch {
         principal = null;
       }

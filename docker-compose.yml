@@ -16,6 +16,7 @@ services:
     image: ${DUCKVIEW_IMAGE:-anbproject/duckview:latest}
     ports:
       - "${PORT:-4200}:4200"
+      - "${APPS_PORT:-4201}:4201"   # data apps on their own origin (apps.isolation); behind a proxy set DUCKVIEW_APPS_PUBLIC_URL
     env_file:
       - path: .env
         required: false

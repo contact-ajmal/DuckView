@@ -8,7 +8,7 @@ import { HttpError } from '../services/errors.js';
 import { metrics } from '../observability/metrics.js';
 import type { Principal } from '../services/principal.js';
 import { logger } from '../observability/logger.js';
-import type { JwtClaims } from './auth-plugin.js';
+import { principalFromBearer } from './auth-plugin.js';
 import { conditional } from './conditional.js';
 
 const QueryBody = z.object({
@@ -75,12 +75,7 @@ export async function queryRoutes(app: FastifyInstance, ctx: AppContext) {
       if (msg.type === 'auth') {
         const token = String(msg.token ?? '');
         try {
-          if (token.startsWith('dv_')) principal = await ctx.auth.verifyToken(token, req.ip);
-          else {
-            const claims = app.jwt.verify<JwtClaims>(token);
-            const user = await ctx.auth.findById(claims.sub);
-            principal = user ? ctx.auth.principalFromUser(user, 'jwt', req.ip) : null;
-          }
+          principal = await principalFromBearer(ctx, app, token, req.ip);
         } catch {
           principal = null;
         }

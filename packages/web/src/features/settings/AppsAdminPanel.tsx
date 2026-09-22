@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppWindow, Check, ExternalLink, Globe, Pin, Square, X } from 'lucide-react';
-import { api, timeAgo, type AdminApp, type AppRuntimeInfo, type DataApp } from '../../api/client';
+import { api, openAppInTab, timeAgo, type AdminApp, type AppRuntimeInfo, type DataApp } from '../../api/client';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { Badge, Button, Card, Input, cn } from '../../components/ui';
 import { KvRows } from '../../components/layout';
@@ -37,10 +37,7 @@ export function AppsAdminPanel() {
     }
   };
   const review = (a: AdminApp, decision: 'approve' | 'reject') => act(`${decision}:${a.id}`, () => api.post(`/api/admin/apps/${a.id}/review`, { decision, note: notes[a.id]?.trim() || null }));
-  const open = async (a: AdminApp) => {
-    await api.post(`/api/apps/${a.id}/session`, {});
-    window.open(a.url, '_blank', 'noopener');
-  };
+  const open = (a: AdminApp) => openAppInTab(a.id).catch((e) => setError((e as Error).message));
   const pending = apps.filter((a) => a.publish_status === 'pending');
   const running = apps.filter((a) => a.status === 'running' || a.status === 'starting' || a.status === 'installing');
 

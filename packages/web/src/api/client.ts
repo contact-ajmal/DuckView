@@ -459,6 +459,25 @@ export interface GoogleIntegration { configured: boolean; client_id: string | nu
 export type AppStatus = 'stopped' | 'installing' | 'starting' | 'running' | 'error';
 export type AppPublishStatus = 'none' | 'pending' | 'approved' | 'rejected';
 export interface DataApp { id: string; workspace_id: string; user_id: string; name: string; description: string | null; kind: 'streamlit'; entry: string; files: Record<string, string>; spec: Record<string, unknown> | null; visibility: 'workspace' | 'org'; status: AppStatus; port: number | null; last_error: string | null; last_started_at: string | null; last_used_at: string | null; created_at: string; updated_at: string; url: string; source_bytes: number; running: boolean; always_on: boolean; runtime: 'subprocess' | 'docker' | 'kubernetes' | null; runtime_ref: string | null; publish_status: AppPublishStatus; publish_note: string | null; publish_requested_by: string | null; publish_requested_at: string | null; publish_reviewed_by: string | null; publish_reviewed_at: string | null }
+/**
+ * A link that opens an app for this browser: apps live on their own origin, so DuckView hands over a one-time
+ * link that sets the app cookie there and redirects to the app.
+ */
+export async function appLaunchUrl(id: string): Promise<string> {
+  return (await api.post<{ url: string }>(`/api/apps/${id}/session`, {})).url;
+}
+/** Opens an app in a new tab (the tab is opened first so popup blockers let it through). */
+export async function openAppInTab(id: string): Promise<void> {
+  const tab = window.open('about:blank', '_blank');
+  try {
+    const url = await appLaunchUrl(id);
+    if (tab) tab.location.href = url;
+    else window.open(url, '_blank');
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
+}
 /** Settings → Data apps: every app on the server, without its source. */
 export type AdminApp = Omit<DataApp, 'files'> & { owner_email: string | null; workspace_name: string | null; requested_by_email: string | null; last_used_ms: number | null };
 export interface AppRuntimeInfo { runtime: 'subprocess' | 'docker' | 'kubernetes'; enabled: boolean; running: number; max_running: number; idle_stop_minutes: number; evict_idle_seconds: number; publish_requires_approval: boolean; image?: string; network?: string | null; namespace?: string; api_url?: string; duckview_url?: string; venv?: string; cpu?: string; memory?: string }

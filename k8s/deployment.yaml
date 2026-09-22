@@ -36,10 +36,12 @@ spec:
           args: ["serve"]
           ports:
             - { name: http, containerPort: 4200 }
+            - { name: apps, containerPort: 4201 }   # data apps' own origin (apps.isolation)
           env:
             - { name: NODE_ENV, value: production }
             - { name: DUCKVIEW_CONFIG, value: /etc/duckview/duckview.config.yaml }
             - { name: DUCKVIEW_PUBLIC_URL, value: "https://duckview.example.com" }
+            - { name: DUCKVIEW_APPS_PUBLIC_URL, value: "https://apps.duckview.example.com" }
             - { name: DUCKDB_MEMORY_LIMIT, value: "75%" }
             - { name: DUCKDB_EXTENSION_DIRECTORY, value: /app/duckdb-extensions }
             - { name: LOG_LEVEL, value: info }

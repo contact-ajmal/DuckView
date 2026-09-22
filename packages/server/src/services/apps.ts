@@ -143,6 +143,8 @@ export class DataAppService {
   readonly runtime: AppRuntime;
   /** Where apps reach this server; set after listen (tests bind port 0). */
   internalUrl: string;
+  /** Where the app proxy listens (the apps listener, or this server with isolation off); set after listen. */
+  proxyUrl: string;
   /** Overridable for tests (a fake "streamlit"). */
   command: string[] | null;
   /** Signs the /apps session cookie for a user (set by the routes; used for headless previews). */
@@ -151,6 +153,7 @@ export class DataAppService {
 
   constructor(private readonly store: MetadataStore, private readonly cfg: DuckViewConfig, private readonly workspaces: WorkspaceService, private readonly auth: AuthService, private readonly audit: AuditService) {
     this.internalUrl = `http://127.0.0.1:${cfg.server.port}`;
+    this.proxyUrl = cfg.apps.isolation ? `http://127.0.0.1:${cfg.apps.port}` : this.internalUrl;
     this.command = cfg.apps.command ?? null;
     this.runtime = createRuntime(cfg, {
       command: () => this.command,

@@ -27,6 +27,7 @@ import { lakehouseRoutes } from './routes/lakehouse.js';
 import { sourceRoutes } from './routes/sources.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { appRoutes } from './routes/apps.js';
+import { buildAppsServer } from './apps-server.js';
 import { agentRoutes } from './routes/agent.js';
 import { groupRoutes } from './routes/groups.js';
 import { mosaicRoutes } from './routes/mosaic.js';
@@ -41,7 +42,7 @@ export function findWebDist(): string | null {
   return null;
 }
 
-export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance; mcpSessions: McpSessionRegistry }> {
+export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance; mcpSessions: McpSessionRegistry; appsServer: FastifyInstance | null }> {
   const { cfg } = ctx;
   const app = Fastify({
     loggerInstance: logger().child({ component: 'http' }) as unknown as FastifyBaseLogger,
@@ -141,8 +142,14 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
 
   app.addHook('onListen', () => {
     const addr = app.server.address();
-    if (addr && typeof addr === 'object') ctx.apps.internalUrl = `http://127.0.0.1:${addr.port}`;
+    if (addr && typeof addr === 'object') {
+      ctx.apps.internalUrl = `http://127.0.0.1:${addr.port}`;
+      if (!cfg.apps.isolation) ctx.apps.proxyUrl = ctx.apps.internalUrl;
+    }
     void ctx.apps.startAlwaysOn().catch((err) => logger().warn({ err: (err as Error).message }, 'Always-on apps did not start'));
   });
-  return { app, mcpSessions };
+  // Data apps get their own origin (see apps-server.ts); nothing listens there when apps are off.
+  const appsServer = cfg.apps.enabled && cfg.apps.isolation ? await buildAppsServer(ctx) : null;
+  if (cfg.apps.enabled && !cfg.apps.isolation) logger().warn('apps.isolation is off: data apps share the UI origin, so an app author can run script with a viewer\'s DuckView session. Keep it on unless every app author is trusted.');
+  return { app, mcpSessions, appsServer };
 }

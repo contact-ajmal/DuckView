@@ -238,6 +238,20 @@ export const ConfigSchema = z.object({
       max_source_bytes: z.coerce.number().int().min(1024).default(512 * 1024),
       /** Chrome / Chromium binary for headless previews (preview_app); auto-detected when unset. */
       chrome_path: z.string().optional(),
+      /**
+       * Serve apps from their own origin: a second listener (apps.port, default server.port + 1), so an app's code —
+       * which may run script in the viewer's browser — can never read the DuckView UI's session. Turn off only where
+       * every app author is trusted with every viewer's account.
+       */
+      isolation: z.coerce.boolean().default(true),
+      /** Port of the apps listener (isolation); default server.port + 1. */
+      port: z.coerce.number().int().min(1).max(65535).optional(),
+      /**
+       * Public URL of the apps listener behind a reverse proxy, e.g. https://apps.duckview.example.com — a different
+       * host on the same registrable domain as the UI (its cookie must reach iframes of the UI). Default: the UI's
+       * scheme and host with apps.port.
+       */
+      public_url: z.string().url().optional(),
       /** Publishing an app to everyone signed in ("org") waits for an administrator's approval. */
       publish_requires_approval: z.coerce.boolean().default(true),
       /** When max_running is reached, stop the least recently used app idle for at least this long instead of refusing. */
@@ -375,6 +389,8 @@ const WELL_KNOWN_ENV: Record<string, string[]> = {
   DUCKVIEW_HOST: ['server', 'host'],
   LOG_LEVEL: ['server', 'log_level'],
   DUCKVIEW_PUBLIC_URL: ['server', 'public_url'],
+  DUCKVIEW_APPS_PUBLIC_URL: ['apps', 'public_url'],
+  DUCKVIEW_APPS_PORT: ['apps', 'port'],
   DUCKVIEW_CORS_ORIGINS: ['server', 'cors_origins'],
   JWT_SECRET: ['security', 'jwt_secret'],
   ENCRYPTION_KEY: ['security', 'encryption_key'],
@@ -489,6 +505,8 @@ export function loadConfig(opts: LoadOptions = {}): DuckViewConfig {
   // Data apps run Python: on by default only where analysts already own the machine's filesystem.
   if (cfg.apps.enabled === undefined) cfg.apps.enabled = cfg.security.filesystem_mode === 'full';
   cfg.apps.venv_dir = path.resolve(cfg.apps.venv_dir ?? path.join(cfg.security.data_jail_directory, '.duckview', 'apps', 'venv'));
+  cfg.apps.port ??= cfg.server.port + 1;
+  if (cfg.apps.public_url) cfg.apps.public_url = cfg.apps.public_url.replace(/\/+$/, '');
 
   if (cfg.auth.strategy === 'oidc') {
     const o = cfg.auth.oidc;

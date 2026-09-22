@@ -36,11 +36,12 @@ interface Server {
   close(): Promise<void>;
 }
 
+/** A server with apps on the UI's origin (apps.isolation off — the isolated default is covered in apps.test.ts). */
 async function server(env: Record<string, string>, setup?: (ctx: AppContext) => void): Promise<Server> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-apprt-'));
   const cfg = loadConfig({
     configPath: null,
-    env: { DUCKVIEW_DATA_DIR: path.join(dir, 'data'), DUCKVIEW_FILESYSTEM_MODE: 'full', DUCKDB_TEMP_DIRECTORY: path.join(dir, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '512MB', DUCKVIEW_ADMIN_EMAIL: 'admin@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', DUCKVIEW__duckdb__sync_scheduler_enabled: 'false', DUCKVIEW__apps__start_timeout_seconds: '20', LOG_LEVEL: 'silent', ...env },
+    env: { DUCKVIEW_DATA_DIR: path.join(dir, 'data'), DUCKVIEW_FILESYSTEM_MODE: 'full', DUCKDB_TEMP_DIRECTORY: path.join(dir, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '512MB', DUCKVIEW_ADMIN_EMAIL: 'admin@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', DUCKVIEW__duckdb__sync_scheduler_enabled: 'false', DUCKVIEW__apps__start_timeout_seconds: '20', DUCKVIEW__apps__isolation: 'false', LOG_LEVEL: 'silent', ...env },
   });
   const ctx = await createContext(cfg);
   ctx.apps.command = [process.execPath, FAKE];

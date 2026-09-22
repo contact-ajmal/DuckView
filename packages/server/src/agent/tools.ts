@@ -701,7 +701,7 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         const tracebacks = logs.filter((l) => /Traceback|Error/.test(l));
         let shot: { png: Buffer; text: string } | null = null;
         try {
-          shot = await env.ctx.apps.screenshot(row, env.principal.userId, env.ctx.apps.internalUrl, { wait_ms });
+          shot = await env.ctx.apps.screenshot(row, env.principal.userId, env.ctx.apps.proxyUrl, { wait_ms });
         } catch (err) {
           logs.push(`preview: ${(err as Error).message}`);
         }

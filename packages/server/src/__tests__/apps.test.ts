@@ -24,6 +24,9 @@ let dir: string;
 let ctx: AppContext;
 let app: Awaited<ReturnType<typeof buildApp>>['app'];
 let base: string;
+/** The apps listener: apps are served from their own origin (apps.isolation, the default). */
+let appsServer: Awaited<ReturnType<typeof buildApp>>['appsServer'];
+let appsBase: string;
 let admin: Principal;
 let jwt: string;
 let userJwt: string;
@@ -36,15 +39,19 @@ const api = async (method: string, url: string, body?: unknown, token = jwt) => 
   const res = await fetch(base + url, { method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), authorization: `Bearer ${token}` }, body: body === undefined ? undefined : JSON.stringify(body) });
   return { status: res.status, json: (await res.json()) as Record<string, unknown>, headers: res.headers };
 };
+/** The browser's way in: a one-time handoff link from the UI, opened on the apps origin, which sets the cookie. */
 const sessionCookie = async (id: string, token = jwt) => {
   const r = await api('POST', `/api/apps/${id}/session`, {}, token);
   expect(r.status, JSON.stringify(r.json)).toBe(200);
-  const c = r.headers.get('set-cookie')!;
+  const handoff = await fetch(String(r.json.url), { redirect: 'manual' });
+  expect(handoff.status).toBe(302);
+  expect(handoff.headers.get('location')).toBe(`/apps/${id}/`);
+  const c = handoff.headers.get('set-cookie')!;
   expect(c).toMatch(/^dv_app=.*; Path=\/apps; HttpOnly; SameSite=Lax; Max-Age=43200$/);
   return c.split(';')[0]!;
 };
 /** A page load, as a browser sends it (only navigations wake a stopped app). */
-const visit = (id: string, cookie: string | null, pathname = '/') => fetch(`${base}/apps/${id}${pathname}`, { headers: { accept: 'text/html,application/xhtml+xml', ...(cookie ? { cookie } : {}) }, redirect: 'manual' });
+const visit = (id: string, cookie: string | null, pathname = '/') => fetch(`${appsBase}/apps/${id}${pathname}`, { headers: { accept: 'text/html,application/xhtml+xml', ...(cookie ? { cookie } : {}) }, redirect: 'manual' });
 const info = async (res: Response) => {
   const text = await res.text();
   const m = /<script id="info" type="application\/json">(.*?)<\/script>/.exec(text);
@@ -77,15 +84,19 @@ beforeAll(async () => {
   wsId = (await ctx.workspaces.create(admin, { name: 'Apps', active_db_path: 'apps.duckdb' })).id;
   otherWsId = (await ctx.workspaces.create(admin, { name: 'Private', active_db_path: 'private.duckdb' })).id;
   await ctx.queries.run(admin, wsId, "CREATE TABLE sdk_demo AS SELECT range AS n, 'r' || range AS label FROM range(5)", { cache: false, countTotal: false });
-  ({ app } = await buildApp(ctx));
+  ({ app, appsServer } = await buildApp(ctx));
   await app.listen({ port: 0, host: '127.0.0.1' });
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  await appsServer!.listen({ port: 0, host: '127.0.0.1' });
+  ctx.cfg.apps.port = (appsServer!.server.address() as { port: number }).port;
+  appsBase = `http://127.0.0.1:${ctx.cfg.apps.port}`;
   jwt = (await api('POST', '/api/auth/login', { email: 'admin@test.local', password: 'super-secret-pw' }, '')).json.token as string;
   userJwt = (await api('POST', '/api/auth/login', { email: 'user@test.local', password: 'user-secret-pw' }, '')).json.token as string;
 });
 
 afterAll(async () => {
   await app.close();
+  await appsServer?.close();
   await ctx.shutdown();
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -134,10 +145,15 @@ describe('runner and proxy', () => {
   });
 
   it('proxies HTTP only with the session cookie, forwards the visitor, passes bodies through', async () => {
-    expect((await visit(id, null)).status).toBe(401);
-    expect((await visit(id, 'dv_app=garbage')).status).toBe(401);
+    // No cookie: a page load goes to the UI to launch the app there; anything else is refused.
+    for (const c of [null, 'dv_app=garbage']) {
+      const r = await visit(id, c);
+      expect(r.status).toBe(302);
+      expect(r.headers.get('location')).toMatch(new RegExp(`/#/apps/${id}\\?launch=1$`));
+    }
+    expect((await fetch(`${appsBase}/apps/${id}/_stcore/health`)).status).toBe(401);
     const cookie = await sessionCookie(id);
-    const redirect = await fetch(`${base}/apps/${id}`, { headers: { cookie }, redirect: 'manual' });
+    const redirect = await fetch(`${appsBase}/apps/${id}`, { headers: { cookie }, redirect: 'manual' });
     expect(redirect.status).toBe(302);
     expect(redirect.headers.get('location')).toBe(`/apps/${id}/`);
     const res = await visit(id, cookie);
@@ -154,7 +170,7 @@ describe('runner and proxy', () => {
     expect(i.queryRows).toBe(1);
     expect(i.mutateStatus).toBe(403); // read scope
     expect(i.source).toContain('import streamlit');
-    const echo = await fetch(`${base}/apps/${id}/echo`, { method: 'POST', headers: { cookie, 'content-type': 'application/octet-stream' }, body: Buffer.from([1, 2, 3, 0, 255]) });
+    const echo = await fetch(`${appsBase}/apps/${id}/echo`, { method: 'POST', headers: { cookie, 'content-type': 'application/octet-stream' }, body: Buffer.from([1, 2, 3, 0, 255]) });
     expect(echo.headers.get('x-echo-length')).toBe('5');
     expect(Buffer.from(await echo.arrayBuffer())).toEqual(Buffer.from([1, 2, 3, 0, 255]));
     expect((await visit(id, cookie, '/nope')).status).toBe(404);
@@ -163,9 +179,44 @@ describe('runner and proxy', () => {
     expect(other).toBeNull();
   });
 
+  it('keeps apps on their own origin: single-use handoff, old links redirected, purpose JWTs are no credentials', async () => {
+    const s = await api('POST', `/api/apps/${id}/session`, {});
+    expect(s.headers.get('set-cookie')).toBeNull(); // nothing is set on the UI's origin
+    const url = String(s.json.url);
+    expect(url.startsWith(`${appsBase}/_duckview/session?app=${id}&t=`)).toBe(true);
+    expect(s.json.app_url).toBe(`${appsBase}/apps/${id}/`);
+    const first = await fetch(url, { redirect: 'manual' });
+    expect(first.headers.get('location')).toBe(`/apps/${id}/`);
+    const cookie = first.headers.get('set-cookie')!.split(';')[0]!;
+    // Replayed without the cookie: back to the UI; with it (an iframe reloading): straight to the app.
+    expect((await fetch(url, { redirect: 'manual' })).headers.get('location')).toMatch(new RegExp(`/#/apps/${id}\\?launch=1$`));
+    expect((await fetch(url, { redirect: 'manual', headers: { cookie } })).headers.get('location')).toBe(`/apps/${id}/`);
+    // A handoff for one app does not open another.
+    const t = new URL(String((await api('POST', `/api/apps/${id}/session`, {})).json.url)).searchParams.get('t')!;
+    expect((await fetch(`${appsBase}/_duckview/session?app=00000000-0000-0000-0000-000000000000&t=${encodeURIComponent(t)}`, { redirect: 'manual' })).headers.get('set-cookie')).toBeNull();
+    // The UI's origin no longer serves apps: pages move to the apps origin, anything else is a 404.
+    const old = await fetch(`${base}/apps/${id}/`, { headers: { accept: 'text/html' }, redirect: 'manual' });
+    expect(old.status).toBe(302);
+    expect(old.headers.get('location')).toBe(`${appsBase}/apps/${id}/`);
+    expect((await fetch(`${base}/apps/${id}/_stcore/health`, { headers: { cookie } })).status).toBe(404);
+    // The apps origin serves the proxy and nothing else.
+    expect((await fetch(`${appsBase}/api/workspaces`, { headers: { authorization: `Bearer ${jwt}` } })).status).toBe(404);
+    expect((await fetch(`${appsBase}/`)).status).toBe(404);
+    // Only sign-in sessions and API tokens are credentials: the app cookie and the handoff JWT are not.
+    expect((await api('GET', '/api/workspaces', undefined, decodeURIComponent(cookie.slice('dv_app='.length)))).status).toBe(401);
+    expect((await api('GET', '/api/workspaces', undefined, new URL(url).searchParams.get('t')!)).status).toBe(401);
+    // The in-browser app credential (purpose app-browser) reads one workspace and nothing more.
+    const ab = app.jwt.sign({ purpose: 'app-browser', sub: admin.userId, ws: wsId }, { expiresIn: '5m' });
+    expect((await api('POST', `/api/workspaces/${wsId}/query`, { sql: 'SELECT 1 AS one' }, ab)).status).toBe(200);
+    expect((await api('POST', `/api/workspaces/${wsId}/query`, { sql: 'CREATE TABLE ab_should_not AS SELECT 1' }, ab)).status).toBe(403);
+    expect((await api('POST', `/api/workspaces/${otherWsId}/query`, { sql: 'SELECT 1' }, ab)).status).toBe(403);
+    expect((await api('GET', '/api/admin/users', undefined, ab)).status).toBe(403);
+    expect((await api('GET', '/api/workspaces', undefined, app.jwt.sign({ purpose: 'app-browser', sub: admin.userId }, { expiresIn: '5m' }))).status).toBe(401);
+  });
+
   it('bridges the WebSocket with the subprotocol and the visitor header', async () => {
     const cookie = await sessionCookie(id);
-    const ws = new WebSocket(`${base.replace('http', 'ws')}/apps/${id}/_stcore/stream`, ['streamlit', 'session-token-x'], { headers: { cookie } });
+    const ws = new WebSocket(`${appsBase.replace('http', 'ws')}/apps/${id}/_stcore/stream`, ['streamlit', 'session-token-x'], { headers: { cookie } });
     const messages: string[] = [];
     await new Promise<void>((resolve, reject) => {
       ws.on('open', () => ws.send('ping'));
@@ -178,7 +229,7 @@ describe('runner and proxy', () => {
     expect(messages[1]).toBe('echo:ping');
     ws.close();
     // Without a cookie the socket is refused.
-    const bad = new WebSocket(`${base.replace('http', 'ws')}/apps/${id}/_stcore/stream`);
+    const bad = new WebSocket(`${appsBase.replace('http', 'ws')}/apps/${id}/_stcore/stream`);
     const code = await new Promise<number>((resolve) => { bad.on('close', (c) => resolve(c)); bad.on('error', () => resolve(-1)); });
     expect(code).toBe(1008);
   });
@@ -193,9 +244,9 @@ describe('runner and proxy', () => {
     expect((await api('POST', `/api/apps/${id}/stop`, {})).json).toEqual({ ok: true });
     expect((await api('GET', `/api/apps/${id}`)).json.app).toMatchObject({ status: 'stopped', running: false });
     // A tab left open keeps polling in the background: that must not undo the stop.
-    const poll = await fetch(`${base}/apps/${id}/_stcore/health`, { headers: { cookie, 'sec-fetch-mode': 'cors' } });
+    const poll = await fetch(`${appsBase}/apps/${id}/_stcore/health`, { headers: { cookie, 'sec-fetch-mode': 'cors' } });
     expect(poll.status).toBe(503);
-    expect((await fetch(`${base}/apps/${id}/_stcore/host-config`, { headers: { cookie } })).status).toBe(503);
+    expect((await fetch(`${appsBase}/apps/${id}/_stcore/host-config`, { headers: { cookie } })).status).toBe(503);
     await new Promise((r) => setTimeout(r, 300));
     expect((await api('GET', `/api/apps/${id}`)).json.app).toMatchObject({ status: 'stopped' });
     const waiting = await visit(id, cookie);

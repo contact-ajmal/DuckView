@@ -5,7 +5,7 @@ import { Prec } from '@codemirror/state';
 import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { AppWindow, Plus, Play, Square, RotateCw, ExternalLink, Save, Trash2, ScrollText, Loader2, ChevronLeft, Bot, Wand2, CheckCircle2, LayoutDashboard, FileCode2, Globe, Users, Pin } from 'lucide-react';
-import { api, copilotChat, timeAgo, type DataApp, type AppTemplate, type AppStatus, type Dashboard, type SavedQuery } from '../../api/client';
+import { api, appLaunchUrl, openAppInTab, copilotChat, timeAgo, type DataApp, type AppTemplate, type AppStatus, type Dashboard, type SavedQuery } from '../../api/client';
 import { useAuth } from '../../store/auth';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useTheme } from '../../store/theme';
@@ -22,6 +22,14 @@ export function AppsPage() {
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
+  // #/apps/<id>?launch=1: where the apps origin sends a visitor without its cookie — hand over and go back.
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const launching = !!appId && /[?&]launch=1\b/.test(location.hash);
+  useEffect(() => {
+    if (!launching || !appId) return;
+    void appLaunchUrl(appId).then((url) => location.replace(url)).catch((e) => setLaunchError((e as Error).message));
+  }, [launching, appId]);
+  if (launching) return <div className="flex h-full items-center justify-center gap-2 text-xs text-zinc-400">{launchError ? <span className="text-red-300">{launchError}</span> : <><Loader2 className="h-4 w-4 animate-spin" /> Opening the app…</>}</div>;
   return appId ? <AppEditor id={appId} /> : <Gallery />;
 }
 
@@ -80,10 +88,7 @@ function Gallery() {
       setBusy(null);
     }
   };
-  const openInTab = async (a: DataApp) => {
-    await api.post(`/api/apps/${a.id}/session`, {});
-    window.open(a.url, '_blank', 'noopener');
-  };
+  const openInTab = (a: DataApp) => openAppInTab(a.id).catch((e) => setError((e as Error).message));
 
   return (
     <div className="h-full min-h-0 overflow-auto">
@@ -203,9 +208,15 @@ function AppEditor({ id }: { id: string }) {
   }, [id]);
   useEffect(() => {
     void load().then((a) => { setFiles(a.files); setActive(a.entry); }).catch((e) => setError((e as Error).message));
-    // The preview iframe needs the /apps cookie.
-    void api.post<{ url: string }>(`/api/apps/${id}/session`, {}).then((r) => setPreviewUrl(r.url)).catch(() => undefined);
   }, [id, load]);
+  // The preview iframe opens through a fresh one-time link whenever it (re)mounts: apps live on their own origin.
+  const previewing = app?.status === 'running' || app?.status === 'starting' || app?.status === 'installing';
+  useEffect(() => {
+    if (!previewing) return;
+    let cancelled = false;
+    void appLaunchUrl(id).then((url) => { if (!cancelled) setPreviewUrl(url); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [id, previewKey, previewing]);
   useEffect(() => subscribeLiveEvents((e) => { if (e.type === 'app' && e.app_id === id) void load().then((a) => { if (a.status === 'running') setPreviewKey((k) => k + 1); }).catch(() => undefined); }), [id, load]);
   // Logs refresh while something is happening.
   useEffect(() => {
@@ -308,7 +319,7 @@ function AppEditor({ id }: { id: string }) {
           ) : (
             <Button size="sm" variant="primary" onClick={() => void action('start')} loading={busy === 'start'} title="Start"><Play className="h-3.5 w-3.5" /> Run</Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => { void api.post(`/api/apps/${id}/session`, {}).then(() => window.open(app.url, '_blank', 'noopener')); }} title="Open in a new tab"><ExternalLink className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => void openAppInTab(id).catch((e) => setError((e as Error).message))} title="Open in a new tab"><ExternalLink className="h-3.5 w-3.5" /></Button>
           <Button size="sm" variant="ghost" onClick={() => setShowLogs((v) => !v)} title="Logs" className={showLogs ? 'text-accent-300' : ''}><ScrollText className="h-3.5 w-3.5" /></Button>
           {isAdmin && <Button size="sm" variant="ghost" className={app.always_on ? 'text-accent-300' : ''} onClick={async () => { try { setApp((await api.post<{ app: DataApp }>(`/api/apps/${id}/always-on`, { on: !app.always_on })).app); } catch (e) { setError((e as Error).message); } }} title={app.always_on ? 'Always on: starts with the server, never stopped for idleness, restarted after a crash — click to let it scale to zero' : 'Keep always on (administrators): starts with the server, never idles out, restarts after a crash'}><Pin className="h-3.5 w-3.5" /></Button>}
           <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setPublishing(true)} title="Share beyond the workspace"><Globe className="h-3.5 w-3.5" /> Publish</Button>

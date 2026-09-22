@@ -66,7 +66,7 @@ COPY --chown=duckuser:duckgroup packages/sdk-python/pyproject.toml packages/sdk-
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 USER duckuser:duckgroup
 VOLUME ["/data", "/app/meta"]
-EXPOSE 4200
+EXPOSE 4200 4201
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD curl -fsS http://127.0.0.1:4200/readyz || exit 1
 ENTRYPOINT ["/usr/bin/tini", "--", "node", "/app/server/dist/cli.js"]
 CMD ["serve"]

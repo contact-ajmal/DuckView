@@ -87,6 +87,27 @@ const evaluate = async (expression) => {
   if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description ?? 'evaluate failed');
   return r.result?.result?.value;
 };
+/**
+ * Evaluates inside the first frame whose URL starts with `prefix` — the app preview lives on the apps origin, so the
+ * page cannot reach into it; DevTools can, through an isolated world bound to that frame.
+ */
+const frameEval = async (prefix, expression) => {
+  const tree = (await send('Page.getFrameTree')).result.frameTree;
+  const find = (n) => (n.frame.url.startsWith(prefix) ? n.frame : (n.childFrames ?? []).map(find).find(Boolean));
+  const frame = find(tree);
+  if (!frame) return undefined;
+  const world = await send('Page.createIsolatedWorld', { frameId: frame.id, worldName: 'e2e' });
+  const r = await send('Runtime.evaluate', { expression, contextId: world.result.executionContextId, returnByValue: true, awaitPromise: true });
+  return r.result?.result?.value;
+};
+const waitForFrame = async (prefix, expression, timeoutMs = 30000, label = expression) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if (await frameEval(prefix, expression).catch(() => false)) return true;
+    await sleep(400);
+  }
+  throw new Error(`timeout waiting in the app frame for: ${label}`);
+};
 const waitFor = async (expression, timeoutMs = 30000, label = expression) => {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
@@ -178,18 +199,29 @@ try {
     await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Run')`, 20000, 'editor loaded');
     report.details.audienceBadge = await evaluate(`document.body.innerText.includes('everyone')`);
     await clickButton('Run');
-    await waitFor(`(() => { const f = document.querySelector('iframe'); const d = f?.contentDocument; return !!d && !!d.querySelector('[data-testid="stAppViewContainer"]') && d.body.innerText.includes('E2E runtime app') && !!d.querySelector('[data-testid="stMetricValue"]'); })()`, 180000, 'streamlit rendered in the preview');
-    await waitFor(`(() => { const d = document.querySelector('iframe').contentDocument; return !!d.querySelector('[data-testid="stVegaLiteChart"] canvas, [data-testid="stVegaLiteChart"] svg, .vega-embed'); })()`, 60000, 'chart rendered');
+    const appsOrigin = new URL((await (await authed(`/api/apps/${appId}/session`, { method: 'POST', body: '{}' })).json()).app_url, BASE).origin;
+    report.details.appsOrigin = appsOrigin;
+    await waitForFrame(appsOrigin, `!!document.querySelector('[data-testid="stAppViewContainer"]') && document.body.innerText.includes('E2E runtime app') && !!document.querySelector('[data-testid="stMetricValue"]')`, 180000, 'streamlit rendered in the preview');
+    await waitForFrame(appsOrigin, `!!document.querySelector('[data-testid="stVegaLiteChart"] canvas, [data-testid="stVegaLiteChart"] svg, .vega-embed')`, 60000, 'chart rendered');
+    // Isolation: the preview is on another origin than the UI — the page cannot reach into it, nor it out.
+    report.details.isolation = { uiOrigin: await evaluate('location.origin'), frameOrigin: await frameEval(appsOrigin, 'location.origin'), pageSeesFrame: await evaluate(`(() => { try { return !!document.querySelector('iframe').contentDocument; } catch { return false; } })()`), frameSeesSession: await frameEval(appsOrigin, `(() => { try { return !!localStorage.getItem('duckview.session') || !!parent.localStorage.getItem('duckview.session'); } catch { return false; } })()`) };
     await sleep(2500);
     const app = (await (await authed(`/api/apps/${appId}`)).json()).app;
     report.details.app = { status: app.status, runtime: app.runtime, runtime_ref: app.runtime_ref, visibility: app.visibility, publish_status: app.publish_status };
-    report.details.rendered = await evaluate(`(() => { const d = document.querySelector('iframe').contentDocument; return { metric: d.querySelector('[data-testid="stMetricValue"]')?.textContent, chart: !!d.querySelector('[data-testid="stVegaLiteChart"]'), dataframe: !!d.querySelector('[data-testid="stDataFrame"]'), exception: d.querySelector('[data-testid="stException"]')?.innerText ?? null }; })()`);
+    report.details.rendered = await frameEval(appsOrigin, `(() => { const d = document; return { metric: d.querySelector('[data-testid="stMetricValue"]')?.textContent, chart: !!d.querySelector('[data-testid="stVegaLiteChart"]'), dataframe: !!d.querySelector('[data-testid="stDataFrame"]'), exception: d.querySelector('[data-testid="stException"]')?.innerText ?? null }; })()`);
     if (app.runtime === 'docker') {
       const inspect = JSON.parse(execFileSync('docker', ['inspect', app.runtime_ref]).toString())[0];
       report.details.container = { running: inspect.State.Running, image: inspect.Config.Image, user: inspect.Config.User, readOnly: inspect.HostConfig.ReadonlyRootfs, capDrop: inspect.HostConfig.CapDrop, tokenInArgs: /dv_[A-Za-z0-9]{10,}/.test(JSON.stringify(inspect.Config.Cmd) + JSON.stringify(inspect.Args)) };
     }
     report.details.charts = report.details.rendered.chart ? 1 : 0;
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_running.png'), Buffer.from(shot.result.data, 'base64')); }
+    // A shared link to the app, opened with no app cookie: bounced through the UI (signed in) and back to the app.
+    await send('Network.clearBrowserCookies');
+    await send('Page.navigate', { url: `${appsOrigin}/apps/${appId}/` });
+    await waitFor(`location.origin === ${JSON.stringify(appsOrigin)} && !!document.querySelector('[data-testid="stMetricValue"]')`, 60000, 'shared link opened the app');
+    report.details.sharedLink = { landed: await evaluate('location.href'), metric: await evaluate(`document.querySelector('[data-testid="stMetricValue"]')?.textContent`) };
+    await send('Page.navigate', { url: `${BASE}/#/apps/${appId}` });
+    await sleep(1500);
     // Delete it while the preview tab is still open (its Streamlit client keeps reconnecting): nothing may survive.
     // The tab's failed reconnects (503, then 404) are expected from here on and are not counted as page errors.
     const errorsBefore = errors.length;
@@ -276,6 +308,8 @@ try {
     if (d.rendered?.metric !== '12') problems.push(`the app did not compute its data (metric ${d.rendered?.metric})`);
     if (d.rendered?.exception) problems.push(`the app raised: ${d.rendered.exception}`);
     if (d.container && (!d.container.running || !d.container.readOnly || d.container.tokenInArgs)) problems.push(`container not as expected: ${JSON.stringify(d.container)}`);
+    if (d.sharedLink?.metric !== '12') problems.push(`a shared app link did not open the app: ${JSON.stringify(d.sharedLink)}`);
+    if (d.isolation && (d.isolation.uiOrigin === d.isolation.frameOrigin || d.isolation.pageSeesFrame || d.isolation.frameSeesSession)) problems.push(`the app is not isolated from the UI: ${JSON.stringify(d.isolation)}`);
     if (d.afterDelete?.app !== 404 || d.afterDelete?.containers) problems.push(`the deleted app left something running: ${JSON.stringify(d.afterDelete)}`);
   }
   if (d.error) problems.push(`view error: ${d.error}`);
