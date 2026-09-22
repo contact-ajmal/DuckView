@@ -11,7 +11,8 @@ import WebSocket from 'ws';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import type { DataApp } from '../db/schema/sqlite.js';
-import { APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS } from '../db/schema/sqlite.js';
+import { APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, APP_KINDS } from '../db/schema/sqlite.js';
+import { framework } from '../services/app-frameworks.js';
 import { DataAppService } from '../services/apps.js';
 import { stlitePage, sdkFiles } from '../services/app-stlite.js';
 import { DATA_APP_GUIDE } from '../services/app-generator.js';
@@ -27,9 +28,9 @@ const Source = z.union([
   z.object({ dashboard_id: z.string().max(64) }),
   z.object({ queries: z.array(z.object({ name: z.string().max(120), sql: z.string().max(50_000) })).max(50) }),
   z.object({ saved_query_ids: z.array(z.string().max(64)).max(50) }),
-  z.object({ code: z.string().max(2_000_000), requirements: z.string().max(20_000).nullable().optional() }),
+  z.object({ code: z.string().max(2_000_000), requirements: z.string().max(20_000).nullable().optional(), kind: z.enum(APP_KINDS).optional() }),
 ]);
-const AppBody = z.object({ name: z.string().max(120), description: z.string().max(2000).nullable().optional(), files: Files.optional(), entry: z.string().max(200).optional(), spec: z.record(z.string(), z.unknown()).nullable().optional(), visibility: z.enum(APP_VISIBILITIES).optional(), execution: z.enum(APP_EXECUTIONS).optional(), source: Source.optional() });
+const AppBody = z.object({ name: z.string().max(120), description: z.string().max(2000).nullable().optional(), files: Files.optional(), entry: z.string().max(200).optional(), spec: z.record(z.string(), z.unknown()).nullable().optional(), visibility: z.enum(APP_VISIBILITIES).optional(), execution: z.enum(APP_EXECUTIONS).optional(), kind: z.enum(APP_KINDS).optional(), source: Source.optional() });
 const HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'cookie', 'authorization']);
 
 function readCookie(header: string | undefined, name: string): string | null {
@@ -52,15 +53,15 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
     r.get('/api/apps/guide', async () => ({ guide: DATA_APP_GUIDE }));
     /** Static checks of app sources (compile, imports, secrets) — the editor's "Check" and agents' safety net. */
     r.post('/api/apps/validate', async (req) => {
-      const body = z.object({ files: Files, entry: z.string().max(200).optional() }).parse(req.body ?? {});
-      return ctx.apps.validateSource(body.files, body.entry ?? 'app.py');
+      const body = z.object({ files: Files, entry: z.string().max(200).optional(), kind: z.enum(APP_KINDS).optional() }).parse(req.body ?? {});
+      return ctx.apps.validateSource(body.files, body.entry ?? 'app.py', body.kind);
     });
     /** Generates files without saving them (the New-app dialog's preview of a dashboard-derived app). */
     r.post('/api/workspaces/:id/apps/generate', async (req) => {
       const { id } = req.params as { id: string };
       const body = z.object({ source: Source, name: z.string().max(120).optional(), description: z.string().max(2000).nullable().optional() }).parse(req.body ?? {});
       const g = await ctx.apps.generate(req.principal!, id, body.source, { name: body.name, description: body.description });
-      return { ...g, validation: await ctx.apps.validateSource(g.files) };
+      return { ...g, validation: await ctx.apps.validateSource(g.files, 'app.py', g.kind) };
     });
     r.get('/api/apps', async (req) => ({ apps: await ctx.apps.listAll(req.principal!), enabled: ctx.apps.enabled }));
     r.get('/api/workspaces/:id/apps', async (req) => {
@@ -72,7 +73,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext) {
       const body = AppBody.parse(req.body ?? {});
       if (body.source) {
         const g = await ctx.apps.generate(req.principal!, id, body.source, { name: body.name || undefined, description: body.description });
-        return { app: await ctx.apps.create(req.principal!, id, { ...body, name: body.name || g.name, description: body.description ?? g.description, files: body.files ?? g.files, spec: body.spec ?? g.spec }), summary: g.summary };
+        return { app: await ctx.apps.create(req.principal!, id, { ...body, name: body.name || g.name, description: body.description ?? g.description, files: body.files ?? g.files, spec: body.spec ?? g.spec, kind: g.kind }), summary: g.summary };
       }
       return { app: await ctx.apps.create(req.principal!, id, body) };
     });
@@ -217,7 +218,7 @@ export async function registerAppProxy(r: FastifyInstance, ctx: AppContext, opts
       }
       ctx.apps.touch(id);
       const role = (await ctx.workspaces.get(p, a.workspace_id).catch(() => null))?.role ?? 'VIEWER';
-      return proxy(req, reply, target, p, role);
+      return proxy(req, reply, target, p, role, upstreamPath(req, id, a.kind));
     },
   });
 
@@ -235,7 +236,7 @@ export async function registerAppProxy(r: FastifyInstance, ctx: AppContext, opts
       const target = ctx.apps.target(id);
       if (!target) return socket.close(1013, 'app not running');
       const role = (await ctx.workspaces.get(p, a.workspace_id).catch(() => null))?.role ?? 'VIEWER';
-      bridge(socket, req, target, p, role, () => ctx.apps.touch(id));
+      bridge(socket, req, target, p, role, () => ctx.apps.touch(id), upstreamPath(req, id, a.kind));
     })().catch((err) => {
       logger().warn({ err: (err as Error).message }, 'App websocket failed');
       try {
@@ -267,6 +268,15 @@ async function browserApp(r: FastifyInstance, ctx: AppContext, req: FastifyReque
 function apiBase(req: FastifyRequest, ctx: AppContext): string {
   if (!ctx.cfg.apps.isolation) return `${req.protocol}://${req.host}`;
   return (ctx.cfg.server.public_url ?? `${req.protocol}://${hostPart(req.hostname)}:${ctx.cfg.server.port}`).replace(/\/+$/, '');
+}
+
+/** The path the app server sees: frameworks that serve at the root (Gradio) get it without /apps/<id>. */
+function upstreamPath(req: FastifyRequest, id: string, kind: DataApp['kind']): string {
+  const url = req.raw.url ?? '/';
+  if (!framework(kind).stripPrefix) return url;
+  const prefix = `/apps/${id}`;
+  const rest = url.startsWith(prefix) ? url.slice(prefix.length) : url;
+  return rest.startsWith('/') ? rest : `/${rest}`;
 }
 
 /** A person opening a page (not a script polling in the background). */
@@ -301,7 +311,7 @@ export async function visitor(app: FastifyInstance, ctx: AppContext, req: Fastif
 const deny = (reply: FastifyReply, status: number, message: string) => reply.code(status).type('text/html').send(page(message, status === 401 ? 'Open the app from DuckView to sign in.' : ''));
 
 /** Forwards one HTTP request to the app's Streamlit server, streaming the answer straight to the socket. */
-function proxy(req: FastifyRequest, reply: FastifyReply, { host, port }: { host: string; port: number }, p: Principal, role: string): Promise<void> {
+function proxy(req: FastifyRequest, reply: FastifyReply, { host, port }: { host: string; port: number }, p: Principal, role: string, path: string): Promise<void> {
   return new Promise((resolve) => {
     const headers: Record<string, string | string[]> = {};
     for (const [k, v] of Object.entries(req.headers)) if (v !== undefined && !HOP.has(k.toLowerCase())) headers[k] = v;
@@ -310,10 +320,11 @@ function proxy(req: FastifyRequest, reply: FastifyReply, { host, port }: { host:
     headers['x-duckview-email'] = p.email;
     headers['x-duckview-role'] = role;
     headers['x-forwarded-proto'] = req.protocol;
+    headers['x-forwarded-host'] = String(req.headers.host ?? '');
     headers['x-forwarded-for'] = req.ip;
     reply.hijack();
     const raw = reply.raw;
-    const upstream = http.request({ host, port, method: req.method, path: req.raw.url, headers }, (res) => {
+    const upstream = http.request({ host, port, method: req.method, path, headers }, (res) => {
       const out: Record<string, string | string[]> = {};
       for (const [k, v] of Object.entries(res.headers)) if (v !== undefined && !['connection', 'keep-alive', 'transfer-encoding'].includes(k)) out[k] = v;
       raw.writeHead(res.statusCode ?? 502, out);
@@ -336,11 +347,11 @@ function proxy(req: FastifyRequest, reply: FastifyReply, { host, port }: { host:
 }
 
 /** Pipes a browser WebSocket to the app's, both ways, with the visitor's headers on the upstream handshake. */
-function bridge(client: WebSocket, req: FastifyRequest, { host, port }: { host: string; port: number }, p: Principal, role: string, touch: () => void): void {
+function bridge(client: WebSocket, req: FastifyRequest, { host, port }: { host: string; port: number }, p: Principal, role: string, touch: () => void, path: string): void {
   const protocols = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  const headers: Record<string, string> = { 'x-duckview-user': p.userId, 'x-duckview-email': p.email, 'x-duckview-role': role, 'x-forwarded-for': req.ip };
+  const headers: Record<string, string> = { 'x-duckview-user': p.userId, 'x-duckview-email': p.email, 'x-duckview-role': role, 'x-forwarded-for': req.ip, 'x-forwarded-host': String(req.headers.host ?? ''), 'x-forwarded-proto': req.protocol };
   for (const k of ['user-agent', 'accept-language', 'origin']) if (req.headers[k]) headers[k] = String(req.headers[k]);
-  const upstream = new WebSocket(`ws://${hostPart(host)}:${port}${req.raw.url}`, protocols, { headers, perMessageDeflate: false });
+  const upstream = new WebSocket(`ws://${hostPart(host)}:${port}${path}`, protocols, { headers, perMessageDeflate: false });
   const queue: { data: WebSocket.RawData; binary: boolean }[] = [];
   upstream.on('open', () => {
     for (const m of queue) upstream.send(m.data, { binary: m.binary });

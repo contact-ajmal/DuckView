@@ -20,7 +20,9 @@ import https from 'node:https';
 import net from 'node:net';
 import path from 'node:path';
 import type { DuckViewConfig } from '../config/index.js';
-import type { AppFiles } from '../db/schema/sqlite.js';
+import type { AppFiles, AppKind } from '../db/schema/sqlite.js';
+import { framework } from './app-frameworks.js';
+export { streamlitFlags } from './app-frameworks.js';
 import { badRequest } from './errors.js';
 
 export type RuntimeName = DuckViewConfig['apps']['runtime'];
@@ -28,6 +30,8 @@ export type RuntimeName = DuckViewConfig['apps']['runtime'];
 export interface LaunchSpec {
   id: string;
   name: string;
+  /** The framework (streamlit, dash, gradio): how the app is started and where it answers. */
+  kind: AppKind;
   files: AppFiles;
   entry: string;
   /** What the SDK needs (DUCKVIEW_URL is rewritten per runtime, DUCKVIEW_TOKEN is kept out of argv and pod specs). */
@@ -64,11 +68,6 @@ export interface AppRuntime {
   cleanup(): Promise<number>;
   /** Shown to admins and in /api/apps/templates. */
   describe(): Record<string, unknown>;
-}
-
-/** Streamlit's flags, shared by every runtime. */
-export function streamlitFlags(port: number, address: string, base: string): string[] {
-  return ['--server.headless=true', `--server.port=${port}`, `--server.address=${address}`, `--server.baseUrlPath=${base}`, '--browser.gatherUsageStats=false', '--server.enableXsrfProtection=false', '--server.enableCORS=false', '--server.fileWatcherType=none', '--client.toolbarMode=minimal'];
 }
 
 /**
@@ -216,11 +215,28 @@ export class SubprocessRuntime implements AppRuntime {
     });
   }
 
-  /** Makes sure a Python with streamlit exists (creates the virtualenv and installs on first use). */
+  /** Makes sure a Python with streamlit exists (creates the virtualenv and installs on first use), plus the app's framework. */
   private async ensureVenv(spec: LaunchSpec): Promise<string[]> {
     const override = this.opts.command();
     if (override) return override;
     const py = SubprocessRuntime.venvPython(this.cfg);
+    await this.ensureStreamlit(spec, py);
+    const fw = framework(spec.kind);
+    if (fw.id !== 'streamlit') {
+      const mod = fw.id;
+      const has = await new Promise<boolean>((resolve) => { const c = spawn(py, ['-c', `import ${mod}`], { stdio: 'ignore' }); c.on('error', () => resolve(false)); c.on('exit', (code) => resolve(code === 0)); });
+      if (!has) {
+        if (!this.cfg.apps.auto_install) throw badRequest(`${fw.label} is not installed in ${this.cfg.apps.venv_dir}; set apps.auto_install or install ${fw.packages.join(' ')} yourself`);
+        await spec.installing();
+        spec.log(`First ${fw.label} app: installing ${fw.packages.join(' ')} into the apps virtualenv`);
+        await this.exec(spec, py, ['-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', ...fw.packages]);
+      }
+      return [py];
+    }
+    return [py, '-m', 'streamlit', 'run'];
+  }
+
+  private async ensureStreamlit(spec: LaunchSpec, py: string): Promise<void> {
     const has = (interp: string) => new Promise<boolean>((resolve) => { const c = spawn(interp, ['-c', 'import streamlit, pandas'], { stdio: 'ignore' }); c.on('error', () => resolve(false)); c.on('exit', (code) => resolve(code === 0)); });
     if (!(await has(py))) {
       if (!this.cfg.apps.auto_install) throw badRequest(`No Python with streamlit at ${py}; set apps.auto_install or create the virtualenv yourself`);
@@ -237,7 +253,6 @@ export class SubprocessRuntime implements AppRuntime {
       } else spec.log('Waiting for the apps virtualenv being prepared by another app…');
       await this.installingVenv;
     }
-    return [py, '-m', 'streamlit', 'run'];
   }
 
   async launch(spec: LaunchSpec): Promise<Instance> {
@@ -258,9 +273,10 @@ export class SubprocessRuntime implements AppRuntime {
       await this.exec(spec, SubprocessRuntime.venvPython(this.cfg), ['-m', 'pip', 'install', '--disable-pip-version-check', '--quiet', '-r', 'requirements.txt'], dir);
     }
     const port = await freePort(this.cfg.apps.port_range, this.opts.usedPorts());
-    const args = [...command.slice(1), spec.entry, ...streamlitFlags(port, '127.0.0.1', spec.baseUrlPath)];
+    const run = framework(spec.kind).launch(spec.entry, '127.0.0.1', port, spec.baseUrlPath);
+    const args = [...command.slice(1), ...run.args];
     spec.log(`$ ${path.basename(command[0]!)} ${args.join(' ')}`);
-    const child = spawn(command[0]!, args, { cwd: dir, env: this.env(spec), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command[0]!, args, { cwd: dir, env: { ...this.env(spec), ...run.env }, stdio: ['ignore', 'pipe', 'pipe'] });
     pipeLines(child, spec.log);
     child.on('error', (err) => spec.log(`process error: ${err.message}`));
     const { exited, state } = watchChild(child);
@@ -329,15 +345,16 @@ export class DockerRuntime implements AppRuntime {
     await this.cli(['rm', '-f', name]); // a leftover with the same name
     const containerPort = 8501;
     const hostPort = this.d.network ? null : await freePort(this.cfg.apps.port_range, this.opts.usedPorts());
-    const env: Record<string, string> = { ...spec.env, DUCKVIEW_URL: this.duckviewUrl(), HOME: '/tmp', PYTHONUSERBASE: '/tmp/.local', PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', STREAMLIT_BROWSER_GATHER_USAGE_STATS: 'false', DV_REQUIREMENTS: this.d.allow_requirements ? '1' : '0' };
+    const run = framework(spec.kind).launch(spec.entry, '0.0.0.0', containerPort, spec.baseUrlPath);
+    const env: Record<string, string> = { ...spec.env, ...run.env, DUCKVIEW_URL: this.duckviewUrl(), HOME: '/tmp', PYTHONUSERBASE: '/tmp/.local', PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', STREAMLIT_BROWSER_GATHER_USAGE_STATS: 'false', DV_REQUIREMENTS: this.d.allow_requirements ? '1' : '0' };
     const args = ['run', '--rm', '-i', '--name', name, '--label', `duckview.app=${spec.id}`, '--label', `duckview.server=${this.label}`, '--read-only', '--tmpfs', '/tmp:rw,exec,size=1g,uid=1001,gid=1001', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', String(this.d.pids_limit), '--memory', dockerMemory(this.cfg.apps.resources.memory), '--cpus', this.cfg.apps.resources.cpu, '--user', '1001:1001'];
     if (this.d.network) args.push('--network', this.d.network);
     else args.push('-p', `127.0.0.1:${hostPort}:${containerPort}`, '--add-host', 'host.docker.internal:host-gateway');
     // Values travel in the CLI's environment, only names on the command line.
     for (const k of Object.keys(env)) args.push('-e', k);
-    const flags = streamlitFlags(containerPort, '0.0.0.0', spec.baseUrlPath);
-    args.push('--entrypoint', 'sh', this.d.image, '-c', CONTAINER_LAUNCH, 'sh', ...this.d.command, spec.entry, ...flags);
-    spec.log(`$ docker run … --name ${name} ${this.d.image} ${[...this.d.command, spec.entry].join(' ')}${hostPort ? ` (127.0.0.1:${hostPort} → ${containerPort})` : ` (network ${this.d.network})`}`);
+    const argv = [...(spec.kind === 'streamlit' ? this.d.command : ['python']), ...run.args];
+    args.push('--entrypoint', 'sh', this.d.image, '-c', CONTAINER_LAUNCH, 'sh', ...argv);
+    spec.log(`$ docker run … --name ${name} ${this.d.image} ${argv.slice(0, spec.kind === 'streamlit' ? this.d.command.length + 1 : 2).join(' ')}${hostPort ? ` (127.0.0.1:${hostPort} → ${containerPort})` : ` (network ${this.d.network})`}`);
     const child = spawn(this.d.binary, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
     pipeLines(child, spec.log);
     child.on('error', (err) => spec.log(`docker: ${err.message}`));
@@ -475,7 +492,8 @@ export class KubernetesRuntime implements AppRuntime {
       await new Promise((res) => setTimeout(res, 500));
     }
     const { DUCKVIEW_TOKEN: token, ...plain } = spec.env;
-    const env = { ...plain, DUCKVIEW_URL: this.duckviewUrl(), HOME: '/tmp', PYTHONUSERBASE: '/tmp/.local', PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', STREAMLIT_BROWSER_GATHER_USAGE_STATS: 'false', DV_REQUIREMENTS: this.k.allow_requirements ? '1' : '0' };
+    const run = framework(spec.kind).launch(spec.entry, '0.0.0.0', port, spec.baseUrlPath);
+    const env = { ...plain, ...run.env, DUCKVIEW_URL: this.duckviewUrl(), HOME: '/tmp', PYTHONUSERBASE: '/tmp/.local', PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', STREAMLIT_BROWSER_GATHER_USAGE_STATS: 'false', DV_REQUIREMENTS: this.k.allow_requirements ? '1' : '0' };
     const entries = Object.entries(spec.files);
     const meta = { name, namespace: this.namespace, labels };
     await this.must('POST', this.ns('secrets'), { apiVersion: 'v1', kind: 'Secret', metadata: meta, type: 'Opaque', stringData: token ? { DUCKVIEW_TOKEN: token } : {} });
@@ -497,7 +515,7 @@ export class KubernetesRuntime implements AppRuntime {
             image: this.k.image,
             imagePullPolicy: this.k.image_pull_policy,
             command: ['sh', '-c', CONTAINER_LAUNCH, 'sh'],
-            args: [...this.k.command, spec.entry, ...streamlitFlags(port, '0.0.0.0', spec.baseUrlPath)],
+            args: [...(spec.kind === 'streamlit' ? this.k.command : ['python']), ...run.args],
             ports: [{ name: 'http', containerPort: port }],
             env: Object.entries(env).map(([k, value]) => ({ name: k, value })),
             envFrom: [{ secretRef: { name } }],

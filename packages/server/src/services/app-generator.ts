@@ -372,6 +372,11 @@ A data app is a Streamlit script that reads a DuckView workspace through the \`d
 the SDK reads: DUCKVIEW_URL, DUCKVIEW_TOKEN (read-only, scoped to the workspace) and DUCKVIEW_WORKSPACE. Never put
 tokens or credentials in the code; never open .duckdb files directly (the engine holds the lock).
 
+Streamlit is the default; Dash and Gradio apps (create_app with kind, or the dash-explorer / gradio-query templates)
+use the same SDK (\`dv = duckview.connect(); dv.query(sql)\`) — a Dash app calls \`app.run()\` with no arguments and a
+Gradio app \`demo.launch()\` with no server arguments (DuckView sets host, port and base path); the viewer is
+\`duckview.viewer_from_headers(request.headers)\`.
+
 Apps run on the server by default. With execution "browser" (create_app) the same script runs in each viewer's
 browser instead (stlite on Pyodide): nothing runs on the server, the SDK reads as the viewer (read-only, the app's
 workspace), \`viewer()\` still works, and requirements.txt may only list pure-Python packages (or ones Pyodide ships).

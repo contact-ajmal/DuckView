@@ -203,7 +203,7 @@ jobs:
           cache-from: type=gha,scope=app-runtime
           cache-to: type=gha,mode=max,scope=app-runtime
 
-      - name: Smoke test (Streamlit and the SDK import as uid 1001 on a read-only root)
+      - name: Smoke test (Streamlit, Dash, Gradio and the SDK import as uid 1001 on a read-only root)
         run: |
           image="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
-          docker run --rm --read-only --tmpfs /tmp "$image" python -c "import streamlit, pandas, pyarrow, duckview.streamlit; print('ok', streamlit.__version__)"
+          docker run --rm --read-only --tmpfs /tmp "$image" python -c "import streamlit, dash, gradio, pandas, pyarrow, duckview.streamlit; print('ok', streamlit.__version__, dash.__version__, gradio.__version__)"

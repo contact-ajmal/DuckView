@@ -543,7 +543,7 @@ export const connectorConnections = sqliteTable(
   (t) => [index('connector_connections_user_idx').on(t.user_id)],
 );
 
-export const APP_KINDS = ['streamlit'] as const;
+export const APP_KINDS = ['streamlit', 'dash', 'gradio'] as const;
 export type AppKind = (typeof APP_KINDS)[number];
 export const APP_STATUSES = ['stopped', 'installing', 'starting', 'running', 'error'] as const;
 export type AppStatus = (typeof APP_STATUSES)[number];

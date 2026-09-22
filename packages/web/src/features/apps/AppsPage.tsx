@@ -5,7 +5,7 @@ import { Prec } from '@codemirror/state';
 import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { AppWindow, Plus, Play, Square, RotateCw, ExternalLink, Save, Trash2, ScrollText, Loader2, ChevronLeft, Bot, Wand2, CheckCircle2, LayoutDashboard, FileCode2, Globe, Users, Pin, Monitor, Server } from 'lucide-react';
-import { api, appLaunchUrl, openAppInTab, copilotChat, timeAgo, type DataApp, type AppTemplate, type AppStatus, type Dashboard, type SavedQuery } from '../../api/client';
+import { api, appLaunchUrl, openAppInTab, copilotChat, timeAgo, APP_KIND_LABEL, type DataApp, type AppTemplate, type AppStatus, type Dashboard, type SavedQuery } from '../../api/client';
 import { useAuth } from '../../store/auth';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useTheme } from '../../store/theme';
@@ -80,7 +80,7 @@ function Gallery() {
     setError(null);
     try {
       const source = form.from === 'dashboard' ? { dashboard_id: form.dashboard } : form.from === 'queries' ? { saved_query_ids: form.queryIds } : { template: form.template };
-      const r = await api.post<{ app: DataApp }>(`/api/workspaces/${wsId}/apps`, { name: form.name.trim(), description: form.description.trim() || null, source, execution: form.execution });
+      const r = await api.post<{ app: DataApp }>(`/api/workspaces/${wsId}/apps`, { name: form.name.trim(), description: form.description.trim() || null, source, execution: form.from === 'template' && templates.find((t) => t.id === form.template)?.kind !== 'streamlit' ? 'server' : form.execution });
       setCreating(false);
       location.hash = `#/apps/${r.app.id}`;
     } catch (e) {
@@ -116,7 +116,7 @@ function Gallery() {
                   <Badge tone={STATUS_TONE[a.status]} className="ml-auto">{a.execution === 'browser' && a.status === 'running' ? 'ready' : a.status}</Badge>
                 </div>
                 <p className="mt-1 line-clamp-2 min-h-[2rem] text-[11px] text-zinc-500">{a.description || `${a.entry} · ${(a.source_bytes / 1024).toFixed(1)} KB`}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10.5px] text-zinc-600"><Audience app={a} />{a.execution === 'browser' && <Badge tone="violet" className="gap-1"><Monitor className="h-3 w-3" /> in browser</Badge>}{a.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}<span>{a.execution === 'browser' ? 'runs in the viewer\'s browser' : a.last_started_at ? `started ${timeAgo(a.last_started_at)}` : 'never started'}</span>{a.last_error ? <span className="truncate text-red-300">· {a.last_error}</span> : null}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10.5px] text-zinc-600"><Audience app={a} />{a.kind !== 'streamlit' && <Badge tone="blue">{APP_KIND_LABEL[a.kind]}</Badge>}{a.execution === 'browser' && <Badge tone="violet" className="gap-1"><Monitor className="h-3 w-3" /> in browser</Badge>}{a.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}<span>{a.execution === 'browser' ? 'runs in the viewer\'s browser' : a.last_started_at ? `started ${timeAgo(a.last_started_at)}` : 'never started'}</span>{a.last_error ? <span className="truncate text-red-300">· {a.last_error}</span> : null}</div>
                 <div className="mt-3 flex items-center gap-1">
                   <Button size="sm" variant="secondary" onClick={() => void openInTab(a)} title="Open the app in a new tab"><ExternalLink className="h-3.5 w-3.5" /> Open</Button>
                   <Button size="sm" variant="ghost" onClick={() => (location.hash = `#/apps/${a.id}`)} title="Edit and preview">Edit</Button>
@@ -146,7 +146,7 @@ function Gallery() {
                 <div className="grid gap-2 md:grid-cols-2">
                   {templates.map((t) => (
                     <button key={t.id} type="button" onClick={() => setForm({ ...form, template: t.id })} className={cn('rounded-lg border p-3 text-left', form.template === t.id ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
-                      <div className="text-sm text-zinc-100">{t.label}</div>
+                      <div className="flex items-center gap-1.5 text-sm text-zinc-100">{t.label}<Badge className="ml-auto">{APP_KIND_LABEL[t.kind]}</Badge></div>
                       <div className="mt-1 text-[11px] text-zinc-500">{t.blurb}</div>
                     </button>
                   ))}
@@ -170,7 +170,7 @@ function Gallery() {
                 </div>
               )}
             </div>
-            {browserOk && (
+            {browserOk && (form.from !== 'template' || templates.find((t) => t.id === form.template)?.kind === 'streamlit') && (
               <div>
                 <Label>Runs</Label>
                 <div className="grid grid-cols-2 gap-2">
@@ -271,7 +271,7 @@ function AppEditor({ id }: { id: string }) {
   const askCopilot = () => {
     if (!app) return;
     cp.toggle(true);
-    void cp.send({ workspaceId: app.workspace_id, message: `I'm writing a Streamlit data app in DuckView (file ${active}). The app reads this workspace through the duckview SDK: \`from duckview.streamlit import connect, query, table_picker\` — \`query(sql)\` runs DuckDB SQL and returns a pandas DataFrame, \`table_picker(dv)\` is a selectbox over the tables. Suggest concrete improvements and give the full updated file in one \`\`\`python block.\n\n\`\`\`python\n${files[active] ?? ''}\n\`\`\`` });
+    void cp.send({ workspaceId: app.workspace_id, message: app.kind === 'streamlit' ? `I'm writing a Streamlit data app in DuckView (file ${active}). The app reads this workspace through the duckview SDK: \`from duckview.streamlit import connect, query, table_picker\` — \`query(sql)\` runs DuckDB SQL and returns a pandas DataFrame, \`table_picker(dv)\` is a selectbox over the tables. Suggest concrete improvements and give the full updated file in one \`\`\`python block.\n\n\`\`\`python\n${files[active] ?? ''}\n\`\`\`` : `I'm writing a ${APP_KIND_LABEL[app.kind]} data app in DuckView (file ${active}). It reads this workspace through the duckview SDK: \`dv = duckview.connect()\`, \`dv.query(sql)\` runs DuckDB SQL and returns a pandas DataFrame, \`duckview.viewer_from_headers(headers)\` names the viewer. DuckView sets the host, port and base path (${app.kind === 'dash' ? 'call app.run() without arguments' : 'call demo.launch() without server arguments'}). Suggest concrete improvements and give the full updated file in one \`\`\`python block.\n\n\`\`\`python\n${files[active] ?? ''}\n\`\`\`` });
   };
   /** Copilot writes (or rewrites) app.py for a goal, with the SDK guide as the contract; the result lands in the editor after a static check. */
   const draft = async () => {
@@ -289,7 +289,7 @@ function AppEditor({ id }: { id: string }) {
       }
       const m = /```python\s*([\s\S]*?)```/i.exec(out) ?? /```\s*([\s\S]*?)```/.exec(out);
       const code = (m ? m[1]! : out).trim() + '\n';
-      const v = await api.post<{ ok: boolean; errors: string[]; warnings: string[] }>('/api/apps/validate', { files: { ...files, 'app.py': code }, entry: app.entry });
+      const v = await api.post<{ ok: boolean; errors: string[]; warnings: string[] }>('/api/apps/validate', { files: { ...files, 'app.py': code }, entry: app.entry, kind: app.kind });
       setCheck(v);
       if (!v.ok) throw new Error(`Copilot's draft did not pass the check: ${v.errors.join('; ')} — it is in the editor to fix.`);
       setFiles((f) => ({ ...f, 'app.py': code }));
@@ -302,7 +302,7 @@ function AppEditor({ id }: { id: string }) {
   };
   const runCheck = async () => {
     try {
-      setCheck(await api.post('/api/apps/validate', { files, entry: app?.entry ?? 'app.py' }));
+      setCheck(await api.post('/api/apps/validate', { files, entry: app?.entry ?? 'app.py', kind: app?.kind }));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -320,7 +320,8 @@ function AppEditor({ id }: { id: string }) {
         {dirty && <Badge tone="amber">unsaved</Badge>}
         <button type="button" onClick={() => setPublishing(true)} title="Who sees this app" className="disabled:opacity-50" disabled={!canEdit}><Audience app={app} /></button>
         {app.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}
-        {canEdit && (
+        <Badge tone={app.kind === 'streamlit' ? 'zinc' : 'blue'}>{APP_KIND_LABEL[app.kind]}</Badge>
+        {canEdit && app.kind === 'streamlit' && (
           <Select value={app.execution} title="Where the app's Python runs" className="h-6 py-0 text-[11px]" onChange={async (e) => { try { setApp((await api.patch<{ app: DataApp }>(`/api/apps/${id}`, { execution: e.target.value })).app); setPreviewKey((k) => k + 1); } catch (err) { setError((err as Error).message); } }}>
             <option value="server">runs on the server</option>
             <option value="browser">runs in the viewer's browser</option>
@@ -328,7 +329,7 @@ function AppEditor({ id }: { id: string }) {
         )}
         <span className="text-[11px] text-zinc-500">{app.execution === 'browser' ? 'Python runs in each viewer\'s browser' : app.last_started_at ? `started ${timeAgo(app.last_started_at)}` : 'never started'}{app.last_error ? <span className="text-red-300"> · {app.last_error}</span> : null}</span>
         <div className="ml-auto flex items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={() => void draft()} loading={drafting} disabled={!canEdit || !cp.config?.can_use} title={cp.config?.can_use ? 'Let Copilot write app.py for a goal (checked before it lands in the editor)' : 'Configure Copilot under Settings → Copilot first'}><Wand2 className="h-3.5 w-3.5" /> Draft</Button>
+          <Button size="sm" variant="ghost" onClick={() => void draft()} loading={drafting} disabled={!canEdit || !cp.config?.can_use || app.kind !== 'streamlit'} title={app.kind !== 'streamlit' ? 'Draft writes Streamlit apps; ask Copilot (next button) about Dash or Gradio code' : cp.config?.can_use ? 'Let Copilot write app.py for a goal (checked before it lands in the editor)' : 'Configure Copilot under Settings → Copilot first'}><Wand2 className="h-3.5 w-3.5" /> Draft</Button>
           <Button size="sm" variant="ghost" onClick={askCopilot} title="Ask Copilot about this app"><Bot className="h-3.5 w-3.5" /></Button>
           <Button size="sm" variant="ghost" onClick={() => void runCheck()} title="Static check: compiles, imports streamlit, no tokens"><CheckCircle2 className={cn('h-3.5 w-3.5', check?.ok ? 'text-emerald-400' : check ? 'text-red-300' : '')} /> Check</Button>
           <Button size="sm" variant="secondary" onClick={() => void save()} loading={busy === 'save'} disabled={!canEdit || !dirty} title="Save (⌘S) — a running app restarts"><Save className="h-3.5 w-3.5" /> Save</Button>

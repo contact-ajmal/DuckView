@@ -23,6 +23,7 @@ import { describeSpec, parseSpecText } from '../services/mosaic-spec.js';
 import { SOURCE_CATALOG } from '../services/source-catalog.js';
 import type { SyncSource, SyncSchedule } from '../db/schema/sqlite.js';
 import type { AppSource } from '../services/apps.js';
+import { framework } from '../services/app-frameworks.js';
 
 export type ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 export type ToolResult = { content: ToolContent[]; structuredContent?: Record<string, unknown>; isError?: boolean };
@@ -587,10 +588,10 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
     define({
       name: 'create_app',
       title: 'Create data app',
-      description: 'Creates a Streamlit data app on the workspace\'s data. source: {dashboard_id} generates the app deterministically from a Mosaic dashboard (its datasets, filters, KPIs, charts and tables) or a grid dashboard (its widgets); {saved_query_ids} / {queries: [{name, sql}]} build a query browser; {template: "explorer" | "blank"} starts from a template; {code, requirements?} takes app.py as written (read duckdb://guides/data-app first). The code is checked before it is saved — it must compile, import streamlit and carry no token — and the app can be started right away (run_now) so preview_app can look at it. execution "browser" runs it in each viewer\'s browser instead (stlite / Pyodide: no server process, the viewer\'s own read-only access; pure-Python requirements only).',
+      description: 'Creates a Streamlit data app on the workspace\'s data. source: {dashboard_id} generates the app deterministically from a Mosaic dashboard (its datasets, filters, KPIs, charts and tables) or a grid dashboard (its widgets); {saved_query_ids} / {queries: [{name, sql}]} build a query browser; {template: "explorer" | "blank" (Streamlit) | "dash-explorer" (Dash) | "gradio-query" (Gradio)} starts from a template; {code, requirements?, kind?} takes app.py as written (kind: "streamlit" — the default —, "dash" or "gradio") (read duckdb://guides/data-app first). The code is checked before it is saved — it must compile, import streamlit and carry no token — and the app can be started right away (run_now) so preview_app can look at it. execution "browser" runs it in each viewer\'s browser instead (stlite / Pyodide: no server process, the viewer\'s own read-only access; pure-Python requirements only).',
       inputSchema: {
         name: z.string().min(1).max(120),
-        source: z.record(z.string(), z.unknown()).describe('{dashboard_id} | {saved_query_ids: [...]} | {queries: [{name, sql}]} | {template} | {code, requirements?}'),
+        source: z.record(z.string(), z.unknown()).describe('{dashboard_id} | {saved_query_ids: [...]} | {queries: [{name, sql}]} | {template} | {code, requirements?, kind?: "streamlit" | "dash" | "gradio"}'),
         description: z.string().max(2000).optional(),
         visibility: z.enum(['workspace', 'org']).optional().describe('Who can open it: workspace members (default) or everyone signed in'),
         execution: z.enum(['server', 'browser']).optional().describe('Where the Python runs: "server" (default) or "browser" (stlite in each viewer\'s browser)'),
@@ -601,9 +602,9 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
       async handler(env, { name, source, description, visibility, execution, run_now, workspace_id }) {
         const ws = resolveWorkspace(env, workspace_id);
         const g = await env.ctx.apps.generate(env.principal, ws, source as unknown as AppSource, { name, description: description ?? null });
-        const check = await env.ctx.apps.validateSource(g.files, 'app.py');
+        const check = await env.ctx.apps.validateSource(g.files, 'app.py', g.kind);
         if (!check.ok) return { content: [text(`The app was not saved — fix these and try again:\n${check.errors.map((e) => `- ${e}`).join('\n')}`)], structuredContent: { status: 'invalid', errors: check.errors, warnings: check.warnings }, isError: true };
-        const app = await env.ctx.apps.create(env.principal, ws, { name, description: description ?? g.description, files: g.files, spec: g.spec, visibility, execution });
+        const app = await env.ctx.apps.create(env.principal, ws, { name, description: description ?? g.description, files: g.files, spec: g.spec, visibility, execution, kind: g.kind });
         let started: { status: string; last_error: string | null } | null = null;
         let startError: string | null = null;
         if (run_now !== false && env.ctx.apps.enabled) {
@@ -632,7 +633,7 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         const existing = await env.ctx.apps.get(env.principal, app_id, 'EDITOR');
         const files = code !== undefined || requirements !== undefined ? { ...existing.files, ...(code !== undefined ? { [existing.entry]: code } : {}), ...(requirements !== undefined ? { 'requirements.txt': requirements } : {}) } : undefined;
         if (files) {
-          const check = await env.ctx.apps.validateSource(files, existing.entry);
+          const check = await env.ctx.apps.validateSource(files, existing.entry, existing.kind);
           if (!check.ok) return { content: [text(`Not saved — fix these first:\n${check.errors.map((e) => `- ${e}`).join('\n')}`)], structuredContent: { status: 'invalid', errors: check.errors, warnings: check.warnings }, isError: true };
         }
         const app = await env.ctx.apps.update(env.principal, app_id, { files, name, description });
@@ -700,7 +701,7 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         const inBrowser = row.execution === 'browser';
         if (!inBrowser && !env.ctx.apps.target(app_id)) return { content: [text(`**${app.name}** is ${env.ctx.apps.status(app_id) ?? app.status}${app.last_error ? `: ${app.last_error}` : ''} — run_app first.`)], structuredContent: { status: 'not_running', app_id, app_status: env.ctx.apps.status(app_id) ?? app.status, last_error: app.last_error }, isError: true };
         // An in-browser app has no server to check: the headless browser loading it is the health check.
-        const health = inBrowser ? env.ctx.apps.browserReady : await fetch(`http://127.0.0.1:${env.ctx.apps.target(app_id)!.port}/apps/${app_id}/_stcore/health`).then((r) => r.ok).catch(() => false);
+        const health = inBrowser ? env.ctx.apps.browserReady : await fetch(`http://${env.ctx.apps.target(app_id)!.host}:${env.ctx.apps.target(app_id)!.port}${framework(row.kind).healthPath(`/apps/${app_id}`)}`).then((r) => r.ok).catch(() => false);
         const logs = env.ctx.apps.logs(app_id).slice(-15);
         const tracebacks = logs.filter((l) => /Traceback|Error/.test(l));
         let shot: { png: Buffer; text: string } | null = null;

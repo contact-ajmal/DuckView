@@ -105,7 +105,7 @@ afterAll(async () => {
 describe('registry', () => {
   it('offers templates, creates from one, validates sources, keeps apps to workspace members', async () => {
     const t = await api('GET', '/api/apps/templates');
-    expect((t.json.templates as { id: string }[]).map((x) => x.id)).toEqual(['explorer', 'blank']);
+    expect((t.json.templates as { id: string }[]).map((x) => x.id)).toEqual(['explorer', 'blank', 'dash-explorer', 'gradio-query']);
     expect(t.json.enabled).toBe(true);
     const r = await api('POST', `/api/workspaces/${wsId}/apps`, { name: 'Explorer', description: 'first app' });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -356,6 +356,52 @@ describe('in-browser apps (stlite)', () => {
     expect((await visit(a.id, cookie)).status).toBe(503);
     ctx.cfg.apps.stlite.enabled = true;
     for (const x of [a.id, srv.id]) await api('DELETE', `/api/apps/${x}`);
+  });
+});
+
+describe('dash and gradio', () => {
+  it('runs Dash and Gradio apps behind the same proxy: templates, per-framework checks, launch settings, prefix handling', async () => {
+    const templates = (await api('GET', '/api/apps/templates')).json.templates as { id: string; kind: string }[];
+    expect(templates.map((t) => `${t.id}:${t.kind}`)).toEqual(['explorer:streamlit', 'blank:streamlit', 'dash-explorer:dash', 'gradio-query:gradio']);
+    // Checks per framework.
+    const check = async (kind: string, code: string) => (await api('POST', '/api/apps/validate', { files: { 'app.py': code }, kind })).json as { ok: boolean; errors: string[]; warnings: string[] };
+    expect((await check('dash', 'import dash\napp = dash.Dash()\n')).errors).toEqual([expect.stringMatching(/must call app.run\(\)/)]);
+    expect((await check('dash', 'import streamlit as st\n')).errors).toEqual(expect.arrayContaining([expect.stringMatching(/app.py does not import dash/)]));
+    expect((await check('dash', 'import dash\napp = dash.Dash()\napp.run(port=8050)\n')).warnings).toEqual([expect.stringMatching(/leave them out/)]);
+    expect((await check('gradio', 'import gradio as gr\n')).errors).toEqual([expect.stringMatching(/must call demo.launch\(\)/)]);
+    expect((await check('gradio', 'import gradio as gr\ndemo = gr.Blocks()\ndemo.launch(share=True)\n')).warnings).toEqual([expect.stringMatching(/never share=True/)]);
+    for (const t of templates) {
+      const g = (await api('POST', `/api/workspaces/${wsId}/apps/generate`, { source: { template: t.id } })).json as { kind: string; validation: { ok: boolean; errors: string[] } };
+      expect(g.kind).toBe(t.kind);
+      expect(g.validation, t.id).toMatchObject({ ok: true });
+    }
+    // Dash: served under the base path, told where through the environment.
+    const dash = (await api('POST', `/api/workspaces/${wsId}/apps`, { name: 'Dash app', kind: 'dash', files: { 'app.py': 'import dash\napp = dash.Dash()\nif __name__ == "__main__":\n    app.run()\n' } })).json.app as { id: string; kind: string };
+    expect(dash.kind).toBe('dash');
+    expect((await api('POST', `/api/apps/${dash.id}/start`, {})).json.app).toMatchObject({ status: 'running', kind: 'dash' });
+    const di = await info(await visit(dash.id, await sessionCookie(dash.id)));
+    expect(di).toMatchObject({ framework: 'dash', path: `/apps/${dash.id}/`, viewer: 'admin@test.local', queryStatus: 200, mutateStatus: 403 });
+    // Gradio: serves at the root — the proxy strips /apps/<id>, and GRADIO_ROOT_PATH + X-Forwarded-Host make its links right.
+    const gr = (await api('POST', `/api/workspaces/${wsId}/apps`, { name: 'Gradio app', source: { template: 'gradio-query' } })).json.app as { id: string; kind: string };
+    expect(gr.kind).toBe('gradio');
+    expect((await api('POST', `/api/apps/${gr.id}/start`, {})).json.app).toMatchObject({ status: 'running' });
+    const gc = await sessionCookie(gr.id);
+    const gi = await info(await visit(gr.id, gc));
+    expect(gi).toMatchObject({ framework: 'gradio', path: '/', rootPath: `/apps/${gr.id}`, forwardedHost: new URL(appsBase).host, viewer: 'admin@test.local' });
+    const echo = await fetch(`${appsBase}/apps/${gr.id}/echo`, { method: 'POST', headers: { cookie: gc, 'content-type': 'text/plain' }, body: 'hello' });
+    expect(await echo.text()).toBe('hello');
+    // Only Streamlit runs in the browser.
+    expect((await api('PATCH', `/api/apps/${gr.id}`, { execution: 'browser' })).status).toBe(400);
+    expect((await api('POST', `/api/workspaces/${wsId}/apps`, { name: 'x', kind: 'dash', execution: 'browser', files: { 'app.py': 'import dash\n' } })).status).toBe(400);
+    // Agents pick the framework through the template or the code's kind.
+    const tools = buildTools(ctx.cfg);
+    const env: ToolEnv = { ctx, principal: admin, via: 'rest', defaultWorkspaceId: wsId, agent: null };
+    const made = await runTool(env, tools.find((t) => t.name === 'create_app')!, { name: 'Agent dash', source: { code: 'import dash\napp = dash.Dash()\napp.run()\n', kind: 'dash' }, run_now: false });
+    expect(made.isError, JSON.stringify(made.content)).toBeFalsy();
+    expect((await api('GET', `/api/apps/${(made.structuredContent as { app_id: string }).app_id}`)).json.app).toMatchObject({ kind: 'dash' });
+    const refused = await runTool(env, tools.find((t) => t.name === 'create_app')!, { name: 'Bad gradio', source: { code: 'import gradio as gr\n', kind: 'gradio' } });
+    expect(refused.isError).toBe(true);
+    for (const x of [dash.id, gr.id, (made.structuredContent as { app_id: string }).app_id]) await api('DELETE', `/api/apps/${x}`);
   });
 });
 

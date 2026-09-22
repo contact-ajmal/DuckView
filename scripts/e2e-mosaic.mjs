@@ -12,7 +12,9 @@
  * Settings → Data apps, runs it from the editor (whatever apps.runtime the server uses — with docker it checks the
  * container too) and waits for Streamlit to render the app's table and chart in the preview. The browser-app
  * scenario creates an app that runs in the viewer's browser (stlite) through the New-app dialog, waits for Pyodide
- * to render it in the editor's preview and checks that it reads as the viewer, read-only.
+ * to render it in the editor's preview and checks that it reads as the viewer, read-only. The frameworks scenario
+ * runs a real Dash app (a callback queries DuckView) and the Gradio template (a click runs SQL through the queue)
+ * behind the proxy, in the editor's cross-origin preview.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -264,6 +266,34 @@ try {
     report.details.writeHappened = (await (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql: "SELECT count(*) FROM information_schema.tables WHERE table_name = 'e2e_browser_write'" }) })).json()).rows?.[0]?.[0];
     report.details.charts = report.details.rendered?.chart ? 1 : 0;
   }
+  else if (scenario === 'frameworks') {
+    const wsList = await (await authed('/api/workspaces')).json();
+    const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
+    const dashCode = 'import duckview\nimport plotly.express as px\nfrom dash import Dash, Input, Output, dcc, html, dash_table\nfrom flask import request\n\ndv = duckview.connect()\napp = Dash(__name__, title="E2E dash")\napp.layout = html.Div([html.H2("E2E dash"), dcc.Slider(3, 12, 1, value=6, id="n"), html.Div(id="who"), dcc.Graph(id="g"), dash_table.DataTable(id="t")])\n\n\n@app.callback(Output("g", "figure"), Output("t", "data"), Output("who", "children"), Input("n", "value"))\ndef show(n):\n    df = dv.query(f"SELECT range AS x, range * range AS y FROM range({int(n)})")\n    who = duckview.viewer_from_headers(request.headers)["email"]\n    return px.bar(df, x="x", y="y"), df.to_dict("records"), f"rows {len(df)} viewer {who}"\n\n\nif __name__ == "__main__":\n    app.run()\n';
+    const dash = (await (await authed(`/api/workspaces/${wsId}/apps`, { method: 'POST', body: JSON.stringify({ name: 'E2E dash', source: { code: dashCode, kind: 'dash' } }) })).json()).app;
+    const grad = (await (await authed(`/api/workspaces/${wsId}/apps`, { method: 'POST', body: JSON.stringify({ name: 'E2E gradio', source: { template: 'gradio-query' } }) })).json()).app;
+    cleanup = async () => { for (const a of [dash, grad]) await authed(`/api/apps/${a.id}`, { method: 'DELETE' }); };
+    const appsOrigin = new URL((await (await authed(`/api/apps/${dash.id}/session`, { method: 'POST', body: '{}' })).json()).app_url, BASE).origin;
+    const open = async (a) => {
+      await send('Page.navigate', { url: `${BASE}/#/apps/${a.id}` });
+      await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Run')`, 20000, `${a.name} editor`);
+      await clickButton('Run');
+    };
+    // Dash: the callback runs through the proxy, queries DuckView and names the viewer.
+    await open(dash);
+    await waitForFrame(appsOrigin, `document.body.innerText.includes('rows 6 viewer admin@example.com') && !!document.querySelector('.js-plotly-plot .bars, .js-plotly-plot .trace')`, 240000, 'dash rendered its callback');
+    report.details.dash = await frameEval(appsOrigin, `({ path: location.pathname, text: document.body.innerText.slice(0, 200), plot: !!document.querySelector('.js-plotly-plot'), rows: document.querySelectorAll('.dash-spreadsheet tbody tr, .dash-table-container tr').length })`);
+    report.details.dashBadge = await evaluate(`document.body.innerText.includes('Dash')`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dash.png'), Buffer.from(shot.result.data, 'base64')); }
+    // Gradio: served at its root behind the stripped prefix; a click queues the SQL and the answer comes back.
+    await open(grad);
+    await waitForFrame(appsOrigin, `!!document.querySelector('gradio-app') && [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Run')`, 240000, 'gradio rendered');
+    await frameEval(appsOrigin, `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Run').click(), true`);
+    await waitForFrame(appsOrigin, `document.body.innerText.includes('asked by admin@example.com')`, 60000, 'gradio answered');
+    await sleep(800);
+    report.details.gradio = await frameEval(appsOrigin, `({ path: location.pathname, status: [...document.querySelectorAll('.prose, .md')].map(e => e.innerText).find(t => t.includes('asked by')) ?? null, answer: document.body.innerText.includes('42') })`);
+    report.details.charts = report.details.dash?.plot ? 1 : 0;
+  }
   else if (scenario === 'mosaic-dashboard') {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
@@ -336,6 +366,10 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'frameworks') {
+    if (!/rows 6 viewer admin@example\.com/.test(d.dash?.text ?? '')) problems.push(`the Dash callback did not answer: ${JSON.stringify(d.dash)}`);
+    if (!/1 rows · asked by admin@example\.com/.test(d.gradio?.status ?? '') || !d.gradio?.answer) problems.push(`Gradio did not answer: ${JSON.stringify(d.gradio)}`);
+  }
   if (scenario === 'browser-app') {
     if (d.created !== 'browser') problems.push('the dialog did not create an in-browser app');
     if (d.rendered?.metric !== '9') problems.push(`the app did not read its data (metric ${d.rendered?.metric})`);

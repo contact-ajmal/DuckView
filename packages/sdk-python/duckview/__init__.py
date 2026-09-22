@@ -23,7 +23,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Union
 
-__all__ = ["connect", "Client", "Table", "QueryResult", "DuckViewError", "__version__"]
+__all__ = ["connect", "viewer_from_headers", "Client", "Table", "QueryResult", "DuckViewError", "__version__"]
 __version__ = "0.1.0"
 
 
@@ -365,6 +365,21 @@ class Table:
 
     def __repr__(self) -> str:
         return f"Table({self.sql!r})"
+
+
+def viewer_from_headers(headers: Any) -> Dict[str, Optional[str]]:
+    """
+    The DuckView user viewing an app, from the request headers DuckView's proxy adds (X-DuckView-User / -Email /
+    -Role): pass Dash's ``flask.request.headers`` or Gradio's ``gr.Request.headers``. Streamlit apps use
+    ``duckview.streamlit.viewer()``.
+    """
+
+    def get(name: str) -> Optional[str]:
+        if headers is None or not hasattr(headers, "get"):
+            return None
+        return headers.get(name) or headers.get(name.lower()) or headers.get(name.title())
+
+    return {"id": get("X-DuckView-User"), "email": get("X-DuckView-Email"), "role": get("X-DuckView-Role")}
 
 
 def connect(url: Optional[str] = None, token: Optional[str] = None, workspace: Optional[str] = None, timeout: float = 120.0) -> Client:

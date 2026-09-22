@@ -5,8 +5,10 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
-const port = Number(arg('--server.port'));
-const base = arg('--server.baseUrlPath') ?? '';
+// Streamlit gets flags; Dash (PORT, DASH_URL_BASE_PATHNAME) and Gradio (GRADIO_SERVER_PORT, served at the root) get env.
+const framework = arg('--server.port') ? 'streamlit' : process.env.DASH_URL_BASE_PATHNAME ? 'dash' : process.env.GRADIO_SERVER_PORT ? 'gradio' : 'streamlit';
+const port = Number(arg('--server.port') ?? process.env.PORT ?? process.env.GRADIO_SERVER_PORT);
+const base = arg('--server.baseUrlPath') ?? (process.env.DASH_URL_BASE_PATHNAME ?? '').replace(/\/$/, '');
 const entry = process.argv.find((a) => a.endsWith('.py'));
 const fs = await import('node:fs');
 const source = entry && fs.existsSync(entry) ? fs.readFileSync(entry, 'utf8') : '';
@@ -30,7 +32,7 @@ const server = http.createServer(async (req, res) => {
     const q = await api(`/api/workspaces/${ws}/query`, { sql: 'SELECT 1 AS one' }).catch((e) => ({ status: 0, json: { error: String(e) } }));
     const m = await api(`/api/workspaces/${ws}/query`, { sql: 'CREATE TABLE app_should_not_write AS SELECT 1' }).catch((e) => ({ status: 0, json: {} }));
     const other = process.env.OTHER_WORKSPACE ? await api(`/api/workspaces/${process.env.OTHER_WORKSPACE}/query`, { sql: 'SELECT 1' }).catch(() => ({ status: 0 })) : null;
-    const info = { url: process.env.DUCKVIEW_URL, workspace: ws, hasToken: !!process.env.DUCKVIEW_TOKEN, tokenPrefix: (process.env.DUCKVIEW_TOKEN ?? '').slice(0, 3), secretLeak: Object.keys(process.env).filter((k) => /JWT|ENCRYPTION|PASSWORD/i.test(k)), viewer: req.headers['x-duckview-email'] ?? null, role: req.headers['x-duckview-role'] ?? null, queryRows: q.json.rowCount ?? null, queryStatus: q.status, mutateStatus: m.status, otherWorkspaceStatus: other?.status ?? null, source: source.slice(0, 60) };
+    const info = { url: process.env.DUCKVIEW_URL, workspace: ws, hasToken: !!process.env.DUCKVIEW_TOKEN, tokenPrefix: (process.env.DUCKVIEW_TOKEN ?? '').slice(0, 3), secretLeak: Object.keys(process.env).filter((k) => /JWT|ENCRYPTION|PASSWORD/i.test(k)), viewer: req.headers['x-duckview-email'] ?? null, framework, path: url.pathname, forwardedHost: req.headers['x-forwarded-host'] ?? null, rootPath: process.env.GRADIO_ROOT_PATH ?? null, role: req.headers['x-duckview-role'] ?? null, queryRows: q.json.rowCount ?? null, queryStatus: q.status, mutateStatus: m.status, otherWorkspaceStatus: other?.status ?? null, source: source.slice(0, 60) };
     res.writeHead(200, { 'content-type': 'text/html' });
     return res.end(`<html><body><h1>fake streamlit</h1><script id="info" type="application/json">${JSON.stringify(info)}</script></body></html>`);
   }

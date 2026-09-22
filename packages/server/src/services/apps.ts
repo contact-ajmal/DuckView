@@ -21,8 +21,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { and, eq } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
-import type { DataApp, AppFiles, AppStatus, AppVisibility, AppPublishStatus, AppExecution } from '../db/schema/sqlite.js';
-import { APP_VISIBILITIES, APP_EXECUTIONS } from '../db/schema/sqlite.js';
+import type { DataApp, AppFiles, AppStatus, AppVisibility, AppPublishStatus, AppExecution, AppKind } from '../db/schema/sqlite.js';
+import { APP_VISIBILITIES, APP_EXECUTIONS, APP_KINDS } from '../db/schema/sqlite.js';
+import { framework } from './app-frameworks.js';
 import type { DuckViewConfig } from '../config/index.js';
 import { newId } from '../security/crypto.js';
 import type { Principal } from './principal.js';
@@ -48,18 +49,22 @@ export interface AppInput {
   entry?: string;
   /** "server" (a runtime process, the default) or "browser" (stlite in the viewer's browser). */
   execution?: AppExecution;
+  /** The framework: streamlit (default), dash or gradio. */
+  kind?: AppKind;
   spec?: Record<string, unknown> | null;
   visibility?: AppVisibility;
 }
 export interface AppTemplate {
   id: string;
+  kind: AppKind;
   label: string;
   blurb: string;
   files: AppFiles;
 }
 /** Where an app's code comes from: a template, a dashboard, saved queries / inline SQL, or code as written. */
-export type AppSource = { template: string } | { dashboard_id: string } | { queries: { name: string; sql: string }[] } | { saved_query_ids: string[] } | { code: string; requirements?: string | null };
+export type AppSource = { template: string } | { dashboard_id: string } | { queries: { name: string; sql: string }[] } | { saved_query_ids: string[] } | { code: string; requirements?: string | null; kind?: AppKind };
 export interface Generated {
+  kind: AppKind;
   files: AppFiles;
   spec: Record<string, unknown>;
   name: string;
@@ -87,6 +92,7 @@ const SAFE_FILE = /^[A-Za-z0-9_][A-Za-z0-9_.-]*(\/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$
 export const APP_TEMPLATES: AppTemplate[] = [
   {
     id: 'explorer',
+    kind: 'streamlit',
     label: 'Table explorer',
     blurb: 'Pick a table, filter it, chart a column — the app every workspace can start from.',
     files: {
@@ -119,6 +125,7 @@ if numeric:
   },
   {
     id: 'blank',
+    kind: 'streamlit',
     label: 'Blank',
     blurb: 'A connection and a query; write the rest.',
     files: {
@@ -129,6 +136,76 @@ st.title("My data app")
 dv = connect()
 df = query("SELECT 42 AS answer")
 st.dataframe(df)
+`,
+      'requirements.txt': '',
+    },
+  },
+  {
+    id: 'dash-explorer',
+    kind: 'dash',
+    label: 'Dash explorer',
+    blurb: 'A Plotly Dash app: pick a table, see its rows and a chart — callbacks query DuckView on every change.',
+    files: {
+      'app.py': `import duckview
+import plotly.express as px
+from dash import Dash, Input, Output, dash_table, dcc, html
+
+dv = duckview.connect()                      # DUCKVIEW_URL / DUCKVIEW_TOKEN / DUCKVIEW_WORKSPACE from the runner
+tables = [t["name"] for t in dv.tables()]
+
+app = Dash(__name__, title="Dash explorer")
+app.layout = html.Div(style={"fontFamily": "system-ui", "padding": "1rem"}, children=[
+    html.H2("Dash explorer"),
+    dcc.Dropdown(tables, tables[0] if tables else None, id="table", clearable=False),
+    html.Div(id="summary", style={"margin": "0.5rem 0"}),
+    dcc.Graph(id="chart"),
+    dash_table.DataTable(id="rows", page_size=15, style_table={"overflowX": "auto"}),
+])
+
+
+@app.callback(Output("rows", "data"), Output("rows", "columns"), Output("chart", "figure"), Output("summary", "children"), Input("table", "value"))
+def show(table):
+    if not table:
+        return [], [], {}, "This workspace has no tables yet."
+    df = dv.query('SELECT * FROM "%s" LIMIT 1000' % table.replace('"', '""'))
+    numeric = [c for c in df.columns if str(df[c].dtype).startswith(("int", "float"))]
+    fig = px.histogram(df, x=numeric[0]) if numeric else {}
+    return df.to_dict("records"), [{"name": c, "id": c} for c in df.columns], fig, f"{len(df):,} rows of {table}"
+
+
+if __name__ == "__main__":
+    app.run()                                # DuckView sets HOST, PORT and the base path
+`,
+      'requirements.txt': '',
+    },
+  },
+  {
+    id: 'gradio-query',
+    kind: 'gradio',
+    label: 'Gradio SQL box',
+    blurb: 'A Gradio app: type SQL, get a table back — the quickest way to hand a query to someone.',
+    files: {
+      'app.py': `import duckview
+import gradio as gr
+
+dv = duckview.connect()                      # DUCKVIEW_URL / DUCKVIEW_TOKEN / DUCKVIEW_WORKSPACE from the runner
+
+
+def run(sql: str, request: gr.Request):
+    who = duckview.viewer_from_headers(request.headers)["email"] or "someone"
+    df = dv.query(sql, max_rows=1000)
+    return df, f"{len(df):,} rows · asked by {who}"
+
+
+with gr.Blocks(title="SQL box") as demo:
+    gr.Markdown("# SQL box")
+    sql = gr.Code("SELECT 42 AS answer", language="sql", label="SQL")
+    go = gr.Button("Run", variant="primary")
+    status = gr.Markdown()
+    out = gr.Dataframe()
+    go.click(run, inputs=sql, outputs=[out, status])
+
+demo.launch()                                # DuckView sets the server name, port and root path
 `,
       'requirements.txt': '',
     },
@@ -250,10 +327,11 @@ export class DataAppService {
     if ('template' in source) {
       const t = APP_TEMPLATES.find((x) => x.id === source.template);
       if (!t) throw badRequest(`Unknown template "${source.template}" (${APP_TEMPLATES.map((x) => x.id).join(', ')})`);
-      return { files: { ...t.files }, spec: { template: t.id }, name: opts.name ?? t.label, description: opts.description ?? null, summary: t.label };
+      return { kind: t.kind, files: { ...t.files }, spec: { template: t.id }, name: opts.name ?? t.label, description: opts.description ?? null, summary: t.label };
     }
     if ('code' in source) {
-      return { files: { 'app.py': source.code, 'requirements.txt': source.requirements ?? '' }, spec: { source: 'code' }, name: opts.name ?? 'App', description: opts.description ?? null, summary: 'code as written' };
+      if (source.kind && !APP_KINDS.includes(source.kind)) throw badRequest(`kind must be ${APP_KINDS.join(', ')}`);
+      return { kind: source.kind ?? 'streamlit', files: { 'app.py': source.code, 'requirements.txt': source.requirements ?? '' }, spec: { source: 'code' }, name: opts.name ?? 'App', description: opts.description ?? null, summary: `${framework(source.kind).label} code as written` };
     }
     if ('dashboard_id' in source) {
       if (!this.bi) throw badRequest('Dashboards are not available');
@@ -261,7 +339,7 @@ export class DataAppService {
       if (d.workspace_id !== workspaceId) throw badRequest('The dashboard belongs to another workspace');
       if (d.kind === 'mosaic' && d.spec) {
         const g = appFromDashboard(d.spec, { name: opts.name ?? d.name, description: opts.description ?? d.description });
-        return { files: g.files, spec: { dashboard_id: d.id, kind: 'mosaic' }, name: opts.name ?? d.name, description: opts.description ?? d.description, summary: g.summary };
+        return { kind: 'streamlit', files: g.files, spec: { dashboard_id: d.id, kind: 'mosaic' }, name: opts.name ?? d.name, description: opts.description ?? d.description, summary: g.summary };
       }
       const queries: { name: string; sql: string }[] = [];
       for (const w of d.widgets) {
@@ -270,7 +348,7 @@ export class DataAppService {
       }
       if (!queries.length) throw badRequest('The dashboard has no widgets with SQL to build from');
       const g = appFromQueries(queries, { name: opts.name ?? d.name, description: opts.description ?? d.description });
-      return { files: g.files, spec: { dashboard_id: d.id, kind: 'grid' }, name: opts.name ?? d.name, description: opts.description ?? d.description, summary: g.summary };
+      return { kind: 'streamlit', files: g.files, spec: { dashboard_id: d.id, kind: 'grid' }, name: opts.name ?? d.name, description: opts.description ?? d.description, summary: g.summary };
     }
     if ('saved_query_ids' in source) {
       if (!this.bi) throw badRequest('Saved queries are not available');
@@ -281,18 +359,18 @@ export class DataAppService {
       }
       if (!queries.length) throw badRequest('saved_query_ids is empty');
       const g = appFromQueries(queries, opts);
-      return { files: g.files, spec: { saved_query_ids: source.saved_query_ids }, name: opts.name ?? g.summary, description: opts.description ?? null, summary: g.summary };
+      return { kind: 'streamlit', files: g.files, spec: { saved_query_ids: source.saved_query_ids }, name: opts.name ?? g.summary, description: opts.description ?? null, summary: g.summary };
     }
     if (!source.queries?.length) throw badRequest('queries is empty');
     const g = appFromQueries(source.queries, opts);
-    return { files: g.files, spec: { queries: source.queries.map((q) => q.name) }, name: opts.name ?? (source.queries.length === 1 ? source.queries[0]!.name : 'Queries'), description: opts.description ?? null, summary: g.summary };
+    return { kind: 'streamlit', files: g.files, spec: { queries: source.queries.map((q) => q.name) }, name: opts.name ?? (source.queries.length === 1 ? source.queries[0]!.name : 'Queries'), description: opts.description ?? null, summary: g.summary };
   }
 
   /**
    * Static checks before code from an agent (or the editor's "Check") is saved: the entry compiles (py_compile
    * with the apps' Python, when there is one), imports streamlit, and carries no token. Never executes the app.
    */
-  async validateSource(files: AppFiles, entry = 'app.py'): Promise<{ ok: boolean; errors: string[]; warnings: string[] }> {
+  async validateSource(files: AppFiles, entry = 'app.py', kind: AppKind = 'streamlit'): Promise<{ ok: boolean; errors: string[]; warnings: string[] }> {
     const errors: string[] = [];
     const warnings: string[] = [];
     try {
@@ -301,8 +379,11 @@ export class DataAppService {
       errors.push((err as Error).message);
     }
     const code = files[entry] ?? '';
-    if (code && !/^\s*(import|from)\s+streamlit\b/m.test(code)) errors.push(`${entry} does not import streamlit`);
-    if (/use_container_width/.test(code)) warnings.push('use_container_width is deprecated in Streamlit ≥ 1.46 — use width="stretch"');
+    if (code) {
+      const c = framework(kind).check(code);
+      errors.push(...c.errors.map((e) => e.replace('the entry file', entry)));
+      warnings.push(...c.warnings);
+    }
     const venvPy = SubprocessRuntime.venvPython(this.cfg);
     const py = fs.existsSync(venvPy) ? venvPy : this.cfg.apps.python;
     if (code && py) {
@@ -439,9 +520,10 @@ export class DataAppService {
     return this.enabled && this.cfg.apps.stlite.enabled;
   }
 
-  private checkExecution(execution: AppExecution | undefined): void {
+  private checkExecution(execution: AppExecution | undefined, kind: AppKind): void {
     if (execution === undefined) return;
     if (!APP_EXECUTIONS.includes(execution)) throw badRequest(`execution must be ${APP_EXECUTIONS.join(' or ')}`);
+    if (execution === 'browser' && kind !== 'streamlit') throw badRequest(`Only Streamlit apps run in the browser (stlite); a ${framework(kind).label} app runs on the server`);
     if (execution === 'browser' && !this.cfg.apps.stlite.enabled) throw badRequest('In-browser apps are disabled on this server (apps.stlite.enabled)');
   }
 
@@ -473,9 +555,11 @@ export class DataAppService {
     if (!SAFE_FILE.test(entry) || !entry.endsWith('.py')) throw badRequest('entry must be a .py file');
     const files = this.validateFiles(input.files ?? APP_TEMPLATES[0]!.files, entry);
     if (input.visibility && !APP_VISIBILITIES.includes(input.visibility)) throw badRequest(`visibility must be ${APP_VISIBILITIES.join(' or ')}`);
-    this.checkExecution(input.execution);
+    const kind = input.kind ?? 'streamlit';
+    if (!APP_KINDS.includes(kind)) throw badRequest(`kind must be ${APP_KINDS.join(', ')}`);
+    this.checkExecution(input.execution, kind);
     const now = new Date();
-    const row: DataApp = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name, description: input.description?.trim() || null, kind: 'streamlit', entry, files, spec: input.spec ?? null, visibility: 'workspace', status: 'stopped', port: null, pid: null, last_error: null, last_started_at: null, last_used_at: null, execution: input.execution ?? 'server', always_on: false, runtime: null, publish_status: 'none', publish_requested_by: null, publish_requested_at: null, publish_reviewed_by: null, publish_reviewed_at: null, publish_note: null, created_at: now, updated_at: now };
+    const row: DataApp = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name, description: input.description?.trim() || null, kind, entry, files, spec: input.spec ?? null, visibility: 'workspace', status: 'stopped', port: null, pid: null, last_error: null, last_started_at: null, last_used_at: null, execution: input.execution ?? 'server', always_on: false, runtime: null, publish_status: 'none', publish_requested_by: null, publish_requested_at: null, publish_reviewed_by: null, publish_reviewed_at: null, publish_note: null, created_at: now, updated_at: now };
     if (input.visibility === 'org') Object.assign(row, this.publishFields(p, 'org', null, now));
     await this.db.insert(this.s.dataApps).values(row);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'app.create', resource: `app:${row.id}`, ip: p.ip });
@@ -516,7 +600,7 @@ export class DataAppService {
     else if (set.entry && !app.files[set.entry]) throw badRequest(`The entry file "${set.entry}" is missing`);
     if (patch.spec !== undefined) set.spec = patch.spec;
     if (patch.execution !== undefined && patch.execution !== app.execution) {
-      this.checkExecution(patch.execution);
+      this.checkExecution(patch.execution, app.kind);
       set.execution = patch.execution;
       if (patch.execution === 'browser') {
         set.always_on = false;
@@ -650,6 +734,7 @@ export class DataAppService {
       const inst = await this.runtime.launch({
         id,
         name: app.name,
+        kind: app.kind,
         files: app.files,
         entry: app.entry,
         env: { DUCKVIEW_APP_ID: id, DUCKVIEW_URL: this.internalUrl, DUCKVIEW_TOKEN: minted.token, DUCKVIEW_WORKSPACE: app.workspace_id },
@@ -661,7 +746,7 @@ export class DataAppService {
       void inst.exited.then((e) => this.onExit(id, proc, e));
       if (proc.stopping) throw new Error('stopped while starting');
       await this.setStatus(id, 'starting', { port: inst.port, pid: inst.pid });
-      await this.waitHealthy(id, proc);
+      await this.waitHealthy(id, proc, framework(app.kind).healthPath(`/apps/${id}`));
       proc.healthy = true;
       await this.setStatus(id, 'running', { last_used_at: new Date() });
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'app.start', resource: `app:${id}`, ip: p.ip });
@@ -702,7 +787,7 @@ export class DataAppService {
     }
   }
 
-  private async waitHealthy(id: string, proc: Proc): Promise<void> {
+  private async waitHealthy(id: string, proc: Proc, healthPath: string): Promise<void> {
     const inst = proc.inst!;
     const host = inst.host.includes(':') ? `[${inst.host}]` : inst.host;
     const deadline = Date.now() + this.cfg.apps.start_timeout_seconds * 1000;
@@ -710,7 +795,7 @@ export class DataAppService {
       if (inst.exit) throw new Error(`the app exited before it was ready: ${proc.logs.slice(-3).join(' · ')}`);
       if (proc.stopping) throw new Error('stopped while starting');
       try {
-        const res = await fetch(`http://${host}:${inst.port}/apps/${id}/_stcore/health`, { signal: AbortSignal.timeout(2000) });
+        const res = await fetch(`http://${host}:${inst.port}${healthPath}`, { signal: AbortSignal.timeout(2000), redirect: 'manual' });
         if (res.ok) return;
       } catch {
         /* not up yet */
