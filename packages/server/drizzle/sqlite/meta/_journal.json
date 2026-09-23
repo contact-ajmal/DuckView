@@ -190,6 +190,13 @@
       "when": 1790172554011,
       "tag": "0026_quality",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1790182940631,
+      "tag": "0027_reverse_etl",
+      "breakpoints": true
     }
   ]
 }

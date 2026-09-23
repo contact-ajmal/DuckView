@@ -21,7 +21,8 @@ import { HttpError } from '../services/errors.js';
 import { liveEvents, summarizeArgs } from '../observability/events.js';
 import { describeSpec, parseSpecText } from '../services/mosaic-spec.js';
 import { SOURCE_CATALOG } from '../services/source-catalog.js';
-import type { SyncSource, SyncSchedule, QualityCheck } from '../db/schema/sqlite.js';
+import type { SyncSource, SyncSchedule, QualityCheck, ReverseDestination } from '../db/schema/sqlite.js';
+import { describeDestination } from '../services/reverse-etl.js';
 import { describeCheck } from '../services/quality.js';
 import type { AppSource } from '../services/apps.js';
 import { framework } from '../services/app-frameworks.js';
@@ -1049,7 +1050,58 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`**${r.suite.name}**: ${r.run.status}${r.changed ? ' (changed)' : ''} — ${r.run.summary}${r.run.notified ? ` ${r.run.notified} channel(s) notified.` : ''}\n${lines.join('\n')}`)], structuredContent: { status: 'ok', suite_id, run_id: r.run.id, result: r.run.status, changed: r.changed, summary: r.run.summary, results: r.run.results.map(({ sample, ...x }) => ({ ...x, sample_rows: sample?.rows.slice(0, 3) ?? [] })) } };
       },
     }),
+    // ---------------------------------------------------------------- reverse ETL
+    define({
+      name: 'list_reverse_syncs',
+      title: 'List reverse syncs',
+      description: 'The workspace\'s reverse syncs — query results sent out to a database table, files or an HTTP API — with destination, mode (replace, append, upsert, mirror), key columns, schedule and the last run. Also lists your database connections that accept writes and your cloud connections, for create_reverse_sync.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const syncs = await env.ctx.reverse.list(env.principal, ws);
+        const dbs = (await env.ctx.databases.list(env.principal.userId)).filter((c) => c.config.read_only === false);
+        const clouds = await env.ctx.cloud.list(env.principal.userId);
+        const lines = syncs.map((r) => `- **${r.name}** (\`${r.id}\`): ${describeDestination(r.destination, { connection: dbs.find((c) => r.destination.kind === 'database' && c.id === r.destination.connection_id)?.name })} · ${r.mode}${r.key_columns.length ? ` on ${r.key_columns.join(', ')}` : ''} · ${r.schedule.kind === 'manual' ? 'by hand' : r.schedule.kind === 'interval' ? `every ${r.schedule.minutes} min` : r.schedule.expression}${r.last_run ? ` · last run ${r.last_run.status}${r.last_run.summary ? `: ${r.last_run.summary}` : r.last_run.error ? `: ${r.last_run.error}` : ''}` : ''}`);
+        const conns = [...dbs.map((c) => `- database \`${c.id}\` ${c.name} (${c.engine})`), ...clouds.map((c) => `- cloud \`${c.id}\` ${c.name} (${c.provider}${c.bucket ? `, bucket ${c.bucket}` : ''})`)];
+        return { content: [text(`${lines.length ? lines.join('\n') : 'No reverse syncs yet.'}\n\nDestinations you can write to:\n${conns.join('\n') || '- (no writable database or cloud connections — an HTTP API or a local file still works)'}`)], structuredContent: { status: 'ok', syncs, writable_databases: dbs.map((c) => ({ id: c.id, name: c.name, engine: c.engine })), cloud_connections: clouds.map((c) => ({ id: c.id, name: c.name, provider: c.provider, bucket: c.bucket })) } };
+      },
+    }),
+
+    define({
+      name: 'create_reverse_sync',
+      title: 'Create reverse sync',
+      description: 'Saves a reverse sync: a read-only SELECT whose rows are sent out of the workspace. destination: {kind:"database", connection_id, schema?, table} (a connection with read-only off; the table is created if missing) · {kind:"file", format: parquet|csv|json, path (relative to the data directory, or a key with cloud_connection_id and bucket)} · {kind:"http", url, batch_size?, payload: object|array|ndjson} (headers such as Authorization go in headers). mode: replace (default), append, upsert or mirror (upsert + delete rows that disappeared) — upsert and mirror need key_columns and send only rows new or changed since the last run. Nothing is sent until run_reverse_sync; a person sets the schedule.',
+      inputSchema: {
+        name: z.string().min(1).max(120),
+        sql: z.string().max(100_000),
+        destination: z.record(z.string(), z.unknown()),
+        mode: z.enum(['replace', 'append', 'upsert', 'mirror']).optional(),
+        key_columns: z.array(z.string()).max(10).optional(),
+        headers: z.record(z.string(), z.string()).optional(),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { name, sql, destination, mode, key_columns, headers, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const r = await env.ctx.reverse.create(env.principal, ws, { name, sql, destination: destination as unknown as ReverseDestination, mode, key_columns, headers });
+        const plan = await env.ctx.reverse.plan(env.principal, r.id);
+        return { content: [text(`Saved **${r.name}** (\`${r.id}\`): ${plan.destination}, ${r.mode}. The next run would send ${plan.to_send} of ${plan.rows_read} rows (columns ${plan.columns.join(', ')}). Run it with run_reverse_sync (a person approves first).`)], structuredContent: { status: 'ok', sync_id: r.id, plan } };
+      },
+    }),
+
+    define({
+      name: 'run_reverse_sync',
+      title: 'Run reverse sync',
+      description: 'Sends a reverse sync\'s rows to its destination now. Data leaves the workspace, so for agents this first returns an approval challenge (how many rows go where, and deletions); after a person approves, call again with dry_run: false. Returns rows read, sent and deleted.',
+      inputSchema: { sync_id: z.string(), dry_run: z.boolean().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      async handler(env, { sync_id, dry_run }) {
+        const run = await env.ctx.reverse.run(sync_id, env.principal.actorType === 'AGENT' ? 'agent' : 'manual', env.principal, { approved: dry_run === false });
+        return { content: [text(run.status === 'ok' ? `Done: ${run.summary}` : `The run failed: ${run.error}`)], structuredContent: { status: run.status === 'ok' ? 'ok' : 'error', run_id: run.id, rows_read: run.rows_read, rows_sent: run.rows_sent, rows_deleted: run.rows_deleted, summary: run.summary, error: run.error }, isError: run.status !== 'ok' };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync'] as const;

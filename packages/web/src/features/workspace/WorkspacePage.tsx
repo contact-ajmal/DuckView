@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search } from 'lucide-react';
+import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search, Send } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess, lakehouseEngine, engineConnectionId } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { fetchCached } from '../../lib/useCached';
@@ -14,6 +14,7 @@ import { ProfilePanel, type ProfileResult } from './ProfilePanel';
 import { ExploreView } from '../explore/ExploreView';
 import { SchemaTree } from './SchemaTree';
 import { SavedQueriesTree } from './SavedQueries';
+import { REVERSE_DRAFT_KEY } from '../connections/ReversePanel';
 import { SaveDbtModelDialog } from '../transform/SaveDbtModelDialog';
 import { Explorer, type ExplorerNode } from '../explorer/Explorer';
 import { SchemaPanel } from '../explorer/SchemaPanel';
@@ -468,6 +469,7 @@ export function WorkspacePage() {
                 <>
                   <MenuItem icon={<Play className="h-3.5 w-3.5" />} hint="⌘↵" onClick={() => { close(); run(null); }}>Run all</MenuItem>
                   <MenuItem icon={<Workflow className="h-3.5 w-3.5" />} onClick={() => { close(); setDbtModel(sql); }}>Save as dbt model…</MenuItem>
+                  <MenuItem icon={<Send className="h-3.5 w-3.5" />} onClick={() => { close(); try { sessionStorage.setItem(REVERSE_DRAFT_KEY, JSON.stringify({ sql, name: tab?.title && !/^Query \d+$/.test(tab.title) ? tab.title : '' })); } catch { /* storage unavailable */ } location.hash = '#/connections/reverse'; }}>Send results to…</MenuItem>
                   <MenuItem icon={copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />} onClick={() => { navigator.clipboard.writeText(sql).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }); }}>Copy SQL</MenuItem>
                   <MenuItem icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => { close(); replaceSql(''); }}>Clear editor</MenuItem>
                   <MenuDivider />

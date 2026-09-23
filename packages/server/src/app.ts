@@ -31,6 +31,7 @@ import { notificationRoutes, snapshotFileRoutes } from './routes/notifications.j
 import { governanceRoutes } from './routes/governance.js';
 import { scimRoutes, scimAdminRoutes } from './routes/scim.js';
 import { transformRoutes } from './routes/transform.js';
+import { reverseRoutes } from './routes/reverse.js';
 import { buildAppsServer } from './apps-server.js';
 import { agentRoutes } from './routes/agent.js';
 import { groupRoutes } from './routes/groups.js';
@@ -129,6 +130,7 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   await app.register(async (r) => scimRoutes(r, ctx));
   await app.register(async (r) => scimAdminRoutes(r, ctx));
   await app.register(async (r) => transformRoutes(r, ctx));
+  await app.register(async (r) => reverseRoutes(r, ctx));
   await app.register(async (r) => agentRoutes(r, ctx));
   await app.register(async (r) => groupRoutes(r, ctx));
   await app.register(async (r) => mosaicRoutes(r, ctx));

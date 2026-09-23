@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (42 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (45 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -444,6 +444,30 @@ Each check can be limited to rows matching `where`, allow a `tolerance` of faili
 **Where it shows**: the Data explorer's dataset header (checks failing / passing, linking to the suite); the latest **dbt test** results of each dbt project alongside the suites; DuckCopilot's context (each suite's status and failing checks); agents over MCP / REST — `list_quality_suites`, `suggest_quality_checks`, `create_quality_suite` (without checks: the suggestions, saved and run once), `run_quality_suite`; the `data_quality_audit` prompt ends by offering to keep its findings as checks.
 
 API: `GET/POST /api/workspaces/:id/quality/suites` (the list includes `dbt_tests`) · `POST /api/workspaces/:id/quality/preview {relation, checks}` · `POST /api/workspaces/:id/quality/suggest {relation}` · `GET/PATCH/DELETE /api/quality/suites/:id` (GET includes the latest run) · `POST /api/quality/suites/:id/run` · `GET /api/quality/suites/:id/runs` · `GET /api/quality/runs/:id`. Audit: `quality.create`, `quality.update`, `quality.delete`. Live event: `quality`.
+
+
+## Reverse ETL
+
+**Query results sent out of a workspace** (Connections › Reverse ETL, `services/reverse-etl.ts`) — by hand, from agents, or on a schedule. A reverse sync is one read-only SELECT, a destination and a mode:
+
+| Destination | What happens |
+|---|---|
+| **Database table** — a Postgres, MySQL or SQLite connection of yours with *read-only* turned off | The table is created from the result when missing. DuckDB files are not a destination: they take one writer at a time, and the workspace engines may have them attached. |
+| **Files** — Parquet, CSV or JSON, in the data directory or a cloud bucket (S3, R2, GCS, Azure) | *replace* overwrites the file; *append* writes a new file per run (`{date}` / `{run}` in the path, or a timestamp before the extension). |
+| **HTTP API** — JSON POSTed in batches (`batch_size`, default 500) | Body `object` (`{sync, sync_id, run_id, mode, op: upsert\|delete, batch, batches, rows}`), `array` or `ndjson`; headers (Authorization, API keys) stored encrypted and never returned; an `Idempotency-Key` per batch; any non-2xx fails the run. |
+
+| Mode | Sends |
+|---|---|
+| `replace` | the whole result; the destination holds exactly it |
+| `append` | the whole result, added |
+| `upsert` | rows new or changed since the last successful run, matched on `key_columns` (deleted and re-inserted by key in a database) |
+| `mirror` | upsert, plus the keys that disappeared: deleted from the table, or sent as `op: "delete"` batches (`_deleted: true` for array / ndjson) |
+
+**How a run works**: the query runs as the sync's author through the workspace engine — read-only, with their access policies (row filters, masks) — and is staged as Parquet; a scratch DuckDB instance attaches the destination and delivers it. Change detection keeps the keys and a hash of every row delivered (`.duckview/reverse/<id>/state.parquet`), replaced only after a successful delivery, so a failed run is retried in full next time (at-least-once for APIs). Keys must be unique and not null. Changing the query, destination, mode or keys starts change detection over, and whoever edits them becomes who it runs as (their connections must fit). Runs are kept 90 days; a failing run, and the first success after it, go to the sync's notification channels (`reverse_sync.failed` / `reverse_sync.recovered`). **Preview next run** shows how many rows would be sent and deleted, with a sample, without sending anything.
+
+**From the workbench**: ⋯ → *Send results to…* opens a new reverse sync with the tab's SQL. **Agents** (`list_reverse_syncs`, `create_reverse_sync`, `run_reverse_sync`): data leaving the workspace needs approval — the first `run_reverse_sync` returns a challenge (rows, deletions, destination) and runs only when repeated with `dry_run: false`; a sync an agent creates has no schedule until a person sets one. DuckView AI's context lists the workspace's reverse syncs.
+
+API: `GET/POST /api/workspaces/:id/reverse-syncs` · `GET/PATCH/DELETE /api/reverse-syncs/:id` · `GET /api/reverse-syncs/:id/plan` · `POST /api/reverse-syncs/:id/run {dry_run?}` (agent tokens: 409 `APPROVAL_REQUIRED`) · `GET /api/reverse-syncs/:id/runs`. Audit: `reverse_sync.create`, `.update`, `.delete`, `.run`. Live event: `reverse_sync`. HTTP targets follow `notifications.allow_private_targets` (https and public addresses only, unless set).
 
 ## Governance
 

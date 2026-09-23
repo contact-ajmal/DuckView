@@ -328,6 +328,8 @@ export interface ChatContextSnapshot {
   metrics?: string;
   /** Data quality suites: status and failing checks. */
   quality?: string;
+  /** Reverse syncs: destinations, modes and last runs. */
+  reverse?: string;
   model?: string;
   provider?: string;
 }
@@ -1148,3 +1150,71 @@ export const qualityRuns = sqliteTable(
 );
 export type QualitySuite = typeof qualitySuites.$inferSelect;
 export type QualityRun = typeof qualityRuns.$inferSelect;
+
+/** Reverse ETL: the rows of a query sent out of the workspace — to a database table, to files, or to an HTTP API. */
+export const REVERSE_MODES = ['replace', 'append', 'upsert', 'mirror'] as const;
+export type ReverseMode = (typeof REVERSE_MODES)[number];
+export const REVERSE_RUN_STATUSES = ['running', 'ok', 'error'] as const;
+export type ReverseDestination =
+  /** A database connection of the author with read-only turned off; the table is created when missing. */
+  | { kind: 'database'; connection_id: string; schema?: string | null; table: string }
+  /** A file per run or one file replaced: local (relative to the data directory) or in a cloud bucket. */
+  | { kind: 'file'; format: 'parquet' | 'csv' | 'json'; path: string; cloud_connection_id?: string | null; bucket?: string | null }
+  /** JSON batches POSTed to a URL; headers are stored encrypted. */
+  | { kind: 'http'; url: string; batch_size?: number; payload?: 'array' | 'object' | 'ndjson' };
+export interface ReverseLastRun { run_id: string; status: (typeof REVERSE_RUN_STATUSES)[number]; started_at: string; finished_at: string | null; rows: number | null; error: string | null; summary: string | null }
+
+export const reverseSyncs = sqliteTable(
+  'reverse_syncs',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Runs as this user: their access policies, their connections. */
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** One read-only SELECT. */
+    sql: text('sql').notNull(),
+    destination: text('destination', { mode: 'json' }).$type<ReverseDestination>().notNull(),
+    mode: text('mode', { enum: REVERSE_MODES }).notNull().default('replace'),
+    /** Identify a row for upsert / mirror (and change detection). */
+    key_columns: text('key_columns', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** AES-256-GCM JSON: HTTP headers such as Authorization. */
+    encrypted_secret: text('encrypted_secret'),
+    iv: text('iv'),
+    tag: text('tag'),
+    schedule: text('schedule', { mode: 'json' }).$type<SyncSchedule>().notNull().default({ kind: 'manual' }),
+    /** Told when a run fails (and when it works again). */
+    channel_ids: text('channel_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    last_run: text('last_run', { mode: 'json' }).$type<ReverseLastRun | null>(),
+    next_run_at: integer('next_run_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('reverse_syncs_workspace_idx').on(t.workspace_id), index('reverse_syncs_next_run_idx').on(t.next_run_at)],
+);
+
+export const reverseSyncRuns = sqliteTable(
+  'reverse_sync_runs',
+  {
+    id: text('id').primaryKey(),
+    sync_id: text('sync_id').notNull().references(() => reverseSyncs.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    status: text('status', { enum: REVERSE_RUN_STATUSES }).notNull(),
+    triggered_by: text('triggered_by').notNull(), // manual | schedule | agent
+    actor_id: text('actor_id'),
+    /** Rows the query returned. */
+    rows_read: integer('rows_read'),
+    /** Rows written or sent (new and changed ones for upsert / mirror). */
+    rows_sent: integer('rows_sent'),
+    rows_deleted: integer('rows_deleted'),
+    summary: text('summary'),
+    error: text('error'),
+    duration_ms: integer('duration_ms'),
+    started_at: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+    finished_at: integer('finished_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => [index('reverse_sync_runs_sync_idx').on(t.sync_id, t.started_at)],
+);
+export type ReverseSync = typeof reverseSyncs.$inferSelect;
+export type ReverseSyncRun = typeof reverseSyncRuns.$inferSelect;

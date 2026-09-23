@@ -17,6 +17,8 @@ export type LiveEvent =
   | { type: 'app'; at: string; workspace_id: string; app_id: string; status: 'stopped' | 'installing' | 'starting' | 'running' | 'error'; error: string | null }
   /** An alert was checked (its state may have changed). */
   | { type: 'alert'; at: string; workspace_id: string; alert_id: string; state: 'unknown' | 'ok' | 'triggered' | 'error'; changed: boolean }
+  /** A reverse sync started or finished. */
+  | { type: 'reverse_sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; summary: string | null }
   /** A data quality suite ran. */
   | { type: 'quality'; at: string; workspace_id: string; suite_id: string; status: 'pass' | 'warn' | 'fail' | 'error'; changed: boolean }
   /** A dbt run started or finished. */

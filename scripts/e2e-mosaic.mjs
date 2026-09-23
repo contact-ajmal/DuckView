@@ -36,6 +36,9 @@
  * The data-quality scenario opens Data → Quality, has DuckView suggest checks for a clean table, saves and runs them
  * (passing), breaks the data, runs again from the page (failing, with the failing rows shown and opened in SQL), and
  * reads the quality status in the Data explorer's dataset header.
+ * The reverse-etl scenario starts from a workbench query (⋯ → Send results to…), sends it to a local HTTP receiver in
+ * upsert mode from Connections → Reverse ETL, runs it (every row), previews the next run (nothing changed), changes a
+ * row and runs again (only that row).
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -102,9 +105,17 @@ ws.on('message', (raw) => {
     errors.push(`[log] ${m.params.entry.text} ${m.params.entry.url ?? ''}`);
   }
 });
-const send = (method, params = {}) => new Promise((resolve) => {
+// A DevTools call that never answers (a wedged headless tab) fails the scenario instead of hanging it.
+const send = (method, params = {}) => new Promise((resolve, reject) => {
   const i = ++id;
-  pending.set(i, resolve);
+  const timer = setTimeout(() => {
+    pending.delete(i);
+    reject(new Error(`DevTools did not answer ${method} within 90 s`));
+  }, 90_000);
+  pending.set(i, (v) => {
+    clearTimeout(timer);
+    resolve(v);
+  });
   ws.send(JSON.stringify({ id: i, method, params }));
 });
 const evaluate = async (expression) => {
@@ -134,6 +145,7 @@ const waitForFrame = async (prefix, expression, timeoutMs = 30000, label = expre
   throw new Error(`timeout waiting in the app frame for: ${label}`);
 };
 const waitFor = async (expression, timeoutMs = 30000, label = expression) => {
+  if (process.env.E2E_TRACE) console.error(`[e2e] waiting for: ${String(label).slice(0, 80)}`);
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     if (await evaluate(expression)) return true;
@@ -612,6 +624,68 @@ try {
     report.details.chip = await evaluate(`document.querySelector('[data-testid="quality-chip"]').innerText`);
     report.details.charts = 1;
   }
+  else if (scenario === 'reverse-etl') {
+    const http = await import('node:http');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const got = [];
+    const receiver = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { got.push({ auth: req.headers.authorization, body: JSON.parse(b) }); res.end('ok'); }); });
+    await new Promise((r) => receiver.listen(0, '127.0.0.1', r));
+    let tabId = null;
+    cleanup = async () => {
+      receiver.close();
+      for (const s of (await j('GET', `/api/workspaces/${wsId}/reverse-syncs`)).syncs ?? []) if (s.name.startsWith('E2E')) await j('DELETE', `/api/reverse-syncs/${s.id}`);
+      if (tabId) await authed(`/api/workspaces/${wsId}/tabs/${tabId}`, { method: 'DELETE' });
+      await q('DROP TABLE IF EXISTS e2e_rev_scores');
+    };
+    await q(`CREATE OR REPLACE TABLE e2e_rev_scores AS SELECT range AS id, 'user' || range || '@example.com' AS email, (range * 37) % 100 AS score FROM range(1, 26)`);
+    tabId = (await j('POST', `/api/workspaces/${wsId}/tabs`, { title: 'E2E scores', sql_content: 'SELECT id, email, score FROM e2e_rev_scores' })).tab?.id;
+    // 1. From the workbench: ⋯ → Send results to…
+    await send('Page.navigate', { url: `${BASE}/#/query` });
+    await sleep(500);
+    await send('Page.reload', {});
+    await waitFor(`[...document.querySelectorAll('span.truncate')].some(s => s.textContent === 'E2E scores')`, 20000, 'tab listed');
+    await evaluate(`[...document.querySelectorAll('span.truncate')].find(s => s.textContent === 'E2E scores').closest('div').click(); true`);
+    await sleep(500);
+    await evaluate(`document.querySelector('button[aria-label="More query actions"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Send results to'))`, 5000, 'query menu');
+    await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.includes('Send results to')).click(); true`);
+    await waitFor(`location.hash.startsWith('#/connections/reverse') && !!document.querySelector('[data-testid="reverse-editor"]')`, 15000, 'reverse editor with the query');
+    report.details.handedSql = await evaluate(`document.querySelector('[data-testid="reverse-sql"]').value`);
+    report.details.handedName = await evaluate(`document.querySelector('[data-testid="reverse-name"]').value`);
+    // 2. An HTTP API, upsert on id, with a header.
+    const setVal = (sel, v) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); const proto = el.tagName === 'SELECT' ? HTMLSelectElement.prototype : el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${JSON.stringify(v)}); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); return true; })()`);
+    await setVal('[data-testid="reverse-name"]', 'E2E scores to CRM');
+    await evaluate(`document.querySelector('[data-kind="http"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="reverse-url"]')`, 5000, 'http fields');
+    await setVal('[data-testid="reverse-url"]', `http://127.0.0.1:${receiver.address().port}/scores`);
+    await setVal('input[aria-label="Header value"]', 'Bearer e2e-token');
+    await setVal('[data-testid="reverse-mode"]', 'upsert');
+    await waitFor(`!!document.querySelector('[data-testid="reverse-keys"]')`, 5000, 'key field');
+    await setVal('[data-testid="reverse-keys"]', 'id');
+    await evaluate(`document.querySelector('[data-testid="save-reverse"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-testid="reverse-editor"]') && !!document.querySelector('[data-reverse="E2E scores to CRM"]')`, 15000, 'sync listed');
+    // 3. Run: every row.
+    await evaluate(`document.querySelector('[data-reverse="E2E scores to CRM"] [data-testid="run-reverse"]').click(); true`);
+    await waitFor(`/25 rows sent/.test(document.querySelector('[data-reverse="E2E scores to CRM"] [data-testid="reverse-last-run"]')?.innerText ?? '')`, 30000, 'first run');
+    report.details.first = await evaluate(`document.querySelector('[data-reverse="E2E scores to CRM"] [data-testid="reverse-last-run"]').innerText`);
+    // 4. Preview the next run: nothing changed.
+    await evaluate(`document.querySelector('[data-reverse="E2E scores to CRM"] button[aria-label="More actions"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Preview next run'))`, 5000, 'row menu');
+    await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.includes('Preview next run')).click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="reverse-plan"]')`, 20000, 'plan');
+    report.details.plan = await evaluate(`document.querySelector('[data-testid="reverse-plan"] p').innerText`);
+    await evaluate(`[...document.querySelectorAll('[data-testid="reverse-plan"] button')].find(b => b.textContent.trim() === 'Close').click(); true`);
+    // 5. One row changes: only it is sent.
+    await q('UPDATE e2e_rev_scores SET score = 999 WHERE id = 7');
+    await evaluate(`document.querySelector('[data-reverse="E2E scores to CRM"] [data-testid="run-reverse"]').click(); true`);
+    await waitFor(`/^1 row sent/.test(document.querySelector('[data-reverse="E2E scores to CRM"] [data-testid="reverse-last-run"]')?.innerText ?? '')`, 30000, 'second run');
+    await sleep(400);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_reverse.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.received = got.map((g) => ({ auth: g.auth, op: g.body.op, n: g.body.rows.length, first: g.body.rows[0] }));
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -894,6 +968,14 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'reverse-etl') {
+    if (d.handedSql !== 'SELECT id, email, score FROM e2e_rev_scores' || d.handedName !== 'E2E scores') problems.push(`workbench hand-over: ${d.handedName} / ${d.handedSql}`);
+    if (!/^25 rows sent/.test(d.first ?? '')) problems.push(`first run: ${d.first}`);
+    if (!/Would send 0 of 25 rows/.test(d.plan ?? '')) problems.push(`plan: ${d.plan}`);
+    const rows = (d.received ?? []).reduce((a, r) => a + r.n, 0);
+    if (rows !== 26 || d.received?.some((r) => r.auth !== 'Bearer e2e-token')) problems.push(`received: ${JSON.stringify(d.received)}`);
+    if (JSON.stringify(d.received?.at(-1)?.first) !== JSON.stringify({ id: 7, email: 'user7@example.com', score: 999 })) problems.push(`changed row: ${JSON.stringify(d.received?.at(-1))}`);
   }
   if (scenario === 'data-quality') {
     for (const want of ['row_count', 'not_null', 'unique', 'accepted_values', 'relationships']) if (!d.suggested?.includes(want)) problems.push(`no ${want} suggested: ${JSON.stringify(d.suggested)}`);

@@ -30,6 +30,7 @@ import { ScimService } from './services/scim.js';
 import { DbtService } from './services/dbt.js';
 import { SemanticService } from './services/semantic.js';
 import { QualityService } from './services/quality.js';
+import { ReverseEtlService } from './services/reverse-etl.js';
 import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
@@ -74,6 +75,7 @@ export interface AppContext {
   dbt: DbtService;
   semantic: SemanticService;
   quality: QualityService;
+  reverse: ReverseEtlService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -164,9 +166,12 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const quality = new QualityService(store, workspaces, queries, auth, notifications, audit);
   quality.dbt = dbt;
   copilot.quality = quality;
+  const reverse = new ReverseEtlService(store, cfg, cipher, engines, workspaces, databases, cloud, auth, notifications, audit);
+  copilot.reverse = reverse;
   if (cfg.transform.scheduler_enabled) {
     dbt.startScheduler();
     quality.start();
+    reverse.start();
   }
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
@@ -211,6 +216,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     dbt,
     semantic,
     quality,
+    reverse,
     lakehouse,
     agents,
     groups,
@@ -224,6 +230,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       auditExport.stop();
       dbt.stop();
       quality.stop();
+      reverse.stop();
       await apps.shutdown().catch(() => undefined);
       await agents.flush();
       await cloudSync.flush().catch(() => undefined);

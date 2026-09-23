@@ -157,7 +157,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -731,4 +731,50 @@ export const qualityRuns = pgTable(
     started_at: ts('started_at').notNull(),
   },
   (t) => [index('quality_runs_suite_idx').on(t.suite_id, t.started_at)],
+);
+
+export const reverseSyncs = pgTable(
+  'reverse_syncs',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    sql: text('sql').notNull(),
+    destination: jsonb('destination').$type<ReverseDestination>().notNull(),
+    mode: text('mode', { enum: REVERSE_MODES }).notNull().default('replace'),
+    key_columns: jsonb('key_columns').$type<string[]>().notNull().default([]),
+    encrypted_secret: text('encrypted_secret'),
+    iv: text('iv'),
+    tag: text('tag'),
+    schedule: jsonb('schedule').$type<SyncSchedule>().notNull().default({ kind: 'manual' }),
+    channel_ids: jsonb('channel_ids').$type<string[]>().notNull().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    last_run: jsonb('last_run').$type<ReverseLastRun | null>(),
+    next_run_at: ts('next_run_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('reverse_syncs_workspace_idx').on(t.workspace_id), index('reverse_syncs_next_run_idx').on(t.next_run_at)],
+);
+
+export const reverseSyncRuns = pgTable(
+  'reverse_sync_runs',
+  {
+    id: text('id').primaryKey(),
+    sync_id: text('sync_id').notNull().references(() => reverseSyncs.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    status: text('status', { enum: REVERSE_RUN_STATUSES }).notNull(),
+    triggered_by: text('triggered_by').notNull(),
+    actor_id: text('actor_id'),
+    rows_read: integer('rows_read'),
+    rows_sent: integer('rows_sent'),
+    rows_deleted: integer('rows_deleted'),
+    summary: text('summary'),
+    error: text('error'),
+    duration_ms: integer('duration_ms'),
+    started_at: ts('started_at').notNull(),
+    finished_at: ts('finished_at'),
+  },
+  (t) => [index('reverse_sync_runs_sync_idx').on(t.sync_id, t.started_at)],
 );
