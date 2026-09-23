@@ -96,6 +96,7 @@ function renderContext(c: ChatContextSnapshot, cfg: DuckViewConfig): string {
   } else parts.push('### Tables & views\n- (none in this workspace yet)');
   if (c.files.length) parts.push(`### Data files in the data directory (${c.files.length})\n${c.files.slice(0, 200).map((f) => `- '${f}'`).join('\n')}`);
   if (c.buckets.length) parts.push(`### Cloud storage buckets\n${c.buckets.map((b) => `- ${b}`).join('\n')}`);
+  if (c.notes) parts.push(`### What the tables mean (the workspace's catalog notes — trust these over guesses from names)\n${c.notes.slice(0, 6000)}`);
   if (c.summaries && Object.keys(c.summaries).length) {
     parts.push('### Selected dataset schemas & statistics');
     for (const [target, cols] of Object.entries(c.summaries)) {
@@ -269,6 +270,9 @@ export class CopilotService {
     }
   }
 
+  /** Catalog notes for prompts (set by the context). */
+  lineage: { notesForPrompt(workspaceId: string): Promise<string> } | null = null;
+
   async buildContext(p: Principal, workspaceId: string, opts: { activeSql?: string | null; targets?: string[] } = {}): Promise<ChatContextSnapshot> {
     const { objects, files } = await this.queries.catalog(p, workspaceId);
     const conns = await this.cloud.list(p.userId);
@@ -278,6 +282,7 @@ export class CopilotService {
       files: files.map((f) => f.path),
       buckets: conns.map((c) => `${c.uri_scheme}://${c.bucket ?? '<bucket>'} (${c.provider} · ${c.name})`),
       active_sql: opts.activeSql ?? null,
+      notes: (await this.lineage?.notesForPrompt(workspaceId).catch(() => '')) || undefined,
     };
     const targets = (opts.targets ?? []).filter(Boolean).slice(0, 3);
     if (targets.length) {

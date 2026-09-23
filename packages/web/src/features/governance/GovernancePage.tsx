@@ -4,15 +4,17 @@ import { useWorkspace } from '../../store/workspace';
 import { Eyebrow, PageTitle } from '../../components/layout';
 import { cn } from '../../components/ui';
 import { PoliciesPanel } from './PoliciesPanel';
+import { CatalogPanel } from './CatalogPanel';
+import { LineagePanel } from './LineagePanel';
 
-type Tab = 'policies';
-const TABS: { id: Tab; label: string }[] = [{ id: 'policies', label: 'Access policies' }];
+type Tab = 'catalog' | 'lineage' | 'policies';
+const TABS: { id: Tab; label: string }[] = [{ id: 'catalog', label: 'Catalog' }, { id: 'lineage', label: 'Lineage' }, { id: 'policies', label: 'Access policies' }];
 
 /** #/governance — who may see what, and (later) where data comes from and who touched it. */
 export function GovernancePage() {
   const ws = useWorkspace();
   const active = ws.workspaces.find((w) => w.id === ws.activeId);
-  const parse = (): Tab => (/^#\/governance\/([a-z]+)/.exec(location.hash)?.[1] as Tab | undefined) ?? 'policies';
+  const parse = (): Tab => (/^#\/governance\/([a-z]+)/.exec(location.hash)?.[1] as Tab | undefined) ?? 'catalog';
   const [tab, setTab] = useState<Tab>(parse);
   useEffect(() => {
     const on = () => setTab(parse());
@@ -25,11 +27,13 @@ export function GovernancePage() {
         <div>
           <Eyebrow>Govern</Eyebrow>
           <PageTitle><span className="inline-flex items-center gap-2"><Landmark className="h-5 w-5 text-accent-300" /> Governance</span></PageTitle>
-          <p className="mt-1 text-xs text-zinc-500">Who may see which data in <b className="text-zinc-300">{active?.name ?? 'the active workspace'}</b>.</p>
+          <p className="mt-1 text-xs text-zinc-500">What the data means, where it comes from, and who may see it in <b className="text-zinc-300">{active?.name ?? 'the active workspace'}</b>.</p>
         </div>
         <div className="flex gap-1 border-b border-zinc-800 text-xs">
           {TABS.map((t) => <button key={t.id} onClick={() => (location.hash = `#/governance/${t.id}`)} className={cn('-mb-px border-b-2 px-3 py-1.5', tab === t.id ? 'border-accent-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-200')}>{t.label}</button>)}
         </div>
+        {ws.activeId && tab === 'catalog' && <CatalogPanel key={ws.activeId} workspaceId={ws.activeId} />}
+        {ws.activeId && tab === 'lineage' && <LineagePanel key={ws.activeId} workspaceId={ws.activeId} />}
         {ws.activeId && tab === 'policies' && <PoliciesPanel key={ws.activeId} workspaceId={ws.activeId} isOwner={active?.role === 'OWNER'} />}
       </div>
     </div>

@@ -316,6 +316,16 @@ export const ConfigSchema = z.object({
         .default({}),
     })
     .default({}),
+  /** Lineage: OpenLineage events for sync runs, sent to Marquez / DataHub / OpenMetadata / any OpenLineage HTTP endpoint. */
+  lineage: z
+    .object({
+      /** e.g. http://marquez:5000/api/v1/lineage — unset: no events. */
+      openlineage_url: z.string().optional(),
+      openlineage_api_key: z.string().optional(),
+      /** The namespace DuckView's jobs and datasets live in. */
+      namespace: z.string().default('duckview'),
+    })
+    .default({}),
   /** Delivery of alerts and scheduled snapshots: Slack, Microsoft Teams, email, PagerDuty and webhooks. */
   notifications: z
     .object({

@@ -585,6 +585,21 @@ export const accessPolicies = pgTable(
   (t) => [index('access_policies_workspace_idx').on(t.workspace_id)],
 );
 
+export const catalogAnnotations = pgTable(
+  'catalog_annotations',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    object_name: text('object_name').notNull(),
+    column_name: text('column_name'),
+    description: text('description'),
+    tags: jsonb('tags').$type<string[]>().notNull().default([]),
+    updated_by: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('catalog_annotations_workspace_idx').on(t.workspace_id, t.object_name)],
+);
+
 export const appSettings = pgTable('app_settings', {
   key: text('key').primaryKey(),
   value: jsonb('value').$type<Record<string, unknown>>().notNull().default({}),

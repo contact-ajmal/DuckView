@@ -47,4 +47,12 @@ export async function governanceRoutes(app: FastifyInstance, ctx: AppContext) {
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'policy.preview', resource: `workspace:${id}`, queryText: body.sql, ip: req.ip });
     return { as: { id: user.id, email: user.email, role }, restricted: !!r, policies: (r?.policies ?? []).map((x) => ({ id: x.id, name: x.name, table: x.table_name })), sql, columns: result.columns, rows: result.rows, row_count: result.rowCount };
   });
+
+  // ---------------------------------------------------------------- catalog & lineage
+  app.get('/api/workspaces/:id/catalog/annotated', async (req) => ({ objects: await ctx.lineage.catalog(req.principal!, (req.params as { id: string }).id) }));
+  app.put('/api/workspaces/:id/catalog/annotations', async (req) => {
+    const body = z.object({ object_name: z.string().max(300), column_name: z.string().max(200).nullable().optional(), description: z.string().max(4000).nullable().optional(), tags: z.array(z.string().max(40)).max(20).optional() }).parse(req.body ?? {});
+    return { annotation: await ctx.lineage.annotate(req.principal!, (req.params as { id: string }).id, body) };
+  });
+  app.get('/api/workspaces/:id/lineage', async (req) => ctx.lineage.graph(req.principal!, (req.params as { id: string }).id));
 }

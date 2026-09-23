@@ -21,7 +21,8 @@
  * while the receiver collects the webhooks. The snapshots scenario (same setting) schedules a grid dashboard in the
  * dialog, sends it now, and renders a Mosaic dashboard; both pictures are saved next to the screenshot. The
  * access-policies scenario creates a row filter and a mask in Governance, previews it as a viewer, then signs in as
- * that viewer and opens a Mosaic dashboard over the protected table: only the permitted region may show.
+ * that viewer and opens a Mosaic dashboard over the protected table: only the permitted region may show. The
+ * catalog-lineage scenario describes a table in Governance → Catalog and traces it in Governance → Lineage.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -471,6 +472,38 @@ try {
     await evaluate(`localStorage.setItem('duckview.session', ${JSON.stringify(login.token)}); true`);
     report.details.charts = 1;
   }
+  else if (scenario === 'catalog-lineage') {
+    const wsList = await (await authed('/api/workspaces')).json();
+    const remembered = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const ws = (wsList.workspaces ?? wsList).find((w) => w.id === remembered) ?? (wsList.workspaces ?? wsList)[0];
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const sync = (await j('POST', `/api/workspaces/${ws.id}/syncs`, { name: 'E2E load', source: { kind: 'sql', sql: "SELECT * FROM (VALUES ('EU', 10), ('US', 20)) t(region, n)" }, target_table: 'e2e_lin_orders', schedule: { kind: 'manual' } })).sync;
+    await j('POST', `/api/syncs/${sync.id}/run`, {});
+    await j('POST', `/api/workspaces/${ws.id}/query`, { sql: 'CREATE OR REPLACE VIEW e2e_lin_totals AS SELECT region, sum(n) AS n FROM e2e_lin_orders GROUP BY region' });
+    const dash = (await j('POST', `/api/workspaces/${ws.id}/dashboards`, { name: 'E2E lineage board', kind: 'grid' })).dashboard;
+    await j('POST', `/api/dashboards/${dash.id}/widgets`, { title: 'Totals', widget_type: 'TABLE', custom_sql: 'SELECT * FROM e2e_lin_totals', chart_config: {} });
+    cleanup = async () => {
+      await j('DELETE', `/api/dashboards/${dash.id}`);
+      await j('DELETE', `/api/syncs/${sync.id}`);
+      await j('PUT', `/api/workspaces/${ws.id}/catalog/annotations`, { object_name: 'e2e_lin_orders', description: '', tags: [] });
+      await j('POST', `/api/workspaces/${ws.id}/query`, { sql: 'DROP VIEW IF EXISTS e2e_lin_totals; DROP TABLE IF EXISTS e2e_lin_orders' });
+    };
+    await send('Page.navigate', { url: `${BASE}/#/governance/catalog` });
+    await waitFor(`[...document.querySelectorAll('span.font-mono')].some(s => s.textContent === 'e2e_lin_orders')`, 20000, 'catalog lists the table');
+    await evaluate(`[...document.querySelectorAll('span.font-mono')].find(s => s.textContent === 'e2e_lin_orders').closest('div.min-w-0').querySelector('button').click(); true`);
+    await waitFor(`!!document.querySelector('input[placeholder^="What this table is"]')`, 5000, 'description editor');
+    await setField('input[placeholder^="What this table is"]', 'Orders loaded by the E2E sync');
+    await setField('input[placeholder="tags: pii, finance"]', 'sales');
+    await clickButton('Save');
+    await waitFor(`document.body.innerText.includes('Orders loaded by the E2E sync')`, 10000, 'description saved');
+    report.details.annotation = (await j('GET', `/api/workspaces/${ws.id}/catalog/annotated`)).objects.find((o) => o.name === 'e2e_lin_orders');
+    await send('Page.navigate', { url: `${BASE}/#/governance/lineage` });
+    await waitFor(`document.querySelectorAll('svg[aria-label="Lineage graph"] g').length > 0`, 30000, 'lineage graph');
+    await evaluate(`(() => { const sel = [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.value === 'table:e2e_lin_orders')); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sel), 'value').set.call(sel, 'table:e2e_lin_orders'); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await sleep(600);
+    report.details.traced = await evaluate(`[...document.querySelectorAll('svg[aria-label="Lineage graph"] g[data-node]')].map(g => g.querySelector('text')?.textContent)`);
+    report.details.charts = 1;
+  }
   else if (scenario === 'mosaic-dashboard') {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
@@ -543,6 +576,10 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'catalog-lineage') {
+    if (d.annotation?.description !== 'Orders loaded by the E2E sync' || !d.annotation?.tags?.includes('sales')) problems.push(`annotation not saved: ${JSON.stringify(d.annotation)}`);
+    for (const want of ['E2E load', 'e2e_lin_orders', 'e2e_lin_totals', 'E2E lineage board']) if (!d.traced?.includes(want)) problems.push(`the trace misses ${want}: ${JSON.stringify(d.traced)}`);
+  }
   if (scenario === 'access-policies') {
     if (JSON.stringify((d.preview ?? []).map((r) => r.replace(/\s+/g, ' '))) !== JSON.stringify(['EU NULL', 'EU NULL'])) problems.push(`preview wrong: ${JSON.stringify(d.preview)}`);
     if (!d.viewerInfo?.restricted) problems.push('mosaic info not restricted for the viewer');

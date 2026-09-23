@@ -327,8 +327,14 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         const md: string[] = [`**${r.target}** (${r.kind}${r.row_count != null ? ` · ${r.row_count.toLocaleString()} rows via ${r.row_count_source}` : ''}${r.size_bytes != null ? ` · ${formatBytes(r.size_bytes)}` : ''})`];
         if (r.tables?.length) for (const t of r.tables) md.push(`\n_${t.schema}.${t.name}_\n| column | type | nullable |\n| --- | --- | --- |\n${t.columns.map((c) => `| ${c.name} | ${c.type} | ${c.nullable ? 'yes' : 'no'} |`).join('\n')}`);
         else md.push(`| column | type | nullable |\n| --- | --- | --- |\n${r.columns.map((c) => `| ${c.name} | ${c.type} | ${c.nullable ? 'yes' : 'no'} |`).join('\n')}`);
+        // What people wrote about it (catalog notes).
+        const notes = (await env.ctx.lineage.annotations(env.principal, ws).catch(() => [])).filter((n) => n.object_name.toLowerCase() === file_path_or_table.trim().toLowerCase());
+        const table = notes.find((n) => !n.column_name);
+        const cols = notes.filter((n) => n.column_name);
+        if (table?.description || table?.tags.length) md.splice(1, 0, `${table.description ?? ''}${table.tags.length ? ` _tags: ${table.tags.join(', ')}_` : ''}`.trim());
+        if (cols.length) md.push(`\nColumn notes:\n${cols.map((c) => `- **${c.column_name}**: ${c.description ?? ''}${c.tags.length ? ` _(${c.tags.join(', ')})_` : ''}`).join('\n')}`);
         md.push(`\nSuggested query:\n\`\`\`sql\n${r.suggested_sql}\n\`\`\``);
-        return { content: [text(md.join('\n'))], structuredContent: { status: 'ok', ...r } };
+        return { content: [text(md.join('\n'))], structuredContent: { status: 'ok', ...r, annotations: notes.map((n) => ({ column: n.column_name, description: n.description, tags: n.tags })) } };
       },
     }),
 

@@ -513,3 +513,8 @@ export type ColumnMask = { kind: Exclude<MaskKind, 'expression'> } | { kind: 'ex
 export interface PolicySubjects { all?: boolean; roles?: ('VIEWER' | 'EDITOR')[]; users?: string[]; groups?: string[] }
 export interface AccessPolicy { id: string; workspace_id: string; name: string; description: string | null; table_name: string; row_filter: string | null; column_masks: Record<string, ColumnMask>; applies_to: PolicySubjects; enabled: boolean; created_by: string | null; created_at: string; updated_at: string }
 export interface MyRestrictions { restricted: boolean; tables: { table: string; name: string; description: string | null; rows_filtered: boolean; masked_columns: string[] }[] }
+// ---- catalog notes & lineage
+export type AnnotatedObject = Omit<CatalogObject, 'columns'> & { description: string | null; tags: string[]; columns: (CatalogObject['columns'][number] & { description: string | null; tags: string[] })[] };
+export type LineageKind = 'source' | 'file' | 'sync' | 'table' | 'view' | 'saved_query' | 'dashboard' | 'app' | 'alert' | 'snapshot';
+export interface LineageNode { id: string; kind: LineageKind; label: string; href?: string; detail?: string; description?: string | null; tags?: string[] }
+export interface LineageEdge { from: string; to: string; kind: 'reads' | 'loads' | 'renders' | 'mentions' }

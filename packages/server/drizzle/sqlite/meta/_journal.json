@@ -148,6 +148,13 @@
       "when": 1790135212130,
       "tag": "0020_access_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1790146780394,
+      "tag": "0021_catalog_annotations",
+      "breakpoints": true
     }
   ]
 }

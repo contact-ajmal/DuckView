@@ -318,6 +318,8 @@ export interface ChatContextSnapshot {
   buckets: string[];
   active_sql: string | null;
   summaries?: Record<string, { column: string; type: string; min: string | null; max: string | null; approx_unique: number | null; null_percentage: number }[]>;
+  /** The workspace's catalog notes: descriptions and tags people wrote on tables and columns. */
+  notes?: string;
   model?: string;
   provider?: string;
 }
@@ -784,6 +786,23 @@ export const accessPolicies = sqliteTable(
   (t) => [index('access_policies_workspace_idx').on(t.workspace_id)],
 );
 
+/** What people know about a table (column null) or a column of a workspace: a description and tags (pii, …). */
+export const catalogAnnotations = sqliteTable(
+  'catalog_annotations',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** As queries name it: "orders" or "sales.orders". */
+    object_name: text('object_name').notNull(),
+    column_name: text('column_name'),
+    description: text('description'),
+    tags: text('tags', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    updated_by: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('catalog_annotations_workspace_idx').on(t.workspace_id, t.object_name)],
+);
+
 /** Platform-wide settings set from the console (e.g. the Google OAuth client), secrets encrypted. */
 export const appSettings = sqliteTable('app_settings', {
   key: text('key').primaryKey(),
@@ -903,3 +922,4 @@ export type AlertEvent = typeof alertEvents.$inferSelect;
 export type Snapshot = typeof snapshots.$inferSelect;
 export type SnapshotRun = typeof snapshotRuns.$inferSelect;
 export type AccessPolicy = typeof accessPolicies.$inferSelect;
+export type CatalogAnnotation = typeof catalogAnnotations.$inferSelect;
