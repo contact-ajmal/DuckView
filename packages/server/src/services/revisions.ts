@@ -161,14 +161,23 @@ export class RevisionService {
     if (!restorer) throw badRequest(`${r.object_type} cannot be restored`);
     // What is there now stays in the history (not merged into the restore).
     await this.record(p.userId, r.workspace_id, r.object_type, r.object_id, { message: 'Before restoring' });
-    const key = `${r.object_type}:${r.object_id}`;
+    await this.as(p.userId, r.workspace_id, r.object_type, r.object_id, `Restored version ${r.number}`, () => restorer(p, r.workspace_id, r.object_id, r.snapshot));
+    this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'revision.restore', resource: `${r.object_type}:${r.object_id}`, queryText: `version ${r.number}`, ip: p.ip });
+    return (await this.db.select().from(this.s.revisions).where(and(eq(this.s.revisions.object_type, r.object_type), eq(this.s.revisions.object_id, r.object_id))).orderBy(desc(this.s.revisions.number)).limit(1))[0] ?? null;
+  }
+
+  /**
+   * Runs a change (a restore, a Git pull) with the owning service's own recording held back, then records the
+   * result as one new revision with this message — so it never merges into someone's in-progress version.
+   */
+  async as<T>(userId: string | null, workspaceId: string, type: RevisionType, id: string, message: string, fn: () => Promise<T>): Promise<T> {
+    const key = `${type}:${id}`;
     this.restoring.add(key);
     try {
-      await restorer(p, r.workspace_id, r.object_id, r.snapshot);
+      return await fn();
     } finally {
       this.restoring.delete(key);
+      await this.record(userId, workspaceId, type, id, { message });
     }
-    this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'revision.restore', resource: `${r.object_type}:${r.object_id}`, queryText: `version ${r.number}`, ip: p.ip });
-    return this.record(p.userId, r.workspace_id, r.object_type, r.object_id, { message: `Restored version ${r.number}` });
   }
 }

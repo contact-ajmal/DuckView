@@ -47,6 +47,8 @@
  * resolving it clears the cell's count.
  * The version-history scenario names a version of a notebook, changes it, opens History, reads the diff, restores
  * the named version and checks the cell and the history.
+ * The git-sync scenario (server started with DUCKVIEW__git__allow_local_repos=true) connects a local bare repository in
+ * Settings → Git, pushes the workspace, edits a notebook in a clone and pulls the change back.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -824,6 +826,52 @@ try {
     report.details.cell = await evaluate(`document.querySelector('[data-cell="revenue"] .cm-content').innerText`);
     report.details.charts = 1;
   }
+  else if (scenario === 'git-sync') {
+    const { execFileSync } = await import('node:child_process');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-e2e-git-'));
+    const bare = path.join(tmp, 'repo.git');
+    const gitc = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'Reviewer', GIT_AUTHOR_EMAIL: 'reviewer@example.com', GIT_COMMITTER_NAME: 'Reviewer', GIT_COMMITTER_EMAIL: 'reviewer@example.com' } });
+    gitc(tmp, 'init', '-q', '--bare', '-b', 'main', bare);
+    cleanup = async () => {
+      await j('DELETE', `/api/workspaces/${wsId}/git`);
+      for (const n of (await j('GET', `/api/workspaces/${wsId}/notebooks`)).notebooks ?? []) if (n.title.startsWith('E2E')) await j('DELETE', `/api/notebooks/${n.id}`);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    };
+    await j('DELETE', `/api/workspaces/${wsId}/git`);
+    for (const n of (await j('GET', `/api/workspaces/${wsId}/notebooks`)).notebooks ?? []) if (n.title.startsWith('E2E')) await j('DELETE', `/api/notebooks/${n.id}`);
+    const nb = (await j('POST', `/api/workspaces/${wsId}/notebooks`, { title: 'E2E git notebook', cells: [{ id: 'c1', type: 'sql', name: 'answer', source: 'SELECT 42 AS answer' }] })).notebook;
+    const setVal = (sel, v) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(v)}); el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    // 1. Connect.
+    await send('Page.navigate', { url: `${BASE}/#/settings/git` });
+    await waitFor(`!!document.querySelector('[data-testid="git-url"]')`, 20000, 'git settings');
+    await setVal('[data-testid="git-url"]', bare);
+    await setVal('[data-testid="git-path"]', 'e2e-dv');
+    await evaluate(`document.querySelector('[data-testid="git-save"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[data-testid="git-changes"] li')].some(l => l.innerText.includes('e2e-dv/notebooks/e2e-git-notebook.yml'))`, 30000, 'changes to push');
+    report.details.pending = await evaluate(`[...document.querySelectorAll('[data-testid="git-changes"] li')].filter(l => l.innerText.includes('e2e-git')).map(l => l.innerText.replace(/\\s+/g, ' '))`);
+    // 2. Push.
+    await setVal('[data-testid="git-message"]', 'E2E export');
+    await evaluate(`document.querySelector('[data-testid="git-push"]').click(); true`);
+    await waitFor(`/^Pushed [0-9a-f]{7}/.test(document.querySelector('[data-testid="git-notice"]')?.innerText ?? '')`, 30000, 'pushed');
+    const clone = path.join(tmp, 'clone');
+    gitc(tmp, 'clone', '-q', bare, clone);
+    report.details.log = gitc(clone, 'log', '--format=%s').trim();
+    const file = path.join(clone, 'e2e-dv/notebooks/e2e-git-notebook.yml');
+    report.details.file = fs.readFileSync(file, 'utf8');
+    // 3. A change in Git, pulled back.
+    fs.writeFileSync(file, report.details.file.replace('SELECT 42 AS answer', 'SELECT 43 AS answer'));
+    gitc(clone, 'commit', '-qam', 'Answer is 43');
+    gitc(clone, 'push', '-q', 'origin', 'main');
+    await evaluate(`document.querySelector('[data-testid="git-pull"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="git-pull-result"]')`, 30000, 'pulled');
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_git.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.pull = await evaluate(`document.querySelector('[data-testid="git-pull-result"]').innerText.replace(/\\s+/g, ' ')`);
+    report.details.after = (await j('GET', `/api/notebooks/${nb.id}`)).notebook.cells[0].source;
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -1106,6 +1154,13 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'git-sync') {
+    if (!(d.pending ?? []).some((x) => /^added e2e-dv\/notebooks\/e2e-git-notebook\.yml$/.test(x))) problems.push(`pending: ${JSON.stringify(d.pending)}`);
+    if (d.log !== 'E2E export') problems.push(`log: ${d.log}`);
+    if (!/title: E2E git notebook/.test(d.file ?? '') || !/SELECT 42 AS answer/.test(d.file ?? '')) problems.push(`file: ${d.file}`);
+    if (!/Updated notebooks\/e2e-git-notebook\.yml/.test(d.pull ?? '')) problems.push(`pull: ${d.pull}`);
+    if (d.after !== 'SELECT 43 AS answer') problems.push(`after pull: ${d.after}`);
   }
   if (scenario === 'version-history') {
     if (!(d.versions ?? []).includes('Signed off')) problems.push(`versions: ${JSON.stringify(d.versions)}`);

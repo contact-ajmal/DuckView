@@ -373,6 +373,18 @@ export const ConfigSchema = z.object({
         .default({}),
     })
     .default({}),
+  /** Git sync: a workspace's notebooks, queries, dashboards, metrics and dbt projects kept in a Git repository. */
+  git: z
+    .object({
+      enabled: z.coerce.boolean().default(true),
+      /** The git executable. */
+      binary: z.string().default('git'),
+      /** Accept file:// and plain paths as repositories (tests, a repository on the same machine). Off: https only. */
+      allow_local_repos: z.coerce.boolean().default(false),
+      /** A clone, fetch or push is stopped after this long. */
+      timeout_seconds: z.coerce.number().int().min(5).default(120),
+    })
+    .default({}),
   /** Delivery of alerts and scheduled snapshots: Slack, Microsoft Teams, email, PagerDuty and webhooks. */
   notifications: z
     .object({

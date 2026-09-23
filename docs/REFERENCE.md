@@ -505,6 +505,26 @@ API: `GET /api/workspaces/:id/comments?target_type=notebook|dashboard|query|app|
 
 API: `GET /api/workspaces/:id/revisions?object_type=notebook|dashboard|query|semantic|dbt&object_id=` (`semantic` uses `object_id=workspace`) · `POST /api/workspaces/:id/revisions {object_type, object_id, message}` · `GET /api/revisions/:id` (snapshot, `text`, `current`) · `POST /api/revisions/:id/restore`. Audit: `revision.name`, `revision.restore`.
 
+
+## Git sync
+
+**A workspace's definitions in a Git repository** (Settings → Git, `services/git-sync.ts`), as files people read and review in pull requests:
+
+```
+<folder>/notebooks/<title>.yml        title and cells — SQL and text as YAML block scalars
+<folder>/queries/<folder>/<name>.sql  the SQL; id, name, folder, description and tags in a header comment
+<folder>/dashboards/<name>.yml        layout and widgets (with their SQL), or the Mosaic spec
+<folder>/metrics/semantic.yml         the semantic layer's hand-written YAML
+<folder>/dbt/<project>/…              the project's files, and duckview.yml (id, vars, target schema)
+```
+
+- **Connect** (workspace owners): an `https://` repository, a branch (created on the first push when missing), an optional folder, and an access token with read/write access to contents (GitHub, GitLab, Bitbucket, Azure DevOps…). The token is stored encrypted and sent only as an `Authorization` header for that one git command — never written to disk or git config, and scrubbed from errors. `git.allow_local_repos: true` also accepts local paths and `file://` (tests; a repository on the same machine).
+- **Push** (editors) writes those folders from the workspace — other files in the repository are left alone — commits as the person pushing (with their message) and pushes. The page lists what would change first. A push is refused while the repository has commits this workspace has not pulled, so nobody's work is overwritten.
+- **Pull** (editors) brings in what changed in the repository since the last push or pull: each changed file updates its object through the owning service (validation, permissions, audit) and is recorded in its version history as "Pulled from Git <sha>"; a file for something this workspace does not have creates it. Files nobody changed upstream are left alone, so local edits that were not pushed yet survive. An object changed on both sides takes the repository's version and is reported as a conflict — the local version is in its history, one click from being restored. Files deleted in the repository, and objects only in this workspace, are listed, never deleted. Objects are matched by the id in the file, else by the file's path in this workspace, so several workspaces (dev and prod) can share one repository without duplicates.
+- git runs with a throwaway HOME, no prompts, no system config and hooks disabled, with `git.timeout_seconds` per command (`git.binary`, default `git`; the Docker image includes it).
+
+API: `GET/PUT/DELETE /api/workspaces/:id/git` (`PUT {repo_url, branch?, path?, token?}`) · `GET /api/workspaces/:id/git/status` · `POST /api/workspaces/:id/git/push {message?}` (409 when a pull is needed) · `POST /api/workspaces/:id/git/pull` → `{created, updated, unchanged, conflicts, deleted_upstream, only_in_workspace, errors}`. Audit: `git.configure`, `git.disconnect`, `git.push`, `git.pull`.
+
 ## Governance
 
 **Catalog** (`#/governance/catalog`, `services/lineage.ts`): descriptions and tags (lower-case, e.g. `pii`, `finance`) on tables, views and columns, written by editors, read by every member (`GET /api/workspaces/:id/catalog/annotated`, `PUT /api/workspaces/:id/catalog/annotations {object_name, column_name?, description, tags}` — an empty description and no tags removes the note). Copilot's context carries the notes ("trust these over guesses from names"), and `inspect_schema` shows them next to the columns.

@@ -1337,3 +1337,32 @@ export const revisions = sqliteTable(
   (t) => [index('revisions_object_idx').on(t.object_type, t.object_id, t.number)],
 );
 export type Revision = typeof revisions.$inferSelect;
+
+/** Git sync: where a workspace's definitions are kept in Git, and the last push and pull. */
+export const gitSyncs = sqliteTable(
+  'git_syncs',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    repo_url: text('repo_url').notNull(),
+    branch: text('branch').notNull().default('main'),
+    /** A folder inside the repository ('' = its root). */
+    path: text('path').notNull().default(''),
+    /** AES-256-GCM JSON: { token } for HTTPS. */
+    encrypted_secret: text('encrypted_secret'),
+    iv: text('iv'),
+    tag: text('tag'),
+    created_by: text('created_by'),
+    last_push_sha: text('last_push_sha'),
+    last_push_at: integer('last_push_at', { mode: 'timestamp_ms' }),
+    last_pull_sha: text('last_pull_sha'),
+    last_pull_at: integer('last_pull_at', { mode: 'timestamp_ms' }),
+    /** Which object each file (or dbt folder) is in this workspace: files may carry another workspace's ids. */
+    mapping: text('mapping', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+    last_error: text('last_error'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [uniqueIndex('git_syncs_workspace_idx').on(t.workspace_id)],
+);
+export type GitSync = typeof gitSyncs.$inferSelect;

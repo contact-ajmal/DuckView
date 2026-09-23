@@ -847,3 +847,27 @@ export const revisions = pgTable(
   },
   (t) => [index('revisions_object_idx').on(t.object_type, t.object_id, t.number)],
 );
+
+export const gitSyncs = pgTable(
+  'git_syncs',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    repo_url: text('repo_url').notNull(),
+    branch: text('branch').notNull().default('main'),
+    path: text('path').notNull().default(''),
+    encrypted_secret: text('encrypted_secret'),
+    iv: text('iv'),
+    tag: text('tag'),
+    created_by: text('created_by'),
+    last_push_sha: text('last_push_sha'),
+    last_push_at: ts('last_push_at'),
+    last_pull_sha: text('last_pull_sha'),
+    last_pull_at: ts('last_pull_at'),
+    mapping: jsonb('mapping').$type<Record<string, string>>().notNull().default({}),
+    last_error: text('last_error'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('git_syncs_workspace_idx').on(t.workspace_id)],
+);
