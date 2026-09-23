@@ -525,6 +525,22 @@ API: `GET /api/workspaces/:id/revisions?object_type=notebook|dashboard|query|sem
 
 API: `GET/PUT/DELETE /api/workspaces/:id/git` (`PUT {repo_url, branch?, path?, token?}`) · `GET /api/workspaces/:id/git/status` · `POST /api/workspaces/:id/git/push {message?}` (409 when a pull is needed) · `POST /api/workspaces/:id/git/pull` → `{created, updated, unchanged, conflicts, deleted_upstream, only_in_workspace, errors}`. Audit: `git.configure`, `git.disconnect`, `git.push`, `git.pull`.
 
+
+## Signed embeds
+
+**A dashboard or notebook inside your own application** (Settings → Embedding, `services/embeds.ts`), with no DuckView login for its viewers.
+
+1. A workspace owner creates an **embed key** — its secret is shown once — and optionally the sites allowed to frame it (origins; the page sends `Content-Security-Policy: frame-ancestors …`, and without a valid token `X-Frame-Options: DENY`).
+2. For each page view, your **server** signs an HS256 token with the key's secret (header `kid` = the key id):
+   `{ "res": "dashboard:<id>" | "notebook:<id>", "sub": "<your user>", "iat": …, "exp": …, "attrs": { "tenant": "acme" }, "params": { "region": "EU" }, "theme": "light" | "dark" }` — at most 7 days between `iat` and `exp`. Settings → Embedding shows a Node.js and a Python function that does it.
+3. The iframe loads `https://<duckview>/embed/view?token=<token>`.
+
+**What an embed can do**: load that one object — a grid dashboard's widgets, or a notebook's cells run live — and nothing else: no other object, no SQL of its own, no other API (the token is not a session). Every request is checked again (signature, expiry, key not revoked, its creator still active with access, the object in the key's workspace), so revoking a key stops all its embeds at once. Queries run as the key's creator with the read scope only. A notebook's SQL is not shown, its inputs take the token's `params`, and nothing it runs is saved. Mosaic dashboards cannot be embedded yet.
+
+**Rows per viewer**: an access policy that applies to **embeds** (the *embeds* box in Data → Access policies, `applies_to: { embeds: true }`) filters and masks what embeds see; the token's attributes are `{{embed.<name>}}` in its row filter — `tenant = {{embed.tenant}}` shows each customer their own rows. An attribute the token does not carry is NULL, so such a filter shows nothing. When several policies apply to someone on one table, all of them apply: filters are AND-ed and the strictest mask wins.
+
+API (owners): `GET/POST /api/workspaces/:id/embed/keys` (`POST {name, allowed_origins?}` → `{key, secret}`) · `PATCH/DELETE /api/embed/keys/:id` · `POST /api/workspaces/:id/embed/sign {key_id, resource_type, resource_id, sub?, attrs?, params?, expires_in?, theme?}` → `{token, url}`. The embed (token as `Authorization: Embed <token>` or `?token=`): `GET /api/embed/view` · `POST /api/embed/widgets/:wid/data` · `POST /api/embed/notebook/cells/:cell/run`. Audit: `embed.key_create`, `embed.key_revoke`, `embed.view`.
+
 ## Governance
 
 **Catalog** (`#/governance/catalog`, `services/lineage.ts`): descriptions and tags (lower-case, e.g. `pii`, `finance`) on tables, views and columns, written by editors, read by every member (`GET /api/workspaces/:id/catalog/annotated`, `PUT /api/workspaces/:id/catalog/annotations {object_name, column_name?, description, tags}` — an empty description and no tags removes the note). Copilot's context carries the notes ("trust these over guesses from names"), and `inspect_schema` shows them next to the columns.

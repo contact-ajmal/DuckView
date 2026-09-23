@@ -12,6 +12,8 @@ export interface Principal {
   workspaceScope?: string | null;
   actorType: 'USER' | 'AGENT' | 'SYSTEM';
   ip?: string;
+  /** A viewer of a signed embed: read-only, one object, and the attributes the host signed (for access policies). */
+  embed?: { keyId: string; subject: string; attrs: Record<string, string | number | boolean> };
 }
 
 export const isAdmin = (p: Principal) => p.role === 'ADMIN' && p.scopes.includes('admin');

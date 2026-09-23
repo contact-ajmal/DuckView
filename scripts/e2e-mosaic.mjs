@@ -49,6 +49,8 @@
  * the named version and checks the cell and the history.
  * The git-sync scenario (server started with DUCKVIEW__git__allow_local_repos=true) connects a local bare repository in
  * Settings → Git, pushes the workspace, edits a notebook in a clone and pulls the change back.
+ * The embeds scenario creates an embed key in Settings → Embedding, signs a link for one tenant, checks the preview
+ * shows only that tenant's revenue, opens the embed page itself (no DuckView chrome) and a second tenant's link.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -560,8 +562,12 @@ try {
     await evaluate(`document.querySelector('[data-testid="metrics-scaffold"]').click(); true`);
     await waitFor(`document.querySelector('.cm-content')?.innerText.includes('table: sem_orders')`, 10000, 'scaffold in the editor');
     await evaluate(`document.querySelector('[data-testid="metrics-save"]').click(); true`);
-    await waitFor(`document.querySelector('[data-testid="metrics-save"]').disabled && document.body.innerText.includes('1 semantic model')`, 20000, 'saved');
-    report.details.saved = (await j('GET', `/api/workspaces/${wsId}/semantic`)).metrics.map((m) => m.name);
+    // Saved when the API lists the scaffolded metric (the page may already show other models of the workspace).
+    for (let i = 0; i < 80; i++) {
+      report.details.saved = (await j('GET', `/api/workspaces/${wsId}/semantic`)).metrics.map((m) => m.name);
+      if (report.details.saved.includes('total_amount')) break;
+      await sleep(250);
+    }
     // 2. Explore: total amount by order date per month, EU only.
     await evaluate(`document.querySelector('[data-testid="metrics-explore"]').click(); true`);
     await waitFor(`!!document.querySelector('label[data-metric="total_amount"] input')`, 10000, 'metric listed');
@@ -872,6 +878,54 @@ try {
     report.details.after = (await j('GET', `/api/notebooks/${nb.id}`)).notebook.cells[0].source;
     report.details.charts = 1;
   }
+  else if (scenario === 'embeds') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    cleanup = async () => {
+      for (const k of (await j('GET', `/api/workspaces/${wsId}/embed/keys`)).keys ?? []) if (k.name.startsWith('E2E') && !k.revoked_at) await j('DELETE', `/api/embed/keys/${k.id}`);
+      for (const d of (await j('GET', `/api/workspaces/${wsId}/dashboards`)).dashboards ?? []) if (d.name.startsWith('E2E embed')) await j('DELETE', `/api/dashboards/${d.id}`);
+      for (const p of (await j('GET', `/api/workspaces/${wsId}/policies`)).policies ?? []) if (p.name.startsWith('E2E')) await j('DELETE', `/api/policies/${p.id}`);
+      await q('DROP TABLE IF EXISTS e2e_embed_orders');
+    };
+    await cleanup();
+    await q(`CREATE TABLE e2e_embed_orders AS SELECT * FROM (VALUES (1, 'acme', 100.0), (2, 'acme', 50.0), (3, 'globex', 70.0)) t(id, tenant, amount)`);
+    await j('POST', `/api/workspaces/${wsId}/policies`, { name: 'E2E embeds: own tenant', table_name: 'e2e_embed_orders', row_filter: 'tenant = {{embed.tenant}}', applies_to: { embeds: true } });
+    const dash = (await j('POST', `/api/workspaces/${wsId}/dashboards`, { name: 'E2E embed portal', kind: 'grid' })).dashboard;
+    await j('POST', `/api/dashboards/${dash.id}/widgets`, { title: 'Your revenue', widget_type: 'KPI', custom_sql: 'SELECT sum(amount) AS revenue FROM e2e_embed_orders', chart_config: {} });
+    const setVal = (sel, v) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); const proto = el.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${JSON.stringify(v)}); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); return true; })()`);
+    // 1. A key.
+    await send('Page.navigate', { url: `${BASE}/#/settings/embedding` });
+    await waitFor(`!!document.querySelector('[data-testid="embed-key-name"]')`, 20000, 'embedding settings');
+    await setVal('[data-testid="embed-key-name"]', 'E2E portal');
+    await evaluate(`document.querySelector('[data-testid="embed-key-create"]').click(); true`);
+    await waitFor(`/dves_/.test(document.querySelector('[data-testid="embed-secret"]')?.innerText ?? '')`, 10000, 'secret shown once');
+    report.details.snippet = await evaluate(`document.querySelector('[data-testid="embed-secret"] pre').innerText.includes("createHmac('sha256'")`);
+    // 2. Try it for acme.
+    await waitFor(`[...(document.querySelector('[data-testid="embed-resource"]')?.options ?? [])].some(o => o.value === 'dashboard:${dash.id}')`, 10000, 'dashboards listed');
+    await setVal('[data-testid="embed-resource"]', `dashboard:${dash.id}`);
+    await evaluate(`document.querySelector('[data-testid="embed-sign"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="embed-preview"]')?.contentDocument?.querySelector('[data-widget="Your revenue"]')?.innerText.match(/150/)`, 30000, 'preview shows acme revenue');
+    report.details.preview = await evaluate(`document.querySelector('[data-testid="embed-preview"]').contentDocument.querySelector('[data-widget="Your revenue"]').innerText.replace(/\\s+/g, ' ')`);
+    const url = await evaluate(`document.querySelector('[data-testid="embed-link"] code').getAttribute('title')`);
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_settings.png'), Buffer.from(shot.result.data, 'base64')); }
+    // 3. The embed page itself: the dashboard, no shell.
+    await send('Page.navigate', { url });
+    await waitFor(`!!document.querySelector('[data-testid="embed"] [data-widget="Your revenue"]')?.innerText.match(/150/)`, 30000, 'embed page');
+    report.details.shell = await evaluate(`!!document.querySelector('nav[aria-label="Primary"]')`);
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_embed.png'), Buffer.from(shot.result.data, 'base64')); }
+    // 4. Another tenant.
+    const key = ((await j('GET', `/api/workspaces/${wsId}/embed/keys`)).keys ?? []).find((k) => k.name === 'E2E portal');
+    const globex = await j('POST', `/api/workspaces/${wsId}/embed/sign`, { key_id: key.id, resource_type: 'dashboard', resource_id: dash.id, attrs: { tenant: 'globex' } });
+    await send('Page.navigate', { url: globex.url.startsWith('/') ? `${BASE}${globex.url}` : globex.url.replace(/^https?:\/\/[^/]+/, BASE) });
+    await waitFor(`!!document.querySelector('[data-testid="embed"] [data-widget="Your revenue"]')?.innerText.match(/70/)`, 30000, 'second tenant');
+    report.details.globex = await evaluate(`document.querySelector('[data-widget="Your revenue"]').innerText.replace(/\\s+/g, ' ')`);
+    // Back into the app for the cleanup's API calls.
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -1154,6 +1208,12 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'embeds') {
+    if (!d.snippet) problems.push('no signing snippet');
+    if (!/150/.test(d.preview ?? '') || /250|220/.test(d.preview ?? '')) problems.push(`preview: ${d.preview}`);
+    if (d.shell !== false) problems.push('the embed page shows the DuckView shell');
+    if (!/70/.test(d.globex ?? '') || /150/.test(d.globex ?? '')) problems.push(`second tenant: ${d.globex}`);
   }
   if (scenario === 'git-sync') {
     if (!(d.pending ?? []).some((x) => /^added e2e-dv\/notebooks\/e2e-git-notebook\.yml$/.test(x))) problems.push(`pending: ${JSON.stringify(d.pending)}`);

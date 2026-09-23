@@ -12,8 +12,8 @@ const MASKS: { id: MaskKind | ''; label: string; example: string }[] = [
   { id: 'expression', label: 'expression…', example: 'your SQL' },
 ];
 
-interface Draft { id: string | null; name: string; description: string; table: string; filter: string; masks: Record<string, ColumnMask>; roles: ('VIEWER' | 'EDITOR')[]; users: string[]; groups: string[]; all: boolean }
-const blank = (): Draft => ({ id: null, name: '', description: '', table: '', filter: '', masks: {}, roles: ['VIEWER'], users: [], groups: [], all: false });
+interface Draft { id: string | null; name: string; description: string; table: string; filter: string; masks: Record<string, ColumnMask>; roles: ('VIEWER' | 'EDITOR')[]; users: string[]; groups: string[]; all: boolean; embeds: boolean }
+const blank = (): Draft => ({ id: null, name: '', description: '', table: '', filter: '', masks: {}, roles: ['VIEWER'], users: [], groups: [], all: false, embeds: false });
 
 /** Governance → Access policies: who sees which rows and columns of a workspace's tables (owners manage them). */
 export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; isOwner: boolean }) {
@@ -58,12 +58,12 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
   };
   const save = () => act('save', async () => {
     if (!draft) return;
-    const body = { name: draft.name.trim() || undefined, description: draft.description.trim() || null, table_name: draft.table, row_filter: draft.filter.trim() || null, column_masks: draft.masks, applies_to: draft.all ? { all: true } : { roles: draft.roles, users: draft.users, groups: draft.groups } };
+    const body = { name: draft.name.trim() || undefined, description: draft.description.trim() || null, table_name: draft.table, row_filter: draft.filter.trim() || null, column_masks: draft.masks, applies_to: draft.all ? { all: true } : { roles: draft.roles, users: draft.users, groups: draft.groups, ...(draft.embeds ? { embeds: true } : {}) } };
     if (draft.id) await api.patch(`/api/policies/${draft.id}`, body);
     else await api.post(`/api/workspaces/${workspaceId}/policies`, body);
     setDraft(null);
   });
-  const subjects = (p: AccessPolicy) => (p.applies_to.all ? 'everyone but owners' : [...(p.applies_to.roles ?? []).map((r) => `${r.toLowerCase()}s`), ...(p.applies_to.users ?? []).map(nameOf), ...(p.applies_to.groups ?? []).map((g) => `team ${nameOf(g)}`)].join(', '));
+  const subjects = (p: AccessPolicy) => (p.applies_to.all ? 'everyone but owners' : [...(p.applies_to.embeds ? ['embeds'] : []), ...(p.applies_to.roles ?? []).map((r) => `${r.toLowerCase()}s`), ...(p.applies_to.users ?? []).map(nameOf), ...(p.applies_to.groups ?? []).map((g) => `team ${nameOf(g)}`)].join(', '));
 
   if (!isOwner) {
     return (
@@ -111,7 +111,7 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
                 {Object.entries(p.column_masks).map(([c, m]) => <span key={c} className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-[10.5px] text-zinc-300"><EyeOff className="h-3 w-3" /> {c}: {m.kind}</span>)}
               </div>
               <div className="mt-2 flex items-center gap-1">
-                <Button size="sm" variant="ghost" onClick={() => setDraft({ id: p.id, name: p.name, description: p.description ?? '', table: p.table_name, filter: p.row_filter ?? '', masks: p.column_masks, roles: p.applies_to.roles ?? [], users: p.applies_to.users ?? [], groups: p.applies_to.groups ?? [], all: !!p.applies_to.all })}><Pencil className="h-3.5 w-3.5" /> Edit</Button>
+                <Button size="sm" variant="ghost" onClick={() => setDraft({ id: p.id, name: p.name, description: p.description ?? '', table: p.table_name, filter: p.row_filter ?? '', masks: p.column_masks, roles: p.applies_to.roles ?? [], users: p.applies_to.users ?? [], groups: p.applies_to.groups ?? [], all: !!p.applies_to.all, embeds: !!p.applies_to.embeds })}><Pencil className="h-3.5 w-3.5" /> Edit</Button>
                 <Button size="sm" variant="ghost" onClick={() => void act(`t:${p.id}`, () => api.patch(`/api/policies/${p.id}`, { enabled: !p.enabled }))}>{p.enabled ? 'Turn off' : 'Turn on'}</Button>
                 <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={() => { if (confirm(`Delete the policy "${p.name}"? The people it restricts will see the whole table.`)) void act(`d:${p.id}`, () => api.del(`/api/policies/${p.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
@@ -148,6 +148,7 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
             <div>
               <Label>Applies to</Label>
               <label className="mr-3 inline-flex items-center gap-1.5 text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={draft.all} onChange={(e) => setDraft({ ...draft, all: e.target.checked })} /> everyone but the owners</label>
+              {!draft.all && <label className="mr-3 inline-flex items-center gap-1.5 text-zinc-300" title="Viewers of signed embeds; use {{embed.<attribute>}} in the row filter"><input type="checkbox" className="accent-accent-500" checked={draft.embeds} onChange={(e) => setDraft({ ...draft, embeds: e.target.checked })} /> embeds</label>}
               {!draft.all && (
                 <div className="mt-1 space-y-1.5">
                   <div className="flex gap-3">{(['VIEWER', 'EDITOR'] as const).map((r) => <label key={r} className="inline-flex items-center gap-1.5 text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={draft.roles.includes(r)} onChange={(e) => setDraft({ ...draft, roles: e.target.checked ? [...draft.roles, r] : draft.roles.filter((x) => x !== r) })} /> {r.toLowerCase()}s</label>)}</div>

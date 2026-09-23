@@ -35,6 +35,7 @@ import { NotebookService } from './services/notebooks.js';
 import { CommentService } from './services/comments.js';
 import { RevisionService } from './services/revisions.js';
 import { GitSyncService } from './services/git-sync.js';
+import { EmbedService } from './services/embeds.js';
 import { eq } from 'drizzle-orm';
 import type { DashboardWidget, LayoutItem, NotebookCell } from './db/schema/sqlite.js';
 import path from 'node:path';
@@ -86,6 +87,7 @@ export interface AppContext {
   comments: CommentService;
   revisions: RevisionService;
   git: GitSyncService;
+  embeds: EmbedService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -202,6 +204,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       for (const w of (snap.widgets as Omit<DashboardWidget, 'dashboard_id' | 'created_at' | 'updated_at'>[]) ?? []) await store.db.insert(store.schema.dashboardWidgets).values({ ...w, dashboard_id: id, created_at: now, updated_at: now });
     },
   };
+  const embeds = new EmbedService(store, cipher, workspaces, auth, audit, dashboards, notebooks, queries, () => cfg.server.public_url?.replace(/\/+$/, '') ?? null);
   const git = new GitSyncService(store, cfg, cipher, engines.jail.baseDir, workspaces, audit, { revisions, notebooks, savedQueries, dashboards, semantic, dbt });
   if (cfg.transform.scheduler_enabled) {
     dbt.startScheduler();
@@ -256,6 +259,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     comments,
     revisions,
     git,
+    embeds,
     lakehouse,
     agents,
     groups,

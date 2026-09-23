@@ -241,4 +241,15 @@ describe('access policies', () => {
     expect((await mq(`SELECT count(*) AS n FROM "${myView}"`, teamJwt)).status).toBe(403);
     for (const x of (await api('GET', `/api/workspaces/${wsId}/policies`)).json.policies as { id: string }[]) await api('DELETE', `/api/policies/${x.id}`);
   });
+
+  it('applies every policy that matches a table, not just the first', async () => {
+    const make = (body: Record<string, unknown>) => api('POST', `/api/workspaces/${wsId}/policies`, body, jwt);
+    const a = (await make({ name: 'A: EU only', table_name: 'customers', row_filter: "region = 'EU'", column_masks: { email: { kind: 'partial' } }, applies_to: { roles: ['VIEWER'] } })).json.policy;
+    const b = (await make({ name: 'B: own rows', table_name: 'customers', row_filter: 'owner_email = {{user.email}}', column_masks: { email: { kind: 'null' } }, applies_to: { roles: ['VIEWER'] } })).json.policy;
+    // Both filters: EU and owned by the viewer — one row; the stricter mask (null) wins over partial.
+    expect(await rows('SELECT id, email FROM customers ORDER BY id', viewerJwt)).toEqual([[1, null]]);
+    await api('DELETE', `/api/policies/${a.id}`);
+    expect(await rows('SELECT id FROM customers ORDER BY id', viewerJwt)).toEqual([[1], [3]]);
+    await api('DELETE', `/api/policies/${b.id}`);
+  });
 });

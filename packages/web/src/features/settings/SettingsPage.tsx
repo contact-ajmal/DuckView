@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { GitBranch, Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, Layers, Pencil, AppWindow, ScrollText } from 'lucide-react';
+import { Code2, GitBranch, Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, Layers, Pencil, AppWindow, ScrollText } from 'lucide-react';
 import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type CloudConnection, type CopilotConfig, type LakehouseConnection } from '../../api/client';
 import { Gauge } from '../../components/Gauge';
 import { PageHeader, SideCard, Panel, KvRows, Tag } from '../../components/layout';
@@ -21,8 +21,9 @@ import { AppsAdminPanel } from './AppsAdminPanel';
 import { AuditPanel } from '../governance/AuditPanel';
 import { ProvisioningPanel } from '../governance/ProvisioningPanel';
 import { GitPanel } from './GitPanel';
+import { EmbedPanel } from './EmbedPanel';
 
-type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git';
+type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; group: string; admin?: boolean }[] = [
   { id: 'account', group: 'General', label: 'Account', blurb: 'Your password and identity', icon: <UserRound className="h-4 w-4" /> },
   { id: 'teams', group: 'General', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
@@ -33,6 +34,7 @@ const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.Reac
   { id: 'users', group: 'Security', label: 'Users', blurb: 'Roles, access and deactivation', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
   { id: 'audit', group: 'Security', label: 'Audit log', blurb: 'Who did what, and where the log is streamed', icon: <ScrollText className="h-4 w-4" /> },
   { id: 'provisioning', group: 'Security', label: 'Provisioning', blurb: 'SCIM 2.0 users and teams from your identity provider', icon: <KeyRound className="h-4 w-4" />, admin: true },
+  { id: 'embedding', group: 'Security', label: 'Embedding', blurb: 'Show dashboards and notebooks inside your own application', icon: <Code2 className="h-4 w-4" /> },
   { id: 'copilot', group: 'AI', label: 'AI assistant', blurb: 'The model DuckView AI uses, keys and usage', icon: <Bot className="h-4 w-4" /> },
   { id: 'engine', group: 'Data', label: 'Engine', blurb: 'Memory, threads, timeouts and storage of this workspace', icon: <Database className="h-4 w-4" /> },
   { id: 'git', group: 'Data', label: 'Git', blurb: 'Notebooks, queries, dashboards and models in a Git repository', icon: <GitBranch className="h-4 w-4" /> },
@@ -156,6 +158,8 @@ export function SettingsPage() {
           {cat === 'layout' && <LayoutSettings />}
 
           {cat === 'git' && ws.activeId && <GitPanel key={ws.activeId} workspaceId={ws.activeId} />}
+
+          {cat === 'embedding' && ws.activeId && <EmbedPanel key={ws.activeId} workspaceId={ws.activeId} />}
 
           {cat === 'hardware' && (
             <div className="space-y-5">

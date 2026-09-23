@@ -15,7 +15,7 @@ const PolicyBody = z.object({
   table_name: z.string().max(300),
   row_filter: z.string().max(5000).nullable().optional(),
   column_masks: z.record(z.string().max(200), Mask).optional(),
-  applies_to: z.object({ all: z.boolean().optional(), roles: z.array(z.enum(['VIEWER', 'EDITOR'])).optional(), users: z.array(z.string().max(64)).max(500).optional(), groups: z.array(z.string().max(64)).max(200).optional() }).optional(),
+  applies_to: z.object({ all: z.boolean().optional(), embeds: z.boolean().optional(), roles: z.array(z.enum(['VIEWER', 'EDITOR'])).optional(), users: z.array(z.string().max(64)).max(500).optional(), groups: z.array(z.string().max(64)).max(200).optional() }).optional(),
   enabled: z.boolean().optional(),
 });
 

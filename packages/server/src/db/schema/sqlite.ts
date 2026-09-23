@@ -768,6 +768,8 @@ export type ColumnMask = { kind: Exclude<MaskKind, 'expression'> } | { kind: 'ex
 /** Who a policy restricts: workspace roles, users, teams — or everyone but the workspace's owners. */
 export interface PolicySubjects {
   all?: boolean;
+  /** Viewers of signed embeds ({{embed.<attribute>}} in the row filter). */
+  embeds?: boolean;
   roles?: ('VIEWER' | 'EDITOR')[];
   users?: string[];
   groups?: string[];
@@ -1366,3 +1368,26 @@ export const gitSyncs = sqliteTable(
   (t) => [uniqueIndex('git_syncs_workspace_idx').on(t.workspace_id)],
 );
 export type GitSync = typeof gitSyncs.$inferSelect;
+
+/** Signing keys for embeds: a host application signs a short-lived token naming one dashboard or notebook. */
+export const embedKeys = sqliteTable(
+  'embed_keys',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** AES-256-GCM JSON: { secret } (HMAC-SHA256 key, shown once). */
+    encrypted_secret: text('encrypted_secret').notNull(),
+    iv: text('iv').notNull(),
+    tag: text('tag').notNull(),
+    /** Sites allowed to frame embeds signed with this key (Content-Security-Policy frame-ancestors); empty = any. */
+    allowed_origins: text('allowed_origins', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** Embeds query as this person (read-only), restricted by the policies for embeds. */
+    created_by: text('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    last_used_at: integer('last_used_at', { mode: 'timestamp_ms' }),
+    revoked_at: integer('revoked_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('embed_keys_workspace_idx').on(t.workspace_id)],
+);
+export type EmbedKey = typeof embedKeys.$inferSelect;

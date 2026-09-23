@@ -871,3 +871,21 @@ export const gitSyncs = pgTable(
   },
   (t) => [uniqueIndex('git_syncs_workspace_idx').on(t.workspace_id)],
 );
+
+export const embedKeys = pgTable(
+  'embed_keys',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    encrypted_secret: text('encrypted_secret').notNull(),
+    iv: text('iv').notNull(),
+    tag: text('tag').notNull(),
+    allowed_origins: jsonb('allowed_origins').$type<string[]>().notNull().default([]),
+    created_by: text('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    last_used_at: ts('last_used_at'),
+    revoked_at: ts('revoked_at'),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('embed_keys_workspace_idx').on(t.workspace_id)],
+);

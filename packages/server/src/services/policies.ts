@@ -45,8 +45,10 @@ export interface PolicyInput {
 export interface PolicySubject {
   id: string;
   email: string;
-  role: WorkspaceRole;
+  role: WorkspaceRole | 'EMBED';
   groups: { id: string; name: string }[];
+  /** A signed embed's attributes. */
+  attrs?: Record<string, string | number | boolean>;
 }
 
 /** The policies that apply to one person in one workspace. */
@@ -163,6 +165,7 @@ export class PolicyService {
     const s = a ?? { roles: ['VIEWER'] };
     const out: PolicySubjects = {};
     if (s.all) out.all = true;
+    if (s.embeds) out.embeds = true;
     if (s.roles?.length) {
       const bad = s.roles.find((r) => r !== 'VIEWER' && r !== 'EDITOR');
       if (bad) throw badRequest(`applies_to.roles: ${bad} — owners are never restricted; use VIEWER or EDITOR`);
@@ -170,7 +173,7 @@ export class PolicyService {
     }
     if (s.users?.length) out.users = [...new Set(s.users)];
     if (s.groups?.length) out.groups = [...new Set(s.groups)];
-    if (!out.all && !out.roles && !out.users && !out.groups) throw badRequest('applies_to must name roles, users, teams, or all');
+    if (!out.all && !out.embeds && !out.roles && !out.users && !out.groups) throw badRequest('applies_to must name roles, users, teams, embeds, or all');
     return out;
   }
 
@@ -238,6 +241,14 @@ export class PolicyService {
 
   /** The policies that apply to `p` in a workspace where they have `role`, or null when none do. */
   async restrictionFor(p: Principal, workspaceId: string, role: WorkspaceRole): Promise<Restriction | null> {
+    // A signed embed is restricted by the policies for embeds (and for everyone), whoever made its key.
+    if (p.embed) {
+      const applies = (await this.byWorkspace(workspaceId)).filter((x) => x.enabled && (x.applies_to.all || x.applies_to.embeds));
+      if (!applies.length) return null;
+      const subject: PolicySubject = { id: `embed:${p.embed.subject}`, email: p.embed.subject, role: 'EMBED', groups: [], attrs: p.embed.attrs };
+      const scope = crypto.createHash('sha256').update(JSON.stringify([subject, applies.map((x) => [x.id, x.updated_at.getTime()])])).digest('hex').slice(0, 24);
+      return { subject, policies: applies, scope };
+    }
     if (role === 'OWNER') return null;
     const all = (await this.byWorkspace(workspaceId)).filter((x) => x.enabled);
     if (!all.length) return null;
@@ -286,7 +297,13 @@ export class PolicyService {
   }
 
   private placeholder(filter: string, s: PolicySubject): string {
-    return filter.replace(/\{\{\s*user\.(email|id|role|groups)\s*\}\}/g, (_, k: string) => (k === 'groups' ? `[${s.groups.map((g) => lit(g.name)).join(', ')}]::VARCHAR[]` : lit(k === 'email' ? s.email : k === 'id' ? s.id : s.role)));
+    return filter
+      .replace(/\{\{\s*user\.(email|id|role|groups)\s*\}\}/g, (_, k: string) => (k === 'groups' ? `[${s.groups.map((g) => lit(g.name)).join(', ')}]::VARCHAR[]` : lit(k === 'email' ? s.email : k === 'id' ? s.id : s.role)))
+      // A signed attribute; one the token does not carry is NULL (so a filter on it matches nothing).
+      .replace(/\{\{\s*embed\.([A-Za-z_][\w]*)\s*\}\}/g, (_, k: string) => {
+        const v = s.attrs?.[k];
+        return v === undefined || v === null ? 'NULL' : typeof v === 'number' ? String(v) : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : lit(String(v));
+      });
   }
 
   private maskExpr(col: { name: string; type: string }, m: ColumnMask | undefined): string {
@@ -380,7 +397,8 @@ export class PolicyService {
         throw forbidden(`Access policies apply to you in this workspace: ${ref.table_name} was built for someone else`);
       }
       if (this.isMosaicDerived(ref)) throw forbidden('Access policies apply to you in this workspace: shared Mosaic objects (pre-aggregates, materialised datasets) are not available');
-      const policy = r.policies.find((x) => this.matches(x, ref, currentDb));
+      // Every policy that applies to this person on this table counts: filters are AND-ed, masks merged.
+      const policy = combinePolicies(r.policies.filter((x) => this.matches(x, ref, currentDb)));
       if (policy) {
         if (n.at_clause) throw forbidden(`${ref.table_name} is protected by an access policy: time travel (AT) is not allowed`);
         let sub = subqueries.get(policy.id);
@@ -476,4 +494,26 @@ function walk(node: unknown, fn: (n: Record<string, unknown>) => void): void {
     fn(node as Record<string, unknown>);
     for (const v of Object.values(node)) walk(v, fn);
   }
+}
+
+/** How strict a mask is, for two policies masking one column: the stricter wins. */
+const MASK_STRICTNESS: Record<string, number> = { null: 5, redact: 4, hash: 3, partial: 2, expression: 1 };
+
+/**
+ * One effective policy from all the policies that apply to a person on a table (null when none): a row passes only
+ * if it passes every filter, and a column masked by several policies gets the strictest of their masks.
+ */
+export function combinePolicies(policies: AccessPolicy[]): AccessPolicy | null {
+  if (!policies.length) return null;
+  if (policies.length === 1) return policies[0]!;
+  const filters = policies.map((x) => x.row_filter).filter((f): f is string => !!f);
+  const masks: Record<string, ColumnMask> = {};
+  for (const x of policies) {
+    for (const [col, m] of Object.entries(x.column_masks)) {
+      const cur = Object.entries(masks).find(([c]) => c.toLowerCase() === col.toLowerCase());
+      if (!cur) masks[col] = m;
+      else if ((MASK_STRICTNESS[m.kind] ?? 0) > (MASK_STRICTNESS[cur[1].kind] ?? 0)) masks[cur[0]] = m;
+    }
+  }
+  return { ...policies[0]!, id: policies.map((x) => x.id).join('+'), name: policies.map((x) => x.name).join(' + '), row_filter: filters.length ? filters.map((f) => `(${f})`).join(' AND ') : null, column_masks: masks };
 }

@@ -545,7 +545,7 @@ export interface SnapshotRun { id: string; snapshot_id: string; status: 'ok' | '
 // ---- governance: access policies (row / column security)
 export type MaskKind = 'null' | 'redact' | 'hash' | 'partial' | 'expression';
 export type ColumnMask = { kind: Exclude<MaskKind, 'expression'> } | { kind: 'expression'; sql: string };
-export interface PolicySubjects { all?: boolean; roles?: ('VIEWER' | 'EDITOR')[]; users?: string[]; groups?: string[] }
+export interface PolicySubjects { all?: boolean; embeds?: boolean; roles?: ('VIEWER' | 'EDITOR')[]; users?: string[]; groups?: string[] }
 export interface AccessPolicy { id: string; workspace_id: string; name: string; description: string | null; table_name: string; row_filter: string | null; column_masks: Record<string, ColumnMask>; applies_to: PolicySubjects; enabled: boolean; created_by: string | null; created_at: string; updated_at: string }
 export interface MyRestrictions { restricted: boolean; tables: { table: string; name: string; description: string | null; rows_filtered: boolean; masked_columns: string[] }[] }
 // ---- catalog notes & lineage

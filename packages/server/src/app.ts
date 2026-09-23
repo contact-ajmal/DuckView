@@ -36,6 +36,7 @@ import { notebookRoutes } from './routes/notebooks.js';
 import { commentRoutes } from './routes/comments.js';
 import { revisionRoutes } from './routes/revisions.js';
 import { gitRoutes } from './routes/git.js';
+import { embedAdminRoutes, embedPublicRoutes } from './routes/embeds.js';
 import { buildAppsServer } from './apps-server.js';
 import { agentRoutes } from './routes/agent.js';
 import { groupRoutes } from './routes/groups.js';
@@ -94,9 +95,12 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   });
 
   // Security headers
-  app.addHook('onSend', async (_req, reply) => {
+  app.addHook('onSend', async (req, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('X-Frame-Options', 'DENY');
+    // A signed embed page may be framed by its key's allowed origins; everything else never.
+    const ancestors = req.method === 'GET' && req.url.startsWith('/embed/') ? await ctx.embeds.frameAncestors(new URL(req.url, 'http://x').searchParams.get('token') ?? undefined) : null;
+    if (ancestors) reply.header('Content-Security-Policy', `frame-ancestors ${ancestors}`);
+    else reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'same-origin');
     if (process.env.NODE_ENV === 'production') reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   });
@@ -139,6 +143,8 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   await app.register(async (r) => commentRoutes(r, ctx));
   await app.register(async (r) => revisionRoutes(r, ctx));
   await app.register(async (r) => gitRoutes(r, ctx));
+  await app.register(async (r) => embedAdminRoutes(r, ctx));
+  await app.register(async (r) => embedPublicRoutes(r, ctx));
   await app.register(async (r) => agentRoutes(r, ctx));
   await app.register(async (r) => groupRoutes(r, ctx));
   await app.register(async (r) => mosaicRoutes(r, ctx));

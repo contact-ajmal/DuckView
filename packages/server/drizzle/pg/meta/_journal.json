@@ -225,6 +225,13 @@
       "when": 1790189266554,
       "tag": "0031_git_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790189986504,
+      "tag": "0032_embed_keys",
+      "breakpoints": true
     }
   ]
 }
