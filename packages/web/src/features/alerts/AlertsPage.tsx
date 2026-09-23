@@ -5,9 +5,10 @@ import { Eyebrow, PageTitle } from '../../components/layout';
 import { cn } from '../../components/ui';
 import { ChannelsPanel } from './ChannelsPanel';
 import { AlertsPanel } from './AlertsPanel';
+import { SnapshotsPanel } from './SnapshotsPanel';
 
-type Tab = 'alerts' | 'channels';
-const TABS: { id: Tab; label: string }[] = [{ id: 'alerts', label: 'Alerts' }, { id: 'channels', label: 'Channels' }];
+type Tab = 'alerts' | 'snapshots' | 'channels';
+const TABS: { id: Tab; label: string }[] = [{ id: 'alerts', label: 'Alerts' }, { id: 'snapshots', label: 'Snapshots' }, { id: 'channels', label: 'Channels' }];
 
 /** #/alerts — alerts, scheduled snapshots and the channels they are delivered to. */
 export function AlertsPage() {
@@ -31,6 +32,7 @@ export function AlertsPage() {
           {TABS.map((t) => <button key={t.id} onClick={() => (location.hash = `#/alerts/${t.id}`)} className={cn('-mb-px border-b-2 px-3 py-1.5', tab === t.id ? 'border-accent-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-200')}>{t.label}</button>)}
         </div>
         {ws.activeId && tab === 'alerts' && <AlertsPanel workspaceId={ws.activeId} />}
+        {ws.activeId && tab === 'snapshots' && <SnapshotsPanel workspaceId={ws.activeId} />}
         {ws.activeId && tab === 'channels' && <ChannelsPanel workspaceId={ws.activeId} />}
       </div>
     </div>

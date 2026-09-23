@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (28 tools · 4 resources · 5 prompts)        │
+│  Agent tools: one registry → MCP (29 tools · 4 resources · 5 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -348,6 +348,16 @@ The API returns a masked hint instead of any secret. Every URL is called through
 
 Messages carry the description, what the check found (a sample of up to 5 rows for `rows`), the condition, value, workspace and a link, with `dedup_key: duckview-alert-<id>`. The scheduler (`notifications.scheduler_enabled`, every 30 s) checks due alerts and moves `next_run_at` first; a changed query or condition resets the state. Checks are recorded (`GET /api/alerts/:id/events`, 90 days) when the state changes, something was delivered, or a person ran it; live events `{type: "alert"}` refresh open pages. API: `GET/POST /api/workspaces/:id/alerts` · `POST /api/workspaces/:id/alerts/preview {sql, condition}` (runs once as the caller, saves and sends nothing) · `GET/PATCH/DELETE /api/alerts/:id` · `POST /api/alerts/:id/run` (editors). Agents: `list_alerts`, `create_alert` (tries the query first), `run_alert`.
 
+**Scheduled snapshots** (`#/alerts/snapshots`, `services/snapshots.ts`): a dashboard (grid or Mosaic) or a data app rendered by a headless browser on a schedule (cron — default `0 8 * * 1-5` — or every ≥ 15 minutes, or by hand), as a PNG or a PDF (a PNG is always kept too), `width` 640–2400 px, and delivered to channels. A dashboard is rendered by DuckView's own UI at `#/snapshot/dashboard/<id>` (the dashboard alone; `<html data-snapshot>` reports loading → loaded / ready / error) signed in as the snapshot's owner with a five-minute session that never leaves the server; the renderer waits for that state, for the network to go quiet and for fonts, then captures the full page. An app is rendered on its own origin with the app cookie (a server app is started first). One render runs at a time; `notifications.snapshot_timeout_seconds` bounds each. Files live in `<data>/.duckview/snapshots/<id>/` for `notifications.snapshot_retention_days`.
+
+| Channel | What arrives |
+|---|---|
+| email | the PNG inline, the PDF attached |
+| webhook | `image` (base64 + link) and `attachments` (the PDF, base64) |
+| Slack · Teams · PagerDuty | the image through a signed link — `GET /api/snapshot-files/<run>/png?exp=…&sig=…`, HMAC with the server secret, valid `notifications.snapshot_link_days` — which needs `server.public_url` reachable from them; the PDF as a link in the text |
+
+A render that fails is delivered as `snapshot.failed` with the reason (e.g. no browser). The server image ships Chromium (`CHROME_PATH`, run without its sandbox — `CHROME_NO_SANDBOX=1` — as containers cannot provide one; `--build-arg WITH_BROWSER=false` leaves it out). API: `GET/POST /api/workspaces/:id/snapshots` · `GET/PATCH/DELETE /api/snapshots/:id` · `POST /api/snapshots/:id/run` · `GET /api/snapshots/:id/runs` · `GET /api/snapshots/:id/runs/:run/file`. Agents: `snapshot_dashboard(dashboard_id | app_id)` returns the picture without saving or sending it.
+
 **Outgoing mail**: Settings → Integrations → Outgoing mail (`GET/PUT/DELETE /api/admin/integrations/smtp`, `POST …/smtp/test {to}`) — host, port, TLS or STARTTLS, user, password (encrypted, write-only), from — overrides `notifications.smtp` in the configuration. Links in messages use `server.public_url`.
 
 ## Overview: the data source bar
@@ -484,6 +494,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 
 | `browse_connector(connection_id, path?)` | Walks a warehouse, SaaS or Google connection one level at a time; leaves carry the `resource` for `create_data_sync`. |
 | `connector_query(connection_id, sql, limit?)` | Read-only SQL on Snowflake, BigQuery, Redshift or ClickHouse; rows capped. |
+| `snapshot_dashboard(dashboard_id \| app_id, width?)` | Renders a dashboard or data app the way a person sees it and returns the image — to check a dashboard an agent built, or to describe one. |
 | `list_alerts` · `create_alert(name, sql, condition, every_minutes \| cron, channel_ids, …)` · `run_alert` | SQL alerts: a read-only query and a condition checked on a schedule; state changes go to Slack, Teams, email, PagerDuty or webhooks — see [Alerts & delivery](#alerts--delivery). |
 | `list_apps` · `create_app(name, source, …)` · `update_app` · `run_app` · `stop_app` · `get_app_logs` · `preview_app` · `publish_app` | Streamlit data apps: generated from a dashboard, saved queries or code (validated first), run, previewed with a screenshot, published after human approval — see [Data apps](#data-apps-streamlit-dash-gradio). |
 

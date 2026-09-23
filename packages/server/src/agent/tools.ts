@@ -792,7 +792,28 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`**${r.alert.name}**: ${r.evaluation.summary} State ${r.alert.state}${r.changed ? ' (changed)' : ''}${r.notified ? `, ${r.notified} notified` : ''}.`)], structuredContent: { status: r.evaluation.state === 'error' ? 'error' : 'ok', alert_id, state: r.alert.state, changed: r.changed, value: r.evaluation.value, notified: r.notified, error: r.evaluation.error }, isError: r.evaluation.state === 'error' };
       },
     }),
+
+    define({
+      name: 'snapshot_dashboard',
+      title: 'Snapshot dashboard or app',
+      description: 'Renders a dashboard (or a data app) the way a person sees it — a headless browser on the server — and returns the picture, so you can check a dashboard you built or describe one. Nothing is saved or sent; scheduled delivery to Slack / Teams / email is set up under Alerts → Snapshots.',
+      inputSchema: { dashboard_id: z.string().optional(), app_id: z.string().optional(), width: z.number().int().min(640).max(2400).optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { dashboard_id, app_id, width }) {
+        if (!dashboard_id === !app_id) return { content: [text('Pass dashboard_id or app_id.')], structuredContent: { status: 'error' }, isError: true };
+        const user = await env.ctx.auth.findById(env.principal.userId);
+        if (!user) return { content: [text('Unknown user')], isError: true };
+        const target = dashboard_id ? { kind: 'dashboard' as const, dashboard_id } : { kind: 'app' as const, app_id: app_id! };
+        const owner = dashboard_id ? await env.ctx.dashboards.get(env.principal, dashboard_id) : await env.ctx.apps.get(env.principal, app_id!);
+        try {
+          const r = await env.ctx.snapshots.render({ id: 'adhoc', workspace_id: owner.workspace_id, user_id: user.id, name: owner.name, target, format: 'png', width: width ?? 1280, schedule: { kind: 'manual' }, channel_ids: [], enabled: false, last_status: null, last_error: null, last_run_at: null, next_run_at: null, created_at: new Date(), updated_at: new Date() }, user);
+          return { content: [text(`**${r.title}** rendered (${Math.round(r.png.length / 1024)} KB PNG).`), { type: 'image', data: r.png.toString('base64'), mimeType: 'image/png' }], structuredContent: { status: 'ok', title: r.title, bytes: r.png.length } };
+        } catch (err) {
+          return { content: [text(`Could not render: ${(err as Error).message}`)], structuredContent: { status: 'error', error: (err as Error).message }, isError: true };
+        }
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard'] as const;

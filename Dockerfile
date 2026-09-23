@@ -48,9 +48,14 @@ ENV NODE_ENV=production \
     DUCKVIEW_WEB_DIST=/app/web \
     DUCKVIEW_CONFIG=/app/duckview.config.yaml \
     DUCKDB_EXTENSION_DIRECTORY=/app/duckdb-extensions \
-    DUCKVIEW_TRUST_PROXY=true
+    DUCKVIEW_TRUST_PROXY=true \
+    CHROME_PATH=/usr/bin/chromium \
+    CHROME_NO_SANDBOX=1
 # python3 + venv: data apps (Streamlit) run from a virtualenv DuckView creates under /data/.duckview/apps on first use.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini python3 python3-venv python3-pip \
+# chromium + fonts: scheduled snapshots of dashboards and apps, and agents' previews (a headless browser);
+# --build-arg WITH_BROWSER=false builds a slimmer image without them (snapshots then report "no Chrome").
+ARG WITH_BROWSER=true
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini python3 python3-venv python3-pip $( [ "$WITH_BROWSER" = "true" ] && echo chromium fonts-liberation fonts-noto-color-emoji ) \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 1001 duckgroup \
  && useradd --system --uid 1001 --gid duckgroup --home-dir /app --shell /usr/sbin/nologin duckuser \

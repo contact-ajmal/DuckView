@@ -327,6 +327,11 @@ export const ConfigSchema = z.object({
       scheduler_enabled: z.coerce.boolean().default(true),
       /** Rows an alert query may return (the first ones are quoted in the message). */
       alert_max_rows: z.coerce.number().int().min(1).max(10_000).default(100),
+      /** Scheduled snapshots: how long rendered files are kept, and how long a shared link to one works. */
+      snapshot_retention_days: z.coerce.number().int().min(1).default(30),
+      snapshot_link_days: z.coerce.number().int().min(1).max(90).default(7),
+      /** How long a dashboard or app may take to render. */
+      snapshot_timeout_seconds: z.coerce.number().int().min(10).default(90),
       /** PagerDuty Events API v2 endpoint (EU accounts: https://events.eu.pagerduty.com/v2/enqueue). */
       pagerduty_url: z.string().default('https://events.pagerduty.com/v2/enqueue'),
       /** Outgoing mail; administrators can also set it from Settings → Integrations (that one wins). */

@@ -700,6 +700,54 @@ export const alertEvents = sqliteTable(
   (t) => [index('alert_events_alert_idx').on(t.alert_id, t.created_at)],
 );
 
+export type SnapshotTarget = { kind: 'dashboard'; dashboard_id: string } | { kind: 'app'; app_id: string };
+export const SNAPSHOT_FORMATS = ['png', 'pdf'] as const;
+export type SnapshotFormat = (typeof SNAPSHOT_FORMATS)[number];
+
+/** A dashboard or data app rendered on a schedule (PNG or PDF) and delivered to notification channels. */
+export const snapshots = sqliteTable(
+  'snapshots',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Rendered as this user (what they can see). */
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    target: text('target', { mode: 'json' }).$type<SnapshotTarget>().notNull(),
+    format: text('format', { enum: SNAPSHOT_FORMATS }).notNull().default('png'),
+    width: integer('width').notNull().default(1280),
+    schedule: text('schedule', { mode: 'json' }).$type<SyncSchedule>().notNull(),
+    channel_ids: text('channel_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    last_status: text('last_status', { enum: DELIVERY_STATUSES }),
+    last_error: text('last_error'),
+    last_run_at: integer('last_run_at', { mode: 'timestamp_ms' }),
+    next_run_at: integer('next_run_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('snapshots_workspace_idx').on(t.workspace_id), index('snapshots_next_run_idx').on(t.next_run_at)],
+);
+
+/** One rendering: the file it produced (under <data>/.duckview/snapshots) and how many channels got it. */
+export const snapshotRuns = sqliteTable(
+  'snapshot_runs',
+  {
+    id: text('id').primaryKey(),
+    snapshot_id: text('snapshot_id').notNull().references(() => snapshots.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: DELIVERY_STATUSES }).notNull(),
+    error: text('error'),
+    format: text('format', { enum: SNAPSHOT_FORMATS }).notNull(),
+    file: text('file'),
+    bytes: integer('bytes'),
+    delivered: integer('delivered').notNull().default(0),
+    triggered_by: text('triggered_by').notNull().default('schedule'),
+    duration_ms: integer('duration_ms'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('snapshot_runs_snapshot_idx').on(t.snapshot_id, t.created_at)],
+);
+
 /** Platform-wide settings set from the console (e.g. the Google OAuth client), secrets encrypted. */
 export const appSettings = sqliteTable('app_settings', {
   key: text('key').primaryKey(),
@@ -816,3 +864,5 @@ export type NotificationChannel = typeof notificationChannels.$inferSelect;
 export type NotificationDelivery = typeof notificationDeliveries.$inferSelect;
 export type Alert = typeof alerts.$inferSelect;
 export type AlertEvent = typeof alertEvents.$inferSelect;
+export type Snapshot = typeof snapshots.$inferSelect;
+export type SnapshotRun = typeof snapshotRuns.$inferSelect;

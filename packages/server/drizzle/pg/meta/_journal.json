@@ -134,6 +134,13 @@
       "when": 1790131508865,
       "tag": "0018_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790132228663,
+      "tag": "0019_snapshots",
+      "breakpoints": true
     }
   ]
 }

@@ -35,6 +35,7 @@ import { badRequest, notFound, forbidden } from './errors.js';
 import type { DashboardService, SavedQueryService } from './bi.js';
 import { appFromDashboard, appFromQueries } from './app-generator.js';
 import { logger } from '../observability/logger.js';
+import { findChrome, withHeadless } from './headless.js';
 import { liveEvents } from '../observability/events.js';
 import { createRuntime, SubprocessRuntime, type AppRuntime, type Exit, type Instance } from './app-runtimes.js';
 
@@ -415,94 +416,38 @@ export class DataAppService {
   }
 
   /**
-   * A headless screenshot of the running app for agents (Chrome via CDP, when a browser is installed; the
-   * proxy's own cookie signs the visitor in). Returns null without a browser.
+   * A headless screenshot of the running app for agents and snapshots (Chrome via CDP, when a browser is installed;
+   * the proxy's own cookie signs the visitor in — the app's origin, never the UI's). Returns null without a browser.
    */
-  async screenshot(app: DataApp, userId: string, baseUrl: string, opts: { width?: number; height?: number; wait_ms?: number } = {}): Promise<{ png: Buffer; text: string } | null> {
+  async screenshot(app: DataApp, userId: string, baseUrl: string, opts: { width?: number; height?: number; wait_ms?: number; fullPage?: boolean; pdf?: boolean } = {}): Promise<{ png: Buffer; pdf: Buffer | null; text: string } | null> {
     const chrome = findChrome(this.cfg.apps.chrome_path);
     if (!chrome || !this.signSession) return null;
-    const { default: WebSocket } = await import('ws');
-    const os = await import('node:os');
-    const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-shot-'));
-    const port = 9400 + Math.floor(Math.random() * 400);
-    const flags = [`--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--no-default-browser-check', '--disable-dev-shm-usage', '--disable-extensions', `--window-size=${opts.width ?? 1280},${opts.height ?? 900}`, 'about:blank'];
-    if (process.getuid?.() === 0) flags.unshift('--no-sandbox'); // containers running as root cannot use Chrome's sandbox
-    const child = spawn(chrome, flags, { stdio: 'ignore' });
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const budget = (opts.wait_ms ?? 25_000) + 20_000; // the whole session, whatever Chrome does
-    const deadlineAll = Date.now() + budget;
-    const handle: { ws: { close(): void } | null } = { ws: null }; // assigned inside run(); narrowing across the closure
-    try {
-      const run = async (): Promise<{ png: Buffer; text: string }> => {
-        let target: { webSocketDebuggerUrl: string } | undefined;
-        for (let i = 0; i < 50 && !target; i++) {
-          if (child.exitCode !== null) throw new Error(`Chrome exited with ${child.exitCode}`);
-          try {
-            const list = (await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(1000) })).json()) as { type: string; webSocketDebuggerUrl: string }[];
-            target = list.find((t) => t.type === 'page');
-          } catch {
-            await sleep(200);
-          }
-        }
-        if (!target) throw new Error('Chrome did not start');
-        const socket = new WebSocket(target.webSocketDebuggerUrl, { perMessageDeflate: false });
-        handle.ws = socket;
-        await new Promise<void>((resolve, reject) => { socket.on('open', () => resolve()); socket.on('error', reject); });
-        let id = 0;
-        const pending = new Map<number, { resolve: (m: { result?: Record<string, unknown> }) => void; reject: (e: Error) => void }>();
-        socket.on('message', (raw) => { const m = JSON.parse(String(raw)) as { id?: number; result?: Record<string, unknown> }; if (m.id && pending.has(m.id)) { pending.get(m.id)!.resolve(m); pending.delete(m.id); } });
-        socket.on('close', () => { for (const p of pending.values()) p.reject(new Error('Chrome closed the connection')); pending.clear(); });
-        // Every command has its own timeout: a crashed or wedged browser must never hang the caller.
-        const send = (method: string, params: Record<string, unknown> = {}) => new Promise<Record<string, unknown>>((resolve, reject) => {
-          const i = ++id;
-          const t = setTimeout(() => { pending.delete(i); reject(new Error(`Chrome did not answer ${method}`)); }, 10_000);
-          pending.set(i, { resolve: (m) => { clearTimeout(t); resolve(m.result ?? {}); }, reject: (e) => { clearTimeout(t); reject(e); } });
-          socket.send(JSON.stringify({ id: i, method, params }));
-        });
-        const evaluate = async (expression: string) => ((await send('Runtime.evaluate', { expression, returnByValue: true })) as { result?: { value?: unknown } }).result?.value;
-        await send('Page.enable');
-        await send('Runtime.enable');
-        const u = new URL(baseUrl);
-        await send('Network.setCookie', { name: 'dv_app', value: this.signSession!(userId), domain: u.hostname, path: '/apps', httpOnly: true });
-        await send('Page.navigate', { url: `${baseUrl.replace(/\/+$/, '')}/apps/${app.id}/` });
-        const deadline = Date.now() + (opts.wait_ms ?? 25_000);
-        let text = '';
+    const wait = opts.wait_ms ?? 25_000;
+    return withHeadless({ chromePath: chrome, width: opts.width ?? 1280, height: opts.height ?? 900, budgetMs: wait + 30_000 }, async (page) => {
+      const base = baseUrl.replace(/\/+$/, '');
+      await page.setCookie({ name: 'dv_app', value: this.signSession!(userId), url: base, path: '/apps', httpOnly: true });
+      await page.navigate(`${base}/apps/${app.id}/`);
+      const deadline = Date.now() + wait;
+      let text = '';
+      if (app.kind === 'streamlit') {
         while (Date.now() < deadline) {
-          await sleep(500);
-          const state = (await evaluate(`(() => { const running = !!document.querySelector('[data-testid="stStatusWidget"]'); const ready = !!document.querySelector('[data-testid="stAppViewContainer"]'); return { running, ready, text: document.body.innerText.slice(0, 4000) }; })()`)) as { running: boolean; ready: boolean; text: string } | undefined;
+          await new Promise((r) => setTimeout(r, 500));
+          const state = await page.evaluate<{ running: boolean; ready: boolean; text: string }>(`(() => { const running = !!document.querySelector('[data-testid="stStatusWidget"]'); const ready = !!document.querySelector('[data-testid="stAppViewContainer"]'); return { running, ready, text: document.body.innerText.slice(0, 4000) }; })()`).catch(() => undefined);
           if (state) text = state.text;
           if (state?.ready && !state.running) {
-            await sleep(1200); // charts settle after the status widget disappears
-            text = String((await evaluate('document.body.innerText.slice(0, 4000)')) ?? text);
+            await new Promise((r) => setTimeout(r, 1200)); // charts settle after the status widget disappears
             break;
           }
         }
-        const shot = (await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })) as { data?: string };
-        if (!shot.data) throw new Error('no screenshot');
-        return { png: Buffer.from(shot.data, 'base64'), text };
-      };
-      return await Promise.race([run(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`preview took longer than ${Math.round(budget / 1000)} s`)), Math.max(1000, deadlineAll - Date.now())))]);
-    } finally {
-      try {
-        handle.ws?.close();
-      } catch {
-        /* closed */
+      } else {
+        // Dash and Gradio: the page is done when the network goes quiet.
+        await page.waitNetworkIdle(1500, wait);
       }
-      // Chrome keeps writing to its profile until it is gone: wait for the exit, then clean up (best effort).
-      await new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, 3000);
-        child.once('exit', () => { clearTimeout(t); resolve(); });
-        child.kill('SIGKILL');
-      });
-      for (let i = 0; i < 5; i++) {
-        try {
-          fs.rmSync(profile, { recursive: true, force: true });
-          break;
-        } catch {
-          await sleep(200);
-        }
-      }
-    }
+      text = String((await page.evaluate<string>('document.body.innerText.slice(0, 4000)').catch(() => text)) ?? text);
+      const png = await page.screenshot({ fullPage: opts.fullPage });
+      const pdf = opts.pdf ? await page.pdf() : null;
+      return { png, pdf, text };
+    });
   }
 
   // ------------------------------------------------------------------ registry
@@ -941,13 +886,4 @@ export class DataAppService {
   }
 }
 
-/**
- * A Chrome / Chromium binary for headless previews. An explicit `apps.chrome_path` is authoritative (missing →
- * no browser); otherwise CHROME_PATH and the usual install locations are tried.
- */
-export function findChrome(configured?: string): string | null {
-  if (configured) return fs.existsSync(configured) ? configured : null;
-  const candidates = [process.env.CHROME_PATH, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium'];
-  for (const c of candidates) if (c && fs.existsSync(c)) return c;
-  return null;
-}
+export { findChrome } from './headless.js';

@@ -22,6 +22,7 @@ import { ConnectorConnectionService } from './services/connector-connections.js'
 import { DataAppService } from './services/apps.js';
 import { NotificationService } from './services/notifications.js';
 import { AlertService } from './services/alerts.js';
+import { SnapshotService } from './services/snapshots.js';
 import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
@@ -58,6 +59,7 @@ export interface AppContext {
   apps: DataAppService;
   notifications: NotificationService;
   alerts: AlertService;
+  snapshots: SnapshotService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -120,9 +122,14 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   if (cfg.duckdb.sync_scheduler_enabled) syncs.start();
   const notifications = new NotificationService(store, cfg, cipher, workspaces, audit);
   const alerts = new AlertService(store, cfg, workspaces, queries, auth, notifications, audit);
-  if (cfg.notifications.scheduler_enabled) alerts.start();
+
   const apps = new DataAppService(store, cfg, workspaces, auth, audit);
   apps.bind({ dashboards, savedQueries });
+  const snapshots = new SnapshotService(store, cfg, workspaces, dashboards, apps, auth, notifications, audit);
+  if (cfg.notifications.scheduler_enabled) {
+    alerts.start();
+    snapshots.start();
+  }
   await apps.init();
   copilot.mosaic = mosaic;
   // Pre-aggregates are only valid for the epoch they were built in.
@@ -160,6 +167,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     apps,
     notifications,
     alerts,
+    snapshots,
     lakehouse,
     agents,
     groups,
@@ -169,6 +177,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     async shutdown() {
       syncs.stop();
       alerts.stop();
+      snapshots.stop();
       await apps.shutdown().catch(() => undefined);
       await agents.flush();
       await cloudSync.flush().catch(() => undefined);

@@ -155,7 +155,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, type AlertCondition, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -523,6 +523,47 @@ export const alertEvents = pgTable(
     created_at: ts('created_at').notNull(),
   },
   (t) => [index('alert_events_alert_idx').on(t.alert_id, t.created_at)],
+);
+
+export const snapshots = pgTable(
+  'snapshots',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    target: jsonb('target').$type<SnapshotTarget>().notNull(),
+    format: text('format', { enum: SNAPSHOT_FORMATS }).notNull().default('png'),
+    width: integer('width').notNull().default(1280),
+    schedule: jsonb('schedule').$type<SyncSchedule>().notNull(),
+    channel_ids: jsonb('channel_ids').$type<string[]>().notNull().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    last_status: text('last_status', { enum: DELIVERY_STATUSES }),
+    last_error: text('last_error'),
+    last_run_at: ts('last_run_at'),
+    next_run_at: ts('next_run_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('snapshots_workspace_idx').on(t.workspace_id), index('snapshots_next_run_idx').on(t.next_run_at)],
+);
+
+export const snapshotRuns = pgTable(
+  'snapshot_runs',
+  {
+    id: text('id').primaryKey(),
+    snapshot_id: text('snapshot_id').notNull().references(() => snapshots.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: DELIVERY_STATUSES }).notNull(),
+    error: text('error'),
+    format: text('format', { enum: SNAPSHOT_FORMATS }).notNull(),
+    file: text('file'),
+    bytes: integer('bytes'),
+    delivered: integer('delivered').notNull().default(0),
+    triggered_by: text('triggered_by').notNull().default('schedule'),
+    duration_ms: integer('duration_ms'),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('snapshot_runs_snapshot_idx').on(t.snapshot_id, t.created_at)],
 );
 
 export const appSettings = pgTable('app_settings', {

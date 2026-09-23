@@ -88,6 +88,14 @@ export async function postConditional<T>(url: string, body: Record<string, unkno
   return { status: 200, data: json as T & CacheMeta, etag };
 }
 
+/** A file behind authentication (a snapshot image), as an object URL for <img> / links. */
+export async function authedBlobUrl(url: string): Promise<string> {
+  const token = getToken();
+  const res = await fetch(url, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return URL.createObjectURL(await res.blob());
+}
+
 export const api = {
   get: <T>(url: string) => request<T>('GET', url),
   post: <T>(url: string, body?: unknown, opts?: { signal?: AbortSignal }) => request<T>('POST', url, body ?? {}, opts),
@@ -495,3 +503,7 @@ export type AlertCondition = { kind: 'rows' } | { kind: 'no_rows' } | { kind: 't
 export interface SqlAlert { id: string; workspace_id: string; user_id: string; name: string; description: string | null; sql: string; condition: AlertCondition; schedule: SyncSchedule; channel_ids: string[]; severity: 'info' | 'warning' | 'critical'; notify: 'change' | 'always'; notify_resolved: boolean; enabled: boolean; state: 'unknown' | 'ok' | 'triggered' | 'error'; last_value: string | null; last_error: string | null; last_checked_at: string | null; last_triggered_at: string | null; next_run_at: string | null; created_at: string; updated_at: string }
 export interface AlertEvaluation { state: 'ok' | 'triggered' | 'error'; value: string | null; summary: string; columns: string[]; rows: unknown[][]; row_count: number; error: string | null; duration_ms: number }
 export interface AlertEventRow { id: string; alert_id: string; state: SqlAlert['state']; value: string | null; message: string | null; notified: number; triggered_by: string; created_at: string }
+// ---- scheduled snapshots
+export type SnapshotTarget = { kind: 'dashboard'; dashboard_id: string } | { kind: 'app'; app_id: string };
+export interface ScheduledSnapshot { id: string; workspace_id: string; user_id: string; name: string; target: SnapshotTarget; format: 'png' | 'pdf'; width: number; schedule: SyncSchedule; channel_ids: string[]; enabled: boolean; last_status: 'ok' | 'error' | null; last_error: string | null; last_run_at: string | null; next_run_at: string | null; created_at: string; updated_at: string }
+export interface SnapshotRun { id: string; snapshot_id: string; status: 'ok' | 'error'; error: string | null; format: 'png' | 'pdf'; file: string | null; bytes: number | null; delivered: number; triggered_by: string; duration_ms: number | null; created_at: string }

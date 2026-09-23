@@ -13,6 +13,7 @@ import { DashboardsPage } from './features/dashboards/DashboardsPage';
 import { ConnectionsPage } from './features/connections/ConnectionsPage';
 import { AppsPage } from './features/apps/AppsPage';
 import { AlertsPage } from './features/alerts/AlertsPage';
+import { SnapshotView } from './features/dashboards/SnapshotView';
 import { CopilotDrawer } from './features/copilot/CopilotDrawer';
 import { ShareDialog } from './features/workspace/ShareDialog';
 import { useCopilot } from './store/copilot';
@@ -114,6 +115,8 @@ export default function App() {
     );
   }
   if (!auth.user) return <LoginPage />;
+  // A dashboard alone, for scheduled snapshots (a headless browser captures it).
+  if (location.hash.startsWith('#/snapshot/')) return <SnapshotView />;
 
   const active = ws.workspaces.find((w) => w.id === ws.activeId);
 

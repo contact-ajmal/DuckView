@@ -395,8 +395,8 @@ describe('MCP: browse_storage, inspect_schema, list_dashboards, create_dashboard
     const prompt = await client.getPrompt({ name: 'build_mosaic_dashboard', arguments: { table_or_path: 'orders.parquet', goal: 'revenue by customer' } });
     expect((prompt.messages[0]!.content as { text: string }).text).toContain('validate_only');
   });
-  it('exposes twenty-eight tools', async () => {
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_connector', 'browse_storage', 'connector_query', 'create_alert', 'create_app', 'create_dashboard_widget', 'create_data_sync', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'get_app_logs', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_alerts', 'list_apps', 'list_dashboards', 'list_data_sources', 'preview_app', 'profile_dataset', 'publish_app', 'run_alert', 'run_app', 'run_data_sync', 'save_dataset', 'stop_app', 'update_app', 'update_data_sync']);
+  it('exposes twenty-nine tools', async () => {
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['browse_connector', 'browse_storage', 'connector_query', 'create_alert', 'create_app', 'create_dashboard_widget', 'create_data_sync', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'get_app_logs', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_alerts', 'list_apps', 'list_dashboards', 'list_data_sources', 'preview_app', 'profile_dataset', 'publish_app', 'run_alert', 'run_app', 'run_data_sync', 'save_dataset', 'snapshot_dashboard', 'stop_app', 'update_app', 'update_data_sync']);
   });
   it('browse_storage local + cloud connection listing', async () => {
     const local = await client.callTool({ name: 'browse_storage', arguments: {} });

@@ -18,7 +18,8 @@
  * DUCKVIEW__notifications__allow_private_targets=true) creates a webhook channel in Alerts → Channels, sends a test
  * and checks the delivery and its signature against a receiver the script runs. The sql-alerts scenario (same server
  * setting) builds a threshold alert in the dialog, tests it, checks it, and drives it through triggered and resolved
- * while the receiver collects the webhooks.
+ * while the receiver collects the webhooks. The snapshots scenario (same setting) schedules a grid dashboard in the
+ * dialog, sends it now, and renders a Mosaic dashboard; both pictures are saved next to the screenshot.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -371,6 +372,51 @@ try {
     report.details.webhooks = got.map((g) => `${g.event}:${g.title}`);
     report.details.charts = 1;
   }
+  else if (scenario === 'snapshots') {
+    const http = await import('node:http');
+    const got = [];
+    const receiver = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { got.push(JSON.parse(b)); res.end('ok'); }); });
+    await new Promise((r) => receiver.listen(0, '127.0.0.1', r));
+    const wsList = await (await authed('/api/workspaces')).json();
+    const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    await j('POST', `/api/workspaces/${wsId}/query`, { sql: "CREATE OR REPLACE TABLE e2e_snap_sales AS SELECT * FROM (VALUES ('North', 120), ('South', 80), ('East', 150), ('West', 60)) t(region, sales)" });
+    const grid = (await j('POST', `/api/workspaces/${wsId}/dashboards`, { name: 'E2E snapshot board', description: 'rendered by the scheduler', kind: 'grid' })).dashboard;
+    await j('POST', `/api/dashboards/${grid.id}/widgets`, { title: 'Total sales', widget_type: 'KPI', custom_sql: 'SELECT sum(sales) AS total FROM e2e_snap_sales', chart_config: {} });
+    await j('POST', `/api/dashboards/${grid.id}/widgets`, { title: 'By region', widget_type: 'TABLE', custom_sql: 'SELECT region, sales FROM e2e_snap_sales ORDER BY sales DESC', chart_config: {} });
+    const mosaic = (await j('POST', `/api/workspaces/${wsId}/dashboards`, { name: 'E2E mosaic snapshot', kind: 'mosaic', spec: { meta: { title: 'Sales' }, data: { s: { query: 'SELECT region, sales FROM e2e_snap_sales' } }, plot: [{ mark: 'barY', data: { from: 's' }, x: 'region', y: 'sales', fill: 'steelblue' }], width: 600, height: 280 } })).dashboard;
+    const channel = (await j('POST', `/api/workspaces/${wsId}/channels`, { name: 'E2E snapshot hook', type: 'webhook', secret: { url: `http://127.0.0.1:${receiver.address().port}/s` } })).channel;
+    cleanup = async () => {
+      receiver.close();
+      for (const sn of (await j('GET', `/api/workspaces/${wsId}/snapshots`)).snapshots) if (sn.name.startsWith('E2E')) await authed(`/api/snapshots/${sn.id}`, { method: 'DELETE' });
+      for (const d of [grid, mosaic]) await authed(`/api/dashboards/${d.id}`, { method: 'DELETE' });
+      await authed(`/api/channels/${channel.id}`, { method: 'DELETE' });
+      await j('POST', `/api/workspaces/${wsId}/query`, { sql: 'DROP TABLE IF EXISTS e2e_snap_sales' });
+    };
+    await send('Page.navigate', { url: `${BASE}/#/alerts/snapshots` });
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New snapshot')`, 20000, 'snapshots tab');
+    await clickButton('New snapshot');
+    await evaluate(`(() => { const sel = [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.textContent === 'E2E snapshot board')); const v = [...sel.options].find(o => o.textContent === 'E2E snapshot board').value; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, v); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await evaluate(`[...document.querySelectorAll('label')].find(l => l.textContent.includes('E2E snapshot hook')).querySelector('input').click(); true`);
+    await clickButton('Create snapshot');
+    await waitFor(`[...document.querySelectorAll('div.rounded-lg')].some(d => d.innerText.includes('E2E snapshot board'))`, 15000, 'snapshot created');
+    const card = `[...document.querySelectorAll('div.rounded-lg')].find(d => d.innerText.includes('E2E snapshot board'))`;
+    const t0 = Date.now();
+    await evaluate(`${card}.querySelector('button[title="Render and send now"]').click(); true`);
+    await waitFor(`!${card}?.innerText.includes('never sent')`, 120000, 'snapshot sent');
+    report.details.gridSeconds = Math.round((Date.now() - t0) / 1000);
+    report.details.gridCard = await evaluate(`${card}.innerText.slice(0, 300)`);
+    const g = got.at(-1);
+    if (g?.image?.base64) fs.writeFileSync(out.replace('.png', '_grid.png'), Buffer.from(g.image.base64, 'base64'));
+    report.details.gridDelivery = g ? { event: g.event, title: g.title, bytes: g.image ? Buffer.from(g.image.base64, 'base64').length : 0 } : null;
+    // Mosaic: through the API.
+    const ms = (await j('POST', `/api/workspaces/${wsId}/snapshots`, { name: 'E2E mosaic', target: { kind: 'dashboard', dashboard_id: mosaic.id }, schedule: { kind: 'manual' }, channel_ids: [channel.id] })).snapshot;
+    const mr = await j('POST', `/api/snapshots/${ms.id}/run`, {});
+    report.details.mosaicRun = { status: mr.run?.status, error: mr.run?.error, delivered: mr.run?.delivered };
+    const m = got.at(-1);
+    if (m?.image?.base64 && m.title === 'E2E mosaic') fs.writeFileSync(out.replace('.png', '_mosaic.png'), Buffer.from(m.image.base64, 'base64'));
+    report.details.charts = 1;
+  }
   else if (scenario === 'mosaic-dashboard') {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
@@ -443,6 +489,10 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'snapshots') {
+    if (d.gridDelivery?.event !== 'snapshot.delivered' || !(d.gridDelivery?.bytes > 10000)) problems.push(`grid snapshot not delivered: ${JSON.stringify(d.gridDelivery)} ${d.gridCard}`);
+    if (d.mosaicRun?.status !== 'ok' || d.mosaicRun?.delivered !== 1) problems.push(`mosaic snapshot failed: ${JSON.stringify(d.mosaicRun)}`);
+  }
   if (scenario === 'sql-alerts') {
     if (!/total is 70 — not > 100/.test(d.preview ?? '')) problems.push(`preview wrong: ${d.preview}`);
     if (JSON.stringify(d.webhooks) !== JSON.stringify(['alert.triggered:E2E revenue', 'alert.resolved:Resolved: E2E revenue'])) problems.push(`webhooks wrong: ${JSON.stringify(d.webhooks)}`);

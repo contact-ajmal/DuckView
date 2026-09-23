@@ -15,6 +15,7 @@ import { createContext, type AppContext } from '../context.js';
 import { buildApp } from '../app.js';
 import { isPrivateAddress } from '../security/egress.js';
 import { buildTools, runTool, type ToolEnv } from '../agent/tools.js';
+import { findChrome } from '../services/headless.js';
 
 let dir: string;
 let ctx: AppContext;
@@ -337,4 +338,86 @@ describe('alerts', () => {
     expect(((await runTool(env, tool('run_alert'), { alert_id: (made.structuredContent as { alert_id: string }).alert_id })).structuredContent as { changed: boolean }).changed).toBe(false);
     for (const a of (await api('GET', `/api/workspaces/${wsId}/alerts`)).json.alerts) await api('DELETE', `/api/alerts/${a.id}`);
   });
+});
+
+const canRender = !process.env.CI && !!findChrome() && fs.existsSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../../web/dist/index.html'));
+
+describe('scheduled snapshots', () => {
+  it('validates targets and schedules, reports a render failure to the channels, signs links', async () => {
+    const admin = ctx.auth.principalFromUser((await ctx.auth.findByEmail('admin@test.local'))!, 'jwt', '127.0.0.1');
+    const dash = await ctx.dashboards.create(admin, wsId, { name: 'Sales board', description: 'daily numbers', kind: 'grid' });
+    const otherDash = await ctx.dashboards.create(admin, otherWsId, { name: 'Elsewhere', kind: 'grid' });
+    const ch = (await api('POST', `/api/workspaces/${wsId}/channels`, { name: 'Snap hook', type: 'webhook', secret: { url: `${hook}/snap-hook` } })).json.channel;
+    const post = (body: Record<string, unknown>) => api('POST', `/api/workspaces/${wsId}/snapshots`, body);
+    expect((await post({ target: { kind: 'dashboard', dashboard_id: otherDash.id } })).json.message).toMatch(/another workspace/);
+    expect((await post({ target: { kind: 'dashboard', dashboard_id: dash.id }, schedule: { kind: 'interval', minutes: 5 } })).json.message).toMatch(/every 15 minutes/);
+    const created = await post({ target: { kind: 'dashboard', dashboard_id: dash.id }, channel_ids: [ch.id] });
+    expect(created.status, JSON.stringify(created.json)).toBe(200);
+    const snap = created.json.snapshot;
+    expect(snap).toMatchObject({ name: 'Sales board', format: 'png', width: 1280, schedule: { kind: 'cron', expression: '0 8 * * 1-5' }, enabled: true });
+    // No browser: the run fails, and the channel hears why.
+    const saved = ctx.cfg.apps.chrome_path;
+    ctx.cfg.apps.chrome_path = '/nonexistent/chrome';
+    const failed = (await api('POST', `/api/snapshots/${snap.id}/run`, {})).json;
+    expect(failed.run).toMatchObject({ status: 'error', delivered: 1, file: null });
+    expect(failed.run.error).toMatch(/No Chrome/);
+    const msg = JSON.parse(last('/snap-hook').body);
+    expect(msg).toMatchObject({ event: 'snapshot.failed', title: 'Snapshot failed: Sales board', severity: 'warning' });
+    ctx.cfg.apps.chrome_path = saved;
+    expect((await api('GET', `/api/snapshots/${snap.id}`)).json.snapshot).toMatchObject({ last_status: 'error' });
+    // Signed links: forged, expired and unknown ones are refused.
+    expect((await fetch(`${base}/api/snapshot-files/${failed.run.id}/png?exp=${Math.floor(Date.now() / 1000) + 60}&sig=forged`)).status).toBe(404);
+    expect((await fetch(`${base}/api/snapshot-files/${failed.run.id}/png?exp=1&sig=x`)).status).toBe(404);
+    // Viewers see snapshots, cannot run them.
+    expect((await api('GET', `/api/workspaces/${wsId}/snapshots`, undefined, userJwt)).json.snapshots).toHaveLength(1);
+    expect((await api('POST', `/api/snapshots/${snap.id}/run`, {}, userJwt)).status).toBe(403);
+    // Retention removes old runs.
+    expect(await ctx.snapshots.cleanup(new Date(Date.now() + 40 * 86_400_000))).toBe(1);
+    expect((await api('GET', `/api/snapshots/${snap.id}/runs`)).json.runs).toEqual([]);
+    await api('DELETE', `/api/snapshots/${snap.id}`);
+    await api('DELETE', `/api/channels/${ch.id}`);
+  });
+
+  it.skipIf(!canRender)('renders a dashboard as its owner (PNG and PDF), delivers it with a signed link, and to agents', async () => {
+    const admin = ctx.auth.principalFromUser((await ctx.auth.findByEmail('admin@test.local'))!, 'jwt', '127.0.0.1');
+    ctx.cfg.server.public_url = base; // the signed link must be fetchable here
+    await api('PUT', '/api/admin/integrations/smtp', { host: '127.0.0.1', port: smtpPort, secure: false, from: 'DuckView <duckview@example.com>' });
+    const dash = await ctx.dashboards.create(admin, wsId, { name: 'KPI board', kind: 'grid' });
+    await ctx.dashboards.addWidget(admin, dash.id, { title: 'Answer', widget_type: 'KPI', custom_sql: 'SELECT 4242 AS answer', chart_config: {} });
+    const ch = (await api('POST', `/api/workspaces/${wsId}/channels`, { name: 'Render hook', type: 'webhook', secret: { url: `${hook}/render-hook` } })).json.channel;
+    const email = (await api('POST', `/api/workspaces/${wsId}/channels`, { name: 'Render mail', type: 'email', config: { to: ['board@example.com'] } })).json.channel;
+    const snap = (await api('POST', `/api/workspaces/${wsId}/snapshots`, { target: { kind: 'dashboard', dashboard_id: dash.id }, format: 'pdf', channel_ids: [ch.id, email.id] })).json.snapshot;
+    const r = (await api('POST', `/api/snapshots/${snap.id}/run`, {})).json;
+    expect(r.run, JSON.stringify(r.run)).toMatchObject({ status: 'ok', format: 'pdf', delivered: 2 });
+    // The files: a PNG (always) and the PDF.
+    const png = await fetch(`${base}/api/snapshots/${snap.id}/runs/${r.run.id}/file`, { headers: { authorization: `Bearer ${jwt}` } });
+    expect(png.headers.get('content-type')).toBe('application/pdf');
+    expect(Buffer.from(await png.arrayBuffer()).subarray(0, 4).toString()).toBe('%PDF');
+    // The webhook got the picture (base64 + a signed link that works without signing in) and the PDF.
+    const w = JSON.parse(last('/render-hook').body);
+    expect(w).toMatchObject({ event: 'snapshot.delivered', title: 'KPI board' });
+    const img = Buffer.from(w.image.base64, 'base64');
+    expect(img.subarray(1, 4).toString()).toBe('PNG');
+    expect(img.readUInt32BE(16)).toBe(1280); // width from the IHDR chunk
+    expect(w.attachments[0]).toMatchObject({ filename: expect.stringMatching(/^KPI_board-\d{4}-\d\d-\d\d\.pdf$/), content_type: 'application/pdf' });
+    const linked = await fetch(w.image.url);
+    expect(linked.status).toBe(200);
+    expect(linked.headers.get('content-type')).toBe('image/png');
+    expect((await fetch(w.image.url.replace(/sig=[^&]+/, 'sig=AAAA'))).status).toBe(404);
+    // What the picture shows: the KPI's value (the text of the rendered page is not in the PNG; check the webhook
+    // image is not a login screen by its size, and the email carries both files).
+    expect(img.length).toBeGreaterThan(8000);
+    const m = mails.at(-1)!;
+    expect(m.data).toMatch(/Content-Type: image\/png/);
+    expect(m.data).toMatch(/Content-Type: application\/pdf/);
+    // Agents see the dashboard as a picture.
+    const env: ToolEnv = { ctx, principal: admin, via: 'rest', defaultWorkspaceId: wsId, agent: null };
+    const tool = buildTools(ctx.cfg).find((t) => t.name === 'snapshot_dashboard')!;
+    const shot = await runTool(env, tool, { dashboard_id: dash.id });
+    expect(shot.isError, JSON.stringify(shot.content)).toBeFalsy();
+    expect(shot.content.some((c) => c.type === 'image' && c.mimeType === 'image/png')).toBe(true);
+    ctx.cfg.server.public_url = 'https://duckview.example.com';
+    await api('DELETE', `/api/snapshots/${snap.id}`);
+    for (const c of [ch, email]) await api('DELETE', `/api/channels/${c.id}`);
+  }, 180_000);
 });

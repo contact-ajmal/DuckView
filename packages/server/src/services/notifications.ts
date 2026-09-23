@@ -446,6 +446,7 @@ export function webhookPayload(msg: Notification, delivery: string): Record<stri
     dedup_key: msg.dedupKey ?? null,
     workspace: msg.workspace ?? null,
     image: msg.image ? { filename: msg.image.filename, content_type: msg.image.contentType, url: msg.image.url ?? null, base64: msg.image.data.toString('base64') } : null,
+    attachments: (msg.attachments ?? []).map((a) => ({ filename: a.filename, content_type: a.contentType, base64: a.content.toString('base64') })),
   };
 }
 
