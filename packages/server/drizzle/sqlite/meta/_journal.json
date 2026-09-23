@@ -169,6 +169,13 @@
       "when": 1790147808856,
       "tag": "0023_user_disabled",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1790149573923,
+      "tag": "0024_dbt_projects",
+      "breakpoints": true
     }
   ]
 }

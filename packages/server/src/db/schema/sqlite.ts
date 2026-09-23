@@ -865,6 +865,30 @@ export interface SyncLastRun {
   error: string | null;
 }
 
+/** dbt: what a run does, and a node's outcome in it (dbt's own status names). */
+export const DBT_COMMANDS = ['build', 'run', 'test', 'seed', 'compile'] as const;
+export type DbtCommand = (typeof DBT_COMMANDS)[number];
+export const DBT_RUN_STATUSES = ['running', 'ok', 'error'] as const;
+export type DbtSchedule = { kind: 'manual' } | { kind: 'interval'; minutes: number } | { kind: 'cron'; expression: string; timezone?: string };
+export interface DbtScheduledCommand { command: DbtCommand; select?: string | null; exclude?: string | null; full_refresh?: boolean }
+export interface DbtNodeResult {
+  unique_id: string;
+  name: string;
+  resource_type: 'model' | 'seed' | 'test' | 'snapshot' | 'analysis' | 'operation';
+  /** model / seed: success · error · skipped; test: pass · warn · fail · error · skipped; compile: compiled. */
+  status: 'success' | 'error' | 'skipped' | 'pass' | 'warn' | 'fail' | 'compiled';
+  materialized: string | null;
+  relation: string | null;
+  rows: number | null;
+  /** Tests: failing rows. */
+  failures: number | null;
+  duration_ms: number;
+  message: string | null;
+  sql: string | null;
+  depends_on: string[];
+}
+export interface DbtLastRun { run_id: string; status: (typeof DBT_RUN_STATUSES)[number]; command: DbtCommand; started_at: string; finished_at: string | null; summary: string | null }
+
 /** A scheduled load of a source into a table of a workspace, with an optional transformation step. */
 export const dataSyncs = sqliteTable(
   'data_syncs',
@@ -955,3 +979,53 @@ export type SnapshotRun = typeof snapshotRuns.$inferSelect;
 export type AccessPolicy = typeof accessPolicies.$inferSelect;
 export type CatalogAnnotation = typeof catalogAnnotations.$inferSelect;
 export type AuditSink = typeof auditSinks.$inferSelect;
+
+/** A dbt project of a workspace: its files (models, tests, seeds, macros, YAML) and how it is scheduled. */
+export const dbtProjects = sqliteTable(
+  'dbt_projects',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    files: text('files', { mode: 'json' }).$type<Record<string, string>>().notNull(),
+    /** --vars passed to dbt. */
+    vars: text('vars', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    /** The schema models without a custom schema are built in (dbt's target schema). */
+    target_schema: text('target_schema').notNull().default('main'),
+    schedule: text('schedule', { mode: 'json' }).$type<DbtSchedule>().notNull().default({ kind: 'manual' }),
+    scheduled: text('scheduled', { mode: 'json' }).$type<DbtScheduledCommand>().notNull().default({ command: 'build' }),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    next_run_at: integer('next_run_at', { mode: 'timestamp_ms' }),
+    last_run: text('last_run', { mode: 'json' }).$type<DbtLastRun | null>(),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('dbt_projects_workspace_idx').on(t.workspace_id), index('dbt_projects_next_run_idx').on(t.next_run_at)],
+);
+
+export const dbtRuns = sqliteTable(
+  'dbt_runs',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull().references(() => dbtProjects.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    user_id: text('user_id'),
+    command: text('command', { enum: DBT_COMMANDS }).notNull(),
+    select: text('select'),
+    exclude: text('exclude'),
+    full_refresh: integer('full_refresh', { mode: 'boolean' }).notNull().default(false),
+    triggered_by: text('triggered_by').notNull(), // manual | schedule | agent
+    status: text('status', { enum: DBT_RUN_STATUSES }).notNull(),
+    summary: text('summary'),
+    error: text('error'),
+    log: text('log'),
+    results: text('results', { mode: 'json' }).$type<DbtNodeResult[]>().notNull().default([]),
+    duration_ms: integer('duration_ms'),
+    started_at: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+    finished_at: integer('finished_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => [index('dbt_runs_project_idx').on(t.project_id, t.started_at)],
+);
+export type DbtProject = typeof dbtProjects.$inferSelect;
+export type DbtRun = typeof dbtRuns.$inferSelect;

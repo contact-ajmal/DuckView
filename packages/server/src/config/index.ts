@@ -347,6 +347,32 @@ export const ConfigSchema = z.object({
       namespace: z.string().default('duckview'),
     })
     .default({}),
+  /** Transformations: dbt projects compiled by dbt Core (dbt-duckdb) and run in the workspace's engine. */
+  transform: z
+    .object({
+      /** Runs scheduled dbt projects (and, later, other transformations). */
+      scheduler_enabled: z.coerce.boolean().default(true),
+      dbt: z
+        .object({
+          enabled: z.coerce.boolean().default(true),
+          /** Interpreter used to create the dbt virtualenv (needs venv + pip). */
+          python: z.string().default('python3'),
+          /** Where dbt Core lives; default <data dir>/.duckview/dbt/venv. */
+          venv_dir: z.string().optional(),
+          /** Create the virtualenv and pip-install `package` on the first run. */
+          auto_install: z.coerce.boolean().default(true),
+          /** The pip requirement installed, e.g. "dbt-duckdb==1.9.4" to pin a version. */
+          package: z.string().default('dbt-duckdb'),
+          /** Allow `dbt deps` (packages.yml / dependencies.yml from dbt Hub or git). */
+          allow_packages: z.coerce.boolean().default(true),
+          /** A compile (and deps) is stopped after this long. */
+          timeout_seconds: z.coerce.number().int().min(10).default(300),
+          /** Largest project accepted, all files together (seeds included). */
+          max_project_bytes: z.coerce.number().int().min(1024).default(20 * 1024 * 1024),
+        })
+        .default({}),
+    })
+    .default({}),
   /** Delivery of alerts and scheduled snapshots: Slack, Microsoft Teams, email, PagerDuty and webhooks. */
   notifications: z
     .object({
@@ -398,6 +424,7 @@ export const ConfigSchema = z.object({
 export type DuckViewConfig = z.infer<typeof ConfigSchema> & {
   security: { jwt_secret: string; encryption_key: string; data_jail_directory: string };
   apps: z.infer<typeof ConfigSchema>['apps'] & { enabled: boolean; venv_dir: string };
+  transform: z.infer<typeof ConfigSchema>['transform'] & { dbt: z.infer<typeof ConfigSchema>['transform']['dbt'] & { venv_dir: string } };
   /** true when secrets were auto-generated for this process (dev only). */
   ephemeralSecrets: boolean;
   configPath: string | null;
@@ -584,6 +611,7 @@ export function loadConfig(opts: LoadOptions = {}): DuckViewConfig {
   if (cfg.apps.enabled === undefined) cfg.apps.enabled = cfg.security.filesystem_mode === 'full';
   cfg.apps.venv_dir = path.resolve(cfg.apps.venv_dir ?? path.join(cfg.security.data_jail_directory, '.duckview', 'apps', 'venv'));
   cfg.apps.port ??= cfg.server.port + 1;
+  cfg.transform.dbt.venv_dir = path.resolve(cfg.transform.dbt.venv_dir ?? path.join(cfg.security.data_jail_directory, '.duckview', 'dbt', 'venv'));
   if (cfg.apps.public_url) cfg.apps.public_url = cfg.apps.public_url.replace(/\/+$/, '');
 
   if (cfg.auth.strategy === 'oidc') {

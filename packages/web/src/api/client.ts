@@ -106,6 +106,14 @@ export const api = {
 
 // ------------------------------------------------------------------ types
 export interface User { id: string; email: string; role: 'ADMIN' | 'USER' | 'READ_ONLY'; auth_provider: string; display_name: string | null; disabled?: boolean; created_at: string }
+export type DbtCommand = 'build' | 'run' | 'test' | 'seed' | 'compile';
+export type DbtSchedule = { kind: 'manual' } | { kind: 'interval'; minutes: number } | { kind: 'cron'; expression: string; timezone?: string };
+export interface DbtScheduled { command: DbtCommand; select?: string | null; exclude?: string | null; full_refresh?: boolean }
+export interface DbtLastRun { run_id: string; status: 'running' | 'ok' | 'error'; command: DbtCommand; started_at: string; finished_at: string | null; summary: string | null }
+export interface DbtProject { id: string; workspace_id: string; user_id: string; name: string; files?: Record<string, string>; vars: Record<string, unknown>; target_schema: string; schedule: DbtSchedule; scheduled: DbtScheduled; enabled: boolean; next_run_at: string | null; last_run: DbtLastRun | null; created_at: string; updated_at: string }
+export interface DbtNodeResult { unique_id: string; name: string; resource_type: 'model' | 'seed' | 'test' | 'snapshot' | 'analysis' | 'operation'; status: 'success' | 'error' | 'skipped' | 'pass' | 'warn' | 'fail' | 'compiled'; materialized: string | null; relation: string | null; rows: number | null; failures: number | null; duration_ms: number; message: string | null; sql: string | null; depends_on: string[] }
+export interface DbtRun { id: string; project_id: string; workspace_id: string; user_id: string | null; command: DbtCommand; select: string | null; exclude: string | null; full_refresh: boolean; triggered_by: string; status: 'running' | 'ok' | 'error'; summary: string | null; error: string | null; log?: string | null; results?: DbtNodeResult[]; duration_ms: number | null; started_at: string; finished_at: string | null }
+export interface DbtStatus { enabled: boolean; installed: boolean; version: string | null; adapter_version: string | null; venv: string; package: string; auto_install: boolean; installing: boolean; error: string | null }
 export interface ScimStatus { enabled: boolean; source: 'config' | 'console' | null; prefix: string | null; created_at: string | null; on_delete: 'deactivate' | 'delete'; endpoint: string }
 export interface CloudSyncState { etag: string | null; synced_at: string | null; size_bytes: number | null; dirty: boolean; last_error: string | null; last_push_ms?: number }
 export interface StorageOptions { mode: 'sandboxed' | 'full'; default_database: 'file' | 'memory'; data_directory: string; cloud_connections: { id: string; name: string; provider: 'S3' | 'R2' | 'GCS' | 'AZURE'; bucket: string | null; uri_scheme: string }[] }
@@ -516,9 +524,9 @@ export interface AccessPolicy { id: string; workspace_id: string; name: string; 
 export interface MyRestrictions { restricted: boolean; tables: { table: string; name: string; description: string | null; rows_filtered: boolean; masked_columns: string[] }[] }
 // ---- catalog notes & lineage
 export type AnnotatedObject = Omit<CatalogObject, 'columns'> & { description: string | null; tags: string[]; columns: (CatalogObject['columns'][number] & { description: string | null; tags: string[] })[] };
-export type LineageKind = 'source' | 'file' | 'sync' | 'table' | 'view' | 'saved_query' | 'dashboard' | 'app' | 'alert' | 'snapshot';
+export type LineageKind = 'source' | 'file' | 'sync' | 'dbt' | 'table' | 'view' | 'saved_query' | 'dashboard' | 'app' | 'alert' | 'snapshot';
 export interface LineageNode { id: string; kind: LineageKind; label: string; href?: string; detail?: string; description?: string | null; tags?: string[] }
-export interface LineageEdge { from: string; to: string; kind: 'reads' | 'loads' | 'renders' | 'mentions' }
+export interface LineageEdge { from: string; to: string; kind: 'reads' | 'loads' | 'builds' | 'renders' | 'mentions' }
 // ---- audit export
 export type AuditSinkType = 'splunk' | 'datadog' | 'elastic' | 'webhook' | 's3';
 export interface AuditSink { id: string; name: string; type: AuditSinkType; config: Record<string, unknown>; enabled: boolean; secret_set: boolean; cursor_at: string | null; exported: number; last_status: 'ok' | 'error' | null; last_error: string | null; last_exported_at: string | null; retry_after: string | null; failures: number; created_at: string }

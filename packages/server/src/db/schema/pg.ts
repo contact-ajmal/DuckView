@@ -157,7 +157,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -633,3 +633,48 @@ export const appSettings = pgTable('app_settings', {
   updated_by: text('updated_by'),
   updated_at: ts('updated_at').notNull(),
 });
+
+export const dbtProjects = pgTable(
+  'dbt_projects',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    files: jsonb('files').$type<Record<string, string>>().notNull(),
+    vars: jsonb('vars').$type<Record<string, unknown>>().notNull().default({}),
+    target_schema: text('target_schema').notNull().default('main'),
+    schedule: jsonb('schedule').$type<DbtSchedule>().notNull().default({ kind: 'manual' }),
+    scheduled: jsonb('scheduled').$type<DbtScheduledCommand>().notNull().default({ command: 'build' }),
+    enabled: boolean('enabled').notNull().default(true),
+    next_run_at: ts('next_run_at'),
+    last_run: jsonb('last_run').$type<DbtLastRun | null>(),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('dbt_projects_workspace_idx').on(t.workspace_id), index('dbt_projects_next_run_idx').on(t.next_run_at)],
+);
+
+export const dbtRuns = pgTable(
+  'dbt_runs',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id').notNull().references(() => dbtProjects.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    user_id: text('user_id'),
+    command: text('command', { enum: DBT_COMMANDS }).notNull(),
+    select: text('select'),
+    exclude: text('exclude'),
+    full_refresh: boolean('full_refresh').notNull().default(false),
+    triggered_by: text('triggered_by').notNull(),
+    status: text('status', { enum: DBT_RUN_STATUSES }).notNull(),
+    summary: text('summary'),
+    error: text('error'),
+    log: text('log'),
+    results: jsonb('results').$type<DbtNodeResult[]>().notNull().default([]),
+    duration_ms: integer('duration_ms'),
+    started_at: ts('started_at').notNull(),
+    finished_at: ts('finished_at'),
+  },
+  (t) => [index('dbt_runs_project_idx').on(t.project_id, t.started_at)],
+);

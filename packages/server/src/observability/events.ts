@@ -17,6 +17,8 @@ export type LiveEvent =
   | { type: 'app'; at: string; workspace_id: string; app_id: string; status: 'stopped' | 'installing' | 'starting' | 'running' | 'error'; error: string | null }
   /** An alert was checked (its state may have changed). */
   | { type: 'alert'; at: string; workspace_id: string; alert_id: string; state: 'unknown' | 'ok' | 'triggered' | 'error'; changed: boolean }
+  /** A dbt run started or finished. */
+  | { type: 'dbt'; at: string; workspace_id: string; project_id: string; run_id: string; status: 'running' | 'ok' | 'error'; summary: string | null }
   /** A user was deactivated or reactivated: their open event streams close. */
   | { type: 'account'; at: string; user_id: string; disabled: boolean };
 

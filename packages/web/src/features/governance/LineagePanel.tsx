@@ -6,6 +6,7 @@ const KIND: Record<LineageKind, { label: string; color: string; col: number }> =
   source: { label: 'source', color: '#0ea5e9', col: 0 },
   file: { label: 'file', color: '#14b8a6', col: 0 },
   sync: { label: 'sync', color: '#8b5cf6', col: 1 },
+  dbt: { label: 'dbt', color: '#f97316', col: 1 },
   table: { label: 'table', color: '#22c55e', col: 2 },
   view: { label: 'view', color: '#84cc16', col: 3 },
   saved_query: { label: 'query', color: '#f59e0b', col: 4 },

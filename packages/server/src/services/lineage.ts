@@ -24,11 +24,12 @@ import type { Principal } from './principal.js';
 import { requireWrite } from './principal.js';
 import type { WorkspaceService } from './workspaces.js';
 import type { AuditService } from './audit.js';
+import type { DbtService } from './dbt.js';
 import { badRequest } from './errors.js';
 import { liveEvents } from '../observability/events.js';
 import { logger } from '../observability/logger.js';
 
-export type LineageKind = 'source' | 'file' | 'sync' | 'table' | 'view' | 'saved_query' | 'dashboard' | 'app' | 'alert' | 'snapshot';
+export type LineageKind = 'source' | 'file' | 'sync' | 'dbt' | 'table' | 'view' | 'saved_query' | 'dashboard' | 'app' | 'alert' | 'snapshot';
 export interface LineageNode {
   id: string;
   kind: LineageKind;
@@ -42,8 +43,8 @@ export interface LineageNode {
 export interface LineageEdge {
   from: string;
   to: string;
-  /** reads (SQL), loads (a sync), renders (snapshot), mentions (app code) */
-  kind: 'reads' | 'loads' | 'renders' | 'mentions';
+  /** reads (SQL), loads (a sync), builds (a dbt project), renders (snapshot), mentions (app code) */
+  kind: 'reads' | 'loads' | 'builds' | 'renders' | 'mentions';
 }
 
 const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
@@ -81,6 +82,8 @@ export async function sqlReferences(engine: WorkspaceEngine, sql: string): Promi
 }
 
 export class LineageService {
+  /** Set by the context: dbt projects appear in the graph. */
+  dbt: DbtService | null = null;
   constructor(private readonly store: MetadataStore, private readonly cfg: DuckViewConfig, private readonly workspaces: WorkspaceService, private readonly audit: AuditService) {
     if (cfg.lineage.openlineage_url) liveEvents.subscribe((e) => { if (e.type === 'sync') void this.emitSync(e.sync_id, e.run_id, e.status, e.rows, e.error).catch((err) => logger().warn({ err: (err as Error).message }, 'OpenLineage event not sent')); });
   }
@@ -118,6 +121,28 @@ export class LineageService {
     else await this.db.insert(this.s.catalogAnnotations).values(row);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'catalog.annotate', resource: `workspace:${workspaceId}:${object}${column ? `.${column}` : ''}`, ip: p.ip });
     return row;
+  }
+
+  /**
+   * Notes that come from code (dbt's YAML): written for every object the run built, one audit event for the batch.
+   * The caller already holds EDITOR on the workspace.
+   */
+  async importNotes(p: Principal, workspaceId: string, notes: { object_name: string; column_name: string | null; description: string | null; tags: string[] }[], source: string): Promise<number> {
+    let n = 0;
+    for (const note of notes) {
+      const column = note.column_name?.trim() || null;
+      const tags = [...new Set(note.tags.map((t) => String(t).trim().toLowerCase()).filter((t) => /^[a-z0-9][a-z0-9_:-]{0,39}$/.test(t)))].slice(0, 20);
+      const description = note.description?.trim().slice(0, 4000) || null;
+      if (!description && !tags.length) continue;
+      const where = and(eq(this.s.catalogAnnotations.workspace_id, workspaceId), eq(this.s.catalogAnnotations.object_name, note.object_name), column ? eq(this.s.catalogAnnotations.column_name, column) : isNull(this.s.catalogAnnotations.column_name));
+      const existing = (await this.db.select().from(this.s.catalogAnnotations).where(where).limit(1))[0];
+      const row: CatalogAnnotation = { id: existing?.id ?? newId(), workspace_id: workspaceId, object_name: note.object_name, column_name: column, description: description ?? existing?.description ?? null, tags: [...new Set([...(existing?.tags ?? []), ...tags])].slice(0, 20), updated_by: p.userId, updated_at: new Date() };
+      if (existing) await this.db.update(this.s.catalogAnnotations).set(row).where(eq(this.s.catalogAnnotations.id, existing.id));
+      else await this.db.insert(this.s.catalogAnnotations).values(row);
+      n++;
+    }
+    if (n) this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'catalog.import', resource: `workspace:${workspaceId}`, queryText: `${n} notes from ${source}`, ip: p.ip });
+    return n;
   }
 
   /** The engine's catalog with descriptions and tags attached (what Copilot and agents are told). */
@@ -204,6 +229,22 @@ export class LineageService {
         edge(src.id, id, 'reads');
       } else if (s.source.kind === 'sql') await reads(s.source.sql, id);
       if (s.transform_sql) await reads(s.transform_sql.replace(/\{\{\s*source\s*\}\}/g, 'source'), id);
+    }
+    // dbt projects build models and seeds (from their last run), which read their upstream models and sources.
+    if (this.dbt) {
+      for (const { project, built } of await this.dbt.lineageOf(workspaceId)) {
+        const id = `dbt:${project.id}`;
+        nodes.set(id, { id, kind: 'dbt', label: project.name, detail: `dbt · ${built.length} built · ${project.schedule.kind === 'cron' ? project.schedule.expression : project.schedule.kind === 'interval' ? `every ${project.schedule.minutes} min` : 'manual'}`, href: `#/transform/dbt/${project.id}` });
+        for (const b of built) {
+          const tid = known.get(b.relation.toLowerCase()) ?? `table:${b.relation}`;
+          if (!nodes.has(tid)) nodes.set(tid, { id: tid, kind: 'table', label: b.relation, detail: 'not created yet' });
+          edge(id, tid, 'builds');
+          for (const u of b.upstream) {
+            const uid = known.get(u.toLowerCase());
+            if (uid) edge(uid, tid, 'reads');
+          }
+        }
+      }
     }
     // Saved queries, dashboards (widgets and Mosaic specs).
     const saved = await this.db.select().from(this.s.savedQueries).where(eq(this.s.savedQueries.workspace_id, workspaceId));

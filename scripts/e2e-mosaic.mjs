@@ -26,7 +26,9 @@
  * audit-export scenario adds a Splunk destination (a receiver the script runs), tests it, and waits for the
  * server's exporter to deliver a query event. The scim-provisioning scenario generates a SCIM token in Governance →
  * Provisioning, links a new team to an IdP group in Settings → Teams and shares the workspace with it, provisions a
- * user and the group over SCIM (the team is adopted), and deactivates the user in Settings → Users.
+ * user and the group over SCIM (the team is adopted), and deactivates the user in Settings → Users. The dbt-project
+ * scenario installs dbt Core when the server lacks it, creates the starter project in Transform, builds it, edits a
+ * model in the editor, saves and runs only that model, and checks its compiled SQL and catalog note.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -508,6 +510,54 @@ try {
     report.details.traced = await evaluate(`[...document.querySelectorAll('svg[aria-label="Lineage graph"] g[data-node]')].map(g => g.querySelector('text')?.textContent)`);
     report.details.charts = 1;
   }
+  else if (scenario === 'dbt-project') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const cleanupDbt = async () => {
+      for (const p of (await j('GET', `/api/workspaces/${wsId}/dbt/projects`)).projects ?? []) if (p.name === 'E2E dbt') await authed(`/api/dbt/projects/${p.id}`, { method: 'DELETE' });
+      await q('DROP TABLE IF EXISTS region_totals; DROP VIEW IF EXISTS stg_numbers; DROP TABLE IF EXISTS regions');
+    };
+    await cleanupDbt();
+    cleanup = cleanupDbt;
+    // 1. Transform → dbt; install dbt Core when the server does not have it yet.
+    await send('Page.navigate', { url: `${BASE}/#/transform/dbt` });
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New project')`, 20000, 'dbt tab');
+    if (!(await evaluate(`!!document.querySelector('[data-testid="dbt-version"]')`))) {
+      await clickButton('Install now');
+      await waitFor(`!!document.querySelector('[data-testid="dbt-version"]')`, 900000, 'dbt installed');
+    }
+    report.details.version = await evaluate(`document.querySelector('[data-testid="dbt-version"]').textContent`);
+    // 2. A project from the starter.
+    await clickButton('New project');
+    await setField('input[placeholder="Sales models"]', 'E2E dbt');
+    await clickButton('Create');
+    await waitFor(`document.querySelector('[data-testid="dbt-project-name"]')?.textContent === 'E2E dbt'`, 15000, 'project opened');
+    // 3. Build it.
+    await clickButton('Run');
+    await waitFor(`!!document.querySelector('tr[data-node="region_totals"]') && document.querySelector('[data-testid="dbt-run"]').innerText.includes('ok')`, 300000, 'build finished');
+    report.details.build = await evaluate(`[...document.querySelectorAll('tr[data-node]')].map(tr => tr.dataset.node + ':' + tr.children[2].innerText.trim())`);
+    // 4. Edit a model in the editor (select all, type), save and run just that model.
+    await evaluate(`[...document.querySelectorAll('button[data-file]')].find(b => b.dataset.file === 'models/marts/region_totals.sql').click(); true`);
+    await waitFor(`document.querySelector('.cm-content')?.innerText.includes('region_name')`, 5000, 'model in the editor');
+    await evaluate(`document.querySelector('.cm-content').focus(); true`);
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: process.platform === 'darwin' ? 4 : 2, commands: ['selectAll'] });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: process.platform === 'darwin' ? 4 : 2 });
+    await send('Input.insertText', { text: "select r.region_name, count(*) as orders, sum(n.amount) as revenue, round(avg(n.amount), 2) as avg_amount\nfrom {{ ref('stg_numbers') }} n\njoin {{ ref('regions') }} r using (region_code)\ngroup by 1\n" });
+    await waitFor(`document.body.innerText.includes('unsaved')`, 5000, 'edited');
+    await setField('input[placeholder^="--select"]', 'region_totals');
+    await evaluate(`(() => { const sel = document.querySelector('[data-testid="dbt-command"]'); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sel), 'value').set.call(sel, 'run'); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await clickButton('Save & run');
+    await waitFor(`document.querySelector('[data-testid="dbt-run"]').innerText.includes('dbt run --select region_totals') && document.querySelector('[data-testid="dbt-run"]').innerText.includes('ok')`, 300000, 'model rebuilt');
+    report.details.columns = ((await q("SELECT column_name FROM information_schema.columns WHERE table_name = 'region_totals' ORDER BY ordinal_position")).rows ?? []).map((r) => r[0]);
+    // 5. Its compiled SQL is one click away.
+    await evaluate(`document.querySelector('tr[data-node="region_totals"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[data-testid="dbt-run"] pre')].some(p => p.textContent.includes('avg_amount'))`, 5000, 'compiled SQL shown');
+    report.details.compiledShown = true;
+    // 6. The catalog carries the model's description.
+    report.details.note = ((await j('GET', `/api/workspaces/${wsId}/catalog/annotated`)).objects ?? []).find((o) => o.name === 'region_totals')?.description ?? null;
+    report.details.charts = 1;
+  }
   else if (scenario === 'scim-provisioning') {
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
     let scimToken = '';
@@ -664,6 +714,13 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'dbt-project') {
+    if (!/dbt Core \d/.test(d.version ?? '')) problems.push(`dbt not installed: ${d.version}`);
+    for (const want of ['regions:success', 'stg_numbers:success', 'region_totals:success']) if (!d.build?.includes(want)) problems.push(`build missing ${want}: ${JSON.stringify(d.build)}`);
+    if ((d.build ?? []).filter((b) => b.endsWith(':pass')).length !== 4) problems.push(`tests did not all pass: ${JSON.stringify(d.build)}`);
+    if (!d.columns?.includes('avg_amount')) problems.push(`the edited model was not rebuilt: ${JSON.stringify(d.columns)}`);
+    if (d.note !== 'Orders and revenue per region.') problems.push(`catalog note missing: ${d.note}`);
+  }
   if (scenario === 'scim-provisioning') {
     if (!/\/scim\/v2$/.test(d.endpoint ?? '')) problems.push(`endpoint wrong: ${d.endpoint}`);
     if (!d.scim?.adopted || d.scim?.members !== 1 || !d.scim?.grant) problems.push(`the pre-linked team was not adopted: ${JSON.stringify(d.scim)}`);
