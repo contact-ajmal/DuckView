@@ -51,6 +51,8 @@
  * Settings → Git, pushes the workspace, edits a notebook in a clone and pulls the change back.
  * The embeds scenario creates an embed key in Settings → Embedding, signs a link for one tenant, checks the preview
  * shows only that tenant's revenue, opens the embed page itself (no DuckView chrome) and a second tenant's link.
+ * The ai-build scenario asks DuckView AI (a mock model through BYOK) to build a dashboard: the reply's build plan is
+ * checked (one item fails), created with one click, and the dashboard has the working widgets with real numbers.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -926,6 +928,55 @@ try {
     await send('Page.navigate', { url: `${BASE}/#/` });
     report.details.charts = 1;
   }
+  else if (scenario === 'ai-build') {
+    const http = await import('node:http');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const plan = ['build: dashboard', 'name: E2E sales overview', 'items:', '  - { title: Revenue, kind: kpi, sql: "SELECT sum(amount) AS revenue FROM e2e_build_orders", format: number }', '  - { title: Orders, kind: kpi, sql: "SELECT count(*) AS orders FROM e2e_build_orders" }', '  - { title: Revenue by region, kind: chart, chart: bar, sql: "SELECT region, sum(amount) AS revenue FROM e2e_build_orders GROUP BY 1 ORDER BY 1", x: region, y: [revenue] }', '  - { title: Margin, kind: kpi, sql: "SELECT sum(margin) AS m FROM e2e_build_orders" }'].join('\n');
+    const answer = `Here is a sales dashboard.\n\n\`\`\`duckview-build\n${plan}\n\`\`\`\n`;
+    const prompts = [];
+    const llm = http.createServer((req, res) => {
+      let b = '';
+      req.on('data', (d) => (b += d));
+      req.on('end', () => {
+        if (!req.url.includes('chat/completions')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"models":[],"data":[]}'); return; }
+        prompts.push(JSON.parse(b));
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        for (const piece of answer.match(/[\s\S]{1,40}/g)) res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: { content: piece }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 20 } })}\n\n`);
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    await new Promise((r) => llm.listen(0, '127.0.0.1', r));
+    cleanup = async () => {
+      llm.close();
+      await evaluate(`localStorage.removeItem('duckview.copilot.settings'); true`).catch(() => undefined);
+      for (const d of (await j('GET', `/api/workspaces/${wsId}/dashboards`)).dashboards ?? []) if (d.name.startsWith('E2E sales overview')) await j('DELETE', `/api/dashboards/${d.id}`);
+      await q('DROP TABLE IF EXISTS e2e_build_orders');
+    };
+    await q(`CREATE OR REPLACE TABLE e2e_build_orders AS SELECT * FROM (VALUES (1, 'EU', 100.0), (2, 'US', 50.0), (3, 'EU', 30.0)) t(id, region, amount)`);
+    await evaluate(`localStorage.setItem('duckview.copilot.settings', JSON.stringify({ provider: 'ollama', model: 'mock', apiKey: '', baseUrl: 'http://127.0.0.1:${llm.address().port}' })); true`);
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await send('Page.reload', {});
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app reloaded');
+    await evaluate(`document.querySelector('[data-testid="ai-toggle"]').click(); true`);
+    await waitFor(`!!document.querySelector('textarea[placeholder^="Ask about your data"]:not([disabled])')`, 15000, 'AI ready');
+    await setField('textarea[placeholder^="Ask about your data"]', 'Build me a sales dashboard for the e2e orders');
+    await evaluate(`document.querySelector('button[title="Send"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[data-testid="build-card"] [data-build-item]')].length === 4`, 30000, 'build card with checked items');
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_card.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.card = await evaluate(`document.querySelector('[data-testid="build-card"]').innerText.replace(/\\s+/g, ' ')`);
+    report.details.guide = prompts.some((p) => (p.messages ?? []).some((m) => m.role === 'system' && String(m.content).includes('## Building dashboards and data apps')));
+    await evaluate(`document.querySelector('[data-testid="build-create"]').click(); true`);
+    await waitFor(`location.hash.startsWith('#/dashboards/') && [...document.querySelectorAll('.react-grid-item')].length === 3`, 30000, 'dashboard created');
+    await waitFor(`document.body.innerText.includes('180')`, 20000, 'revenue shown');
+    await sleep(500);
+    report.details.widgets = await evaluate(`[...document.querySelectorAll('.react-grid-item')].map(w => w.innerText.split('\\n')[0])`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -1208,6 +1259,11 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'ai-build') {
+    if (!d.guide) problems.push('the build guide was not in the prompt');
+    if (!/3 of 4 work/.test(d.card ?? '') || !/Margin kpi .*margin/.test(d.card ?? '')) problems.push(`card: ${d.card}`);
+    if (JSON.stringify([...(d.widgets ?? [])].sort()) !== JSON.stringify(['Orders', 'Revenue', 'Revenue by region'])) problems.push(`widgets: ${JSON.stringify(d.widgets)}`);
   }
   if (scenario === 'embeds') {
     if (!d.snippet) problems.push('no signing snippet');

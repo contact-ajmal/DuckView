@@ -5,7 +5,7 @@ import { Bot, X, Send, Square, Settings2, Sparkles, Wrench, PlayCircle, FilePlus
 import { SaveDbtModelDialog, looksLikeDbtModel } from '../transform/SaveDbtModelDialog';
 import { useCopilot } from '../../store/copilot';
 import { useWorkspace } from '../../store/workspace';
-import { api, type AgentRecord, type CopilotSpecBlock, type Dashboard } from '../../api/client';
+import { api, type AgentRecord, type CopilotBuildBlock, type CopilotSpecBlock, type Dashboard } from '../../api/client';
 import { Button, Input, Label, Select, cn } from '../../components/ui';
 
 export interface CopilotHost {
@@ -28,6 +28,60 @@ export function registerCopilotHost(h: CopilotHost | null) {
 
 /** A ```yaml / ```json block that is a Mosaic spec — validated by the server when the reply completed. */
 const looksLikeSpec = (text: string) => /^\s*(plot|vconcat|hconcat|input|mark|legend)\s*:/m.test(text) || /"(plot|vconcat|hconcat|input|mark|legend)"\s*:/.test(text);
+
+/** A ```duckview-build plan: what DuckView AI proposes to build, each item already run against the workspace. */
+function BuildCard({ text, block, workspaceId, onFix }: { text: string; block: CopilotBuildBlock | undefined; workspaceId: string | null; onFix: (problems: string[]) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [made, setMade] = useState<{ url: string; name: string; skipped: { title: string }[] } | null>(null);
+  const [showPlan, setShowPlan] = useState(false);
+  const check = block?.check ?? null;
+  const failed = check?.items.filter((i) => !i.ok) ?? [];
+  const create = async () => {
+    if (!workspaceId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.post<{ url: string; name: string; skipped: { title: string }[] }>(`/api/workspaces/${workspaceId}/build`, { plan: text });
+      setMade(r);
+      location.hash = r.url.replace(/^#?/, '#');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const kind = check?.build === 'app' ? 'data app' : 'dashboard';
+  return (
+    <div className="my-2 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950" data-testid="build-card">
+      <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-400">
+        <LayoutDashboard className="h-3 w-3 shrink-0 text-accent-300" /> {kind}{check ? <span className="truncate text-zinc-200">· {check.name}</span> : null}
+        <span className="ml-auto shrink-0">{check ? (failed.length ? <span className="text-amber-300">{check.items.length - failed.length} of {check.items.length} work</span> : <span className="inline-flex items-center gap-1 text-emerald-300"><CheckCircle2 className="h-3 w-3" /> all {check.items.length} work</span>) : block?.error ? <span className="text-red-300">not a valid plan</span> : <span>checking…</span>}</span>
+      </div>
+      {check && (
+        <ul className="divide-y divide-zinc-800/60 text-[11.5px]">
+          {check.items.map((i) => (
+            <li key={i.title} className="flex items-start gap-2 px-2 py-1" data-build-item={i.title}>
+              {i.ok ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" /> : <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-300" />}
+              <span className="min-w-0 flex-1"><span className="text-zinc-200">{i.title}</span> <span className="text-zinc-500">{i.kind}{i.ok && i.row_count != null ? ` · ${i.row_count} row${i.row_count === 1 ? '' : 's'}` : ''}</span>{!i.ok && <span className="block break-words font-mono text-[10.5px] text-amber-200">{i.error}</span>}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {block?.error && <div className="px-2 py-1.5 font-mono text-[10.5px] text-red-200">{block.error}</div>}
+      {showPlan && <pre className="max-h-60 overflow-auto border-t border-zinc-800 p-2 font-mono text-[10.5px] text-zinc-300">{text}</pre>}
+      {error && <div className="border-t border-zinc-800 px-2 py-1.5 font-mono text-[10.5px] text-red-200">{error}</div>}
+      {made && <div className="border-t border-zinc-800 px-2 py-1.5 text-[11px] text-emerald-300">Created “{made.name}”{made.skipped.length ? ` without ${made.skipped.length} item${made.skipped.length === 1 ? '' : 's'} that did not work` : ''}. <a className="underline" href={made.url.replace(/^#?/, '#')}>Open it</a></div>}
+      <div className="flex flex-wrap gap-1 border-t border-zinc-800 bg-zinc-900/60 px-1.5 py-1">
+        <button onClick={() => void create()} disabled={busy || !workspaceId || !check || check.items.every((i) => !i.ok || i.kind === 'text')} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" data-testid="build-create">
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <LayoutDashboard className="h-3 w-3" />} Create {kind}{failed.length ? ` (${check!.items.length - failed.length} items)` : ''}
+        </button>
+        {failed.length > 0 && <button onClick={() => onFix(failed.map((f) => `${f.title}: ${f.error}`))} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" data-testid="build-fix"><Wrench className="h-3 w-3 text-amber-300" /> Fix with AI</button>}
+        <button onClick={() => setShowPlan((v) => !v)} className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">{showPlan ? 'Hide plan' : 'Show plan'}</button>
+      </div>
+    </div>
+  );
+}
 
 function SpecBlock({ text, verdict, workspaceId, onFix }: { text: string; verdict: CopilotSpecBlock | undefined; workspaceId: string | null; onFix: (errors: string[]) => void }) {
   const [busy, setBusy] = useState(false);
@@ -202,11 +256,16 @@ export function CopilotDrawer() {
     if (!wsId || cp.streaming) return;
     void cp.send({ workspaceId: wsId, message: `The dashboard spec failed validation in this workspace. Fix it and return the complete corrected spec:\n${errors.map((e) => `- ${e}`).join('\n')}`, action: 'dashboard', targets: cp.targets });
   };
-  const mdComponentsFor = (m: { specBlocks?: CopilotSpecBlock[] }) => ({
+  const fixBuild = (problems: string[]) => {
+    if (!wsId || cp.streaming) return;
+    void cp.send({ workspaceId: wsId, message: `Some items of the build plan do not work in this workspace. Fix them and return the complete corrected plan:\n${problems.map((e) => `- ${e}`).join('\n')}`, action: 'build', targets: cp.targets });
+  };
+  const mdComponentsFor = (m: { specBlocks?: CopilotSpecBlock[]; buildBlocks?: CopilotBuildBlock[] }) => ({
     ...mdComponents,
     code(props: { className?: string; children?: ReactNode; inline?: boolean }) {
-      const lang = /language-(\w+)/.exec(props.className ?? '')?.[1];
+      const lang = /language-([\w-]+)/.exec(props.className ?? '')?.[1];
       const text = String(props.children ?? '').replace(/\n$/, '');
+      if (lang === 'duckview-build') return <BuildCard text={text} block={m.buildBlocks?.find((b) => b.text.trim() === text.trim())} workspaceId={wsId} onFix={fixBuild} />;
       if ((lang === 'yaml' || lang === 'yml' || lang === 'json') && looksLikeSpec(text)) return <SpecBlock text={text} verdict={m.specBlocks?.find((b) => b.text.trim() === text.trim())} workspaceId={wsId} onFix={fixSpec} />;
       return mdComponents.code(props);
     },
@@ -435,6 +494,8 @@ export function CopilotDrawer() {
                 ['Which regions had the highest revenue growth month over month?', 'Trend + window functions'],
                 ['Find duplicate customers by normalised email', 'Data quality'],
                 ['Pivot orders by product into monthly columns', 'PIVOT'],
+                ['Build a dashboard of the key numbers in this workspace', 'Dashboard, checked before it is created'],
+                ['Build a data app to explore the biggest table by its categories', 'Streamlit data app'],
                 ['Build a cross-filtered dashboard of trips by hour, distance and fare', 'Mosaic dashboard'],
               ].map(([q, hint]) => (
                 <button key={q} onClick={() => setInput(q ?? "")} className="rounded-md px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-900" title={hint}>

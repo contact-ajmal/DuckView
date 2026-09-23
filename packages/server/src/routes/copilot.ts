@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { parseBuildPlan } from '../services/builder.js';
 import type { AppContext } from '../context.js';
 import { PROVIDER_CATALOG, PROVIDER_IDS } from '../services/llm.js';
 import { requireAdmin } from '../services/principal.js';
@@ -90,7 +91,7 @@ export async function copilotRoutes(app: FastifyInstance, ctx: AppContext) {
         workspace_id: z.string().min(1),
         conversation_id: z.string().optional(),
         message: z.string().max(50_000).default(''),
-        action: z.enum(['chat', 'fix', 'suggest', 'explain', 'dashboard']).optional(),
+        action: z.enum(['chat', 'fix', 'suggest', 'explain', 'dashboard', 'build']).optional(),
         active_sql: z.string().max(200_000).nullable().optional(),
         error_message: z.string().max(20_000).nullable().optional(),
         targets: z.array(z.string()).max(5).optional(),
@@ -141,5 +142,18 @@ export async function copilotRoutes(app: FastifyInstance, ctx: AppContext) {
     } finally {
       res.end();
     }
+  });
+
+  // ---------------------------------------------------------------- build plans (DuckView AI → dashboards and apps)
+  const Plan = z.union([z.string().max(200_000), z.record(z.string(), z.unknown())]);
+  /** Runs each item's SQL (read-only) and checks its columns; nothing is created. */
+  app.post('/api/workspaces/:id/build/check', { preHandler: app.authenticate }, async (req) => {
+    const body = z.object({ plan: Plan }).parse(req.body ?? {});
+    return { check: await ctx.builder.check(req.principal!, (req.params as { id: string }).id, parseBuildPlan(body.plan as never)) };
+  });
+  /** Creates the dashboard or app from the items that pass (editors). */
+  app.post('/api/workspaces/:id/build', { preHandler: app.authenticate }, async (req) => {
+    const body = z.object({ plan: Plan }).parse(req.body ?? {});
+    return ctx.builder.create(req.principal!, (req.params as { id: string }).id, parseBuildPlan(body.plan as never));
   });
 }

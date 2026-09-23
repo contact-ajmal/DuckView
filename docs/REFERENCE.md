@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (51 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (52 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -540,6 +540,25 @@ API: `GET/PUT/DELETE /api/workspaces/:id/git` (`PUT {repo_url, branch?, path?, t
 **Rows per viewer**: an access policy that applies to **embeds** (the *embeds* box in Data → Access policies, `applies_to: { embeds: true }`) filters and masks what embeds see; the token's attributes are `{{embed.<name>}}` in its row filter — `tenant = {{embed.tenant}}` shows each customer their own rows. An attribute the token does not carry is NULL, so such a filter shows nothing. When several policies apply to someone on one table, all of them apply: filters are AND-ed and the strictest mask wins.
 
 API (owners): `GET/POST /api/workspaces/:id/embed/keys` (`POST {name, allowed_origins?}` → `{key, secret}`) · `PATCH/DELETE /api/embed/keys/:id` · `POST /api/workspaces/:id/embed/sign {key_id, resource_type, resource_id, sub?, attrs?, params?, expires_in?, theme?}` → `{token, url}`. The embed (token as `Authorization: Embed <token>` or `?token=`): `GET /api/embed/view` · `POST /api/embed/widgets/:wid/data` · `POST /api/embed/notebook/cells/:cell/run`. Audit: `embed.key_create`, `embed.key_revoke`, `embed.view`.
+
+
+## DuckView AI builds dashboards and apps
+
+**Ask for a dashboard or an app and get one** (`services/builder.ts`). "Build me a sales dashboard", "make a data app to explore orders by region" — DuckView AI answers with a short outline and a **build plan** (a ```` ```duckview-build ```` YAML block):
+
+```yaml
+build: dashboard            # or app (Streamlit, one section per item)
+name: Sales overview
+items:
+  - { title: Revenue, kind: kpi, sql: "SELECT sum(amount) AS revenue FROM orders", format: currency }
+  - { title: Revenue by month, kind: chart, chart: line, sql: "…", x: month, y: [revenue] }
+  - { title: Latest orders, kind: table, sql: "… LIMIT 100" }
+  - { title: Notes, kind: text, text: "Amounts in EUR." }
+```
+
+Before you see it, DuckView **runs every item's query** as you (read-only, a few rows, your access policies) and checks the columns a chart or KPI names. The reply shows a card: each item with ✓ and its row count, or the error; **Create dashboard** (or *Create app*) builds what works — KPIs in a row, charts two by two, tables and notes full width — and opens it; **Fix with AI** sends the failures back for a corrected plan. Requests that mention Mosaic, cross-filtering or brushing still get an interactive Mosaic spec.
+
+**Agents** build in one call with `build_dashboard` (`name`, `build`, `items`; `check_only` to test first); items that fail are skipped and reported. API: `POST /api/workspaces/:id/build/check {plan}` · `POST /api/workspaces/:id/build {plan}` (the plan as YAML text or an object).
 
 ## Governance
 

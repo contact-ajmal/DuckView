@@ -15,6 +15,7 @@ import type { CopilotAdminService, ServerProvider } from './copilot-admin.js';
 import type { AwsBridge } from './aws.js';
 import { HttpError, badRequest } from './errors.js';
 import { DBT_GUIDE } from './dbt.js';
+import { BUILD_GUIDE, parseBuildPlan, type BuildCheck, type BuilderService } from './builder.js';
 import { MOSAIC_SPEC_GUIDE } from './mosaic-guide.js';
 import { describeSpec, parseSpecText, type Spec } from './mosaic-spec.js';
 import type { MosaicService } from './mosaic.js';
@@ -23,7 +24,7 @@ import { metrics } from '../observability/metrics.js';
 import { tracer } from '../observability/tracing.js';
 import { SpanStatusCode } from '@opentelemetry/api';
 
-export type CopilotAction = 'chat' | 'fix' | 'suggest' | 'explain' | 'dashboard';
+export type CopilotAction = 'chat' | 'fix' | 'suggest' | 'explain' | 'dashboard' | 'build';
 
 export interface CopilotRequest {
   workspaceId: string;
@@ -50,6 +51,9 @@ export interface CopilotRequest {
 }
 
 /** A Mosaic spec the assistant wrote (a ```yaml / ```json block), validated against the workspace. */
+/** A ```duckview-build plan in a reply, checked against the workspace (each item's SQL run). */
+export interface BuildBlock { text: string; check: BuildCheck | null; error: string | null }
+
 export interface SpecBlock {
   text: string;
   title: string | null;
@@ -62,7 +66,7 @@ export interface SpecBlock {
 export type CopilotEvent =
   | { type: 'context'; conversation_id: string; message_id: string; provider: ProviderId; model: string; tables: number; files: number; buckets: number; targets: string[] }
   | { type: 'delta'; text: string }
-  | { type: 'done'; message_id: string; usage: LlmUsage; sql_blocks: string[]; spec_blocks: SpecBlock[]; duration_ms: number }
+  | { type: 'done'; message_id: string; usage: LlmUsage; sql_blocks: string[]; spec_blocks: SpecBlock[]; build_blocks: BuildBlock[]; duration_ms: number }
   | { type: 'error'; code: string; message: string };
 
 const SYSTEM_PROMPT = `You are DuckCopilot, the in-app data assistant inside DuckView — a native DuckDB analytics workspace.
@@ -86,12 +90,14 @@ dbt:
 
 const ACTION_PROMPTS: Record<CopilotAction, string> = {
   chat: '',
+  build: 'Build what the user asks for (a dashboard by default, a data app when they ask for an app) as a duckview-build plan: a short outline in words, then the single ```duckview-build block.',
   fix: 'The user\'s query failed. Diagnose the DuckDB error, then return the corrected SQL in a single ```sql block followed by a one-sentence explanation of what changed.',
   suggest: 'Propose the 5 most insightful analytical questions for the selected dataset(s). For each: a one-line question as a heading, then a ```sql block that answers it. Prefer aggregations, trends over time, distributions and comparisons.',
   explain: 'Explain the query result below in plain business language for a non-technical stakeholder: what the query did, the key numbers, notable patterns or anomalies, and one suggested follow-up question with its SQL.',
   dashboard: 'Design an interactive Mosaic dashboard for the request below (or, if none, for the selected dataset(s)). Return exactly one ```yaml block with the complete spec — meta.title, data (only for files/queries), params, and the layout — followed by two or three bullets on how to read it. Use only columns that exist in the context, write read-only SQL, and follow the Mosaic spec guide in the system prompt.',
 };
 
+const WANTS_BUILD = /\b(build|create|make|set up|design|put together)\b[^.?!]{0,60}\b(dashboard|report|data app|app)\b/i;
 const WANTS_CHART = /\b(dashboard|chart|visuali[sz]e|visualization|plot|histogram|graph|scatter|heatmap)\b/i;
 
 function renderContext(c: ChatContextSnapshot, cfg: DuckViewConfig): string {
@@ -130,7 +136,7 @@ export function extractSqlBlocks(text: string): string[] {
   let buf: string[] = [];
   // Tolerate fences that start mid-line ("Here you go: ```sql") by moving them to their own line.
   for (const line of text.replace(/([^\n])```/g, '$1\n```').split(/\r?\n/)) {
-    const fence = /^\s*```(\w*)\s*$/.exec(line);
+    const fence = /^\s*```([\w-]*)\s*$/.exec(line);
     if (fence) {
       if (!inBlock) {
         inBlock = true;
@@ -292,6 +298,8 @@ export class CopilotService {
   quality: { promptSummary(workspaceId: string): Promise<string> } | null = null;
   /** Reverse syncs (data sent out of the workspace), for prompts (set by the context). */
   reverse: { promptSummary(workspaceId: string): Promise<string> } | null = null;
+  /** Checks build plans (set by the context). */
+  builder: BuilderService | null = null;
   /** The notebook open in the UI, for prompts (set by the context). */
   notebooks: { promptSummary(p: Principal, id: string): Promise<string> } | null = null;
   /** Open comment threads, for prompts (set by the context). */
@@ -379,9 +387,12 @@ export class CopilotService {
     const llmMessages: LlmMessage[] = [...history.filter((m) => m.role === 'user' || m.role === 'assistant').map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })), { role: 'user', content: userContent }];
     // Consecutive same-role turns are fine for Anthropic; OpenAI-compatible servers also accept them.
     // The spec guide is prompt material only when a chart or dashboard is in play.
-    const wantsChart = action === 'dashboard' || WANTS_CHART.test(req.message ?? '');
+    // "Build me a dashboard / an app" gets a build plan (checked, created with one click); the Mosaic spec guide
+    // stays for charts and for the explicit dashboard action.
+    const wantsBuild = action === 'build' || (action !== 'dashboard' && WANTS_BUILD.test(req.message ?? '') && !/\b(mosaic|cross-?filter(ed|ing)?|interactive|brush(ing)?)\b/i.test(req.message ?? ''));
+    const wantsChart = action === 'dashboard' || (!wantsBuild && WANTS_CHART.test(req.message ?? ''));
     const wantsDbt = /\bdbt\b|\{\{\s*(ref|source|config)\(|\bincremental\b/i.test(req.message ?? '');
-    const system = `${SYSTEM_PROMPT}${wantsDbt ? `\n\n${DBT_GUIDE}` : ''}${wantsChart ? `\n\n${MOSAIC_SPEC_GUIDE}\n\nWhen you produce a dashboard spec, put it in a single \`\`\`yaml block; the user can create it with one click.` : ''}\n\n${renderContext(snapshot, this.cfg)}`;
+    const system = `${SYSTEM_PROMPT}${wantsBuild ? `\n\n${BUILD_GUIDE}` : ''}${wantsDbt ? `\n\n${DBT_GUIDE}` : ''}${wantsChart ? `\n\n${MOSAIC_SPEC_GUIDE}\n\nWhen you produce a dashboard spec, put it in a single \`\`\`yaml block; the user can create it with one click.` : ''}\n\n${renderContext(snapshot, this.cfg)}`;
 
     let text = '';
     let usage: LlmUsage = { input_tokens: null, output_tokens: null };
@@ -417,6 +428,7 @@ export class CopilotService {
     this.admin?.streamEnded(messageId);
     const sqlBlocks = extractSqlBlocks(text);
     const specBlocks = await this.validateSpecBlocks(p, req.workspaceId, text);
+    const buildBlocks = await this.checkBuildBlocks(p, req.workspaceId, text);
     await this.chat.append(p, req.workspaceId, conversationId, 'assistant', text, null);
     metrics.copilotRequests.inc({ provider, status: 'ok' });
     if (usage.input_tokens != null) metrics.copilotTokens.inc({ provider, direction: 'input' }, usage.input_tokens);
@@ -424,7 +436,21 @@ export class CopilotService {
     const durationMs = Math.round(performance.now() - started);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: `copilot.${action}`, resource: `conversation:${conversationId}`, queryText: req.message.slice(0, 2000), durationMs, ip: p.ip });
     await this.admin?.record({ user_id: p.userId, workspace_id: req.workspaceId, conversation_id: conversationId, message_id: messageId, provider, model: instance.model, action, byok, input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, duration_ms: durationMs, status: 'ok' }).catch(() => undefined);
-    yield { type: 'done', message_id: messageId, usage, sql_blocks: sqlBlocks, spec_blocks: specBlocks, duration_ms: durationMs };
+    yield { type: 'done', message_id: messageId, usage, sql_blocks: sqlBlocks, spec_blocks: specBlocks, build_blocks: buildBlocks, duration_ms: durationMs };
+  }
+
+  /** Every ```duckview-build block: parsed, and each item's SQL run (read-only) as the person asking. */
+  async checkBuildBlocks(p: Principal, workspaceId: string, text: string): Promise<BuildBlock[]> {
+    const out: BuildBlock[] = [];
+    for (const body of extractFencedBlocks(text, ['duckview-build'])) {
+      try {
+        const plan = parseBuildPlan(body);
+        out.push({ text: body, check: this.builder ? await this.builder.check(p, workspaceId, plan) : null, error: null });
+      } catch (err) {
+        out.push({ text: body, check: null, error: (err as Error).message });
+      }
+    }
+    return out;
   }
 
   /** Every ```yaml / ```json block that is a Mosaic spec, validated and bound in the workspace (EXPLAIN only). */
@@ -464,7 +490,7 @@ export function extractFencedBlocks(text: string, langs: string[]): string[] {
   let lang = '';
   let buf: string[] = [];
   for (const line of text.replace(/([^\n])```/g, '$1\n```').split(/\r?\n/)) {
-    const fence = /^\s*```(\w*)\s*$/.exec(line);
+    const fence = /^\s*```([\w-]*)\s*$/.exec(line);
     if (fence) {
       if (!inBlock) {
         inBlock = true;

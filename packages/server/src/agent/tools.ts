@@ -23,6 +23,7 @@ import { describeSpec, parseSpecText } from '../services/mosaic-spec.js';
 import { SOURCE_CATALOG } from '../services/source-catalog.js';
 import type { SyncSource, SyncSchedule, QualityCheck, ReverseDestination } from '../db/schema/sqlite.js';
 import { describeDestination } from '../services/reverse-etl.js';
+import { parseBuildPlan } from '../services/builder.js';
 import { describeCheck } from '../services/quality.js';
 import type { AppSource } from '../services/apps.js';
 import { framework } from '../services/app-frameworks.js';
@@ -1198,7 +1199,32 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`Commented (\`${c.id}\`)${c.mentioned.length ? `, mentioning ${c.mentioned.map((m) => m.name).join(', ')}` : ''}.`)], structuredContent: { status: 'ok', comment_id: c.id, thread_id: c.parent_id ?? c.id, mentioned: c.mentioned.map((m) => m.email) } };
       },
     }),
+    // ---------------------------------------------------------------- building
+    define({
+      name: 'build_dashboard',
+      title: 'Build a dashboard or data app',
+      description: 'Builds a whole grid dashboard — or, with build: "app", a Streamlit data app — from a plan in one call: name, description and items in order: { title, kind: "kpi", sql, format? } (one row, a numeric column), { title, kind: "chart", chart: bar|line|area|scatter|pie, sql, x, y: [...] }, { title, kind: "table", sql }, { title, kind: "text", text }. Every item\'s SQL is run first (read-only); items that fail are skipped and reported with their error, so fix and call again if needed. With check_only nothing is created. Returns the new dashboard or app and its link.',
+      inputSchema: {
+        name: z.string().min(1).max(120),
+        build: z.enum(['dashboard', 'app']).optional(),
+        description: z.string().max(2000).optional(),
+        items: z.array(z.record(z.string(), z.unknown())).min(1).max(40),
+        check_only: z.boolean().optional(),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { name, build, description, items, check_only, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const plan = parseBuildPlan({ build: build ?? 'dashboard', name, description, items });
+        if (check_only) {
+          const c = await env.ctx.builder.check(env.principal, ws, plan);
+          return { content: [text(c.items.map((i) => `- ${i.ok ? 'ok' : 'FAILS'} ${i.title}${i.ok ? i.row_count != null ? ` (${i.row_count} rows: ${i.columns.join(', ')})` : '' : ` — ${i.error}`}`).join('\n'))], structuredContent: { status: c.ok ? 'ok' : 'error', check: c } };
+        }
+        const r = await env.ctx.builder.create(env.principal, ws, plan);
+        return { content: [text(`Built ${r.build} **${r.name}** (\`${r.id}\`) with ${r.created.length} item${r.created.length === 1 ? '' : 's'}.${r.skipped.length ? `\nSkipped:\n${r.skipped.map((x) => `- ${x.title} — ${x.error}`).join('\n')}` : ''}\nOpen it in DuckView: ${r.url}`)], structuredContent: { status: 'ok', ...r } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard'] as const;
