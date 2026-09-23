@@ -819,7 +819,120 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         }
       },
     }),
+
+    // ---------------------------------------------------------------- dbt projects (Transform)
+    define({
+      name: 'list_dbt_projects',
+      title: 'List dbt projects',
+      description: 'The dbt projects of a workspace (Transform → dbt): their models and seeds, schedule, and the last run with what failed. DuckView compiles projects with dbt Core (dbt-duckdb) and runs them in the workspace engine; read duckdb://guides/dbt for what is supported.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const projects = await env.ctx.dbt.list(env.principal, ws);
+        const full = await Promise.all(projects.map((p) => env.ctx.dbt.get(env.principal, p.id)));
+        const rows = full.map((p) => {
+          const models = Object.keys(p.files).filter((f) => /^models\/.+\.sql$/i.test(f));
+          return { id: p.id, name: p.name, target_schema: p.target_schema, models: models.map((m) => m.split('/').pop()!.replace(/\.sql$/i, '')), files: Object.keys(p.files).length, schedule: p.schedule, scheduled: p.scheduled, enabled: p.enabled, last_run: p.last_run };
+        });
+        return { content: [text(rows.length ? rows.map((r) => `- **${r.name}** (\`${r.id}\`) · ${r.models.length} models: ${r.models.join(', ')} · last run: ${r.last_run ? `${r.last_run.command} ${r.last_run.status}${r.last_run.summary ? ` (${r.last_run.summary})` : ''}` : 'never'}`).join('\n') : 'No dbt projects in this workspace. create_dbt_project starts one.')], structuredContent: { status: 'ok', workspace_id: ws, projects: rows } };
+      },
+    }),
+
+    define({
+      name: 'get_dbt_project',
+      title: 'Read dbt project files',
+      description: 'Lists the files of a dbt project and returns their contents (all of them when the project is small, else the paths you ask for).',
+      inputSchema: { project_id: z.string(), paths: z.array(z.string()).optional().describe('Files to return; default: everything up to ~60 KB') },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { project_id, paths }) {
+        const p = await env.ctx.dbt.get(env.principal, project_id);
+        const names = Object.keys(p.files).sort();
+        let budget = 60_000;
+        const wanted = paths?.length ? paths.filter((x) => x in p.files) : names.filter((n) => !n.endsWith('.gitkeep'));
+        const shown: Record<string, string> = {};
+        for (const n of wanted) {
+          const c = p.files[n] ?? '';
+          if (!paths?.length && c.length > budget) continue;
+          shown[n] = c;
+          budget -= c.length;
+        }
+        const body = Object.entries(shown).map(([n, c]) => `### ${n}\n\`\`\`${n.endsWith('.sql') ? 'sql' : /\.ya?ml$/.test(n) ? 'yaml' : ''}\n${c}\n\`\`\``).join('\n\n');
+        return { content: [text(`**${p.name}** — ${names.length} files: ${names.join(', ')}\n\n${body}`)], structuredContent: { status: 'ok', project_id: p.id, name: p.name, target_schema: p.target_schema, vars: p.vars, paths: names, files: shown } };
+      },
+    }),
+
+    define({
+      name: 'create_dbt_project',
+      title: 'Create dbt project',
+      description: 'Creates a dbt project in a workspace — from the starter (a seed, a staging view, a table and tests) when no files are given, or from files ({path: content}, with dbt_project.yml at the root; DuckView writes profiles.yml).',
+      inputSchema: { name: z.string().min(1).max(120), workspace_id: z.string().optional(), files: z.record(z.string(), z.string()).optional(), target_schema: z.string().max(63).optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { name, workspace_id, files, target_schema }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const p = await env.ctx.dbt.create(env.principal, ws, { name, files, target_schema });
+        return { content: [text(`Created dbt project **${p.name}** (\`${p.id}\`) with ${Object.keys(p.files).length} files: ${Object.keys(p.files).join(', ')}. Run it with run_dbt.`)], structuredContent: { status: 'ok', project_id: p.id, paths: Object.keys(p.files) } };
+      },
+    }),
+
+    define({
+      name: 'write_dbt_files',
+      title: 'Write dbt project files',
+      description: 'Adds or replaces files of a dbt project ({path: content}) and deletes others ({path: null}): models (.sql with Jinja: ref, source, config, is_incremental), YAML (descriptions, sources, data tests), seeds (.csv), macros. Nothing runs until run_dbt; compile first to check.',
+      inputSchema: { project_id: z.string(), files: z.record(z.string(), z.string().nullable()) },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { project_id, files }) {
+        const p = await env.ctx.dbt.writeFiles(env.principal, project_id, files);
+        const changed = Object.entries(files).map(([n, c]) => `${c === null ? 'deleted' : 'wrote'} ${n}`);
+        return { content: [text(`**${p.name}**: ${changed.join(', ')}.`)], structuredContent: { status: 'ok', project_id: p.id, paths: Object.keys(p.files) } };
+      },
+    }),
+
+    define({
+      name: 'create_dbt_model',
+      title: 'Create dbt model from SQL',
+      description: 'Turns a SELECT into a model of a dbt project: models/<folder>/<name>.sql with a config block (view, table or incremental with unique_key), references to the project\'s own models and seeds rewritten to ref(), and the description in YAML. Test the SELECT with execute_query first.',
+      inputSchema: { project_id: z.string(), name: z.string().min(1).max(63), sql: z.string().min(1).max(200_000), folder: z.string().max(200).optional().describe('e.g. marts or staging'), materialized: z.enum(['view', 'table', 'incremental']).optional(), unique_key: z.string().max(200).optional(), description: z.string().max(4000).optional(), overwrite: z.boolean().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { project_id, ...input }) {
+        const r = await env.ctx.dbt.addModel(env.principal, project_id, input);
+        return { content: [text(`Wrote \`${r.path}\`${r.refs.length ? ` (ref() for ${r.refs.join(', ')})` : ''}:\n\`\`\`sql\n${r.sql}\`\`\`\nRun it with run_dbt {command: "build", select: "${input.name}"}.`)], structuredContent: { status: 'ok', project_id, path: r.path, sql: r.sql, refs: r.refs } };
+      },
+    }),
+
+    define({
+      name: 'run_dbt',
+      title: 'Run dbt',
+      description: 'Runs a dbt command on a project and waits for it: build (seeds, models, tests in order; failures skip what is downstream), run (models), test, seed, or compile (nothing executed — returns each node\'s compiled SQL). select / exclude use dbt syntax (model+, tag:x, path:models/marts). build, run and seed create or replace tables, so for agents they first return an approval challenge listing what would be built; after a person approves, call again with dry_run: false.',
+      inputSchema: { project_id: z.string(), command: z.enum(['build', 'run', 'test', 'seed', 'compile']), select: z.string().max(2000).optional(), exclude: z.string().max(2000).optional(), full_refresh: z.boolean().optional(), dry_run: z.boolean().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      async handler(env, { project_id, command, select, exclude, full_refresh, dry_run }) {
+        const { done } = await env.ctx.dbt.start(env.principal, project_id, { command, select, exclude, full_refresh }, env.principal.actorType === 'AGENT' ? 'agent' : 'manual', { approved: dry_run === false });
+        const run = await done;
+        const results = run.results ?? [];
+        const lines = results.map((r) => `- ${r.status.toUpperCase()} ${r.resource_type} **${r.relation ?? r.name}**${r.materialized ? ` (${r.materialized})` : ''}${r.rows != null ? ` · ${r.rows} rows` : ''}${r.failures ? ` · ${r.failures} failing rows` : ''}${r.message ? ` — ${r.message}` : ''}`);
+        const sql = command === 'compile' ? results.filter((r) => r.sql).slice(0, 10).map((r) => `### ${r.name}\n\`\`\`sql\n${r.sql}\n\`\`\``).join('\n') : '';
+        return {
+          content: [text(`dbt ${command}${select ? ` --select ${select}` : ''} → **${run.status}**${run.summary ? ` (${run.summary})` : ''} in ${((run.duration_ms ?? 0) / 1000).toFixed(1)} s${run.error ? `\n\nError: ${run.error}` : ''}\n\n${lines.join('\n')}${sql ? `\n\n${sql}` : ''}`)],
+          structuredContent: { status: run.status === 'ok' ? 'ok' : 'error', run_id: run.id, summary: run.summary, error: run.error, results: results.map(({ sql: s, ...r }) => ({ ...r, sql: command === 'compile' ? s : undefined })) },
+          isError: run.status !== 'ok',
+        };
+      },
+    }),
+
+    define({
+      name: 'get_dbt_run',
+      title: 'Get dbt run',
+      description: 'A dbt run\'s outcome: every node with its status, rows, failing rows and message, the error, and (include_log) the tail of dbt\'s log.',
+      inputSchema: { run_id: z.string(), include_log: z.boolean().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { run_id, include_log }) {
+        const run = await env.ctx.dbt.getRun(env.principal, run_id);
+        const lines = run.results.map((r) => `- ${r.status.toUpperCase()} ${r.resource_type} **${r.relation ?? r.name}**${r.message ? ` — ${r.message}` : ''}`);
+        return { content: [text(`dbt ${run.command} (${run.triggered_by}) → **${run.status}**${run.summary ? ` (${run.summary})` : ''}${run.error ? `\nError: ${run.error}` : ''}\n${lines.join('\n')}${include_log && run.log ? `\n\n\`\`\`\n${run.log.slice(-6000)}\n\`\`\`` : ''}`)], structuredContent: { status: 'ok', run: { ...run, log: include_log ? run.log?.slice(-20_000) : undefined } } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run'] as const;

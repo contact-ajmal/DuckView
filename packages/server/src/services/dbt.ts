@@ -34,6 +34,7 @@ import { requireWrite } from './principal.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { nextRunAt } from './syncs.js';
 import { newId } from '../security/crypto.js';
+import { HitlBlocked, type ApprovalChallenge } from './query.js';
 import { liveEvents } from '../observability/events.js';
 import { logger } from '../observability/logger.js';
 
@@ -124,6 +125,8 @@ export function starterProject(name: string): Record<string, string> {
 
 export class DbtService {
   private running = new Set<string>();
+  /** Runs an agent started with a person's approval (their SQL runs with dry_run=false). */
+  private approved = new Set<string>();
   private installing: Promise<void> | null = null;
   private installError: string | null = null;
   private versions: { dbt: string | null; adapter: string | null } | null = null;
@@ -349,6 +352,107 @@ export class DbtService {
     return { command: c.command, select: c.select?.trim() || null, exclude: c.exclude?.trim() || null, full_refresh: !!c.full_refresh };
   }
 
+  /** Adds, replaces (a string) or deletes (null) files of a project. */
+  async writeFiles(p: Principal, projectId: string, changes: Record<string, string | null>): Promise<DbtProject> {
+    const project = await this.get(p, projectId);
+    const files = { ...project.files };
+    for (const [name, content] of Object.entries(changes)) {
+      const key = name.replace(/\\/g, '/').replace(/^\.\//, '');
+      if (content === null) {
+        if (key === 'dbt_project.yml') throw badRequest('dbt_project.yml cannot be deleted');
+        delete files[key];
+      } else files[key] = content;
+    }
+    return this.update(p, projectId, { files });
+  }
+
+  /** Model and seed names of a project (from its files). */
+  private nodeNames(files: Record<string, string>): { models: string[]; seeds: string[] } {
+    const models = Object.keys(files).filter((f) => /^models\/.+\.sql$/i.test(f)).map((f) => f.split('/').pop()!.replace(/\.sql$/i, ''));
+    const seeds = Object.keys(files).filter((f) => /^seeds\/.+\.csv$/i.test(f)).map((f) => f.split('/').pop()!.replace(/\.csv$/i, ''));
+    return { models, seeds };
+  }
+
+  /**
+   * Turns a SELECT into a model of the project: `models/<folder>/<name>.sql` with a config block, references to the
+   * project's own models and seeds rewritten to ref(), and the description in a YAML file next to it.
+   */
+  async addModel(p: Principal, projectId: string, input: { name: string; sql: string; folder?: string | null; materialized?: 'view' | 'table' | 'incremental'; unique_key?: string | null; description?: string | null; overwrite?: boolean }): Promise<{ project: DbtProject; path: string; sql: string; refs: string[] }> {
+    const project = await this.get(p, projectId);
+    const name = input.name.trim();
+    if (!/^[A-Za-z_][\w]{0,62}$/.test(name)) throw badRequest('A model name is a plain identifier (letters, digits, underscores)');
+    const folder = (input.folder ?? '').trim().replace(/^\/+|\/+$/g, '').replace(/^models\/?/, '');
+    if (folder && !/^[\w-]+(\/[\w-]+)*$/.test(folder)) throw badRequest('folder is a path like marts or staging/shop');
+    const file = `models/${folder ? `${folder}/` : ''}${name}.sql`;
+    const { models, seeds } = this.nodeNames(project.files);
+    const existingPath = Object.keys(project.files).find((f) => /^models\/.+\.sql$/i.test(f) && f.split('/').pop() === `${name}.sql`);
+    if (existingPath && existingPath !== file) throw conflict(`The project already has a model ${name} (${existingPath})`);
+    if (existingPath && !input.overwrite) throw conflict(`${file} exists; pass overwrite to replace it`);
+    let body = input.sql.trim().replace(/;\s*$/, '');
+    if (!body) throw badRequest('sql is required');
+    const refs: string[] = [];
+    if (!/\{\{|\{%/.test(body)) {
+      const known = new Set([...models, ...seeds].filter((m) => m !== name).map((m) => m.toLowerCase()));
+      body = body.replace(/(\b(?:from|join)\s+)(?:"?main"?\.)?("?)([A-Za-z_]\w*)\2(?![\w.(])/gi, (all, kw: string, _q: string, ident: string) => {
+        if (!known.has(ident.toLowerCase())) return all;
+        refs.push(ident);
+        return `${kw}{{ ref('${ident}') }}`;
+      });
+    }
+    const m = input.materialized ?? 'view';
+    const config = /\{\{\s*config\(/.test(body) ? '' : `{{ config(materialized='${m}'${m === 'incremental' && input.unique_key ? `, unique_key='${input.unique_key.replace(/'/g, '')}'` : ''}) }}\n\n`;
+    const changes: Record<string, string> = { [file]: `${config}${body}\n` };
+    const describedElsewhere = Object.entries(project.files).some(([f, c]) => /\.ya?ml$/i.test(f) && new RegExp(`-\\s*name:\\s*['"]?${name}['"]?\\s*$`, 'm').test(c));
+    if (input.description?.trim() && !describedElsewhere) changes[`models/${folder ? `${folder}/` : ''}${name}.yml`] = `version: 2\n\nmodels:\n  - name: ${name}\n    description: ${JSON.stringify(input.description.trim())}\n`;
+    const updated = await this.writeFiles(p, projectId, changes);
+    return { project: updated, path: file, sql: changes[file]!, refs: [...new Set(refs)] };
+  }
+
+  /** What a build / run / seed would create or replace, as an approval challenge (a compile of the selection). */
+  private async challenge(p: Principal, project: DbtProject, cmd: DbtScheduledCommand): Promise<ApprovalChallenge> {
+    if (this.running.has(project.id)) throw conflict('This project is already running');
+    this.running.add(project.id);
+    try {
+      await this.ensureInstalled();
+      const pseudo = { command: cmd.command, select: cmd.select ?? null, exclude: cmd.exclude ?? null, full_refresh: !!cmd.full_refresh } as DbtRun;
+      const compiled = await this.compile(p, project, pseudo);
+      const types = cmd.command === 'seed' ? ['seed'] : cmd.command === 'run' ? ['model'] : ['seed', 'model'];
+      const nodes = compiled.selected.map((id) => compiled.nodes.get(id)).filter((n): n is ManifestNode => !!n && types.includes(n.resource_type) && n.config.materialized !== 'ephemeral');
+      const verb = (n: ManifestNode) => (n.resource_type === 'seed' ? 'CREATE TABLE' : n.config.materialized === 'view' || !n.config.materialized ? 'CREATE VIEW' : n.config.materialized === 'incremental' && !cmd.full_refresh ? 'INSERT' : 'CREATE TABLE');
+      return {
+        status: 'approval_required',
+        reason: `dbt ${cmd.command}${cmd.select ? ` --select ${cmd.select}` : ''} on "${project.name}" would create or replace ${nodes.length} relation${nodes.length === 1 ? '' : 's'} in the workspace: ${nodes.slice(0, 20).map((n) => this.display(n)).join(', ')}${nodes.length > 20 ? ', …' : ''}.`,
+        statement_classes: ['write'],
+        mutating_verbs: [...new Set(nodes.map(verb))],
+        statements: nodes.slice(0, 100).map((n, index) => ({ index, verb: verb(n), class: 'write', preview: `${verb(n)} ${this.display(n)}${n.resource_type === 'model' ? ` (${n.config.materialized ?? 'view'})` : ' (seed)'}` })),
+        how_to_proceed: 'Show the plan to the human operator. If they approve, call run_dbt again with the same arguments and dry_run: false.',
+      };
+    } finally {
+      this.running.delete(project.id);
+    }
+  }
+
+  /** The workspace's dbt projects for Copilot: models, how they are built, the last run and what failed. */
+  async promptSummary(workspaceId: string): Promise<string> {
+    const projects = await this.db.select().from(this.s.dbtProjects).where(eq(this.s.dbtProjects.workspace_id, workspaceId));
+    if (!projects.length) return '';
+    const out: string[] = [];
+    for (const project of projects.slice(0, 10)) {
+      const { models, seeds } = this.nodeNames(project.files);
+      const recent = await this.db.select().from(this.s.dbtRuns).where(eq(this.s.dbtRuns.project_id, project.id)).orderBy(desc(this.s.dbtRuns.started_at)).limit(25);
+      const last = recent[0];
+      const built = new Map<string, DbtNodeResult>();
+      for (const run of recent) for (const r of run.results) if (r.resource_type === 'model' && r.materialized && !built.has(r.name)) built.set(r.name, r);
+      out.push(`- **${project.name}** (id ${project.id}, target schema ${project.target_schema}): models ${models.map((m) => `${m}${built.get(m)?.materialized ? ` [${built.get(m)!.materialized}]` : ''}`).join(', ') || 'none'}${seeds.length ? `; seeds ${seeds.join(', ')}` : ''}`);
+      if (last) {
+        out.push(`  last run: dbt ${last.command}${last.select ? ` --select ${last.select}` : ''} → ${last.status}${last.summary ? ` (${last.summary})` : ''}`);
+        if (last.error) out.push(`  error: ${last.error.slice(0, 400)}`);
+        for (const r of last.results.filter((x) => x.status === 'error' || x.status === 'fail').slice(0, 5)) out.push(`  ${r.status}: ${r.name} — ${(r.message ?? '').slice(0, 300)}`);
+      }
+    }
+    return out.join('\n');
+  }
+
   // ------------------------------------------------------------------ runs
 
   async runs(p: Principal, projectId: string, limit = 30): Promise<Omit<DbtRun, 'log' | 'results'>[]> {
@@ -368,12 +472,16 @@ export class DbtService {
    * Starts a run as `p` (an editor of the workspace) and returns it at once; `done` settles when it finishes.
    * One run per project at a time.
    */
-  async start(p: Principal, projectId: string, input: { command: DbtCommand; select?: string | null; exclude?: string | null; full_refresh?: boolean }, triggeredBy: 'manual' | 'schedule' | 'agent' = 'manual'): Promise<{ run: DbtRun; done: Promise<DbtRun> }> {
+  async start(p: Principal, projectId: string, input: { command: DbtCommand; select?: string | null; exclude?: string | null; full_refresh?: boolean }, triggeredBy: 'manual' | 'schedule' | 'agent' = 'manual', opts: { approved?: boolean } = {}): Promise<{ run: DbtRun; done: Promise<DbtRun> }> {
     requireWrite(p);
     const project = await this.get(p, projectId);
     await this.workspaces.get(p, project.workspace_id, input.command === 'compile' ? 'VIEWER' : 'EDITOR');
     const cmd = this.validateScheduled(input);
     if (this.running.has(projectId)) throw conflict('This project is already running');
+    // Agents build tables only after a person approved (the same human-in-the-loop rule as mutating SQL): the
+    // challenge lists what the run would create or replace, from a compile of the same selection.
+    const writes = cmd.command === 'build' || cmd.command === 'run' || cmd.command === 'seed';
+    if (writes && p.actorType === 'AGENT' && this.cfg.mcp.require_confirmation_for_mutations && !opts.approved) throw new HitlBlocked(await this.challenge(p, project, cmd));
     this.running.add(projectId);
     const run: DbtRun = { id: newId(), project_id: projectId, workspace_id: project.workspace_id, user_id: p.userId, command: cmd.command, select: cmd.select ?? null, exclude: cmd.exclude ?? null, full_refresh: !!cmd.full_refresh, triggered_by: triggeredBy, status: 'running', summary: null, error: null, log: null, results: [], duration_ms: null, started_at: new Date(), finished_at: null };
     try {
@@ -384,7 +492,11 @@ export class DbtService {
       throw err;
     }
     this.publish(run);
-    const done = this.execute(p, project, run).finally(() => this.running.delete(projectId));
+    if (opts.approved) this.approved.add(run.id);
+    const done = this.execute(p, project, run).finally(() => {
+      this.running.delete(projectId);
+      this.approved.delete(run.id);
+    });
     return { run, done };
   }
 
@@ -540,7 +652,8 @@ export class DbtService {
 
     if (run.command === 'compile') return order.map(base);
 
-    const exec = (sql: string) => this.queries.run(p, project.workspace_id, sql, { cache: false, countTotal: false, maxRows: 1 });
+    const dryRun = this.approved.has(run.id) ? false : undefined;
+    const exec = (sql: string) => this.queries.run(p, project.workspace_id, sql, { cache: false, countTotal: false, maxRows: 1, dryRun });
     const scalar = async (sql: string) => Number((await exec(sql)).rows[0]?.[0] ?? 0);
     const existing = new Map<string, string>();
     for (const r of (await this.queries.run(p, project.workspace_id, 'SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_catalog = current_database()', { cache: false, countTotal: false, maxRows: 100_000 })).rows as string[][]) existing.set(`${r[0]}.${r[1]}`.toLowerCase(), r[2]!);
@@ -736,6 +849,40 @@ export function dbtError(log: string): string {
   }
   return out.join(' ').replace(/\s+/g, ' ').slice(0, 1500) || 'unknown error';
 }
+
+/** How DuckView runs dbt — for agents (MCP resource duckdb://guides/dbt) and Copilot. */
+export const DBT_GUIDE = `# dbt in DuckView
+
+A workspace keeps dbt projects (Transform → dbt). dbt Core with dbt-duckdb compiles them; DuckView runs the compiled SQL in the
+workspace's own DuckDB engine, as the person (or agent) who started the run, under the same SQL guard, access policies and audit.
+
+## Files
+- \`dbt_project.yml\` at the root (name, profile, model-paths, +materialized per folder). DuckView writes profiles.yml — never add one.
+- \`models/**.sql\`: one SELECT per model with Jinja — \`{{ ref('model_or_seed') }}\`, \`{{ source('src', 'table') }}\`,
+  \`{{ config(materialized='view'|'table'|'incremental', unique_key='id') }}\`, \`{% if is_incremental() %} … {{ this }} … {% endif %}\`.
+  Tables of the workspace that are not models can be read by name (\`from orders\`) or declared as sources in YAML:
+  \`sources: [{name: raw, schema: main, tables: [{name: orders}]}]\`.
+- \`models/**.yml\`: descriptions (they become catalog notes Copilot reads), column docs, data tests:
+  \`data_tests: [unique, not_null]\`, \`accepted_values\` / \`relationships\` with \`arguments: {values: [...]}\` / \`{to: ref('x'), field: id}\`.
+  Describe each model once across all YAML files.
+- \`tests/*.sql\`: singular tests — a SELECT returning failing rows; \`{{ config(severity='warn') }}\` to warn instead of fail.
+- \`seeds/*.csv\`: small reference tables (loaded by seed / build). \`macros/*.sql\`, \`packages.yml\` (dbt_utils etc.) work.
+- SQL is DuckDB SQL. Comments do not stop Jinja: never write \`{{ … }}\` in a comment; use \`{# … #}\`.
+
+## Running
+- \`compile\` (safe, shows compiled SQL) → \`build\` (seeds, models, tests in dependency order; a failing test skips everything
+  downstream) · \`run\` (models) · \`test\` · \`seed\`. \`select\` / \`exclude\` take dbt syntax: \`orders+\`, \`+orders\`, \`tag:finance\`,
+  \`path:models/marts\`. \`full_refresh\` rebuilds incremental models.
+- Materializations: view, table, incremental (append, or delete + insert on unique_key), ephemeral.
+- Not supported: snapshots, Python models, hooks with Jinja, unit tests, custom materializations, on-run-start/end.
+
+## Workflow for agents
+1. \`list_dbt_projects\` / \`get_dbt_project\` to read what exists; \`list_accessible_data\` for the workspace's tables.
+2. Prove a model's SELECT with \`execute_query\`, then \`create_dbt_model\` (or \`write_dbt_files\` for YAML, tests, several files).
+3. \`run_dbt\` with \`compile\` to check, then \`build\` with a selection. build / run / seed return an approval challenge first:
+   show the plan to a person and repeat with \`dry_run: false\` once they approve.
+4. On failures read the node messages (\`get_dbt_run\` with include_log for dbt's log), fix the files, run again.
+`;
 
 /** dbt's warn_if / error_if: "!=0", ">10", ">= 5", "=0", "<3". */
 export function evalCondition(cond: string, n: number): boolean {

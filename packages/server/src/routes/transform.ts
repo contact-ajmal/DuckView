@@ -4,7 +4,9 @@
  *   POST /api/admin/dbt/install                           install now (administrators; otherwise on first run)
  *   GET/POST /api/workspaces/:id/dbt/projects             list (members) · create (editors; a starter when no files)
  *   GET/PATCH/DELETE /api/dbt/projects/:id                one project with its files · edit · delete
- *   POST /api/dbt/projects/:id/runs                       {command, select?, exclude?, full_refresh?, wait?}
+ *   POST /api/dbt/projects/:id/runs                       {command, select?, exclude?, full_refresh?, wait?, dry_run?}
+ *   PATCH /api/dbt/projects/:id/files                     {files: {path: content | null}} (null deletes)
+ *   POST /api/dbt/projects/:id/models                     {name, sql, folder?, materialized?, unique_key?, description?}
  *   GET  /api/dbt/projects/:id/runs · GET /api/dbt/runs/:id
  */
 import type { FastifyInstance } from 'fastify';
@@ -54,10 +56,23 @@ export async function transformRoutes(app: FastifyInstance, ctx: AppContext) {
     return { ok: true };
   });
 
+  // Agent tokens: build / run / seed answer 409 APPROVAL_REQUIRED with a challenge until repeated with dry_run: false.
   app.post('/api/dbt/projects/:id/runs', async (req) => {
-    const body = Command.extend({ wait: z.boolean().optional() }).parse(req.body ?? {});
-    const { run, done } = await ctx.dbt.start(req.principal!, (req.params as { id: string }).id, body, req.principal!.actorType === 'AGENT' ? 'agent' : 'manual');
+    const body = Command.extend({ wait: z.boolean().optional(), dry_run: z.boolean().optional() }).parse(req.body ?? {});
+    const { run, done } = await ctx.dbt.start(req.principal!, (req.params as { id: string }).id, body, req.principal!.actorType === 'AGENT' ? 'agent' : 'manual', { approved: body.dry_run === false });
     return { run: body.wait ? await done : run };
+  });
+
+  app.patch('/api/dbt/projects/:id/files', async (req) => {
+    const body = z.object({ files: z.record(z.string().min(1).max(300), z.string().nullable()) }).parse(req.body ?? {});
+    return { project: await ctx.dbt.writeFiles(req.principal!, (req.params as { id: string }).id, body.files) };
+  });
+
+  /** A SELECT (from the workbench or Copilot) as a model of the project; references to its models become ref(). */
+  app.post('/api/dbt/projects/:id/models', async (req) => {
+    const body = z.object({ name: z.string().min(1).max(63), sql: z.string().min(1).max(200_000), folder: z.string().max(200).nullable().optional(), materialized: z.enum(['view', 'table', 'incremental']).optional(), unique_key: z.string().max(200).nullable().optional(), description: z.string().max(4000).nullable().optional(), overwrite: z.boolean().optional() }).parse(req.body ?? {});
+    const r = await ctx.dbt.addModel(req.principal!, (req.params as { id: string }).id, body);
+    return { project: r.project, path: r.path, sql: r.sql, refs: r.refs };
   });
 
   app.get('/api/dbt/projects/:id/runs', async (req) => {

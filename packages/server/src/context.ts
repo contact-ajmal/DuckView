@@ -153,6 +153,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const scim = new ScimService(store, cfg, auth, workspaces);
   const dbt = new DbtService(store, cfg, workspaces, queries, auth, audit, lineage, engines.jail.baseDir);
   lineage.dbt = dbt;
+  copilot.dbt = dbt;
   if (cfg.transform.scheduler_enabled) dbt.startScheduler();
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));

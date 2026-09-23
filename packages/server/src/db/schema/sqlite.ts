@@ -322,6 +322,8 @@ export interface ChatContextSnapshot {
   summaries?: Record<string, { column: string; type: string; min: string | null; max: string | null; approx_unique: number | null; null_percentage: number }[]>;
   /** The workspace's catalog notes: descriptions and tags people wrote on tables and columns. */
   notes?: string;
+  /** The workspace's dbt projects: models, last run, failures. */
+  dbt?: string;
   model?: string;
   provider?: string;
 }

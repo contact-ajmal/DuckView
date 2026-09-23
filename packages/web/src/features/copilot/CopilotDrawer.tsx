@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, X, Send, Square, Settings2, Sparkles, Wrench, PlayCircle, FilePlus2, ArrowDownToLine, Trash2, History, ChevronDown, KeyRound, Loader2, LayoutDashboard, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Bot, X, Send, Square, Settings2, Sparkles, Wrench, PlayCircle, FilePlus2, ArrowDownToLine, Trash2, History, ChevronDown, KeyRound, Loader2, LayoutDashboard, CheckCircle2, AlertTriangle, Workflow } from 'lucide-react';
+import { SaveDbtModelDialog, looksLikeDbtModel } from '../transform/SaveDbtModelDialog';
 import { useCopilot } from '../../store/copilot';
 import { useWorkspace } from '../../store/workspace';
 import { api, type AgentRecord, type CopilotSpecBlock, type Dashboard } from '../../api/client';
@@ -78,7 +79,8 @@ function SpecBlock({ text, verdict, workspaceId, onFix }: { text: string; verdic
 const AWS = new Set(['bedrock', 'bedrock_agent', 'agentcore']);
 const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
 
-function SqlBlock({ sql, onInsert, onNewTab, onRun, busy }: { sql: string; onInsert: () => void; onNewTab: () => void; onRun: () => void; busy: boolean }) {
+function SqlBlock({ sql, onInsert, onNewTab, onRun, onDbt, busy }: { sql: string; onInsert: () => void; onNewTab: () => void; onRun: () => void; onDbt: () => void; busy: boolean }) {
+  const dbt = looksLikeDbtModel(sql);
   return (
     <div className="my-2 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
       <pre className="overflow-auto p-2.5 font-mono text-[11px] leading-relaxed text-zinc-200">{sql}</pre>
@@ -89,9 +91,12 @@ function SqlBlock({ sql, onInsert, onNewTab, onRun, busy }: { sql: string; onIns
         <button onClick={onNewTab} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Open in a fresh tab">
           <FilePlus2 className="h-3 w-3" /> New tab
         </button>
-        <button onClick={onRun} disabled={busy} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" title="Run the query, then explain the result">
-          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <PlayCircle className="h-3 w-3" />} Run & inspect
+        <button onClick={onDbt} className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] hover:bg-zinc-800', dbt ? 'text-accent-200' : 'text-zinc-300 hover:text-zinc-50')} title="Add to a dbt project as a model (Transform → dbt)" data-testid="copilot-dbt-model">
+          <Workflow className="h-3 w-3" /> {dbt ? 'Add to dbt project' : 'dbt model'}
         </button>
+        {!dbt && <button onClick={onRun} disabled={busy} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" title="Run the query, then explain the result">
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <PlayCircle className="h-3 w-3" />} Run & inspect
+        </button>}
       </div>
     </div>
   );
@@ -101,6 +106,7 @@ export function CopilotDrawer() {
   const cp = useCopilot();
   const ws = useWorkspace();
   const wsId = ws.activeId;
+  const [dbtSql, setDbtSql] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showConvs, setShowConvs] = useState(false);
@@ -208,7 +214,7 @@ export function CopilotDrawer() {
       const lang = /language-(\w+)/.exec(className ?? '')?.[1];
       const text = String(children ?? '').replace(/\n$/, '');
       const isSql = lang === 'sql' || (!lang && text.includes('\n') && /^\s*(select|with|from|summarize|describe|pivot)\b/i.test(text));
-      if (isSql) return <SqlBlock sql={text} onInsert={() => host?.insertSql(text)} onNewTab={() => host?.newTabWithSql(text, 'Copilot')} onRun={() => void runAndInspect(text)} busy={running === text} />;
+      if (isSql) return <SqlBlock sql={text} onInsert={() => host?.insertSql(text)} onNewTab={() => host?.newTabWithSql(text, 'Copilot')} onRun={() => void runAndInspect(text)} onDbt={() => setDbtSql(text)} busy={running === text} />;
       if (props.inline || !text.includes('\n')) return <code className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-[11px] text-accent-200">{text}</code>;
       return <pre className="my-2 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2.5 font-mono text-[11px] text-zinc-200">{text}</pre>;
     },
@@ -488,6 +494,7 @@ export function CopilotDrawer() {
           <ChevronDown className="h-3 w-3" /> context: schema of all tables, data files, buckets{cp.targets.length ? `, SUMMARIZE of ${cp.targets.join(', ')}` : ''}, active SQL
         </div>
       </div>
+      {dbtSql !== null && wsId && <SaveDbtModelDialog workspaceId={wsId} sql={dbtSql} onClose={() => setDbtSql(null)} />}
     </aside>
   );
 }

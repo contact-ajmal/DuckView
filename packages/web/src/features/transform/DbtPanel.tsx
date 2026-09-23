@@ -4,12 +4,13 @@ import { EditorView } from '@codemirror/view';
 import { sql as sqlLang } from '@codemirror/lang-sql';
 import { yaml } from '@codemirror/lang-yaml';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { ChevronLeft, FilePlus2, FolderUp, Play, Save, Trash2, CalendarClock, FileCode2, Loader2, ScrollText, Workflow, Download } from 'lucide-react';
+import { ChevronLeft, FilePlus2, FolderUp, Play, Save, Trash2, CalendarClock, FileCode2, Loader2, ScrollText, Workflow, Download, Bot } from 'lucide-react';
 import { api, timeAgo, type DbtCommand, type DbtNodeResult, type DbtProject, type DbtRun, type DbtSchedule, type DbtStatus } from '../../api/client';
 import { useAuth } from '../../store/auth';
 import { useWorkspaceAccess } from '../../store/workspace';
 import { useTheme } from '../../store/theme';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
+import { useCopilot } from '../../store/copilot';
 import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
 
 const COMMANDS: { id: DbtCommand; label: string; hint: string }[] = [
@@ -120,6 +121,19 @@ function ProjectList({ workspaceId }: { workspaceId: string }) {
                 <Workflow className="h-4 w-4 text-accent-300" />
                 <span className="font-medium text-zinc-100">{p.name}</span>
                 {p.last_run && <Badge tone={p.last_run.status === 'ok' ? 'green' : p.last_run.status === 'error' ? 'red' : 'blue'}>{p.last_run.status === 'running' ? 'running' : p.last_run.command}</Badge>}
+                {canEdit && p.last_run?.status !== 'running' && (
+                  <span
+                    role="button"
+                    className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-accent-200 hover:bg-accent-600/20"
+                    title="dbt build (seeds, models, tests)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void api.post(`/api/dbt/projects/${p.id}/runs`, { command: 'build' }).then(load).catch((err) => setError((err as Error).message));
+                    }}
+                  >
+                    <Play className="h-3 w-3" /> Build
+                  </span>
+                )}
               </div>
               <div className="mt-1 text-zinc-500">{p.last_run ? `${p.last_run.summary ?? ''} · ${timeAgo(p.last_run.started_at)}` : 'Never run'} · {scheduleLabel(p.schedule)}{p.schedule.kind !== 'manual' && !p.enabled ? ' (paused)' : ''}</div>
             </button>
@@ -178,6 +192,7 @@ function ProjectView({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const selectedRun = useRef<string | null>(null);
+  const cp = useCopilot();
 
   const loadRuns = useCallback(async () => {
     const r = await api.get<{ runs: DbtRun[] }>(`/api/dbt/projects/${id}/runs`);
@@ -230,6 +245,22 @@ function ProjectView({ id }: { id: string }) {
     } finally {
       setBusy(false);
     }
+  };
+  const askCopilot = (r: DbtRun) => {
+    const failed = (r.results ?? []).filter((x) => x.status === 'error' || x.status === 'fail');
+    const fileOf = (name: string) => Object.keys(files).find((f) => f.split('/').pop() === `${name}.sql`);
+    const involved = [...new Set(failed.flatMap((x) => [fileOf(x.name), ...x.depends_on.map((d) => fileOf(d.split('.').pop()!))]).filter((f): f is string => !!f))].slice(0, 6);
+    const names = [...new Set(failed.flatMap((x) => [x.name, ...x.depends_on.map((d) => d.split('.').pop()!)]))];
+    const yamls = Object.keys(files).filter((f) => /\.ya?ml$/.test(f) && f !== 'dbt_project.yml' && names.some((n) => new RegExp(`name:\\s*['"]?${n}\\b`).test(files[f]!))).slice(0, 3);
+    const message = [
+      `My dbt run in project "${project?.name}" failed: dbt ${r.command}${r.select ? ` --select ${r.select}` : ''} → ${r.summary ?? r.status}.`,
+      r.error ? `Error:\n\`\`\`\n${r.error}\n\`\`\`` : '',
+      failed.length ? `Failing nodes:\n${failed.map((x) => `- ${x.status} ${x.resource_type} ${x.name}: ${x.message ?? ''}`).join('\n')}` : '',
+      ...[...involved, ...yamls].map((f) => `${f}:\n\`\`\`${f.endsWith('.sql') ? 'sql' : 'yaml'}\n${files[f]}\n\`\`\``),
+      'Explain what went wrong and give the corrected file(s): for a model, a ```sql block whose first line is `-- dbt model: <path>`; for YAML a ```yaml block with the path in a comment.',
+    ].filter(Boolean).join('\n\n');
+    cp.toggle(true);
+    void cp.send({ workspaceId: project!.workspace_id, message });
   };
   const addFile = () => {
     const name = prompt('New file (path inside the project)', 'models/my_model.sql');
@@ -343,7 +374,9 @@ function ProjectView({ id }: { id: string }) {
                 <span className="text-zinc-300">dbt {run.command}{run.select ? ` --select ${run.select}` : ''}{run.full_refresh ? ' --full-refresh' : ''}</span>
                 <span className="text-zinc-500">{run.duration_ms !== null ? `${(run.duration_ms / 1000).toFixed(1)} s` : ''}</span>
                 {Object.entries(counts).map(([k, v]) => <Badge key={k} tone={STATUS_TONE[k as DbtNodeResult['status']]}>{v} {k}</Badge>)}
-                {run.log && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setShowLog((s) => !s)}><ScrollText className="h-3.5 w-3.5" /> {showLog ? 'Hide log' : 'dbt log'}</Button>}
+                <span className="ml-auto" />
+                {run.status === 'error' && <Button size="sm" variant="ghost" onClick={() => askCopilot(run)} title="Explain the failure and propose fixed files" data-testid="dbt-ask-copilot"><Bot className="h-3.5 w-3.5" /> Ask Copilot</Button>}
+                {run.log && <Button size="sm" variant="ghost" onClick={() => setShowLog((s) => !s)}><ScrollText className="h-3.5 w-3.5" /> {showLog ? 'Hide log' : 'dbt log'}</Button>}
               </div>
               {run.error && <div className="whitespace-pre-wrap rounded-md border border-red-900 bg-red-950/40 px-3 py-2 font-mono text-[11px] text-red-200" data-testid="dbt-run-error">{run.error}</div>}
               {showLog && run.log && <pre className="max-h-72 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[11px] text-zinc-400">{run.log}</pre>}

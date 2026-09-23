@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Bot, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap } from 'lucide-react';
+import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Bot, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess, lakehouseEngine, engineConnectionId } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { fetchCached } from '../../lib/useCached';
@@ -14,6 +14,7 @@ import { ProfilePanel, type ProfileResult } from './ProfilePanel';
 import { ExploreView } from '../explore/ExploreView';
 import { SchemaTree } from './SchemaTree';
 import { SavedQueriesTree } from './SavedQueries';
+import { SaveDbtModelDialog } from '../transform/SaveDbtModelDialog';
 import { Explorer, type ExplorerNode } from '../explorer/Explorer';
 import { SchemaPanel } from '../explorer/SchemaPanel';
 import { FolderPicker } from '../explorer/FolderPicker';
@@ -57,6 +58,7 @@ export function WorkspacePage() {
   const [picker, setPicker] = useState(false);
   const [explorerKey, setExplorerKey] = useState(0);
   const [saved, setSaved] = useState<SavedQuery[]>([]);
+  const [dbtModel, setDbtModel] = useState<string | null>(null);
   const [saveModal, setSaveModal] = useState<{ open: boolean; name: string; folder: string; tags: string; description: string; existing?: SavedQuery }>({ open: false, name: '', folder: '', tags: '', description: '' });
   const importInput = useRef<HTMLInputElement>(null);
   const { canEdit: canWrite } = useWorkspaceAccess();
@@ -422,6 +424,7 @@ export function WorkspacePage() {
         <button onClick={() => run(null)} disabled={!sql.trim() || result?.status === 'running'} className="text-xs text-zinc-300 hover:text-zinc-50 disabled:opacity-40">Run all</button>
         <button onClick={() => replaceSql('')} className="text-xs text-zinc-300 hover:text-zinc-50">Clear</button>
         <button onClick={openSave} disabled={!sql.trim() || !canWrite} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-50 disabled:opacity-40"><Save className="h-3.5 w-3.5" /> Save</button>
+        <button onClick={() => setDbtModel(sql)} disabled={!sql.trim() || !canWrite} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-50 disabled:opacity-40" title="Save this SELECT as a model of a dbt project (Transform → dbt)"><Workflow className="h-3.5 w-3.5" /> dbt model</button>
         <div className="min-w-0 font-mono text-[11px] text-zinc-500">
           {result?.status === 'running' && <span className="text-accent-300">● running… {result.rowCount > 0 && `${result.rowCount.toLocaleString()} rows`}</span>}
           {executed && (
@@ -633,6 +636,7 @@ export function WorkspacePage() {
         }}
       />
 
+      {dbtModel !== null && wsId && <SaveDbtModelDialog workspaceId={wsId} sql={dbtModel} suggestedName={tab?.title} onClose={() => setDbtModel(null)} />}
       <Modal open={saveModal.open} onClose={() => setSaveModal({ ...saveModal, open: false })} title={saveModal.existing ? 'Update saved query' : 'Save query'}>
         <div className="space-y-3">
           <div><Label>Name</Label><Input value={saveModal.name} onChange={(e) => setSaveModal({ ...saveModal, name: e.target.value })} autoFocus /></div>

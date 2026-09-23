@@ -28,7 +28,9 @@
  * Provisioning, links a new team to an IdP group in Settings → Teams and shares the workspace with it, provisions a
  * user and the group over SCIM (the team is adopted), and deactivates the user in Settings → Users. The dbt-project
  * scenario installs dbt Core when the server lacks it, creates the starter project in Transform, builds it, edits a
- * model in the editor, saves and runs only that model, and checks its compiled SQL and catalog note.
+ * model in the editor, saves and runs only that model, and checks its compiled SQL and catalog note. The dbt-copilot
+ * scenario saves a workbench SELECT as a dbt model (Query → dbt model) and has DuckCopilot (a mock LLM through BYOK)
+ * write a model that "Add to dbt project" saves and builds; the prompt must carry the workspace's dbt projects.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -510,6 +512,76 @@ try {
     report.details.traced = await evaluate(`[...document.querySelectorAll('svg[aria-label="Lineage graph"] g[data-node]')].map(g => g.querySelector('text')?.textContent)`);
     report.details.charts = 1;
   }
+  else if (scenario === 'dbt-copilot') {
+    const http = await import('node:http');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    // A mock OpenAI-compatible LLM (BYOK "ollama") that answers with a dbt model and records the prompt it got.
+    const prompts = [];
+    const answer = "Here is a mart model:\n\n```sql\n-- dbt model: models/marts/revenue_bands.sql\nselect case when amount >= 200 then 'large' else 'small' end as band, count(*) as orders, sum(amount) as revenue\nfrom {{ ref('stg_numbers') }}\ngroup by 1\n```\n\nAdd it to the project and build it.";
+    const llm = http.createServer((req, res) => {
+      let b = '';
+      req.on('data', (d) => (b += d));
+      req.on('end', () => {
+        if (!req.url.includes('chat/completions')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"models":[],"data":[]}'); return; }
+        prompts.push(JSON.parse(b));
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        for (const piece of answer.match(/[\s\S]{1,40}/g)) res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: { content: piece }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 20 } })}\n\n`);
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    await new Promise((r) => llm.listen(0, '127.0.0.1', r));
+    let tabId = null;
+    const cleanupDbt = async () => {
+      llm.close();
+      for (const p of (await j('GET', `/api/workspaces/${wsId}/dbt/projects`)).projects ?? []) if (p.name === 'E2E dbt copilot') await authed(`/api/dbt/projects/${p.id}`, { method: 'DELETE' });
+      await q('DROP TABLE IF EXISTS big_regions; DROP VIEW IF EXISTS revenue_bands; DROP TABLE IF EXISTS region_totals; DROP VIEW IF EXISTS stg_numbers; DROP TABLE IF EXISTS regions');
+      if (tabId) await authed(`/api/workspaces/${wsId}/tabs/${tabId}`, { method: 'DELETE' });
+      await evaluate(`localStorage.removeItem('duckview.copilot.settings'); true`);
+    };
+    for (const p of (await j('GET', `/api/workspaces/${wsId}/dbt/projects`)).projects ?? []) if (p.name === 'E2E dbt copilot') await authed(`/api/dbt/projects/${p.id}`, { method: 'DELETE' });
+    cleanup = cleanupDbt;
+    const project = (await j('POST', `/api/workspaces/${wsId}/dbt/projects`, { name: 'E2E dbt copilot' })).project;
+    report.details.starter = (await j('POST', `/api/dbt/projects/${project.id}/runs`, { command: 'build', wait: true })).run?.status;
+    // 1. Query workbench → "dbt model": a SELECT becomes a model of the project and is built.
+    tabId = (await j('POST', `/api/workspaces/${wsId}/tabs`, { title: 'E2E dbt tab', sql_content: 'SELECT region_name, revenue FROM region_totals WHERE revenue > 100' })).tab?.id;
+    await send('Page.navigate', { url: `${BASE}/#/query` });
+    await sleep(500);
+    await send('Page.reload', {});
+    await waitFor(`[...document.querySelectorAll('span.truncate')].some(s => s.textContent === 'E2E dbt tab')`, 20000, 'tab listed');
+    await evaluate(`[...document.querySelectorAll('span.truncate')].find(s => s.textContent === 'E2E dbt tab').closest('div').click(); true`);
+    await sleep(500);
+    await clickButton('dbt model');
+    await waitFor(`!!document.querySelector('[data-testid="dbt-model-name"]')`, 5000, 'dbt model dialog');
+    await waitFor(`[...(document.querySelector('[data-testid="dbt-model-project"]')?.options ?? [])].some(o => o.value === ${JSON.stringify(project.id)})`, 10000, 'projects loaded');
+    await evaluate(`(() => { const sel = document.querySelector('[data-testid="dbt-model-project"]'); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sel), 'value').set.call(sel, ${JSON.stringify(project.id)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await setField('[data-testid="dbt-model-name"]', 'big_regions');
+    await clickButton('Save model');
+    await waitFor(`location.hash.includes(${JSON.stringify(project.id)}) && !!document.querySelector('tr[data-node="big_regions"]') && document.querySelector('[data-testid="dbt-run"]').innerText.includes('ok')`, 300000, 'workbench model built');
+    const files = (await j('GET', `/api/dbt/projects/${project.id}`)).project.files;
+    report.details.workbenchModel = files['models/marts/big_regions.sql'] ?? null;
+    // 2. Copilot writes a dbt model; "Add to dbt project" saves and builds it.
+    await evaluate(`localStorage.setItem('duckview.copilot.settings', JSON.stringify({ provider: 'ollama', model: 'mock', apiKey: '', baseUrl: 'http://127.0.0.1:${llm.address().port}' })); true`);
+    await send('Page.reload', {});
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Copilot')`, 20000, 'app reloaded');
+    await clickButton('Copilot');
+    await waitFor(`!!document.querySelector('textarea[placeholder^="Ask about your data"]:not([disabled])')`, 15000, 'copilot ready');
+    await setField('textarea[placeholder^="Ask about your data"]', 'Write a dbt model that bands orders by amount');
+    await evaluate(`document.querySelector('button[title="Send"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[data-testid="copilot-dbt-model"]')].some(b => b.textContent.includes('Add to dbt project'))`, 30000, 'dbt block in the answer');
+    await evaluate(`[...document.querySelectorAll('[data-testid="copilot-dbt-model"]')].find(b => b.textContent.includes('Add to dbt project')).click(); true`);
+    await waitFor(`document.querySelector('[data-testid="dbt-model-name"]')?.value === 'revenue_bands'`, 5000, 'name from the header');
+    await waitFor(`[...(document.querySelector('[data-testid="dbt-model-project"]')?.options ?? [])].some(o => o.value === ${JSON.stringify(project.id)})`, 10000, 'projects loaded');
+    await evaluate(`(() => { const sel = document.querySelector('[data-testid="dbt-model-project"]'); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sel), 'value').set.call(sel, ${JSON.stringify(project.id)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await clickButton('Save model');
+    await waitFor(`!!document.querySelector('tr[data-node="revenue_bands"]') && document.querySelector('[data-testid="dbt-run"]').innerText.includes('ok')`, 300000, 'copilot model built');
+    report.details.copilotRows = ((await q('SELECT band, orders FROM revenue_bands ORDER BY band')).rows ?? []);
+    const system = prompts[0]?.messages?.find((m) => m.role === 'system')?.content ?? '';
+    report.details.prompt = { dbtContext: system.includes('### dbt projects of this workspace') && system.includes('E2E dbt copilot'), guide: system.includes('# dbt in DuckView') };
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-project') {
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -714,6 +786,12 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'dbt-copilot') {
+    if (d.starter !== 'ok') problems.push(`starter build: ${d.starter}`);
+    if (!/\{\{ ref\('region_totals'\) \}\}/.test(d.workbenchModel ?? '')) problems.push(`workbench model not saved with ref(): ${d.workbenchModel}`);
+    if (JSON.stringify(d.copilotRows) !== JSON.stringify([['large', 15], ['small', 15]])) problems.push(`copilot model rows: ${JSON.stringify(d.copilotRows)}`);
+    if (!d.prompt?.dbtContext || !d.prompt?.guide) problems.push(`copilot prompt lacks dbt context: ${JSON.stringify(d.prompt)}`);
+  }
   if (scenario === 'dbt-project') {
     if (!/dbt Core \d/.test(d.version ?? '')) problems.push(`dbt not installed: ${d.version}`);
     for (const want of ['regions:success', 'stg_numbers:success', 'region_totals:success']) if (!d.build?.includes(want)) problems.push(`build missing ${want}: ${JSON.stringify(d.build)}`);

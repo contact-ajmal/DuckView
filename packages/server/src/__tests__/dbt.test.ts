@@ -18,6 +18,7 @@ import { initLogger } from '../observability/logger.js';
 import { createContext, type AppContext } from '../context.js';
 import { buildApp } from '../app.js';
 import { evalCondition } from '../services/dbt.js';
+import { buildTools, runTool, type ToolEnv } from '../agent/tools.js';
 import type { Principal } from '../services/principal.js';
 
 const hasPython = (() => {
@@ -181,6 +182,72 @@ describe.skipIf(!hasPython)('dbt projects', () => {
     // Only project files are accepted.
     expect((await api('PATCH', `/api/dbt/projects/${projectId}`, { files: { ...files, 'profiles.yml': 'x: 1' } })).status).toBe(400);
     expect((await api('PATCH', `/api/dbt/projects/${projectId}`, { files: { ...files, '../escape.sql': 'select 1' } })).status).toBe(400);
+  }, 600_000);
+
+  it('turns a SELECT into a model, with ref() for the project\'s own models', async () => {
+    const r = await api('POST', `/api/dbt/projects/${projectId}/models`, { name: 'big_regions', sql: 'SELECT region_name, revenue FROM region_totals WHERE revenue > 100;', folder: 'marts', materialized: 'table', description: 'Regions with revenue over 100' });
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ path: 'models/marts/big_regions.sql', refs: ['region_totals'] });
+    expect(r.json.sql).toBe("{{ config(materialized='table') }}\n\nSELECT region_name, revenue FROM {{ ref('region_totals') }} WHERE revenue > 100\n");
+    expect(r.json.project.files['models/marts/big_regions.yml']).toMatch(/description: "Regions with revenue over 100"/);
+    files = r.json.project.files;
+    expect((await api('POST', `/api/dbt/projects/${projectId}/models`, { name: 'big_regions', sql: 'select 1', folder: 'marts' })).status).toBe(409);
+    const built = (await run({ command: 'build', select: 'big_regions' })).json.run;
+    expect(built.results[0]).toMatchObject({ name: 'big_regions', status: 'success', materialized: 'table', depends_on: ['region_totals'] });
+    // PATCH files: add and delete in one go.
+    const patched = await api('PATCH', `/api/dbt/projects/${projectId}/files`, { files: { 'macros/cents.sql': '{% macro cents(c) %}({{ c }} * 100)::BIGINT{% endmacro %}\n', 'models/leak.sql': null } });
+    expect(Object.keys(patched.json.project.files)).toEqual(expect.arrayContaining(['macros/cents.sql']));
+    expect(Object.keys(patched.json.project.files)).not.toContain('models/leak.sql');
+    files = patched.json.project.files;
+  }, 600_000);
+
+  it('lets agents work on dbt through the tools, building only after approval', async () => {
+    const agent = ctx.auth.principalFromUser((await ctx.auth.findByEmail('admin@test.local'))!, 'token', '127.0.0.1');
+    expect(agent.actorType).toBe('AGENT');
+    const env: ToolEnv = { ctx, principal: agent, via: 'mcp', defaultWorkspaceId: wsId, agent: null };
+    const tools = buildTools(ctx.cfg);
+    const call = (name: string, args: Record<string, unknown>) => runTool(env, tools.find((t) => t.name === name)!, args);
+    const listed = await call('list_dbt_projects', {});
+    expect((listed.structuredContent as { projects: { id: string; models: string[] }[] }).projects[0]).toMatchObject({ id: projectId, models: expect.arrayContaining(['region_totals', 'big_regions']) });
+    const read = await call('get_dbt_project', { project_id: projectId, paths: ['models/marts/region_totals.sql'] });
+    expect((read.structuredContent as { files: Record<string, string> }).files['models/marts/region_totals.sql']).toMatch(/ref\('stg_numbers'\)/);
+    const model = await call('create_dbt_model', { project_id: projectId, name: 'agent_totals', sql: 'select region_name, {{ cents("revenue") }} as revenue_cents from region_totals', folder: 'marts' });
+    expect(model.isError).toBeFalsy();
+    // Compile needs no approval; build does, listing what it would create.
+    const compiled = await call('run_dbt', { project_id: projectId, command: 'compile', select: 'agent_totals' });
+    expect((compiled.structuredContent as { results: { sql: string }[] }).results[0].sql).toMatch(/\(revenue \* 100\)::BIGINT/);
+    const blocked = await call('run_dbt', { project_id: projectId, command: 'build', select: 'agent_totals' });
+    expect(blocked.structuredContent).toMatchObject({ status: 'approval_required', mutating_verbs: ['CREATE VIEW'], statements: [{ preview: 'CREATE VIEW agent_totals (view)' }] });
+    expect(await sql("SELECT count(*) FROM information_schema.tables WHERE table_name = 'agent_totals'")).toEqual([[0]]);
+    const approved = await call('run_dbt', { project_id: projectId, command: 'build', select: 'agent_totals', dry_run: false });
+    expect(approved.structuredContent).toMatchObject({ status: 'ok' });
+    expect(await sql('SELECT min(revenue_cents) > 0 FROM agent_totals')).toEqual([[true]]);
+    const runId = (approved.structuredContent as { run_id: string }).run_id;
+    const got = await call('get_dbt_run', { run_id: runId, include_log: true });
+    expect((got.content[0] as { text: string }).text).toMatch(/agent_totals/);
+    expect((await ctx.dbt.getRun(admin, runId)).triggered_by).toBe('agent');
+    const written = await call('write_dbt_files', { project_id: projectId, files: { 'models/marts/agent_totals.sql': null } });
+    expect((written.structuredContent as { paths: string[] }).paths).not.toContain('models/marts/agent_totals.sql');
+    // Over REST an agent token gets the same challenge.
+    const token = (await ctx.auth.createToken((await ctx.auth.findByEmail('admin@test.local'))!, { name: 'agent', scopes: ['read', 'write', 'mcp'] })).token;
+    const rest = await api('POST', `/api/dbt/projects/${projectId}/runs`, { command: 'run', select: 'stg_numbers', wait: true }, token);
+    expect(rest.status).toBe(409);
+    expect(rest.json).toMatchObject({ error: 'APPROVAL_REQUIRED', challenge: { status: 'approval_required' } });
+    expect((await api('POST', `/api/dbt/projects/${projectId}/runs`, { command: 'run', select: 'stg_numbers', wait: true, dry_run: false }, token)).json.run.status).toBe('ok');
+  }, 600_000);
+
+  it('gives Copilot the projects, their models and what failed', async () => {
+    await save({ 'models/broken_two.sql': 'select no_such_column from {{ ref(\'stg_numbers\') }}\n' });
+    const failed = (await run({ command: 'run', select: 'broken_two' })).json.run;
+    expect(failed.status).toBe('error');
+    const snap = await ctx.copilot.buildContext(admin, wsId);
+    expect(snap.dbt).toMatch(/\*\*Shop models\*\*/);
+    expect(snap.dbt).toMatch(/region_totals \[table\]/);
+    expect(snap.dbt).toMatch(/error: broken_two — .*no_such_column/);
+    expect(ctx.copilot.renderContextText(snap)).toMatch(/### dbt projects of this workspace/);
+    const { 'models/broken_two.sql': _gone, ...rest } = files;
+    files = rest;
+    await api('PATCH', `/api/dbt/projects/${projectId}`, { files });
   }, 600_000);
 
   it('shows what the project builds in lineage, and schedules runs', async () => {

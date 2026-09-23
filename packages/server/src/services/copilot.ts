@@ -14,6 +14,7 @@ import { defaultProviderFactory, mapProviderError, DEFAULT_MODELS, SUGGESTED_MOD
 import type { CopilotAdminService, ServerProvider } from './copilot-admin.js';
 import type { AwsBridge } from './aws.js';
 import { HttpError, badRequest } from './errors.js';
+import { DBT_GUIDE } from './dbt.js';
 import { MOSAIC_SPEC_GUIDE } from './mosaic-guide.js';
 import { describeSpec, parseSpecText, type Spec } from './mosaic-spec.js';
 import type { MosaicService } from './mosaic.js';
@@ -75,7 +76,11 @@ DuckDB dialect rules:
 Formatting:
 - Put every SQL statement in a \`\`\`sql fenced block, one statement per block, ending with a semicolon.
 - Keep explanations short; use bullet points for findings.
-- If the request is ambiguous, state your assumption in one line and proceed.`;
+- If the request is ambiguous, state your assumption in one line and proceed.
+
+dbt:
+- The workspace can hold dbt projects (listed in the context when there are any). When the user asks for a dbt model — or to turn a query into one — answer with a \`\`\`sql block whose FIRST line is \`-- dbt model: models/<folder>/<name>.sql\` followed by the model: one SELECT, \`{{ ref('x') }}\` for the project's models and seeds, plain table names (or \`{{ source(...) }}\` when declared) for other tables, \`{{ config(materialized='table') }}\` when it should be a table. The user adds it to a project with one click. Docs and tests go in a \`\`\`yaml block (\`version: 2\`, models → description, columns, data_tests).
+- To explain or fix a failed dbt run, use the failures listed in the context and give the corrected file.`;
 
 const ACTION_PROMPTS: Record<CopilotAction, string> = {
   chat: '',
@@ -97,6 +102,7 @@ function renderContext(c: ChatContextSnapshot, cfg: DuckViewConfig): string {
   if (c.files.length) parts.push(`### Data files in the data directory (${c.files.length})\n${c.files.slice(0, 200).map((f) => `- '${f}'`).join('\n')}`);
   if (c.buckets.length) parts.push(`### Cloud storage buckets\n${c.buckets.map((b) => `- ${b}`).join('\n')}`);
   if (c.notes) parts.push(`### What the tables mean (the workspace's catalog notes — trust these over guesses from names)\n${c.notes.slice(0, 6000)}`);
+  if (c.dbt) parts.push(`### dbt projects of this workspace (Transform → dbt)\n${c.dbt.slice(0, 5000)}`);
   if (c.summaries && Object.keys(c.summaries).length) {
     parts.push('### Selected dataset schemas & statistics');
     for (const [target, cols] of Object.entries(c.summaries)) {
@@ -272,6 +278,8 @@ export class CopilotService {
 
   /** Catalog notes for prompts (set by the context). */
   lineage: { notesForPrompt(workspaceId: string): Promise<string> } | null = null;
+  /** dbt projects for prompts (set by the context). */
+  dbt: { promptSummary(workspaceId: string): Promise<string> } | null = null;
 
   async buildContext(p: Principal, workspaceId: string, opts: { activeSql?: string | null; targets?: string[] } = {}): Promise<ChatContextSnapshot> {
     const { objects, files } = await this.queries.catalog(p, workspaceId);
@@ -283,6 +291,7 @@ export class CopilotService {
       buckets: conns.map((c) => `${c.uri_scheme}://${c.bucket ?? '<bucket>'} (${c.provider} · ${c.name})`),
       active_sql: opts.activeSql ?? null,
       notes: (await this.lineage?.notesForPrompt(workspaceId).catch(() => '')) || undefined,
+      dbt: (await this.dbt?.promptSummary(workspaceId).catch(() => '')) || undefined,
     };
     const targets = (opts.targets ?? []).filter(Boolean).slice(0, 3);
     if (targets.length) {
@@ -344,7 +353,8 @@ export class CopilotService {
     // Consecutive same-role turns are fine for Anthropic; OpenAI-compatible servers also accept them.
     // The spec guide is prompt material only when a chart or dashboard is in play.
     const wantsChart = action === 'dashboard' || WANTS_CHART.test(req.message ?? '');
-    const system = `${SYSTEM_PROMPT}${wantsChart ? `\n\n${MOSAIC_SPEC_GUIDE}\n\nWhen you produce a dashboard spec, put it in a single \`\`\`yaml block; the user can create it with one click.` : ''}\n\n${renderContext(snapshot, this.cfg)}`;
+    const wantsDbt = /\bdbt\b|\{\{\s*(ref|source|config)\(|\bincremental\b/i.test(req.message ?? '');
+    const system = `${SYSTEM_PROMPT}${wantsDbt ? `\n\n${DBT_GUIDE}` : ''}${wantsChart ? `\n\n${MOSAIC_SPEC_GUIDE}\n\nWhen you produce a dashboard spec, put it in a single \`\`\`yaml block; the user can create it with one click.` : ''}\n\n${renderContext(snapshot, this.cfg)}`;
 
     let text = '';
     let usage: LlmUsage = { input_tokens: null, output_tokens: null };

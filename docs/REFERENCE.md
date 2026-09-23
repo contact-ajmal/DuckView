@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (29 tools · 4 resources · 5 prompts)        │
+│  Agent tools: one registry → MCP (36 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -377,7 +377,11 @@ Commands: `build` (seeds, models, tests), `run`, `test`, `seed`, `compile` (noth
 
 **Runtime**: dbt Core and dbt-duckdb are installed with pip into a virtualenv (`transform.dbt.venv_dir`, default `<data dir>/.duckview/dbt/venv`, from `transform.dbt.python`) on the first run, or ahead of time by an administrator (**Install now**, `POST /api/admin/dbt/install`); `transform.dbt.package` pins the requirement (`dbt-duckdb==1.9.4`). The Docker image has Python and venv; the first install needs network. Not run (yet): snapshots, Python models, hooks with Jinja, unit tests, custom materializations, `on-run-start` / `on-run-end`.
 
-API: `GET /api/dbt/status` · `POST /api/admin/dbt/install` · `GET/POST /api/workspaces/:id/dbt/projects` · `GET/PATCH/DELETE /api/dbt/projects/:id` (`{name, files, vars, target_schema, schedule, scheduled: {command, select, exclude, full_refresh}, enabled}`) · `POST /api/dbt/projects/:id/runs {command, select?, exclude?, full_refresh?, wait?}` · `GET /api/dbt/projects/:id/runs` · `GET /api/dbt/runs/:id` (log and node results). Audit: `dbt.project_create` · `dbt.project_update` · `dbt.project_delete` · `dbt.run` · `catalog.import`.
+**Where analysts meet it.** Besides Transform → dbt: the Query workbench's **dbt model** button saves the tab's SELECT as a model (pick or create the project, name, folder, view / table / incremental, description, build now) — references to the project's own models and seeds become `ref()` (`POST /api/dbt/projects/:id/models`); a project card's **Build** runs it. **DuckCopilot** knows the workspace's projects (models, how they are built, the last run and what failed are in its context; the dbt guide joins the prompt when dbt is mentioned), writes models as SQL blocks headed `-- dbt model: models/<folder>/<name>.sql` that **Add to dbt project** saves and builds, and **Ask Copilot** on a failed run sends the error, the failing nodes and their files for a fix.
+
+**Agents** (MCP and the REST façade) get `list_dbt_projects`, `get_dbt_project`, `create_dbt_project`, `write_dbt_files`, `create_dbt_model`, `run_dbt`, `get_dbt_run`, the resource `duckdb://guides/dbt` and the prompt `build_dbt_models`. Building creates tables, so an agent's build / run / seed first gets an approval challenge — computed from a compile of the same selection, listing each relation and whether it becomes a view, a table or an insert — and runs only when repeated with `dry_run: false` (the same human-in-the-loop rule as mutating SQL; an agent token calling `POST /api/dbt/projects/:id/runs` gets `409 APPROVAL_REQUIRED` with the challenge). Compile and test run straight away.
+
+API: `GET /api/dbt/status` · `POST /api/admin/dbt/install` · `PATCH /api/dbt/projects/:id/files {files: {path: content | null}}` · `POST /api/dbt/projects/:id/models {name, sql, folder?, materialized?, unique_key?, description?, overwrite?}` · `GET/POST /api/workspaces/:id/dbt/projects` · `GET/PATCH/DELETE /api/dbt/projects/:id` (`{name, files, vars, target_schema, schedule, scheduled: {command, select, exclude, full_refresh}, enabled}`) · `POST /api/dbt/projects/:id/runs {command, select?, exclude?, full_refresh?, wait?}` · `GET /api/dbt/projects/:id/runs` · `GET /api/dbt/runs/:id` (log and node results). Audit: `dbt.project_create` · `dbt.project_update` · `dbt.project_delete` · `dbt.run` · `catalog.import`.
 
 ## Governance
 
@@ -537,12 +541,19 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `browse_connector(connection_id, path?)` | Walks a warehouse, SaaS or Google connection one level at a time; leaves carry the `resource` for `create_data_sync`. |
 | `connector_query(connection_id, sql, limit?)` | Read-only SQL on Snowflake, BigQuery, Redshift or ClickHouse; rows capped. |
 | `snapshot_dashboard(dashboard_id \| app_id, width?)` | Renders a dashboard or data app the way a person sees it and returns the image — to check a dashboard an agent built, or to describe one. |
+| `list_dbt_projects(workspace_id?)` | The workspace's dbt projects: models, schedule, last run and what failed. |
+| `get_dbt_project(project_id, paths?)` | A project's files with their contents (everything up to ~60 KB, or the paths asked for). |
+| `create_dbt_project(name, workspace_id?, files?, target_schema?)` | A project from the starter, or from files (`dbt_project.yml` at the root). |
+| `write_dbt_files(project_id, files)` | Adds or replaces files (`{path: content}`) and deletes others (`{path: null}`). |
+| `create_dbt_model(project_id, name, sql, folder?, materialized?, unique_key?, description?, overwrite?)` | A SELECT as a model: config block, `ref()` for the project's own models and seeds, description in YAML. |
+| `run_dbt(project_id, command, select?, exclude?, full_refresh?, dry_run?)` | build · run · test · seed · compile, waiting for the result: every node's status, rows, failing rows and message (compile: the SQL). build / run / seed return an **approval challenge** listing what would be created or replaced until repeated with `dry_run: false`. |
+| `get_dbt_run(run_id, include_log?)` | A run's nodes, error and dbt's log. |
 | `list_alerts` · `create_alert(name, sql, condition, every_minutes \| cron, channel_ids, …)` · `run_alert` | SQL alerts: a read-only query and a condition checked on a schedule; state changes go to Slack, Teams, email, PagerDuty or webhooks — see [Alerts & delivery](#alerts--delivery). |
 | `list_apps` · `create_app(name, source, …)` · `update_app` · `run_app` · `stop_app` · `get_app_logs` · `preview_app` · `publish_app` | Streamlit data apps: generated from a dashboard, saved queries or code (validated first), run, previewed with a screenshot, published after human approval — see [Data apps](#data-apps-streamlit-dash-gradio). |
 
-**Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec), `duckdb://guides/data-app` (how to write a Streamlit data app with the SDK).
+**Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec), `duckdb://guides/data-app` (how to write a Streamlit data app with the SDK), `duckdb://guides/dbt` (how DuckView runs dbt projects and a workflow for agents).
 
-**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)`, `build_mosaic_dashboard(table_or_path, goal?)`, `build_data_pipeline(source, goal?)` and `build_data_app(goal, data?)` encode complete agent workflows over the tools above.
+**Prompts** — `data_quality_audit(table_or_path)`, `sql_optimization(sql)`, `build_mosaic_dashboard(table_or_path, goal?)`, `build_data_pipeline(source, goal?)`, `build_data_app(goal, data?)` and `build_dbt_models(goal, project_id?)` encode complete agent workflows over the tools above.
 
 ## HTTP API (summary)
 

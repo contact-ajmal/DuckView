@@ -7,6 +7,7 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mc
 import { z } from 'zod';
 import { DATA_APP_GUIDE } from '../services/app-generator.js';
 import { MOSAIC_SPEC_GUIDE } from '../services/mosaic-guide.js';
+import { DBT_GUIDE } from '../services/dbt.js';
 import type { AppContext } from '../context.js';
 import type { Principal } from '../services/principal.js';
 import { formatBytes } from '../engine/results.js';
@@ -98,6 +99,13 @@ export function buildMcpServer(ctx: AppContext, principal: Principal, opts: { de
     'duckdb://guides/data-app',
     { title: 'Data app (Streamlit) guide', description: 'How to write a Streamlit data app for create_app / update_app: the duckview SDK, the skeleton, rules for SQL, filters and packages.', mimeType: 'text/markdown' },
     async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: DATA_APP_GUIDE }] }),
+  );
+
+  server.registerResource(
+    'dbt-guide',
+    'duckdb://guides/dbt',
+    { title: 'dbt guide', description: 'How DuckView runs dbt projects: files, Jinja, materializations, tests, selection, the approval step for builds, and a workflow for agents.', mimeType: 'text/markdown' },
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: DBT_GUIDE }] }),
   );
 
   server.registerResource(
@@ -218,6 +226,32 @@ Output: a short diagnosis, the rewritten SQL, a before/after plan comparison tab
 4. \`create_app\` with source {dashboard_id} — the app is generated from the dashboard (datasets, filters, KPIs, charts, tables) and started. Read the returned code.
 5. \`preview_app\` to look at it. Refine with \`update_app\` (read \`duckdb://guides/data-app\` for the SDK): better titles, formats, extra widgets, layout — keep the heavy lifting in SQL through \`query()\`. Preview again; \`get_app_logs\` when something errors.
 6. When it is right, \`publish_app\` with dry_run: false only after a person approves, then reply with the app URL, what it shows and the sync that keeps its data fresh.`,
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    'build_dbt_models',
+    {
+      title: 'Build dbt models',
+      description: 'Guided workflow: read the workspace and its dbt projects, write staging and mart models with docs and tests, compile, get approval, build and fix failures.',
+      argsSchema: { goal: z.string().describe('What the models should produce, e.g. "daily revenue per region from raw orders, tested"'), project_id: z.string().optional().describe('An existing dbt project (else one is created)'), workspace_id: z.string().optional() },
+    },
+    ({ goal, project_id, workspace_id }) => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Build dbt models${workspace_id ? ` in workspace \`${workspace_id}\`` : ''}: ${goal}.
+
+1. Read the resource \`duckdb://guides/dbt\`.
+2. \`list_accessible_data\` and \`profile_dataset\` on the raw tables; ${project_id ? `\`get_dbt_project\` on \`${project_id}\`` : '\`list_dbt_projects\` — use an existing project when it fits, else \`create_dbt_project\`'}.
+3. Staging models (views: rename, cast, clean) then marts (tables, or incremental with a unique_key for large append-only data). Prove each SELECT with \`execute_query\`, then \`create_dbt_model\` with a description. Add YAML with column docs and data tests (unique / not_null on keys, accepted_values on enums, relationships between facts and dimensions) via \`write_dbt_files\`.
+4. \`run_dbt\` compile, then build with a selection. Show the approval plan to the person and repeat with dry_run: false once they approve.
+5. Fix anything that fails (\`get_dbt_run\` for details) and build again. Reply with the models built, their tests and how to schedule the project (Transform → dbt → Schedule).`,
           },
         },
       ],
