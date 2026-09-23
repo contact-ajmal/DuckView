@@ -273,8 +273,8 @@ export class DataSyncService {
     if (this.running.has(id)) throw badRequest('This sync is already running');
     const w = await this.workspaces.rowById(sync.workspace_id);
     if (!w) throw notFound('Workspace');
-    const ownerUser = await this.auth.findById(w.user_id);
-    if (!ownerUser) throw badRequest('The workspace owner no longer exists');
+    const ownerUser = await this.auth.findActive(w.user_id);
+    if (!ownerUser) throw badRequest('The workspace owner no longer exists or has been deactivated');
     const owner = this.auth.principalFromUser(ownerUser, 'jwt', 'scheduler');
     const run: DataSyncRun = { id: newId(), sync_id: id, workspace_id: sync.workspace_id, status: 'running', triggered_by: triggeredBy, actor_id: actorId, rows: null, duration_ms: null, error: null, started_at: new Date(), finished_at: null };
     await this.db.insert(this.s.dataSyncRuns).values(run);

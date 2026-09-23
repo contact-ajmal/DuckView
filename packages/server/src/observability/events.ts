@@ -16,7 +16,9 @@ export type LiveEvent =
   | { type: 'sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; rows: number | null; duration_ms: number | null; error: string | null }
   | { type: 'app'; at: string; workspace_id: string; app_id: string; status: 'stopped' | 'installing' | 'starting' | 'running' | 'error'; error: string | null }
   /** An alert was checked (its state may have changed). */
-  | { type: 'alert'; at: string; workspace_id: string; alert_id: string; state: 'unknown' | 'ok' | 'triggered' | 'error'; changed: boolean };
+  | { type: 'alert'; at: string; workspace_id: string; alert_id: string; state: 'unknown' | 'ok' | 'triggered' | 'error'; changed: boolean }
+  /** A user was deactivated or reactivated: their open event streams close. */
+  | { type: 'account'; at: string; user_id: string; disabled: boolean };
 
 class LiveBus extends EventEmitter {
   publish(e: LiveEvent) {

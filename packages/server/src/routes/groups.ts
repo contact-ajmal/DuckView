@@ -16,7 +16,7 @@ export async function groupRoutes(app: FastifyInstance, ctx: AppContext) {
   app.get('/api/groups', async (req) => ({ groups: await ctx.groups.list(req.principal!) }));
 
   app.post('/api/groups', async (req) => {
-    const body = z.object({ name: z.string().min(1).max(80), description: z.string().max(500).nullable().optional() }).parse(req.body);
+    const body = z.object({ name: z.string().min(1).max(80), description: z.string().max(500).nullable().optional(), external_id: z.string().max(256).nullable().optional() }).parse(req.body);
     const g = await ctx.groups.create(req.principal!, body);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'group.create', resource: `group:${g.id}`, ip: req.ip });
     return { group: g };
@@ -24,7 +24,7 @@ export async function groupRoutes(app: FastifyInstance, ctx: AppContext) {
 
   app.patch('/api/groups/:id', async (req) => {
     const { id } = req.params as { id: string };
-    const body = z.object({ name: z.string().min(1).max(80).optional(), description: z.string().max(500).nullable().optional() }).parse(req.body ?? {});
+    const body = z.object({ name: z.string().min(1).max(80).optional(), description: z.string().max(500).nullable().optional(), external_id: z.string().max(256).nullable().optional() }).parse(req.body ?? {});
     const g = await ctx.groups.update(req.principal!, id, body);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'group.update', resource: `group:${id}`, ip: req.ip });
     return { group: g };

@@ -245,8 +245,8 @@ export class AlertService {
     if (this.running.has(id)) throw badRequest('This alert is being checked right now');
     this.running.add(id);
     try {
-      const owner = await this.auth.findById(a.user_id);
-      const evaluation: Evaluation = owner ? await this.evaluate(this.auth.principalFromUser(owner, 'token', 'alerts'), a.workspace_id, a.sql, a.condition) : { state: 'error', value: null, summary: 'The alert\'s author no longer exists', columns: [], rows: [], row_count: 0, error: 'The alert\'s author no longer exists', duration_ms: 0 };
+      const owner = await this.auth.findActive(a.user_id);
+      const evaluation: Evaluation = owner ? await this.evaluate(this.auth.principalFromUser(owner, 'token', 'alerts'), a.workspace_id, a.sql, a.condition) : { state: 'error', value: null, summary: 'The alert\'s author no longer exists or has been deactivated', columns: [], rows: [], row_count: 0, error: 'The alert\'s author no longer exists or has been deactivated', duration_ms: 0 };
       const prev = a.state;
       const now = new Date();
       const changed = evaluation.state !== prev;

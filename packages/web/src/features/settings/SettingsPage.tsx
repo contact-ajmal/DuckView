@@ -398,11 +398,11 @@ export function SettingsPage() {
             <Card title="Users" actions={<Button size="sm" onClick={() => setNewUser({ open: true, email: '', password: '', role: 'USER' })}><Users className="h-3.5 w-3.5" /> Add</Button>}>
               <table className="w-full text-xs">
                 <thead className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
-                  <tr><th className="pb-2">User</th><th className="pb-2">Provider</th><th className="pb-2">Created</th><th className="pb-2">Role</th><th /></tr>
+                  <tr><th className="pb-2">User</th><th className="pb-2">Provider</th><th className="pb-2">Created</th><th className="pb-2">Role</th><th className="pb-2">Status</th><th /></tr>
                 </thead>
                 <tbody>
                   {users.map((u) => (
-                    <tr key={u.id} className="border-t border-zinc-800">
+                    <tr key={u.id} className={cn('border-t border-zinc-800', u.disabled && 'opacity-60')} data-user={u.email}>
                       <td className="py-2"><div className="text-zinc-200">{u.display_name ?? u.email}</div><div className="text-[10px] text-zinc-500">{u.email}</div></td>
                       <td className="py-2 text-zinc-400">{u.auth_provider}</td>
                       <td className="py-2 text-zinc-400">{timeAgo(u.created_at)}</td>
@@ -410,6 +410,26 @@ export function SettingsPage() {
                         <Select value={u.role} disabled={u.id === auth.user?.id} className="h-7 text-xs" onChange={async (e) => { await api.patch(`/api/admin/users/${u.id}`, { role: e.target.value }); await refresh(); }}>
                           {['ADMIN', 'USER', 'READ_ONLY'].map((r) => <option key={r} value={r}>{r}</option>)}
                         </Select>
+                      </td>
+                      <td className="py-2">
+                        {u.id === auth.user?.id ? (
+                          <Badge tone="green">Active</Badge>
+                        ) : (
+                          <button
+                            className={cn('rounded px-2 py-0.5 text-[11px]', u.disabled ? 'bg-amber-950/60 text-amber-200 hover:bg-amber-900/60' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100')}
+                            title={u.disabled ? 'Deactivated: cannot sign in; sessions, API tokens and scheduled work stop. Click to reactivate.' : 'Deactivate: blocks sign-in and stops their sessions, tokens and scheduled work, keeping their workspaces'}
+                            onClick={async () => {
+                              try {
+                                await api.patch(`/api/admin/users/${u.id}`, { disabled: !u.disabled });
+                              } catch (e) {
+                                alert((e as Error).message);
+                              }
+                              await refresh();
+                            }}
+                          >
+                            {u.disabled ? 'Deactivated · Reactivate' : 'Deactivate'}
+                          </button>
+                        )}
                       </td>
                       <td className="py-2 text-right">
                         {u.id !== auth.user?.id && (

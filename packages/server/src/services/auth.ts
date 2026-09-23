@@ -4,9 +4,10 @@ import type { User, UserRole, TokenScope, ApiToken } from '../db/schema/sqlite.j
 import { TOKEN_SCOPES } from '../db/schema/sqlite.js';
 import { hashPassword, verifyPassword, generateApiToken, hashToken, newId } from '../security/crypto.js';
 import type { DuckViewConfig } from '../config/index.js';
-import { badRequest, conflict, notFound, unauthorized } from './errors.js';
+import { badRequest, conflict, forbidden, notFound, unauthorized } from './errors.js';
 import type { Principal } from './principal.js';
 import { logger } from '../observability/logger.js';
+import { liveEvents } from '../observability/events.js';
 
 export type PublicUser = Omit<User, 'password_hash'>;
 export const toPublicUser = (u: User): PublicUser => {
@@ -29,6 +30,12 @@ export class AuthService {
   async findById(id: string): Promise<User | null> {
     const rows = await this.db.select().from(this.s.users).where(eq(this.s.users.id, id)).limit(1);
     return rows[0] ?? null;
+  }
+
+  /** The user behind a credential or a piece of scheduled work — null when missing or deactivated. */
+  async findActive(id: string): Promise<User | null> {
+    const u = await this.findById(id);
+    return u && !u.disabled ? u : null;
   }
 
   async findByEmail(email: string): Promise<User | null> {
@@ -59,6 +66,7 @@ export class AuthService {
       role: input.role ?? 'USER',
       display_name: input.displayName ?? null,
       external_id: null,
+      disabled: false,
       created_at: new Date(),
     };
     await this.db.insert(this.s.users).values(user);
@@ -76,6 +84,7 @@ export class AuthService {
     const adminGroups = new Set(this.cfg.auth.oidc.admin_groups);
     const promoted = adminEmails.includes(email) || (input.groups ?? []).some((g) => adminGroups.has(g));
     if (existing) {
+      if (existing.disabled) throw forbidden('This account has been deactivated');
       const role: UserRole = promoted ? 'ADMIN' : existing.role;
       await this.db.update(this.s.users).set({ external_id: input.externalId, display_name: input.displayName ?? existing.display_name, auth_provider: 'oidc', role }).where(eq(this.s.users.id, existing.id));
       return { ...existing, external_id: input.externalId, auth_provider: 'oidc', role };
@@ -89,6 +98,7 @@ export class AuthService {
       role: isFirst || promoted ? 'ADMIN' : 'USER',
       display_name: input.displayName ?? null,
       external_id: input.externalId,
+      disabled: false,
       created_at: new Date(),
     };
     await this.db.insert(this.s.users).values(user);
@@ -100,12 +110,30 @@ export class AuthService {
     // Always run the hash comparison to avoid user-enumeration timing differences.
     const ok = await verifyPassword(password, user?.password_hash ?? 'scrypt$32768$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=');
     if (!user || !ok || user.auth_provider !== 'local') throw unauthorized('Invalid email or password');
+    if (user.disabled) throw forbidden('This account has been deactivated');
     return user;
   }
 
   async updateRole(userId: string, role: UserRole): Promise<void> {
     const r = await this.db.update(this.s.users).set({ role }).where(eq(this.s.users.id, userId)).returning({ id: this.s.users.id });
     if (r.length === 0) throw notFound('User');
+  }
+
+  /**
+   * Deactivates or reactivates a user. A deactivated user cannot sign in, their sessions and API tokens stop
+   * working at once, and alerts, snapshots, syncs and apps that run as them fail until they are reactivated.
+   * The last active administrator cannot be deactivated.
+   */
+  async setDisabled(userId: string, disabled: boolean): Promise<User> {
+    const user = await this.findById(userId);
+    if (!user) throw notFound('User');
+    if (disabled && user.role === 'ADMIN' && !user.disabled) {
+      const admins = await this.db.select({ id: this.s.users.id }).from(this.s.users).where(and(eq(this.s.users.role, 'ADMIN'), eq(this.s.users.disabled, false)));
+      if (admins.length <= 1) throw badRequest('The last active administrator cannot be deactivated');
+    }
+    await this.db.update(this.s.users).set({ disabled }).where(eq(this.s.users.id, userId));
+    liveEvents.publish({ type: 'account', at: new Date().toISOString(), user_id: userId, disabled });
+    return { ...user, disabled };
   }
 
   async changePassword(userId: string, newPassword: string): Promise<void> {
@@ -191,7 +219,7 @@ export class AuthService {
 
   /** Principal for a stored token (effective scopes = token scopes ∩ role capabilities). */
   async principalFromTokenRecord(rec: ApiToken, ip?: string): Promise<Principal | null> {
-    const user = await this.findById(rec.user_id);
+    const user = await this.findActive(rec.user_id);
     if (!user) return null;
     const roleScopes = this.principalFromUser(user, 'token').scopes;
     const scopes = rec.scopes.filter((s) => roleScopes.includes(s));

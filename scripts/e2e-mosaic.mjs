@@ -24,7 +24,9 @@
  * that viewer and opens a Mosaic dashboard over the protected table: only the permitted region may show. The
  * catalog-lineage scenario describes a table in Governance → Catalog and traces it in Governance → Lineage. The
  * audit-export scenario adds a Splunk destination (a receiver the script runs), tests it, and waits for the
- * server's exporter to deliver a query event.
+ * server's exporter to deliver a query event. The scim-provisioning scenario generates a SCIM token in Governance →
+ * Provisioning, links a new team to an IdP group in Settings → Teams and shares the workspace with it, provisions a
+ * user and the group over SCIM (the team is adopted), and deactivates the user in Settings → Users.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -506,6 +508,59 @@ try {
     report.details.traced = await evaluate(`[...document.querySelectorAll('svg[aria-label="Lineage graph"] g[data-node]')].map(g => g.querySelector('text')?.textContent)`);
     report.details.charts = 1;
   }
+  else if (scenario === 'scim-provisioning') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    let scimToken = '';
+    const scim = async (method, url, body) => {
+      const r = await fetch(`${BASE}/scim/v2${url}`, { method, headers: { 'content-type': 'application/scim+json', authorization: `Bearer ${scimToken}` }, body: body ? JSON.stringify(body) : undefined });
+      return r.status === 204 ? {} : r.json();
+    };
+    const cleanupScim = async () => {
+      for (const u of (await j('GET', '/api/admin/users')).users ?? []) if (u.email === 'e2e-scim@example.com') await authed(`/api/admin/users/${u.id}`, { method: 'DELETE' });
+      for (const g of (await j('GET', '/api/groups')).groups ?? []) if (g.external_id === 'e2e-grp-finance' || g.name === 'E2E Finance') await authed(`/api/groups/${g.id}`, { method: 'DELETE' });
+      await authed('/api/admin/scim/token', { method: 'DELETE' });
+    };
+    await cleanupScim();
+    cleanup = cleanupScim;
+    // 1. Governance → Provisioning: generate the token.
+    await send('Page.navigate', { url: `${BASE}/#/governance/provisioning` });
+    await waitFor(`!!document.querySelector('[data-testid="scim-endpoint"]')`, 20000, 'provisioning tab');
+    await clickButton('Generate token');
+    await waitFor(`!!document.querySelector('[data-testid="scim-token"]')`, 10000, 'token shown');
+    scimToken = await evaluate(`document.querySelector('[data-testid="scim-token"]').textContent`);
+    report.details.endpoint = await evaluate(`document.querySelector('[data-testid="scim-endpoint"]').textContent`);
+    // 2. Settings → Teams: a team linked to the IdP group, shared with the workspace before anyone exists.
+    await send('Page.navigate', { url: `${BASE}/#/settings/teams` });
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New team')`, 20000, 'teams panel');
+    await clickButton('New team');
+    await waitFor(`!!document.querySelector('input[placeholder^="Optional — e.g."]')`, 5000, 'IdP field');
+    await setField('input[placeholder="Analytics"]', 'E2E Finance');
+    await setField('input[placeholder^="Optional — e.g."]', 'e2e-grp-finance');
+    await clickButton('Create');
+    await waitFor(`document.body.innerText.includes('Linked to the identity-provider group')`, 10000, 'linked team created');
+    const team = ((await j('GET', '/api/groups')).groups ?? []).find((g) => g.name === 'E2E Finance');
+    const wsList = await j('GET', '/api/workspaces');
+    const wsId = (await evaluate(`localStorage.getItem('duckview.workspace')`)) ?? (wsList.workspaces ?? wsList)[0].id;
+    await j('PUT', `/api/workspaces/${wsId}/members`, { subject_type: 'group', subject_id: team.id, role: 'VIEWER' });
+    // 3. The IdP provisions a user and pushes the group: the pre-linked team is adopted.
+    const user = await scim('POST', '/Users', { schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], userName: 'e2e-scim@example.com', name: { givenName: 'Scim', familyName: 'User' }, active: true });
+    const group = await scim('POST', '/Groups', { schemas: ['urn:ietf:params:scim:schemas:core:2.0:Group'], displayName: 'E2E Finance', externalId: 'e2e-grp-finance', members: [{ value: user.id }] });
+    report.details.scim = { user: user.userName, adopted: group.id === team?.id, members: (group.members ?? []).length };
+    const shared = (await j('GET', `/api/workspaces/${wsId}/members`)).members ?? [];
+    report.details.scim.grant = shared.some((m) => m.subject_id === team?.id);
+    // 4. The provisioning tab lists the linked team with its member.
+    await send('Page.navigate', { url: `${BASE}/#/governance/provisioning` });
+    await waitFor(`!!document.querySelector('tr[data-team="E2E Finance"]')`, 20000, 'linked team listed');
+    report.details.linkedRow = await evaluate(`document.querySelector('tr[data-team="E2E Finance"]').innerText.replace(/\\s+/g, ' ')`);
+    report.details.tokenStatus = await evaluate(`document.querySelector('[data-testid="scim-token-status"]')?.textContent ?? ''`);
+    // 5. Settings → Users: deactivate the provisioned user; the IdP sees active=false.
+    await send('Page.navigate', { url: `${BASE}/#/settings/users` });
+    await waitFor(`!!document.querySelector('tr[data-user="e2e-scim@example.com"]')`, 20000, 'user listed');
+    await evaluate(`[...document.querySelector('tr[data-user="e2e-scim@example.com"]').querySelectorAll('button')].find(b => b.textContent.trim() === 'Deactivate').click(); true`);
+    await waitFor(`document.querySelector('tr[data-user="e2e-scim@example.com"]').innerText.includes('Reactivate')`, 10000, 'deactivated');
+    report.details.afterDeactivate = (await scim('GET', `/Users/${user.id}`)).active;
+    report.details.charts = 1;
+  }
   else if (scenario === 'audit-export') {
     const http = await import('node:http');
     const got = [];
@@ -609,6 +664,13 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'scim-provisioning') {
+    if (!/\/scim\/v2$/.test(d.endpoint ?? '')) problems.push(`endpoint wrong: ${d.endpoint}`);
+    if (!d.scim?.adopted || d.scim?.members !== 1 || !d.scim?.grant) problems.push(`the pre-linked team was not adopted: ${JSON.stringify(d.scim)}`);
+    if (!/E2E Finance e2e-grp-finance 1/.test(d.linkedRow ?? '')) problems.push(`linked team row wrong: ${d.linkedRow}`);
+    if (!/^dvscim_/.test(d.tokenStatus ?? '')) problems.push(`token status wrong: ${d.tokenStatus}`);
+    if (d.afterDeactivate !== false) problems.push('deactivating in Settings did not reach SCIM');
+  }
   if (scenario === 'audit-export') {
     if (!d.audit?.test || !d.audit?.streamed || d.audit?.auth !== 'Splunk e2e-hec-token') problems.push(`audit export: ${JSON.stringify(d.audit)}`);
   }

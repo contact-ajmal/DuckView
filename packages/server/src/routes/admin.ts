@@ -34,10 +34,17 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext) {
   app.patch('/api/admin/users/:id', async (req) => {
     requireAdmin(req.principal!);
     const { id } = req.params as { id: string };
-    const body = z.object({ role: z.enum(USER_ROLES) }).parse(req.body);
-    if (id === req.principal!.userId && body.role !== 'ADMIN') throw badRequest('You cannot demote yourself');
-    await ctx.auth.updateRole(id, body.role);
-    ctx.audit.log({ userId: req.principal!.userId, actorType: 'USER', action: 'admin.user_role', resource: `user:${id}`, ip: req.ip });
+    const body = z.object({ role: z.enum(USER_ROLES).optional(), disabled: z.boolean().optional() }).parse(req.body);
+    if (body.role !== undefined) {
+      if (id === req.principal!.userId && body.role !== 'ADMIN') throw badRequest('You cannot demote yourself');
+      await ctx.auth.updateRole(id, body.role);
+      ctx.audit.log({ userId: req.principal!.userId, actorType: 'USER', action: 'admin.user_role', resource: `user:${id}`, ip: req.ip });
+    }
+    if (body.disabled !== undefined) {
+      if (id === req.principal!.userId && body.disabled) throw badRequest('You cannot deactivate yourself');
+      await ctx.auth.setDisabled(id, body.disabled);
+      ctx.audit.log({ userId: req.principal!.userId, actorType: 'USER', action: body.disabled ? 'admin.user_deactivate' : 'admin.user_reactivate', resource: `user:${id}`, ip: req.ip });
+    }
     return { ok: true };
   });
 

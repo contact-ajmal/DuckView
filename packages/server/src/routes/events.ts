@@ -67,6 +67,13 @@ export async function eventRoutes(app: FastifyInstance, ctx: AppContext) {
         return ok;
       };
       unsubscribe = liveEvents.subscribe((e) => {
+        if (e.type === 'account') {
+          if (e.user_id === p.userId && e.disabled) {
+            send({ type: 'error', code: 'UNAUTHORIZED' });
+            socket.close(4401, 'deactivated');
+          }
+          return;
+        }
         if (e.type === 'workspace' || e.type === 'sync' || e.type === 'app' || e.type === 'alert') {
           void canSee(e.workspace_id).then((ok) => ok && send(e));
           return;

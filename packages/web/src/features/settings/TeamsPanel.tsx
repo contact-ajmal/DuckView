@@ -16,8 +16,8 @@ export function TeamsPanel() {
   const [members, setMembers] = useState<GroupMember[] | null>(null);
   const [directory, setDirectory] = useState<DirectoryUser[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState<{ open: boolean; name: string; description: string }>({ open: false, name: '', description: '' });
-  const [renaming, setRenaming] = useState<{ open: boolean; id: string; name: string; description: string }>({ open: false, id: '', name: '', description: '' });
+  const [creating, setCreating] = useState<{ open: boolean; name: string; description: string; external_id: string }>({ open: false, name: '', description: '', external_id: '' });
+  const [renaming, setRenaming] = useState<{ open: boolean; id: string; name: string; description: string; external_id: string }>({ open: false, id: '', name: '', description: '', external_id: '' });
   const [addUser, setAddUser] = useState('');
   const [addRole, setAddRole] = useState<'MEMBER' | 'MANAGER'>('MEMBER');
 
@@ -61,7 +61,7 @@ export function TeamsPanel() {
         title="Teams"
         actions={
           isAdmin ? (
-            <Button size="sm" onClick={() => setCreating({ open: true, name: '', description: '' })}>
+            <Button size="sm" onClick={() => setCreating({ open: true, name: '', description: '', external_id: '' })}>
               <Plus className="h-3.5 w-3.5" /> New team
             </Button>
           ) : undefined
@@ -103,7 +103,7 @@ export function TeamsPanel() {
         actions={
           group && isAdmin ? (
             <div className="flex items-center gap-1">
-              <Button size="sm" variant="ghost" onClick={() => setRenaming({ open: true, id: group.id, name: group.name, description: group.description ?? '' })} title="Rename">
+              <Button size="sm" variant="ghost" onClick={() => setRenaming({ open: true, id: group.id, name: group.name, description: group.description ?? '', external_id: group.external_id ?? '' })} title="Rename">
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
               <Button
@@ -135,7 +135,7 @@ export function TeamsPanel() {
               <div className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/30 p-2.5 text-[11px] text-amber-200">
                 <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
-                  Synced from the identity provider as <span className="font-mono">{group.external_id}</span>. Membership is rewritten on every SSO login; manual changes last until the member next signs in.
+                  Linked to the identity-provider group <span className="font-mono">{group.external_id}</span>. SSO sign-in and SCIM provisioning decide its membership; manual changes last until the IdP next syncs the member.
                 </span>
               </div>
             )}
@@ -253,6 +253,13 @@ export function TeamsPanel() {
             <Label>Description</Label>
             <Input value={creating.description} onChange={(e) => setCreating({ ...creating, description: e.target.value })} placeholder="Optional" />
           </div>
+          {isAdmin && (
+            <div>
+              <Label>Identity-provider group</Label>
+              <Input value={creating.external_id} onChange={(e) => setCreating({ ...creating, external_id: e.target.value })} placeholder="Optional — e.g. finance-analysts or an Entra group object id" className="font-mono" />
+              <p className="mt-1 text-[11px] text-zinc-500">The value your IdP sends in the groups claim or as the SCIM group's externalId. Share workspaces with the team now; members arrive when they sign in with SSO or are provisioned.</p>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setCreating({ ...creating, open: false })}>
               Cancel
@@ -262,8 +269,8 @@ export function TeamsPanel() {
               disabled={!creating.name.trim()}
               onClick={() =>
                 void run(async () => {
-                  const r = await api.post<{ group: Group }>('/api/groups', { name: creating.name, description: creating.description || null });
-                  setCreating({ open: false, name: '', description: '' });
+                  const r = await api.post<{ group: Group }>('/api/groups', { name: creating.name, description: creating.description || null, external_id: creating.external_id.trim() || null });
+                  setCreating({ open: false, name: '', description: '', external_id: '' });
                   await refresh();
                   setSelected(r.group.id);
                 })
@@ -285,6 +292,13 @@ export function TeamsPanel() {
             <Label>Description</Label>
             <Input value={renaming.description} onChange={(e) => setRenaming({ ...renaming, description: e.target.value })} />
           </div>
+          {isAdmin && (
+            <div>
+              <Label>Identity-provider group</Label>
+              <Input value={renaming.external_id} onChange={(e) => setRenaming({ ...renaming, external_id: e.target.value })} placeholder="Not linked" className="font-mono" />
+              <p className="mt-1 text-[11px] text-zinc-500">Linked teams take their membership from SSO sign-in and SCIM. Clear it to manage members by hand.</p>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setRenaming({ ...renaming, open: false })}>
               Cancel
@@ -294,7 +308,7 @@ export function TeamsPanel() {
               disabled={!renaming.name.trim()}
               onClick={() =>
                 void run(async () => {
-                  await api.patch(`/api/groups/${renaming.id}`, { name: renaming.name, description: renaming.description || null });
+                  await api.patch(`/api/groups/${renaming.id}`, { name: renaming.name, description: renaming.description || null, external_id: renaming.external_id.trim() || null });
                   setRenaming({ ...renaming, open: false });
                   await refresh();
                 })

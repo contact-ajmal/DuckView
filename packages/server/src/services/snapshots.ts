@@ -267,8 +267,8 @@ export class SnapshotService {
     let file: string | null = null;
     let bytes: number | null = null;
     try {
-      const owner = await this.auth.findById(snap.user_id);
-      if (!owner) throw new Error('The snapshot\'s owner no longer exists');
+      const owner = await this.auth.findActive(snap.user_id);
+      if (!owner) throw new Error('The snapshot\'s owner no longer exists or has been deactivated');
       rendering = await this.render(snap, owner);
       const folder = path.join(this.dir, snap.id);
       fs.mkdirSync(folder, { recursive: true });

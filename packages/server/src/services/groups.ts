@@ -1,8 +1,9 @@
 /**
  * Teams (groups) — the unit workspaces are shared with besides individual users.
  *   - Admins create/rename/delete groups; admins and group MANAGERs manage membership.
- *   - Groups mirrored from an OIDC `groups` claim carry `external_id` and have their membership rewritten on every
- *     SSO login (see syncExternal); manually created groups are never touched by SSO.
+ *   - Groups mirrored from an OIDC `groups` claim, provisioned over SCIM or linked by an admin carry `external_id`
+ *     and have their membership rewritten on every SSO login (see syncExternal) and by SCIM; groups without one are
+ *     never touched by SSO.
  */
 import { eq, and, asc, inArray, isNotNull } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
@@ -73,18 +74,24 @@ export class GroupService {
     return groups.map((g) => ({ ...g, member_count: counts.get(g.id) ?? 0, my_role: mine.get(g.id) ?? null }));
   }
 
-  async create(p: Principal, input: { name: string; description?: string | null }): Promise<Group> {
+  /**
+   * `external_id` links the team to an identity-provider group (the value its OIDC `groups` claim or SCIM
+   * externalId/displayName carries). A linked team can be granted workspaces before anyone signs in; from then on
+   * SSO sign-in and SCIM decide its membership.
+   */
+  async create(p: Principal, input: { name: string; description?: string | null; external_id?: string | null }): Promise<Group> {
     if (!isPlatformAdmin(p)) throw forbidden('Only administrators can create teams');
     const name = normaliseName(input.name);
     if (!name) throw badRequest('name is required');
     if (await this.findByName(name)) throw conflict(`A team named "${name}" already exists`);
+    const external_id = await this.freeExternalId(input.external_id);
     const now = new Date();
-    const g: Group = { id: newId(), name, description: input.description?.trim().slice(0, 500) || null, external_id: null, created_by: p.userId, created_at: now, updated_at: now };
+    const g: Group = { id: newId(), name, description: input.description?.trim().slice(0, 500) || null, external_id, created_by: p.userId, created_at: now, updated_at: now };
     await this.db.insert(this.s.groups).values(g);
     return g;
   }
 
-  async update(p: Principal, id: string, patch: { name?: string; description?: string | null }): Promise<Group> {
+  async update(p: Principal, id: string, patch: { name?: string; description?: string | null; external_id?: string | null }): Promise<Group> {
     if (!isPlatformAdmin(p)) throw forbidden('Only administrators can edit teams');
     const g = await this.byId(id);
     if (!g) throw notFound('Team');
@@ -97,6 +104,7 @@ export class GroupService {
       set.name = name;
     }
     if (patch.description !== undefined) set.description = patch.description?.trim().slice(0, 500) || null;
+    if (patch.external_id !== undefined) set.external_id = await this.freeExternalId(patch.external_id, id);
     await this.db.update(this.s.groups).set(set).where(eq(this.s.groups.id, id));
     return { ...g, ...set };
   }
@@ -107,6 +115,14 @@ export class GroupService {
     const r = await this.db.delete(this.s.groups).where(eq(this.s.groups.id, id)).returning({ id: this.s.groups.id });
     if (r.length === 0) throw notFound('Team');
     await this.db.delete(this.s.workspaceMembers).where(and(eq(this.s.workspaceMembers.subject_type, 'group'), eq(this.s.workspaceMembers.subject_id, id)));
+  }
+
+  private async freeExternalId(value: string | null | undefined, exceptId?: string): Promise<string | null> {
+    const ext = value?.trim().slice(0, 256) || null;
+    if (!ext) return null;
+    const rows = await this.db.select({ id: this.s.groups.id, name: this.s.groups.name }).from(this.s.groups).where(eq(this.s.groups.external_id, ext)).limit(1);
+    if (rows[0] && rows[0].id !== exceptId) throw conflict(`The team "${rows[0].name}" is already linked to the IdP group "${ext}"`);
+    return ext;
   }
 
   private async findByName(name: string): Promise<Group | null> {

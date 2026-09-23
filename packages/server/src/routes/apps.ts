@@ -300,7 +300,7 @@ export async function visitor(app: FastifyInstance, ctx: AppContext, req: Fastif
   try {
     const claims = app.jwt.verify<{ purpose?: string; sub?: string }>(raw);
     if (claims.purpose !== 'app' || !claims.sub) return null;
-    const user = await ctx.auth.findById(claims.sub);
+    const user = await ctx.auth.findActive(claims.sub);
     if (!user) return null;
     return ctx.auth.principalFromUser(user, 'jwt', req.ip);
   } catch {

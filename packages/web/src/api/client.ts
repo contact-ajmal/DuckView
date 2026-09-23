@@ -105,7 +105,8 @@ export const api = {
 };
 
 // ------------------------------------------------------------------ types
-export interface User { id: string; email: string; role: 'ADMIN' | 'USER' | 'READ_ONLY'; auth_provider: string; display_name: string | null; created_at: string }
+export interface User { id: string; email: string; role: 'ADMIN' | 'USER' | 'READ_ONLY'; auth_provider: string; display_name: string | null; disabled?: boolean; created_at: string }
+export interface ScimStatus { enabled: boolean; source: 'config' | 'console' | null; prefix: string | null; created_at: string | null; on_delete: 'deactivate' | 'delete'; endpoint: string }
 export interface CloudSyncState { etag: string | null; synced_at: string | null; size_bytes: number | null; dirty: boolean; last_error: string | null; last_push_ms?: number }
 export interface StorageOptions { mode: 'sandboxed' | 'full'; default_database: 'file' | 'memory'; data_directory: string; cloud_connections: { id: string; name: string; provider: 'S3' | 'R2' | 'GCS' | 'AZURE'; bucket: string | null; uri_scheme: string }[] }
 export type StorageKind = 'data' | 'folder' | 'cloud' | 'memory' | 'motherduck';

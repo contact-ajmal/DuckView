@@ -18,6 +18,8 @@ export const users = pgTable(
     role: text('role', { enum: USER_ROLES }).notNull().default('USER'),
     display_name: text('display_name'),
     external_id: text('external_id'),
+    /** Deactivated (SCIM active=false or by an admin): no sign-in, no tokens, no scheduled work runs as them. */
+    disabled: boolean('disabled').notNull().default(false),
     created_at: ts('created_at').notNull(),
   },
   (t) => [uniqueIndex('users_email_idx').on(t.email)],

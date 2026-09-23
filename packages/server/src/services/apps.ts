@@ -283,7 +283,7 @@ export class DataAppService {
   private async startAsOwner(id: string): Promise<void> {
     const row = (await this.db.select().from(this.s.dataApps).where(eq(this.s.dataApps.id, id)).limit(1))[0];
     if (!row || !row.always_on || this.procs.has(id)) return;
-    const owner = await this.auth.findById(row.user_id);
+    const owner = await this.auth.findActive(row.user_id);
     if (!owner) return;
     try {
       await this.start(this.auth.principalFromUser(owner, 'jwt', 'always-on'), id);
@@ -666,8 +666,8 @@ export class DataAppService {
     if (this.procs.has(id)) return this.toPublic({ ...app, status: this.status(id) ?? 'starting' });
     if (this.procs.size >= this.cfg.apps.max_running) await this.makeRoom();
     if (this.procs.has(id)) return this.toPublic({ ...app, status: this.status(id) ?? 'starting' });
-    const owner = await this.auth.findById(app.user_id);
-    if (!owner) throw badRequest('The app\'s creator no longer exists');
+    const owner = await this.auth.findActive(app.user_id);
+    if (!owner) throw badRequest('The app\'s creator no longer exists or has been deactivated');
     // Registered before the (possibly slow) launch so a second visit waits instead of starting a twin.
     const proc: Proc = { inst: null, tokenId: null, ownerId: owner.id, logs: [], startedAt: Date.now(), lastUsed: Date.now(), healthy: false, alwaysOn: app.always_on, stopping: false };
     this.procs.set(id, proc);

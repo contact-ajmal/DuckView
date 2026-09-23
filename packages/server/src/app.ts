@@ -29,6 +29,7 @@ import { connectorRoutes } from './routes/connectors.js';
 import { appRoutes } from './routes/apps.js';
 import { notificationRoutes, snapshotFileRoutes } from './routes/notifications.js';
 import { governanceRoutes } from './routes/governance.js';
+import { scimRoutes, scimAdminRoutes } from './routes/scim.js';
 import { buildAppsServer } from './apps-server.js';
 import { agentRoutes } from './routes/agent.js';
 import { groupRoutes } from './routes/groups.js';
@@ -66,7 +67,7 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
     global: true,
     max: cfg.server.rate_limit_per_minute,
     timeWindow: '1 minute',
-    allowList: (req) => req.url === '/healthz' || req.url === '/readyz' || req.url === '/metrics' || req.url.startsWith('/mcp'),
+    allowList: (req) => req.url === '/healthz' || req.url === '/readyz' || req.url === '/metrics' || req.url.startsWith('/mcp') || req.url.startsWith('/scim/'),
   });
   await app.register(websocket, { options: { maxPayload: cfg.server.body_limit_bytes } });
   await app.register(multipart, { limits: { fileSize: cfg.security.max_upload_bytes, files: 20 } });
@@ -124,6 +125,8 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   await app.register(async (r) => notificationRoutes(r, ctx));
   await app.register(async (r) => snapshotFileRoutes(r, ctx));
   await app.register(async (r) => governanceRoutes(r, ctx));
+  await app.register(async (r) => scimRoutes(r, ctx));
+  await app.register(async (r) => scimAdminRoutes(r, ctx));
   await app.register(async (r) => agentRoutes(r, ctx));
   await app.register(async (r) => groupRoutes(r, ctx));
   await app.register(async (r) => mosaicRoutes(r, ctx));

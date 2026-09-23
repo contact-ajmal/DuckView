@@ -83,6 +83,16 @@ export const ConfigSchema = z.object({
           sync_groups: z.coerce.boolean().default(true),
         })
         .default({}),
+      /** SCIM 2.0 provisioning at /scim/v2 (Okta, Entra ID, OneLogin, JumpCloud…), authenticated by a bearer token. */
+      scim: z
+        .object({
+          enabled: z.coerce.boolean().default(true),
+          /** A fixed bearer token for infrastructure-as-code setups; otherwise generate one from Governance → Provisioning. */
+          token: z.string().optional(),
+          /** What DELETE /Users/:id does: deactivate (keeps the user's workspaces and history) or delete for good. */
+          on_delete: z.enum(['deactivate', 'delete']).default('deactivate'),
+        })
+        .default({}),
       bootstrap_admin: z
         .object({
           email: z.string().email().optional(),
@@ -601,7 +611,7 @@ export function redactConfig(cfg: DuckViewConfig): Record<string, unknown> {
     ...cfg,
     security: { ...cfg.security, jwt_secret: '***', encryption_key: '***' },
     copilot: { ...cfg.copilot, api_key: cfg.copilot.api_key ? '***' : undefined },
-    auth: { ...cfg.auth, oidc: { ...cfg.auth.oidc, client_secret: cfg.auth.oidc.client_secret ? '***' : undefined }, bootstrap_admin: { email: cfg.auth.bootstrap_admin.email, password: cfg.auth.bootstrap_admin.password ? '***' : undefined } },
+    auth: { ...cfg.auth, oidc: { ...cfg.auth.oidc, client_secret: cfg.auth.oidc.client_secret ? '***' : undefined }, bootstrap_admin: { email: cfg.auth.bootstrap_admin.email, password: cfg.auth.bootstrap_admin.password ? '***' : undefined }, scim: { ...cfg.auth.scim, token: cfg.auth.scim.token ? '***' : undefined } },
     database: { ...cfg.database, metadata_url: cfg.database.metadata_url.replace(/\/\/([^:]+):[^@]+@/, '//$1:***@') },
   };
 }

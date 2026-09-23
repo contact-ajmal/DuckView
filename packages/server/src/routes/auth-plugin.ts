@@ -39,7 +39,7 @@ export async function principalFromBearer(ctx: AppContext, server: FastifyInstan
     return null;
   }
   if (claims.purpose && claims.purpose !== 'app-browser') return null;
-  const user = claims.sub ? await ctx.auth.findById(claims.sub) : null;
+  const user = claims.sub ? await ctx.auth.findActive(claims.sub) : null;
   if (!user) return null;
   const p = ctx.auth.principalFromUser(user, claims.purpose ? 'token' : 'jwt', ip);
   if (!claims.purpose) return p;
