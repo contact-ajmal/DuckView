@@ -13,6 +13,8 @@ import { badRequest, notFound } from './errors.js';
 import { analyzeSql } from '../engine/sql-guard.js';
 
 export class SavedQueryService {
+  /** Version history (set by the context). */
+  revisions: { record(userId: string | null, workspaceId: string, type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string, opts?: { message?: string | null }): Promise<unknown>; forget(type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string): Promise<void> } | null = null;
   constructor(private readonly store: MetadataStore, private readonly workspaces: WorkspaceService) {}
   private get db() {
     return this.store.db;
@@ -61,6 +63,7 @@ export class SavedQueryService {
     const n = this.normalise(input);
     const q: SavedQuery = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name: n.name!, folder: n.folder ?? '', description: n.description ?? null, sql_text: n.sql_text!, tags: n.tags ?? [], created_at: now, updated_at: now };
     await this.db.insert(this.s.savedQueries).values(q);
+    await this.revisions?.record(p.userId, workspaceId, 'query', q.id);
     return q;
   }
 
@@ -70,6 +73,7 @@ export class SavedQueryService {
     const existing = await this.get(p, workspaceId, id);
     const set = { ...this.normalise(patch), updated_at: new Date() };
     await this.db.update(this.s.savedQueries).set(set).where(eq(this.s.savedQueries.id, id));
+    await this.revisions?.record(p.userId, workspaceId, 'query', id);
     return { ...existing, ...set };
   }
 
@@ -78,6 +82,7 @@ export class SavedQueryService {
     await this.workspaces.get(p, workspaceId, 'EDITOR');
     await this.get(p, workspaceId, id);
     await this.db.delete(this.s.savedQueries).where(eq(this.s.savedQueries.id, id));
+    await this.revisions?.forget('query', id);
   }
 }
 
@@ -92,6 +97,13 @@ export interface WidgetInput {
 }
 
 export class DashboardService {
+  /** Version history (set by the context). */
+  revisions: { record(userId: string | null, workspaceId: string, type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string, opts?: { message?: string | null }): Promise<unknown>; forget(type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string): Promise<void> } | null = null;
+  private async rec(userId: string, id: string): Promise<void> {
+    if (!this.revisions) return;
+    const d = (await this.db.select({ workspace_id: this.s.dashboards.workspace_id }).from(this.s.dashboards).where(eq(this.s.dashboards.id, id)).limit(1))[0];
+    if (d) await this.revisions.record(userId, d.workspace_id, 'dashboard', id);
+  }
   constructor(private readonly store: MetadataStore, private readonly workspaces: WorkspaceService) {}
   private get db() {
     return this.store.db;
@@ -132,6 +144,7 @@ export class DashboardService {
     const now = new Date();
     const d: Dashboard = { id: newId(), workspace_id: workspaceId, user_id: p.userId, name: (input.name ?? '').trim().slice(0, 160) || 'Untitled dashboard', description: input.description?.trim().slice(0, 2000) || null, layout: [], kind, spec: kind === 'mosaic' ? this.validateSpec(input.spec) ?? {} : null, created_at: now, updated_at: now };
     await this.db.insert(this.s.dashboards).values(d);
+    await this.rec(p.userId, d.id);
     return d;
   }
 
@@ -147,6 +160,7 @@ export class DashboardService {
       set.spec = this.validateSpec(patch.spec) ?? {};
     }
     await this.db.update(this.s.dashboards).set(set).where(eq(this.s.dashboards.id, id));
+    await this.rec(p.userId, id);
     const { widgets: _w, ...plain } = d;
     return { ...plain, ...set };
   }
@@ -162,6 +176,7 @@ export class DashboardService {
     requireWrite(p);
     await this.get(p, id, 'EDITOR');
     await this.db.delete(this.s.dashboards).where(eq(this.s.dashboards.id, id));
+    await this.revisions?.forget('dashboard', id);
   }
 
   private validateWidget(input: WidgetInput, existing?: DashboardWidget): Partial<DashboardWidget> {
@@ -218,6 +233,7 @@ export class DashboardService {
     const size = w.widget_type === 'KPI' ? { w: 3, h: 2 } : w.widget_type === 'MARKDOWN' ? { w: 4, h: 3 } : { w: 6, h: 4 };
     const layout = [...d.layout, { i: w.id, x: 0, y: maxY, ...size }];
     await this.db.update(this.s.dashboards).set({ layout, updated_at: now }).where(eq(this.s.dashboards.id, dashboardId));
+    await this.rec(p.userId, dashboardId);
     return { widget: w, layout };
   }
 
@@ -233,6 +249,7 @@ export class DashboardService {
     const set = { ...this.validateWidget(patch, existing), updated_at: new Date() };
     await this.db.update(this.s.dashboardWidgets).set(set).where(eq(this.s.dashboardWidgets.id, widgetId));
     await this.db.update(this.s.dashboards).set({ updated_at: new Date() }).where(eq(this.s.dashboards.id, dashboardId));
+    await this.rec(p.userId, dashboardId);
     return { ...existing, ...set };
   }
 
@@ -243,6 +260,7 @@ export class DashboardService {
     await this.db.delete(this.s.dashboardWidgets).where(eq(this.s.dashboardWidgets.id, widgetId));
     const layout = d.layout.filter((l) => l.i !== widgetId);
     await this.db.update(this.s.dashboards).set({ layout, updated_at: new Date() }).where(eq(this.s.dashboards.id, dashboardId));
+    await this.rec(p.userId, dashboardId);
     return layout;
   }
 

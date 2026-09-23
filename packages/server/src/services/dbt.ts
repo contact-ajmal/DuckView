@@ -125,6 +125,8 @@ export function starterProject(name: string): Record<string, string> {
 }
 
 export class DbtService {
+  /** Version history (set by the context). */
+  revisions: { record(userId: string | null, workspaceId: string, type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string, opts?: { message?: string | null }): Promise<unknown>; forget(type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string): Promise<void> } | null = null;
   private running = new Set<string>();
   /** Set by the context: dbt semantic models and metrics are imported into the semantic layer. */
   semantic: SemanticService | null = null;
@@ -311,6 +313,7 @@ export class DbtService {
       updated_at: now,
     };
     await this.db.insert(this.s.dbtProjects).values(row);
+    await this.revisions?.record(p.userId, workspaceId, 'dbt', row.id);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'dbt.project_create', resource: `dbt:${row.id}`, ip: p.ip });
     return row;
   }
@@ -331,6 +334,7 @@ export class DbtService {
     const enabled = set.enabled ?? row.enabled;
     if (patch.schedule !== undefined || patch.enabled !== undefined) set.next_run_at = enabled && schedule.kind !== 'manual' ? nextRunAt(schedule) : null;
     await this.db.update(this.s.dbtProjects).set(set).where(eq(this.s.dbtProjects.id, id));
+    if (patch.files !== undefined || patch.vars !== undefined || patch.target_schema !== undefined || patch.name !== undefined) await this.revisions?.record(p.userId, row.workspace_id, 'dbt', id);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'dbt.project_update', resource: `dbt:${id}`, ip: p.ip });
     return { ...row, ...set };
   }
@@ -340,6 +344,7 @@ export class DbtService {
     const row = await this.get(p, id);
     await this.workspaces.get(p, row.workspace_id, 'EDITOR');
     await this.db.delete(this.s.dbtProjects).where(eq(this.s.dbtProjects.id, id));
+    await this.revisions?.forget('dbt', id);
     await this.semantic?.removeSource(row.workspace_id, `dbt:${id}`);
     fs.rmSync(this.workDir(id), { recursive: true, force: true });
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'dbt.project_delete', resource: `dbt:${id}`, ip: p.ip });

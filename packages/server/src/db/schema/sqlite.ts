@@ -1313,3 +1313,27 @@ export const inbox = sqliteTable(
 );
 export type Comment = typeof comments.$inferSelect;
 export type InboxItem = typeof inbox.$inferSelect;
+
+/** Version history: a snapshot of an object after a save (saves by one person within minutes are one revision). */
+export const REVISION_TYPES = ['notebook', 'dashboard', 'query', 'semantic', 'dbt'] as const;
+export type RevisionType = (typeof REVISION_TYPES)[number];
+export const revisions = sqliteTable(
+  'revisions',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    object_type: text('object_type', { enum: REVISION_TYPES }).notNull(),
+    /** The object's id ('workspace' for the semantic layer). */
+    object_id: text('object_id').notNull(),
+    number: integer('number').notNull(),
+    snapshot: text('snapshot', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    /** A named version (never merged with later saves), or how it came to be ("Restored version 3", "Pulled from Git"). */
+    message: text('message'),
+    named: integer('named', { mode: 'boolean' }).notNull().default(false),
+    user_id: text('user_id'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('revisions_object_idx').on(t.object_type, t.object_id, t.number)],
+);
+export type Revision = typeof revisions.$inferSelect;

@@ -3,6 +3,7 @@
  * dialogs 8px), neutral surfaces, and the accent reserved for "what to do" (primary actions, the active item, focus).
  */
 import { type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Loader2, Check, Copy } from 'lucide-react';
 
 export function cn(...parts: (string | false | null | undefined)[]) {
@@ -154,7 +155,8 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg' }: { 
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
   if (!open) return null;
-  return (
+  // On body: a parent with a transform or backdrop filter would otherwise become the fixed overlay's frame.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-[10vh]" onMouseDown={onClose}>
       <div role="dialog" aria-modal="true" aria-label={title} className={cn('dv-pop w-full rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl', width)} onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 pb-1 pt-4">
@@ -165,7 +167,8 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg' }: { 
         </div>
         <div className="px-5 pb-5 pt-2">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -178,7 +181,7 @@ export function Drawer({ open, onClose, title, children, width = 'w-[420px]', ac
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
   if (!open) return null;
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-40 flex justify-end bg-black/20" onMouseDown={onClose}>
       <aside className={cn('dv-drawer flex h-full max-w-[92vw] flex-col border-l border-zinc-800 bg-zinc-950 shadow-2xl', width)} onMouseDown={(e) => e.stopPropagation()}>
         <header className="flex h-[var(--topbar-h)] shrink-0 items-center gap-2 border-b border-zinc-800 px-4">
@@ -190,7 +193,8 @@ export function Drawer({ open, onClose, title, children, width = 'w-[420px]', ac
         </header>
         <div className="min-h-0 flex-1 overflow-auto">{children}</div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

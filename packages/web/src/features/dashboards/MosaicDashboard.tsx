@@ -11,6 +11,7 @@ import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, cn } fro
 import { CommentsControl } from '../comments/CommentsPanel';
 import { MosaicSpecView, type SpecRenderStatus } from './MosaicSpecView';
 import { SpecEditor } from './SpecEditor';
+import { HistoryButton } from '../history/HistoryDrawer';
 
 const STARTER = `# Mosaic dashboard — https://idl.uw.edu/mosaic/spec/
 # Reference workspace tables directly (from: my_table) or define datasets below.
@@ -169,6 +170,7 @@ export function MosaicDashboard({ id }: { id: string }) {
         <div className="flex items-center gap-1.5">
           <Button size="sm" variant="ghost" onClick={() => setNonce((n) => n + 1)} title="Re-render"><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>
           <CommentsControl workspaceId={dash.workspace_id} targetType="dashboard" targetId={dash.id} targetLabel={dash.name} />
+          <HistoryButton workspaceId={dash.workspace_id} objectType="dashboard" objectId={dash.id} title={dash.name} onRestored={() => void load()} />
           <Button size="sm" variant="ghost" onClick={() => cp.toggle()} title="Ask AI about this dashboard"><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
           {canWrite && (
             <>

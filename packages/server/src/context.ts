@@ -33,6 +33,9 @@ import { QualityService } from './services/quality.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
 import { CommentService } from './services/comments.js';
+import { RevisionService } from './services/revisions.js';
+import { eq } from 'drizzle-orm';
+import type { DashboardWidget, LayoutItem, NotebookCell } from './db/schema/sqlite.js';
 import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
@@ -80,6 +83,7 @@ export interface AppContext {
   reverse: ReverseEtlService;
   notebooks: NotebookService;
   comments: CommentService;
+  revisions: RevisionService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -176,6 +180,26 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   copilot.notebooks = notebooks;
   const comments = new CommentService(store, workspaces, notifications, audit);
   copilot.comments = comments;
+  const revisions = new RevisionService(store, workspaces, audit);
+  notebooks.revisions = revisions;
+  savedQueries.revisions = revisions;
+  dashboards.revisions = revisions;
+  semantic.revisions = revisions;
+  dbt.revisions = revisions;
+  revisions.restorers = {
+    notebook: async (p, _ws, id, snap) => void (await notebooks.update(p, id, { title: snap.title as string, cells: snap.cells as NotebookCell[] })),
+    query: async (p, ws, id, snap) => void (await savedQueries.update(p, ws, id, { name: snap.name as string, folder: snap.folder as string, description: (snap.description as string | null) ?? null, sql_text: snap.sql_text as string, tags: (snap.tags as string[]) ?? [] })),
+    semantic: async (p, ws, _id, snap) => void (await semantic.save(p, ws, String(snap.yaml ?? ''), { force: true })),
+    dbt: async (p, _ws, id, snap) => void (await dbt.update(p, id, { name: snap.name as string, files: snap.files as Record<string, string>, vars: (snap.vars as Record<string, unknown>) ?? {}, target_schema: snap.target_schema as string })),
+    // A dashboard comes back with its widgets under their old ids, so the layout still points at them.
+    dashboard: async (p, _ws, id, snap) => {
+      await dashboards.get(p, id, 'EDITOR');
+      const now = new Date();
+      await store.db.update(store.schema.dashboards).set({ name: snap.name as string, description: (snap.description as string | null) ?? null, layout: (snap.layout as LayoutItem[]) ?? [], spec: (snap.spec as Record<string, unknown> | null) ?? null, updated_at: now }).where(eq(store.schema.dashboards.id, id));
+      await store.db.delete(store.schema.dashboardWidgets).where(eq(store.schema.dashboardWidgets.dashboard_id, id));
+      for (const w of (snap.widgets as Omit<DashboardWidget, 'dashboard_id' | 'created_at' | 'updated_at'>[]) ?? []) await store.db.insert(store.schema.dashboardWidgets).values({ ...w, dashboard_id: id, created_at: now, updated_at: now });
+    },
+  };
   if (cfg.transform.scheduler_enabled) {
     dbt.startScheduler();
     quality.start();
@@ -227,6 +251,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     reverse,
     notebooks,
     comments,
+    revisions,
     lakehouse,
     agents,
     groups,

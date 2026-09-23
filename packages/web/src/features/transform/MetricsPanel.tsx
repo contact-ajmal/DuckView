@@ -10,6 +10,7 @@ import { useTheme } from '../../store/theme';
 import { Badge, Button, Empty, Input, Label, Select, cn } from '../../components/ui';
 import { ChartPanel } from '../workspace/ChartPanel';
 import { ResultsGrid } from '../workspace/ResultsGrid';
+import { HistoryButton } from '../history/HistoryDrawer';
 
 const GRAINS = ['day', 'week', 'month', 'quarter', 'year'] as const;
 const OPS = ['=', '!=', '>', '>=', '<', '<=', 'in', 'not in', 'like', 'is null', 'is not null'] as const;
@@ -261,6 +262,7 @@ function Definitions({ workspaceId, layer, onSaved }: { workspaceId: string; lay
           <span className="font-mono text-zinc-300">semantic layer · this workspace</span>
           {check && (check.ok ? <Badge tone="green"><CheckCircle2 className="mr-0.5 inline h-3 w-3" />valid</Badge> : <Badge tone="red">{check.problems.length} problem{check.problems.length === 1 ? '' : 's'}</Badge>)}
           <div className="ml-auto flex gap-2">
+            <HistoryButton label workspaceId={workspaceId} objectType="semantic" objectId="workspace" title="Semantic layer" onRestored={() => void api.get<SemanticLayer>(`/api/workspaces/${workspaceId}/semantic`).then((l) => { onSaved(l); setText(l.yaml); })} />
             <Button size="sm" variant="ghost" onClick={() => void validate()} data-testid="metrics-validate">Validate</Button>
             {canEdit && <Button size="sm" variant="primary" disabled={busy || !dirty} onClick={() => void save()} data-testid="metrics-save"><Save className="h-3.5 w-3.5" /> Save</Button>}
           </div>

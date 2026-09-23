@@ -45,6 +45,8 @@
  * The comments scenario comments on a notebook cell, @mentions a colleague picked from the suggestions, checks their
  * inbox; the colleague replies (API), the reply arrives in the bell live, opening it lands on the thread, and
  * resolving it clears the cell's count.
+ * The version-history scenario names a version of a notebook, changes it, opens History, reads the diff, restores
+ * the named version and checks the cell and the history.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -794,6 +796,34 @@ try {
     await waitFor(`!document.querySelector('[data-cell="totals"] [data-testid="cell-comments"]')`, 10000, 'count cleared after resolving');
     report.details.charts = 1;
   }
+  else if (scenario === 'version-history') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    cleanup = async () => {
+      for (const n of (await j('GET', `/api/workspaces/${wsId}/notebooks`)).notebooks ?? []) if (n.title.startsWith('E2E')) await j('DELETE', `/api/notebooks/${n.id}`);
+    };
+    await cleanup();
+    const nb = (await j('POST', `/api/workspaces/${wsId}/notebooks`, { title: 'E2E history', cells: [{ id: 'c1', type: 'sql', name: 'revenue', source: "SELECT sum(amount) AS revenue FROM (VALUES (10), (20)) t(amount)" }] })).notebook;
+    await j('POST', `/api/workspaces/${wsId}/revisions`, { object_type: 'notebook', object_id: nb.id, message: 'Signed off' });
+    await j('PATCH', `/api/notebooks/${nb.id}`, { cells: [{ id: 'c1', type: 'sql', name: 'revenue', source: "SELECT sum(amount) * 1.2 AS revenue FROM (VALUES (10), (20)) t(amount)" }] });
+    await send('Page.navigate', { url: `${BASE}/#/notebooks/${nb.id}` });
+    await waitFor(`!!document.querySelector('[data-testid="history-button"]') && document.querySelector('[data-cell="revenue"] .cm-content')?.innerText.includes('1.2')`, 20000, 'notebook with the change');
+    await evaluate(`document.querySelector('[data-testid="history-button"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[data-testid="history"] [data-revision]')].some(b => b.innerText.includes('Signed off'))`, 10000, 'history listed');
+    report.details.versions = await evaluate(`[...document.querySelectorAll('[data-testid="history"] [data-revision]')].map(b => b.innerText.split('\\n')[0])`);
+    await evaluate(`[...document.querySelectorAll('[data-testid="history"] [data-revision]')].find(b => b.innerText.includes('Signed off')).click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="revision-diff"]')`, 10000, 'diff');
+    report.details.diff = await evaluate(`[...document.querySelectorAll('[data-testid="revision-diff"] div')].map(d => d.innerText).filter(t => /^[+-] /.test(t))`);
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_history.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`window.confirm = () => true; document.querySelector('[data-testid="restore-revision"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[data-testid="history"] [data-revision]')].some(b => b.innerText.includes('Restored version'))`, 10000, 'restore recorded');
+    report.details.after = await evaluate(`[...document.querySelectorAll('[data-testid="history"] [data-revision]')].map(b => b.innerText.split('\\n')[0])`);
+    await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`);
+    await waitFor(`!document.querySelector('[data-cell="revenue"] .cm-content')?.innerText.includes('1.2')`, 10000, 'cell restored on screen');
+    report.details.cell = await evaluate(`document.querySelector('[data-cell="revenue"] .cm-content').innerText`);
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -1076,6 +1106,12 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'version-history') {
+    if (!(d.versions ?? []).includes('Signed off')) problems.push(`versions: ${JSON.stringify(d.versions)}`);
+    if (JSON.stringify(d.diff) !== JSON.stringify(['- SELECT sum(amount) * 1.2 AS revenue FROM (VALUES (10), (20)) t(amount)', '+ SELECT sum(amount) AS revenue FROM (VALUES (10), (20)) t(amount)'])) problems.push(`diff: ${JSON.stringify(d.diff)}`);
+    if (!/Restored version \d+/.test((d.after ?? [])[0] ?? '')) problems.push(`after: ${JSON.stringify(d.after)}`);
+    if (!/SELECT sum\(amount\) AS revenue/.test(d.cell ?? '')) problems.push(`cell: ${d.cell}`);
   }
   if (scenario === 'comments') {
     if (!/^Is 42 right\? @e2e-colleague@example\.com can you check\?$/.test(d.draft ?? '')) problems.push(`mention not inserted: ${d.draft}`);

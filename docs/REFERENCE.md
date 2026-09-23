@@ -496,6 +496,15 @@ API: `GET/POST /api/workspaces/:id/notebooks` · `GET/PATCH/DELETE /api/notebook
 
 API: `GET /api/workspaces/:id/comments?target_type=notebook|dashboard|query|app|table&target_id=&anchor=` (threads with replies, `open`, `by_anchor`) · `POST /api/workspaces/:id/comments {target_type, target_id, anchor?, body}` or `{parent_id, body}` to reply · `PATCH /api/comments/:id {body}` · `POST /api/comments/:id/resolve {resolved}` · `DELETE /api/comments/:id` · `GET /api/workspaces/:id/people` · `GET /api/inbox?unread=` · `POST /api/inbox/read {ids | all}`. Audit: `comment.create`, `comment.delete`. Live events: `comment` (workspace members), `inbox` (the person).
 
+
+## Version history
+
+**Every save is kept** (`services/revisions.ts`) for notebooks, dashboards (grid layouts and widgets, or Mosaic specs), saved queries, the semantic layer's YAML and dbt projects. Saves by the same person within ten minutes update their latest version instead of adding one, so autosave and quick edits read as one step; another person's save, a named version, a restore or more than ten minutes start a new one, and nothing identical is stored twice. The latest 200 versions of each object are kept, named ones always; deleting an object deletes its history.
+
+**History** (the clock button in a notebook's or dashboard's header, *History* in Metrics → Definitions and on a dbt project, the clock on a saved query in the workbench) lists the versions with who saved them and when. Picking one shows what restoring it would change (a line diff of the SQL, text and YAML against now). **Restore** (editors) writes it back through the owning service — validation, permissions and audit as for any save — and records a new version ("Restored version 3"), after keeping what was there; restoring the newer version undoes it. A dashboard comes back with its widgets under their old ids, so the layout still fits. **Name this version** keeps the current state under a name ("Signed off by finance").
+
+API: `GET /api/workspaces/:id/revisions?object_type=notebook|dashboard|query|semantic|dbt&object_id=` (`semantic` uses `object_id=workspace`) · `POST /api/workspaces/:id/revisions {object_type, object_id, message}` · `GET /api/revisions/:id` (snapshot, `text`, `current`) · `POST /api/revisions/:id/restore`. Audit: `revision.name`, `revision.restore`.
+
 ## Governance
 
 **Catalog** (`#/governance/catalog`, `services/lineage.ts`): descriptions and tags (lower-case, e.g. `pii`, `finance`) on tables, views and columns, written by editors, read by every member (`GET /api/workspaces/:id/catalog/annotated`, `PUT /api/workspaces/:id/catalog/annotations {object_name, column_name?, description, tags}` — an empty description and no tags removes the note). Copilot's context carries the notes ("trust these over guesses from names"), and `inspect_schema` shows them next to the columns.

@@ -12,6 +12,7 @@ import { ResultsGrid } from '../workspace/ResultsGrid';
 import { ChartPanel } from '../workspace/ChartPanel';
 import { registerCopilotHost } from '../copilot/CopilotDrawer';
 import { CommentsButton, CommentsPanel, useCommentCounts } from '../comments/CommentsPanel';
+import { HistoryButton } from '../history/HistoryDrawer';
 
 const idOf = () => /^#\/notebooks\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
 
@@ -105,6 +106,8 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
   ref.current = nb;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saving = useRef<Promise<void> | null>(null);
+  /** Unsaved edits: saving is skipped when there are none (a run does not bump the version). */
+  const dirty = useRef(false);
 
   useEffect(() => {
     void api.get<{ notebook: Notebook }>(`/api/notebooks/${id}`).then((r) => setNb(r.notebook)).catch((e) => setError((e as Error).message));
@@ -122,7 +125,8 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
     }
     if (saving.current) await saving.current;
     const cur = ref.current;
-    if (!cur || !canEdit) return;
+    if (!cur || !canEdit || !dirty.current) return;
+    dirty.current = false;
     const doSave = async () => {
       setSave('saving');
       try {
@@ -132,6 +136,7 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
         setSave((s) => (s === 'saving' ? 'saved' : s));
       } catch (e) {
         const msg = (e as Error).message;
+        dirty.current = true;
         if (/saved this notebook after you opened it/.test(msg)) {
           setConflict(msg);
           setSave('conflict');
@@ -149,6 +154,7 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
   const change = useCallback((fn: (n: Notebook) => Notebook) => {
     setNb((n) => (n ? fn(n) : n));
     if (!canEdit) return;
+    dirty.current = true;
     setSave((s) => (s === 'conflict' ? s : 'dirty'));
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => void flush(), 800);
@@ -255,6 +261,7 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
           <input value={nb.title} readOnly={!canEdit} onChange={(e) => change((n) => ({ ...n, title: e.target.value }))} aria-label="Title" data-testid="notebook-title" className="min-w-0 flex-1 truncate rounded bg-transparent px-1 py-0.5 text-[15px] font-semibold text-zinc-50 outline-none hover:bg-zinc-900 focus:bg-zinc-900" />
           <span className={cn('shrink-0 text-xs', save === 'conflict' || save === 'error' ? 'text-red-300' : 'text-zinc-500')} data-testid="save-state">{!canEdit ? 'View only' : save === 'saved' ? 'Saved' : save === 'saving' ? 'Saving…' : save === 'dirty' ? 'Unsaved' : save === 'conflict' ? 'Not saved — changed elsewhere' : 'Not saved'}</span>
           <CommentsButton count={counts.open} onClick={() => setComments({})} />
+          <HistoryButton workspaceId={workspaceId} objectType="notebook" objectId={id} title={nb.title} onRestored={() => { if (saveTimer.current) clearTimeout(saveTimer.current); dirty.current = false; void api.get<{ notebook: Notebook }>(`/api/notebooks/${id}`).then((r) => { setNb(r.notebook); setSave('saved'); }); }} />
           <Button size="sm" variant="ghost" onClick={() => cp.toggle(true)} title="DuckView AI sees this notebook"><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
           <Button size="sm" variant="primary" onClick={() => void runAll()} disabled={running.size > 0} data-testid="run-all"><Play className="h-3.5 w-3.5" /> Run all</Button>
           <Menu trigger={(_, toggle) => <IconButton label="More notebook actions" onClick={toggle}><MoreHorizontal className="h-4 w-4" /></IconButton>}>

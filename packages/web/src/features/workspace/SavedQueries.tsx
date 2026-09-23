@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Folder, FolderOpen, FileCode2, Trash2, Play, ChevronRight, ChevronDown, Tag } from 'lucide-react';
+import { Folder, FolderOpen, FileCode2, Trash2, Play, ChevronRight, ChevronDown, Tag, History } from 'lucide-react';
 import type { SavedQuery } from '../../api/client';
 import { cn } from '../../components/ui';
 
-export function SavedQueriesTree({ queries, onOpen, onRun, onDelete }: { queries: SavedQuery[]; onOpen: (q: SavedQuery) => void; onRun: (q: SavedQuery) => void; onDelete: (q: SavedQuery) => void }) {
+export function SavedQueriesTree({ queries, onOpen, onRun, onDelete, onHistory }: { queries: SavedQuery[]; onOpen: (q: SavedQuery) => void; onRun: (q: SavedQuery) => void; onDelete: (q: SavedQuery) => void; onHistory?: (q: SavedQuery) => void }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const folders = useMemo(() => {
     const map = new Map<string, SavedQuery[]>();
@@ -52,6 +52,7 @@ export function SavedQueriesTree({ queries, onOpen, onRun, onDelete }: { queries
                   <button className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-accent-300 group-hover:opacity-100" onClick={() => onRun(q)} title="Run in a new tab">
                     <Play className="h-3 w-3" />
                   </button>
+                  {onHistory && <button className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-zinc-200 group-hover:opacity-100" onClick={() => onHistory(q)} title="Version history"><History className="h-3 w-3" /></button>}
                   <button className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-red-300 group-hover:opacity-100" onClick={() => onDelete(q)} title="Delete">
                     <Trash2 className="h-3 w-3" />
                   </button>

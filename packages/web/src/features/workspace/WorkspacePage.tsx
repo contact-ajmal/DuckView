@@ -15,6 +15,7 @@ import { ExploreView } from '../explore/ExploreView';
 import { SchemaTree } from './SchemaTree';
 import { SavedQueriesTree } from './SavedQueries';
 import { REVERSE_DRAFT_KEY } from '../connections/ReversePanel';
+import { HistoryDrawer } from '../history/HistoryDrawer';
 import { SaveDbtModelDialog } from '../transform/SaveDbtModelDialog';
 import { Explorer, type ExplorerNode } from '../explorer/Explorer';
 import { SchemaPanel } from '../explorer/SchemaPanel';
@@ -63,6 +64,7 @@ export function WorkspacePage() {
   const [explorerKey, setExplorerKey] = useState(0);
   const [saved, setSaved] = useState<SavedQuery[]>([]);
   const [dbtModel, setDbtModel] = useState<string | null>(null);
+  const [queryHistory, setQueryHistory] = useState<SavedQuery | null>(null);
   const [saveModal, setSaveModal] = useState<{ open: boolean; name: string; folder: string; tags: string; description: string; existing?: SavedQuery }>({ open: false, name: '', folder: '', tags: '', description: '' });
   const importInput = useRef<HTMLInputElement>(null);
   const { canEdit: canWrite } = useWorkspaceAccess();
@@ -326,6 +328,7 @@ export function WorkspacePage() {
               const t = await ws.addTab({ title: q.name, sql: q.sql_text });
               if (t) void ws.runQuery(t.id, q.sql_text, {});
             }}
+            onHistory={(q) => setQueryHistory(q)}
             onDelete={async (q) => {
               if (confirm(`Delete saved query "${q.name}"?`)) {
                 await api.del(`/api/workspaces/${workspace.id}/queries/${q.id}`);
@@ -669,6 +672,7 @@ export function WorkspacePage() {
         }}
       />
 
+      {queryHistory && wsId && <HistoryDrawer open onClose={() => setQueryHistory(null)} workspaceId={wsId} objectType="query" objectId={queryHistory.id} title={queryHistory.name} onRestored={() => void loadSaved()} />}
       {dbtModel !== null && wsId && <SaveDbtModelDialog workspaceId={wsId} sql={dbtModel} suggestedName={tab?.title} onClose={() => setDbtModel(null)} />}
       <Modal open={saveModal.open} onClose={() => setSaveModal({ ...saveModal, open: false })} title={saveModal.existing ? 'Update saved query' : 'Save query'}>
         <div className="space-y-3">

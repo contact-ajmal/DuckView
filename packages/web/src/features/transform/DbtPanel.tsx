@@ -12,6 +12,7 @@ import { useTheme } from '../../store/theme';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { useCopilot } from '../../store/copilot';
 import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { HistoryButton } from '../history/HistoryDrawer';
 
 const COMMANDS: { id: DbtCommand; label: string; hint: string }[] = [
   { id: 'build', label: 'Build', hint: 'Seeds, models and tests in dependency order; a failing test skips what is downstream' },
@@ -289,6 +290,7 @@ function ProjectView({ id }: { id: string }) {
         <span className="text-sm font-semibold text-zinc-100" data-testid="dbt-project-name">{project.name}</span>
         <span className="text-zinc-500">· target schema <span className="font-mono">{project.target_schema}</span> · {scheduleLabel(project.schedule)}{project.schedule.kind !== 'manual' && !project.enabled ? ' (paused)' : ''}</span>
         <div className="ml-auto flex items-center gap-2">
+          <HistoryButton label workspaceId={project.workspace_id} objectType="dbt" objectId={project.id} title={project.name} onRestored={() => void load()} />
           {canEdit && <Button size="sm" variant="ghost" onClick={() => setScheduling(true)}><CalendarClock className="h-3.5 w-3.5" /> Schedule</Button>}
           {canEdit && (
             <Button size="sm" variant="ghost" onClick={() => { if (confirm(`Delete the dbt project "${project.name}"? The tables it built stay.`)) void api.del(`/api/dbt/projects/${id}`).then(() => (location.hash = '#/transform/dbt')); }}>
