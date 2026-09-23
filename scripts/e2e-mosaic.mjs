@@ -33,6 +33,9 @@
  * write a model that "Add to dbt project" saves and builds; the prompt must carry the workspace's dbt projects.
  * The semantic-metrics scenario scaffolds semantic definitions from a table in Transform → Metrics, saves them, and
  * computes a metric by month in the explorer; the metric must equal the hand-written SQL.
+ * The data-quality scenario opens Data → Quality, has DuckView suggest checks for a clean table, saves and runs them
+ * (passing), breaks the data, runs again from the page (failing, with the failing rows shown and opened in SQL), and
+ * reads the quality status in the Data explorer's dataset header.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -410,6 +413,7 @@ try {
     await send('Page.navigate', { url: `${BASE}/#/alerts/snapshots` });
     await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New snapshot')`, 20000, 'snapshots tab');
     await clickButton('New snapshot');
+    await waitFor(`[...document.querySelectorAll('select')].some(s => [...s.options].some(o => o.textContent === 'E2E snapshot board'))`, 15000, 'the dashboard in the picker');
     await evaluate(`(() => { const sel = [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.textContent === 'E2E snapshot board')); const v = [...sel.options].find(o => o.textContent === 'E2E snapshot board').value; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, v); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await evaluate(`[...document.querySelectorAll('label')].find(l => l.textContent.includes('E2E snapshot hook')).querySelector('input').click(); true`);
     await clickButton('Create snapshot');
@@ -552,6 +556,62 @@ try {
     report.details.expected = ((await q("SELECT strftime(date_trunc('month', order_date), '%Y-%m') AS m, sum(amount) FROM sem_orders GROUP BY 1 ORDER BY 1")).rows ?? []);
     report.details.charts = 1;
   }
+  else if (scenario === 'data-quality') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const setInput = (sel, value) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    cleanup = async () => {
+      for (const s of (await j('GET', `/api/workspaces/${wsId}/quality/suites`)).suites ?? []) if (s.relation === 'dq_orders') await j('DELETE', `/api/quality/suites/${s.id}`);
+      // The query tab "Open failing rows in SQL" opened.
+      for (const t of (await j('GET', `/api/workspaces/${wsId}/tabs`)).tabs ?? []) if (t.title.startsWith('Failing: ')) await authed(`/api/workspaces/${wsId}/tabs/${t.id}`, { method: 'DELETE' });
+      await q('DROP TABLE IF EXISTS dq_orders');
+      await q('DROP TABLE IF EXISTS dq_customers');
+    };
+    await cleanup();
+    await q(`CREATE TABLE dq_customers AS SELECT range AS customer_id, 'c' || range AS name FROM range(1, 11)`);
+    await q(`CREATE TABLE dq_orders AS SELECT range AS order_id, 1 + range % 10 AS customer_id, CASE WHEN range % 3 = 0 THEN 'complete' WHEN range % 3 = 1 THEN 'pending' ELSE 'cancelled' END AS status, CAST(range * 7 % 500 AS DOUBLE) AS amount FROM range(1, 201)`);
+    // 1. Suggest checks for the clean table, save and run: passing.
+    await send('Page.navigate', { url: `${BASE}/#/transform/quality` });
+    await waitFor(`!!document.querySelector('[data-testid="new-quality-suite"]')`, 20000, 'quality page');
+    await evaluate(`document.querySelector('[data-testid="new-quality-suite"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="quality-table"]')`, 5000, 'editor');
+    await setInput('[data-testid="quality-table"]', 'dq_orders');
+    await evaluate(`document.querySelector('[data-testid="suggest-checks"]').click(); true`);
+    await waitFor(`document.querySelectorAll('[data-check-row]').length >= 4`, 20000, 'suggested checks');
+    report.details.suggested = await evaluate(`[...document.querySelectorAll('[data-check-row]')].map(r => r.dataset.checkRow)`);
+    await evaluate(`document.querySelector('[data-testid="test-checks"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="quality-preview"]')`, 20000, 'test result');
+    report.details.preview = await evaluate(`document.querySelector('[data-testid="quality-preview"]').innerText`);
+    await evaluate(`document.querySelector('[data-testid="save-checks"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-testid="quality-editor"]') && document.querySelector('[data-testid="quality-status"]')?.innerText === 'Passing'`, 30000, 'saved and passing');
+    report.details.first = await evaluate(`document.querySelector('[data-testid="quality-summary"]').innerText`);
+    // 2. Break the data and run from the page: failing, with the rows that break it.
+    await q(`INSERT INTO dq_orders VALUES (201, NULL, 'refunded', 12.5), (202, 77, 'complete', 3.0), (5, 3, 'pending', 10.0)`);
+    await evaluate(`document.querySelector('[data-testid="run-quality"]').click(); true`);
+    await waitFor(`document.querySelector('[data-testid="quality-status"]')?.innerText === 'Failing'`, 30000, 'failing after the data broke');
+    report.details.second = await evaluate(`document.querySelector('[data-testid="quality-summary"]').innerText`);
+    report.details.failing = await evaluate(`[...document.querySelectorAll('[data-check][data-status="fail"]')].map(r => r.innerText.split('\\n').join(' | '))`);
+    await evaluate(`document.querySelector('[data-check][data-status="fail"] button').click(); true`);
+    await waitFor(`!!document.querySelector('[data-check][data-status="fail"] table')`, 5000, 'failing rows shown');
+    report.details.sample = await evaluate(`document.querySelector('[data-check][data-status="fail"] table').innerText.replace(/\\s+/g, ' ')`);
+    await sleep(400);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_suite.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`[...document.querySelectorAll('[data-check][data-status="fail"] button')].find(b => b.innerText.includes('Open failing rows'))?.click(); true`);
+    await waitFor(`location.hash.startsWith('#/query') && document.querySelector('.cm-content')?.innerText.includes('dq_orders')`, 15000, 'failing rows in SQL');
+    report.details.openedSql = await evaluate(`document.querySelector('.cm-content').innerText`);
+    // 3. The table's status in the Data explorer.
+    const suite = ((await j('GET', `/api/workspaces/${wsId}/quality/suites`)).suites ?? []).find((s) => s.relation === 'dq_orders');
+    report.details.api = { status: suite?.status, summary: suite?.last_run?.summary };
+    await send('Page.navigate', { url: `${BASE}/#/data` });
+    await waitFor(`!!document.querySelector('[data-testid="dataset-name"]') || document.body.innerText.includes('Sources')`, 20000, 'data explorer');
+    await evaluate(`document.querySelector('[aria-label="Refresh sources"]')?.click(); true`);
+    const pickTable = `(() => { const b = [...document.querySelectorAll('button[title^="table ·"]')].find(e => e.innerText.trim().split('\\n')[0].trim() === 'dq_orders'); b?.click(); return !!b; })()`;
+    await waitFor(`${pickTable} || (() => { const t = [...document.querySelectorAll('button')].find(e => /^Tables/.test(e.innerText.trim())); if (t && !document.querySelector('button[title^="table ·"]')) t.click(); return false; })()`, 20000, 'dq_orders in the sources');
+    await waitFor(`document.querySelector('[data-testid="dataset-name"]')?.innerText.includes('dq_orders') && !!document.querySelector('[data-testid="quality-chip"]')`, 20000, 'quality status in the dataset header');
+    report.details.chip = await evaluate(`document.querySelector('[data-testid="quality-chip"]').innerText`);
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -638,6 +698,7 @@ try {
     // 1. Transform → dbt; install dbt Core when the server does not have it yet.
     await send('Page.navigate', { url: `${BASE}/#/transform/dbt` });
     await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New project')`, 20000, 'dbt tab');
+    await waitFor(`!!document.querySelector('[data-testid="dbt-version"]') || [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Install now')`, 20000, 'dbt status');
     if (!(await evaluate(`!!document.querySelector('[data-testid="dbt-version"]')`))) {
       await clickButton('Install now');
       await waitFor(`!!document.querySelector('[data-testid="dbt-version"]')`, 900000, 'dbt installed');
@@ -833,6 +894,16 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'data-quality') {
+    for (const want of ['row_count', 'not_null', 'unique', 'accepted_values', 'relationships']) if (!d.suggested?.includes(want)) problems.push(`no ${want} suggested: ${JSON.stringify(d.suggested)}`);
+    if (!/passed\./.test(d.preview ?? '') || /failed/.test(d.preview ?? '')) problems.push(`suggestions did not pass on their own data: ${d.preview}`);
+    if (!/^(\d+) of \1 passed\.$/.test(d.first ?? '')) problems.push(`first run: ${d.first}`);
+    if (!/failed/.test(d.second ?? '')) problems.push(`second run: ${d.second}`);
+    for (const want of ['customer_id is never null', 'order_id is unique', 'status in', 'customer_id exists in dq_customers.customer_id']) if (!d.failing?.some((f) => f.includes(want))) problems.push(`not failing: ${want} (${JSON.stringify(d.failing)})`);
+    if (!/dq_orders/.test(d.openedSql ?? '')) problems.push(`failing rows not opened in SQL: ${d.openedSql}`);
+    if (d.api?.status !== 'fail') problems.push(`api status: ${JSON.stringify(d.api)}`);
+    if (!/Checks failing/.test(d.chip ?? '')) problems.push(`dataset header chip: ${d.chip}`);
   }
   if (scenario === 'dbt-copilot') {
     if (d.starter !== 'ok') problems.push(`starter build: ${d.starter}`);

@@ -21,7 +21,8 @@ import { HttpError } from '../services/errors.js';
 import { liveEvents, summarizeArgs } from '../observability/events.js';
 import { describeSpec, parseSpecText } from '../services/mosaic-spec.js';
 import { SOURCE_CATALOG } from '../services/source-catalog.js';
-import type { SyncSource, SyncSchedule } from '../db/schema/sqlite.js';
+import type { SyncSource, SyncSchedule, QualityCheck } from '../db/schema/sqlite.js';
+import { describeCheck } from '../services/quality.js';
 import type { AppSource } from '../services/apps.js';
 import { framework } from '../services/app-frameworks.js';
 
@@ -969,7 +970,86 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         };
       },
     }),
+    // ---------------------------------------------------------------- data quality
+    define({
+      name: 'list_quality_suites',
+      title: 'List data quality checks',
+      description: 'The data quality suites of the workspace — checks on a table (not_null, unique, accepted_values, range, relationships, expression, row_count, freshness, custom_sql) — with each suite\'s status (pass, warn, fail, error) and the checks failing in its latest run, plus the latest dbt test results of the workspace\'s dbt projects. Check this before trusting a table or when data looks wrong.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const suites = await env.ctx.quality.list(env.principal, ws);
+        const lines: string[] = [];
+        const structured = [];
+        for (const s of suites) {
+          const latest = s.last_run ? await env.ctx.quality.latest(env.principal, s.id) : null;
+          const failing = (latest?.results ?? []).filter((r) => r.status !== 'pass').map((r) => ({ check_id: r.check_id, label: r.label, status: r.status, failures: r.failures, message: r.message, sql: r.sql }));
+          lines.push(`- **${s.name}** (\`${s.id}\`) on ${s.relation}: ${s.status}${s.last_run ? ` — ${s.last_run.summary}` : ' (not run yet)'}${failing.map((f) => `\n  - ${f.status}: ${f.label} — ${f.message}`).join('')}`);
+          structured.push({ id: s.id, name: s.name, relation: s.relation, status: s.status, checks: s.checks.length, summary: s.last_run?.summary ?? null, last_run_at: s.last_run?.finished_at ?? null, failing });
+        }
+        const dbt = await env.ctx.quality.dbtTests(env.principal, ws);
+        for (const d of dbt) {
+          const bad = d.tests.filter((t) => t.status !== 'pass');
+          lines.push(`- dbt project **${d.project_name}**: ${d.tests.length - bad.length} of ${d.tests.length} tests passed${bad.map((t) => `\n  - ${t.status}: ${t.name}${t.failures ? ` (${t.failures} failing rows)` : ''}`).join('')}`);
+        }
+        return { content: [text(lines.length ? lines.join('\n') : 'No data quality checks yet. Create a suite with create_quality_suite (suggest_quality_checks proposes checks from the data).')], structuredContent: { status: 'ok', workspace_id: ws, suites: structured, dbt_tests: dbt } };
+      },
+    }),
+
+    define({
+      name: 'suggest_quality_checks',
+      title: 'Suggest data quality checks',
+      description: 'Profiles a table and proposes checks it satisfies today: at least one row, not_null for complete columns, unique ids, accepted_values for small categories, non-negative amounts, and relationships to tables the id columns point at. Nothing is saved; pass the checks (edited as needed) to create_quality_suite.',
+      inputSchema: { table: z.string().describe('table, schema.table or database.schema.table'), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { table, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const checks = await env.ctx.quality.suggest(env.principal, ws, table);
+        return { content: [text(`${checks.length} suggested check${checks.length === 1 ? '' : 's'} for ${table}:\n${checks.map((c) => `- ${c.type}: ${describeCheck(c)}${c.severity === 'warn' ? ' (warn)' : ''}`).join('\n')}`)], structuredContent: { status: 'ok', table, checks } };
+      },
+    }),
+
+    define({
+      name: 'create_quality_suite',
+      title: 'Create data quality checks',
+      description: 'Saves a suite of data quality checks on a table and runs it once. Each check: {type, column?, severity: "error"|"warn", tolerance?, where?} plus by type — accepted_values: values; range: min and/or max; relationships: to (table), to_column; expression: a condition every row must satisfy; row_count: min and/or max; freshness: column, max_age_hours; custom_sql: a SELECT returning the failing rows ({{ table }} is the table). Leave checks out to use the suggested ones. Optionally a schedule (every_minutes ≥ 5 or cron) and channel_ids to notify when the status changes (see list_alerts for channels).',
+      inputSchema: {
+        table: z.string(),
+        name: z.string().max(120).optional(),
+        checks: z.array(z.record(z.string(), z.unknown())).max(200).optional(),
+        every_minutes: z.number().int().min(5).optional(),
+        cron: z.string().optional(),
+        timezone: z.string().optional(),
+        channel_ids: z.array(z.string()).optional(),
+        description: z.string().max(2000).optional(),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, { table, name, checks, every_minutes, cron, timezone, channel_ids, description, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const wanted = checks?.length ? (checks as Partial<QualityCheck>[]) : await env.ctx.quality.suggest(env.principal, ws, table);
+        const suite = await env.ctx.quality.create(env.principal, ws, { name: name ?? `${table} quality`, relation: table, description: description ?? null, checks: wanted, schedule: cron ? { kind: 'cron', expression: cron, timezone } : every_minutes ? { kind: 'interval', minutes: every_minutes } : { kind: 'manual' }, channel_ids });
+        const r = await env.ctx.quality.run(suite.id, 'agent', env.principal);
+        const bad = r.run.results.filter((x) => x.status !== 'pass');
+        return { content: [text(`Created **${suite.name}** (\`${suite.id}\`) with ${suite.checks.length} checks on ${table}. First run: ${r.run.status} — ${r.run.summary}${bad.map((x) => `\n- ${x.status}: ${x.label} — ${x.message}`).join('')}`)], structuredContent: { status: 'ok', suite_id: suite.id, run_id: r.run.id, result: r.run.status, summary: r.run.summary, checks: suite.checks } };
+      },
+    }),
+
+    define({
+      name: 'run_quality_suite',
+      title: 'Run data quality checks',
+      description: 'Runs a data quality suite now, records the run and notifies its channels if its status changed. Returns each check\'s outcome, failing-row counts, a sample of failing rows and the SQL that finds them.',
+      inputSchema: { suite_id: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, { suite_id }) {
+        await env.ctx.quality.get(env.principal, suite_id, 'EDITOR');
+        const r = await env.ctx.quality.run(suite_id, 'agent', env.principal);
+        const lines = r.run.results.map((x) => `- ${x.status}: ${x.label} — ${x.message}${x.status !== 'pass' && x.sql ? `\n  \`${x.sql.replace(/\s+/g, ' ').slice(0, 300)}\`` : ''}`);
+        return { content: [text(`**${r.suite.name}**: ${r.run.status}${r.changed ? ' (changed)' : ''} — ${r.run.summary}${r.run.notified ? ` ${r.run.notified} channel(s) notified.` : ''}\n${lines.join('\n')}`)], structuredContent: { status: 'ok', suite_id, run_id: r.run.id, result: r.run.status, changed: r.changed, summary: r.run.summary, results: r.run.results.map(({ sample, ...x }) => ({ ...x, sample_rows: sample?.rows.slice(0, 3) ?? [] })) } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite'] as const;

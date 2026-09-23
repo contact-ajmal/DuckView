@@ -157,7 +157,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -691,4 +691,44 @@ export const semanticLayers = pgTable(
     updated_at: ts('updated_at').notNull(),
   },
   (t) => [uniqueIndex('semantic_layers_source_idx').on(t.workspace_id, t.source)],
+);
+
+export const qualitySuites = pgTable(
+  'quality_suites',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    relation: text('relation').notNull(),
+    checks: jsonb('checks').$type<QualityCheck[]>().notNull().default([]),
+    schedule: jsonb('schedule').$type<SyncSchedule>().notNull().default({ kind: 'manual' }),
+    channel_ids: jsonb('channel_ids').$type<string[]>().notNull().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    status: text('status', { enum: QUALITY_STATUSES }).notNull().default('unknown'),
+    last_run: jsonb('last_run').$type<QualityLastRun | null>(),
+    next_run_at: ts('next_run_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('quality_suites_workspace_idx').on(t.workspace_id), index('quality_suites_next_run_idx').on(t.next_run_at)],
+);
+
+export const qualityRuns = pgTable(
+  'quality_runs',
+  {
+    id: text('id').primaryKey(),
+    suite_id: text('suite_id').notNull().references(() => qualitySuites.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    status: text('status', { enum: QUALITY_STATUSES }).notNull(),
+    summary: text('summary').notNull(),
+    results: jsonb('results').$type<QualityCheckResult[]>().notNull().default([]),
+    triggered_by: text('triggered_by').notNull(),
+    actor_id: text('actor_id'),
+    notified: integer('notified').notNull().default(0),
+    duration_ms: integer('duration_ms'),
+    started_at: ts('started_at').notNull(),
+  },
+  (t) => [index('quality_runs_suite_idx').on(t.suite_id, t.started_at)],
 );

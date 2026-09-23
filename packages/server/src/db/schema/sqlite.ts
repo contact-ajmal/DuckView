@@ -326,6 +326,8 @@ export interface ChatContextSnapshot {
   dbt?: string;
   /** The semantic layer's metrics: definitions and dimensions. */
   metrics?: string;
+  /** Data quality suites: status and failing checks. */
+  quality?: string;
   model?: string;
   provider?: string;
 }
@@ -1050,3 +1052,99 @@ export const semanticLayers = sqliteTable(
   (t) => [uniqueIndex('semantic_layers_source_idx').on(t.workspace_id, t.source)],
 );
 export type SemanticLayerRow = typeof semanticLayers.$inferSelect;
+
+/** Data quality: checks on a table (dbt's generic tests and a few more), what a check found, and a suite's outcome. */
+export const QUALITY_CHECK_TYPES = ['not_null', 'unique', 'accepted_values', 'range', 'relationships', 'expression', 'row_count', 'freshness', 'custom_sql'] as const;
+export type QualityCheckType = (typeof QUALITY_CHECK_TYPES)[number];
+export const QUALITY_STATUSES = ['unknown', 'pass', 'warn', 'fail', 'error'] as const;
+export type QualityStatus = (typeof QUALITY_STATUSES)[number];
+export interface QualityCheck {
+  /** Stable within the suite (results refer to it). */
+  id: string;
+  type: QualityCheckType;
+  column?: string | null;
+  /** accepted_values */
+  values?: (string | number | boolean)[];
+  /** range (the column) and row_count (the table); either bound may be left out. */
+  min?: number | null;
+  max?: number | null;
+  /** relationships: every value of column exists in to.to_column. */
+  to?: string | null;
+  to_column?: string | null;
+  /** expression: a condition every row satisfies. */
+  expression?: string | null;
+  /** custom_sql: a SELECT returning the failing rows ({{ table }} is the suite's table). */
+  sql?: string | null;
+  /** freshness: the newest value of column is at most this old. */
+  max_age_hours?: number | null;
+  /** Only rows matching this condition are checked. */
+  where?: string | null;
+  /** error: the suite fails · warn: it warns. */
+  severity: 'warn' | 'error';
+  /** Failing rows allowed before the check counts (0 = none). */
+  tolerance?: number;
+  description?: string | null;
+}
+export interface QualityCheckResult {
+  check_id: string;
+  type: QualityCheckType;
+  column: string | null;
+  label: string;
+  status: Exclude<QualityStatus, 'unknown'>;
+  /** Failing rows (duplicate values for unique; 1 for a table-level check that failed). */
+  failures: number | null;
+  /** Rows checked (the table, after where). */
+  rows: number | null;
+  /** What was seen: the newest value, the row count. */
+  observed: string | null;
+  message: string;
+  sql: string;
+  sample: { columns: string[]; rows: unknown[][] } | null;
+  duration_ms: number;
+}
+export interface QualityLastRun { run_id: string; status: Exclude<QualityStatus, 'unknown'>; summary: string; finished_at: string }
+
+/** A set of checks on one table of a workspace, run on demand or on a schedule; a changed outcome is delivered to channels. */
+export const qualitySuites = sqliteTable(
+  'quality_suites',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Checks run as this user, read-only. */
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** The table or view checked, e.g. trips or analytics.orders. */
+    relation: text('relation').notNull(),
+    checks: text('checks', { mode: 'json' }).$type<QualityCheck[]>().notNull().default([]),
+    schedule: text('schedule', { mode: 'json' }).$type<SyncSchedule>().notNull().default({ kind: 'manual' }),
+    channel_ids: text('channel_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    status: text('status', { enum: QUALITY_STATUSES }).notNull().default('unknown'),
+    last_run: text('last_run', { mode: 'json' }).$type<QualityLastRun | null>(),
+    next_run_at: integer('next_run_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('quality_suites_workspace_idx').on(t.workspace_id), index('quality_suites_next_run_idx').on(t.next_run_at)],
+);
+
+export const qualityRuns = sqliteTable(
+  'quality_runs',
+  {
+    id: text('id').primaryKey(),
+    suite_id: text('suite_id').notNull().references(() => qualitySuites.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    status: text('status', { enum: QUALITY_STATUSES }).notNull(),
+    summary: text('summary').notNull(),
+    results: text('results', { mode: 'json' }).$type<QualityCheckResult[]>().notNull().default([]),
+    triggered_by: text('triggered_by').notNull(), // manual | schedule | agent
+    actor_id: text('actor_id'),
+    notified: integer('notified').notNull().default(0),
+    duration_ms: integer('duration_ms'),
+    started_at: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('quality_runs_suite_idx').on(t.suite_id, t.started_at)],
+);
+export type QualitySuite = typeof qualitySuites.$inferSelect;
+export type QualityRun = typeof qualityRuns.$inferSelect;

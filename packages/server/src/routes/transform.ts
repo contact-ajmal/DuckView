@@ -11,11 +11,16 @@
  * Semantic layer (metrics) of a workspace:
  *   GET/PUT /api/workspaces/:id/semantic                   definitions (merged sources) · save the hand-written YAML
  *   POST .../semantic/validate · .../semantic/query · .../semantic/scaffold · GET .../semantic/dimensions?metrics=
+ * Data quality suites of a workspace:
+ *   GET/POST /api/workspaces/:id/quality/suites               list (with dbt tests) · create (editors)
+ *   POST /api/workspaces/:id/quality/preview · .../quality/suggest   try checks unsaved · checks the data satisfies today
+ *   GET/PATCH/DELETE /api/quality/suites/:id                  one suite with its latest run · edit · delete
+ *   POST /api/quality/suites/:id/run · GET .../runs · GET /api/quality/runs/:id
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
-import { DBT_COMMANDS } from '../db/schema/sqlite.js';
+import { DBT_COMMANDS, QUALITY_CHECK_TYPES } from '../db/schema/sqlite.js';
 import { forbidden } from '../services/errors.js';
 import { isPlatformAdmin } from '../services/principal.js';
 import { FILTER_OPS, parseDefinition } from '../services/semantic.js';
@@ -133,6 +138,70 @@ export async function transformRoutes(app: FastifyInstance, ctx: AppContext) {
     const body = z.object({ table: z.string().min(1).max(200) }).parse(req.body ?? {});
     return { yaml: await ctx.semantic.scaffold(req.principal!, (req.params as { id: string }).id, body.table) };
   });
+
+  // ---------------------------------------------------------------- data quality
+  const Check = z.object({
+    id: z.string().max(40).optional(),
+    type: z.enum(QUALITY_CHECK_TYPES),
+    column: z.string().max(200).nullable().optional(),
+    values: z.array(z.union([z.string().max(500), z.number(), z.boolean()])).max(500).optional(),
+    min: z.number().nullable().optional(),
+    max: z.number().nullable().optional(),
+    to: z.string().max(300).nullable().optional(),
+    to_column: z.string().max(200).nullable().optional(),
+    expression: z.string().max(4000).nullable().optional(),
+    sql: z.string().max(100_000).nullable().optional(),
+    max_age_hours: z.number().positive().nullable().optional(),
+    where: z.string().max(4000).nullable().optional(),
+    severity: z.enum(['warn', 'error']).optional(),
+    tolerance: z.number().int().min(0).optional(),
+    description: z.string().max(300).nullable().optional(),
+  });
+  const Suite = z.object({ name: z.string().max(120).optional(), description: z.string().max(2000).nullable().optional(), relation: z.string().min(1).max(300), checks: z.array(Check).max(200).optional(), schedule: Schedule.optional(), channel_ids: z.array(z.string().max(64)).max(20).optional(), enabled: z.boolean().optional() });
+
+  app.get('/api/workspaces/:id/quality/suites', async (req) => {
+    const { id } = req.params as { id: string };
+    return { suites: await ctx.quality.list(req.principal!, id), dbt_tests: await ctx.quality.dbtTests(req.principal!, id) };
+  });
+
+  app.post('/api/workspaces/:id/quality/suites', async (req) => ({ suite: await ctx.quality.create(req.principal!, (req.params as { id: string }).id, Suite.parse(req.body ?? {})) }));
+
+  app.post('/api/workspaces/:id/quality/preview', async (req) => {
+    const body = z.object({ relation: z.string().min(1).max(300), checks: z.array(Check).min(1).max(200) }).parse(req.body ?? {});
+    return ctx.quality.preview(req.principal!, (req.params as { id: string }).id, body.relation, body.checks);
+  });
+
+  app.post('/api/workspaces/:id/quality/suggest', async (req) => {
+    const body = z.object({ relation: z.string().min(1).max(300) }).parse(req.body ?? {});
+    return { checks: await ctx.quality.suggest(req.principal!, (req.params as { id: string }).id, body.relation) };
+  });
+
+  app.get('/api/quality/suites/:id', async (req) => {
+    const { id } = req.params as { id: string };
+    return { suite: await ctx.quality.get(req.principal!, id), latest: await ctx.quality.latest(req.principal!, id) };
+  });
+
+  app.patch('/api/quality/suites/:id', async (req) => ({ suite: await ctx.quality.update(req.principal!, (req.params as { id: string }).id, Suite.partial().parse(req.body ?? {})) }));
+
+  app.delete('/api/quality/suites/:id', async (req) => {
+    await ctx.quality.remove(req.principal!, (req.params as { id: string }).id);
+    return { ok: true };
+  });
+
+  /** Runs the suite now (editors) and delivers a changed status. */
+  app.post('/api/quality/suites/:id/run', async (req) => {
+    const { id } = req.params as { id: string };
+    await ctx.quality.get(req.principal!, id, 'EDITOR');
+    const r = await ctx.quality.run(id, req.principal!.actorType === 'AGENT' ? 'agent' : 'manual', req.principal!);
+    return { suite: r.suite, run: r.run, changed: r.changed };
+  });
+
+  app.get('/api/quality/suites/:id/runs', async (req) => {
+    const q = z.object({ limit: z.coerce.number().int().min(1).max(200).optional() }).parse(req.query ?? {});
+    return { runs: await ctx.quality.runs(req.principal!, (req.params as { id: string }).id, q.limit) };
+  });
+
+  app.get('/api/quality/runs/:id', async (req) => ({ run: await ctx.quality.getRun(req.principal!, (req.params as { id: string }).id) }));
 
   app.get('/api/dbt/runs/:id', async (req) => ({ run: await ctx.dbt.getRun(req.principal!, (req.params as { id: string }).id) }));
 }

@@ -139,7 +139,9 @@ Follow this plan and keep each tool result small (aggregate, never dump rows):
 5. For each text column: empty strings vs NULL, leading/trailing whitespace (col <> trim(col)), inconsistent casing, top-10 values and long-tail cardinality.
 6. Cross-column integrity: referential-style checks between obviously related columns (ids, codes), and totals that should reconcile.
 
-Deliver an **Anomaly Report** in Markdown with sections: Overview (rows, columns, footprint), Findings (severity: high/medium/low, column, evidence query, affected row count, suggested fix), and a final "Data readiness" verdict. Do not modify any data.`,
+Deliver an **Anomaly Report** in Markdown with sections: Overview (rows, columns, footprint), Findings (severity: high/medium/low, column, evidence query, affected row count, suggested fix), and a final "Data readiness" verdict. Do not modify any data.
+
+7. If it is a table, check \`list_quality_suites\` for existing checks on it, and offer to keep your findings as checks that run on a schedule: \`suggest_quality_checks\` proposes the ones it passes today, \`create_quality_suite\` saves them (add what you found must hold).`,
           },
         },
       ],

@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (38 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (42 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -162,7 +162,7 @@ Key settings:
 
 ## Layout
 
-**Navigation.** A narrow rail on the left holds the eight places: **Home** (recent queries, datasets and dashboards, workspace status), **Data** (the explorer, with Models, Metrics, Catalog, Lineage and Access policies as tabs), **SQL** (the workbench), **Dashboards** (with Alerts, Snapshots and Channels), **Apps**, **AI** (agents, tools, MCP clients, activity, approvals), **Connections** and **Settings**. The top bar shows the workspace switcher and where you are, the command bar, live status, the **AI** panel toggle and your account (theme, appearance, sign out). **⌘K / Ctrl+K** opens the command palette: go anywhere, open a dataset, saved query or dashboard, create things, switch workspace or theme. Every older link (`#/transform/…`, `#/governance/…`, `#/alerts/…`, `#/mcp`, `#/overview`) still opens the same page.
+**Navigation.** A narrow rail on the left holds the eight places: **Home** (recent queries, datasets and dashboards, workspace status), **Data** (the explorer, with Models, Metrics, Quality, Catalog, Lineage and Access policies as tabs), **SQL** (the workbench), **Dashboards** (with Alerts, Snapshots and Channels), **Apps**, **AI** (agents, tools, MCP clients, activity, approvals), **Connections** and **Settings**. The top bar shows the workspace switcher and where you are, the command bar, live status, the **AI** panel toggle and your account (theme, appearance, sign out). **⌘K / Ctrl+K** opens the command palette: go anywhere, open a dataset, saved query or dashboard, create things, switch workspace or theme. Every older link (`#/transform/…`, `#/governance/…`, `#/alerts/…`, `#/mcp`, `#/overview`) still opens the same page.
 
 **The workbench** is IDE-shaped: a schema side bar (Explorer · Tables & views · Saved queries · History), query tabs, a run toolbar (Run / Stop, engine, execution time, rows, row limit, Save, and a ⋯ menu for import/export, *Save as dbt model* and more) above the editor, and a results pane with Results · Chart · Profile · Explain · Schema · Explore. Results sort by column (click a header), resize (drag its edge), filter, copy as tab-separated text, and export the full result as CSV, Parquet, JSON or Arrow.
 
@@ -418,6 +418,32 @@ metrics:
 **Where it is used**: the Metrics explorer (pick metrics, group-by dimensions with a grain, filters → chart, table, the SQL, *Open in Query*); agents over MCP / REST (`list_metrics`, `query_metrics`; dbt semantic YAML through `write_dbt_files`); DuckCopilot, whose context lists each metric with its definition and dimensions ("compute these exactly as defined").
 
 API: `GET/PUT /api/workspaces/:id/semantic {yaml, force?}` · `POST /api/workspaces/:id/semantic/validate {yaml}` · `POST /api/workspaces/:id/semantic/query {metrics, group_by?, where?, where_sql?, order_by?, limit?, compile_only?}` · `GET /api/workspaces/:id/semantic/dimensions?metrics=` · `POST /api/workspaces/:id/semantic/scaffold {table}`. Audit: `semantic.update`.
+
+## Data quality
+
+**Checks on tables** (`#/transform/quality`, Data › Quality, `services/quality.ts`). A suite is a table (`orders`, `schema.table` or `database.schema.table`) and its checks — dbt's generic tests and a few more:
+
+| Check | Fails on |
+|---|---|
+| `not_null` (column) | rows where the column is null |
+| `unique` (column) | values that appear more than once (counted per value, like dbt) |
+| `accepted_values` (column, values) | rows with any other value (nulls allowed) |
+| `range` (column, min and/or max) | rows outside the bounds |
+| `relationships` (column, to, to_column) | values with no match in the other table |
+| `expression` (a condition) | rows where it is false or null |
+| `row_count` (min and/or max) | a table with too few or too many rows |
+| `freshness` (column, max_age_hours) | a newest value older than that (naive timestamps read in the server's time zone) |
+| `custom_sql` (a SELECT) | any row it returns; `{{ table }}` is the suite's table |
+
+Each check can be limited to rows matching `where`, allow a `tolerance` of failing rows, and has a severity — `error` fails the suite, `warn` warns. Every check compiles to one SELECT of the failing rows, so a failing check shows a sample and opens in the workbench as is. A suite's status is its worst outcome: error (a check could not run) › fail › warn › pass.
+
+**Suggest** profiles the table and proposes checks it passes today: at least one row, `not_null` for complete columns, `unique` for its own key (`id`, or `order_id` on `orders` / `stg_orders`), `accepted_values` for small text categories, `range ≥ 0` (warn) for amounts, prices, counts and durations, and `relationships` for `x_id` columns whose table exists (the same prefix preferred). **Test** runs the checks as you without saving.
+
+**Running**: by hand (editors), from agents, or on a schedule (every N ≥ 5 minutes or cron; the transform scheduler). A suite runs as its author with the read scope only, every statement checked to be one SELECT; access policies apply as for the author. Each run is kept 90 days. When the status changes the suite's notification channels are told (`quality.fail` · `quality.warn` · `quality.error`, with the failing checks), and again when it passes (`quality.resolved`).
+
+**Where it shows**: the Data explorer's dataset header (checks failing / passing, linking to the suite); the latest **dbt test** results of each dbt project alongside the suites; DuckCopilot's context (each suite's status and failing checks); agents over MCP / REST — `list_quality_suites`, `suggest_quality_checks`, `create_quality_suite` (without checks: the suggestions, saved and run once), `run_quality_suite`; the `data_quality_audit` prompt ends by offering to keep its findings as checks.
+
+API: `GET/POST /api/workspaces/:id/quality/suites` (the list includes `dbt_tests`) · `POST /api/workspaces/:id/quality/preview {relation, checks}` · `POST /api/workspaces/:id/quality/suggest {relation}` · `GET/PATCH/DELETE /api/quality/suites/:id` (GET includes the latest run) · `POST /api/quality/suites/:id/run` · `GET /api/quality/suites/:id/runs` · `GET /api/quality/runs/:id`. Audit: `quality.create`, `quality.update`, `quality.delete`. Live event: `quality`.
 
 ## Governance
 

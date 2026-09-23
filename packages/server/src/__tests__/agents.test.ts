@@ -137,7 +137,7 @@ describe('registered agents', () => {
     const list = await api('GET', '/api/agent/v1/tools', undefined, agentToken);
     expect(list.status).toBe(200);
     const tools = list.json.tools as { name: string; input_schema: { properties: Record<string, unknown>; required?: string[] } }[];
-    expect(tools).toHaveLength(38);
+    expect(tools).toHaveLength(42);
     const exec = tools.find((t) => t.name === 'execute_query')!;
     expect(exec.input_schema.required).toEqual(['sql']);
     expect(Object.keys(exec.input_schema.properties)).toContain('dry_run');
@@ -212,7 +212,7 @@ describe('registered agents', () => {
     expect(r.json.openapi).toBe('3.0.3');
     const paths = r.json.paths as Record<string, { post?: { operationId: string; description: string; requestBody: { content: { 'application/json': { schema: { properties: Record<string, unknown>; required?: string[] } } } } } }>;
     const names = Object.keys(paths).filter((p) => p !== '/api/agent/v1/tools').map((p) => p.split('/').pop());
-    expect(names.sort()).toEqual(['browse_connector', 'browse_storage', 'connector_query', 'create_alert', 'create_app', 'create_dashboard_widget', 'create_data_sync', 'create_dbt_model', 'create_dbt_project', 'create_mosaic_dashboard', 'execute_query', 'explain_query', 'get_app_logs', 'get_dbt_project', 'get_dbt_run', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_alerts', 'list_apps', 'list_dashboards', 'list_data_sources', 'list_dbt_projects', 'list_metrics', 'preview_app', 'profile_dataset', 'publish_app', 'query_metrics', 'run_alert', 'run_app', 'run_data_sync', 'run_dbt', 'save_dataset', 'snapshot_dashboard', 'stop_app', 'update_app', 'update_data_sync', 'write_dbt_files']);
+    expect(names.sort()).toEqual(['browse_connector', 'browse_storage', 'connector_query', 'create_alert', 'create_app', 'create_dashboard_widget', 'create_data_sync', 'create_dbt_model', 'create_dbt_project', 'create_mosaic_dashboard', 'create_quality_suite', 'execute_query', 'explain_query', 'get_app_logs', 'get_dbt_project', 'get_dbt_run', 'inspect_schema', 'lakehouse_query', 'list_accessible_data', 'list_alerts', 'list_apps', 'list_dashboards', 'list_data_sources', 'list_dbt_projects', 'list_metrics', 'list_quality_suites', 'preview_app', 'profile_dataset', 'publish_app', 'query_metrics', 'run_alert', 'run_app', 'run_data_sync', 'run_dbt', 'run_quality_suite', 'save_dataset', 'snapshot_dashboard', 'stop_app', 'suggest_quality_checks', 'update_app', 'update_data_sync', 'write_dbt_files']);
     const exec = paths['/api/agent/v1/tools/execute_query']!.post!;
     expect(exec.operationId).toBe('execute_query');
     expect(exec.description.length).toBeGreaterThan(20);

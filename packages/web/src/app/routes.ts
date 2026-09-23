@@ -11,7 +11,7 @@ export type Page = 'home' | 'data' | 'query' | 'transform' | 'governance' | 'das
 
 export const SECTIONS: { id: Section; label: string; hash: string; icon: LucideIcon; hint: string }[] = [
   { id: 'home', label: 'Home', hash: '#/', icon: House, hint: 'Recent work and workspace status' },
-  { id: 'data', label: 'Data', hash: '#/data', icon: Database, hint: 'Datasets, models, metrics, catalog and lineage' },
+  { id: 'data', label: 'Data', hash: '#/data', icon: Database, hint: 'Datasets, models, metrics, quality, catalog and lineage' },
   { id: 'sql', label: 'SQL', hash: '#/query', icon: SquareTerminal, hint: 'The SQL workbench' },
   { id: 'dashboards', label: 'Dashboards', hash: '#/dashboards', icon: LayoutDashboard, hint: 'Dashboards, alerts and scheduled snapshots' },
   { id: 'apps', label: 'Apps', hash: '#/apps', icon: AppWindow, hint: 'Data apps (Streamlit, Dash, Gradio)' },
@@ -26,6 +26,7 @@ export const SUBPAGES: Partial<Record<Section, { id: string; label: string; hash
     { id: 'explorer', label: 'Explorer', hash: '#/data' },
     { id: 'dbt', label: 'Models', hash: '#/transform/dbt' },
     { id: 'metrics', label: 'Metrics', hash: '#/transform/metrics' },
+    { id: 'quality', label: 'Quality', hash: '#/transform/quality' },
     { id: 'catalog', label: 'Catalog', hash: '#/governance/catalog' },
     { id: 'lineage', label: 'Lineage', hash: '#/governance/lineage' },
     { id: 'policies', label: 'Access policies', hash: '#/governance/policies' },
@@ -58,7 +59,7 @@ export function parseRoute(hash = location.hash): Route {
   };
   if (first === 'data' || first === 'overview') return { section: 'data', page: 'data', ...sub('data', 'explorer') };
   if (first === 'query') return { section: 'sql', page: 'query', sub: null, crumb: null };
-  if (first === 'transform') return { section: 'data', page: 'transform', ...sub('data', second === 'metrics' ? 'metrics' : 'dbt') };
+  if (first === 'transform') return { section: 'data', page: 'transform', ...sub('data', second === 'metrics' || second === 'quality' ? second : 'dbt') };
   if (first === 'governance') {
     if (second === 'audit' || second === 'provisioning') return { section: 'settings', page: 'governance', sub: second, crumb: second === 'audit' ? 'Audit log' : 'Provisioning' };
     return { section: 'data', page: 'governance', ...sub('data', second || 'catalog') };

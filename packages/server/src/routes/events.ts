@@ -18,6 +18,7 @@ function eventUserId(e: LiveEvent): string | null {
     case 'sync':
     case 'app':
     case 'alert':
+    case 'quality':
     case 'dbt':
       return null; // fanned out to workspace members below
     default:
@@ -75,7 +76,7 @@ export async function eventRoutes(app: FastifyInstance, ctx: AppContext) {
           }
           return;
         }
-        if (e.type === 'workspace' || e.type === 'sync' || e.type === 'app' || e.type === 'alert' || e.type === 'dbt') {
+        if (e.type === 'workspace' || e.type === 'sync' || e.type === 'app' || e.type === 'alert' || e.type === 'quality' || e.type === 'dbt') {
           void canSee(e.workspace_id).then((ok) => ok && send(e));
           return;
         }

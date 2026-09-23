@@ -103,6 +103,7 @@ function renderContext(c: ChatContextSnapshot, cfg: DuckViewConfig): string {
   if (c.buckets.length) parts.push(`### Cloud storage buckets\n${c.buckets.map((b) => `- ${b}`).join('\n')}`);
   if (c.notes) parts.push(`### What the tables mean (the workspace's catalog notes — trust these over guesses from names)\n${c.notes.slice(0, 6000)}`);
   if (c.metrics) parts.push(`### Metrics defined in the semantic layer (compute these exactly as defined when asked; name the metric)\n${c.metrics.slice(0, 6000)}`);
+  if (c.quality) parts.push(`### Data quality checks (Data → Quality; when asked why data looks wrong, or before trusting a table, mention failing checks)\n${c.quality.slice(0, 4000)}`);
   if (c.dbt) parts.push(`### dbt projects of this workspace (Transform → dbt)\n${c.dbt.slice(0, 5000)}`);
   if (c.summaries && Object.keys(c.summaries).length) {
     parts.push('### Selected dataset schemas & statistics');
@@ -283,6 +284,8 @@ export class CopilotService {
   dbt: { promptSummary(workspaceId: string): Promise<string> } | null = null;
   /** The semantic layer's metric catalog for prompts (set by the context). */
   semantic: { promptSummary(workspaceId: string): Promise<string> } | null = null;
+  /** Data quality suites and what is failing, for prompts (set by the context). */
+  quality: { promptSummary(workspaceId: string): Promise<string> } | null = null;
 
   async buildContext(p: Principal, workspaceId: string, opts: { activeSql?: string | null; targets?: string[] } = {}): Promise<ChatContextSnapshot> {
     const { objects, files } = await this.queries.catalog(p, workspaceId);
@@ -296,6 +299,7 @@ export class CopilotService {
       notes: (await this.lineage?.notesForPrompt(workspaceId).catch(() => '')) || undefined,
       dbt: (await this.dbt?.promptSummary(workspaceId).catch(() => '')) || undefined,
       metrics: (await this.semantic?.promptSummary(workspaceId).catch(() => '')) || undefined,
+      quality: (await this.quality?.promptSummary(workspaceId).catch(() => '')) || undefined,
     };
     const targets = (opts.targets ?? []).filter(Boolean).slice(0, 3);
     if (targets.length) {

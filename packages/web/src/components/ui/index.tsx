@@ -11,6 +11,8 @@ export function cn(...parts: (string | false | null | undefined)[]) {
 
 /** Callers that pass their own height (`h-7`) or text size keep it; the defaults only apply otherwise. */
 const hasH = (c?: string) => /(^|\s)h-/.test(c ?? '');
+/** A caller's own width (w-40, flex-1) replaces the default full width. */
+const hasW = (c?: string) => !!c && /(^|\s)(w-|flex-1(\s|$))/.test(c);
 const hasText = (c?: string) => /(^|\s)text-(\[|xs|sm|base)/.test(c ?? '');
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -41,7 +43,7 @@ export function IconButton({ label, active, className, children, ...rest }: Butt
 }
 
 export function Input({ className, uiSize = 'md', ...rest }: InputHTMLAttributes<HTMLInputElement> & { uiSize?: 'sm' | 'md' }) {
-  return <input className={cn('w-full rounded-md border border-zinc-800 bg-zinc-950 text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500/40', uiSize === 'sm' ? 'px-2' : 'px-2.5', !hasH(className) && (uiSize === 'sm' ? 'h-[26px]' : 'h-[var(--control-h)]'), !hasText(className) && (uiSize === 'sm' ? 'text-xs' : 'text-[13px]'), className)} {...rest} />;
+  return <input className={cn(!hasW(className) && 'w-full', 'rounded-md border border-zinc-800 bg-zinc-950 text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500/40', uiSize === 'sm' ? 'px-2' : 'px-2.5', !hasH(className) && (uiSize === 'sm' ? 'h-[26px]' : 'h-[var(--control-h)]'), !hasText(className) && (uiSize === 'sm' ? 'text-xs' : 'text-[13px]'), className)} {...rest} />;
 }
 
 export function Select({ className, children, uiSize = 'md', ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { uiSize?: 'sm' | 'md' }) {

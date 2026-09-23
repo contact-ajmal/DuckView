@@ -17,6 +17,7 @@ import { SplitPane } from '../../components/panes';
 import { useLayout } from '../../store/layout';
 import { Button, Empty, Spinner, Stat, Tabs, cn } from '../../components/ui';
 import { quoteIdent } from '../workspace/SchemaTree';
+import { QualityChip } from '../transform/QualityChip';
 
 
 function Distribution({ col }: { col: OverviewColumn }) {
@@ -215,6 +216,7 @@ export function OverviewPage() {
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  {overview.kind === 'table' && ws.activeId && <QualityChip workspaceId={ws.activeId} relation={overview.target} />}
                   <CacheChip state={ov.state} computedAt={ov.computedAt} fromCache={ov.fromCache} serverCached={ov.serverCached} onRefresh={ov.refresh} verb="profiled" />
                   <Button size="sm" variant="ghost" onClick={() => { if (target) cp.setTargets([target]); cp.toggle(true); }}><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
                   <Button size="sm" variant="primary" onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)}>Open in SQL <ArrowRight className="h-3.5 w-3.5" /></Button>
