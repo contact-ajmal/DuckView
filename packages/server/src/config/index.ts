@@ -316,6 +316,29 @@ export const ConfigSchema = z.object({
         .default({}),
     })
     .default({}),
+  /** Delivery of alerts and scheduled snapshots: Slack, Microsoft Teams, email, PagerDuty and webhooks. */
+  notifications: z
+    .object({
+      enabled: z.coerce.boolean().default(true),
+      /** Let webhooks reach private / loopback addresses (an intranet endpoint; tests). Off: public targets only. */
+      allow_private_targets: z.coerce.boolean().default(false),
+      timeout_seconds: z.coerce.number().int().min(1).max(120).default(10),
+      /** PagerDuty Events API v2 endpoint (EU accounts: https://events.eu.pagerduty.com/v2/enqueue). */
+      pagerduty_url: z.string().default('https://events.pagerduty.com/v2/enqueue'),
+      /** Outgoing mail; administrators can also set it from Settings → Integrations (that one wins). */
+      smtp: z
+        .object({
+          host: z.string().optional(),
+          port: z.coerce.number().int().min(1).max(65535).default(587),
+          /** true: TLS from the start (port 465); false: STARTTLS when the server offers it. */
+          secure: z.coerce.boolean().default(false),
+          user: z.string().optional(),
+          password: z.string().optional(),
+          from: z.string().optional(),
+        })
+        .default({}),
+    })
+    .default({}),
   observability: z
     .object({
       metrics_enabled: z.coerce.boolean().default(true),

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, ExternalLink, KeyRound, Trash2 } from 'lucide-react';
-import { api, timeAgo, type GoogleIntegration } from '../../api/client';
+import { CheckCircle2, ExternalLink, KeyRound, Mail, Send, Trash2 } from 'lucide-react';
+import { api, timeAgo, type GoogleIntegration, type SmtpInfo } from '../../api/client';
 import { Button, Badge, Card, Input, Label } from '../../components/ui';
 
 /**
@@ -51,6 +51,49 @@ export function IntegrationsPanel({ isAdmin }: { isAdmin: boolean }) {
         </div>
         <p className="mt-3 text-[11px] text-zinc-500">Server-to-server alternative: a connection can use a <b>service account key</b> instead (pasted in the connection wizard, encrypted the same way) — no OAuth client needed.</p>
       </Card>
+      <SmtpCard />
     </div>
+  );
+}
+
+/** Outgoing mail for email channels (alerts, snapshots); the password is encrypted and write-only. */
+function SmtpCard() {
+  const [info, setInfo] = useState<SmtpInfo | null>(null);
+  const [f, setF] = useState({ host: '', port: '587', secure: false, user: '', password: '', from: '' });
+  const [to, setTo] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const load = () => api.get<SmtpInfo>('/api/admin/integrations/smtp').then((i) => { setInfo(i); setF((x) => ({ ...x, host: i.host ?? '', port: String(i.port ?? 587), secure: i.secure, user: i.user ?? '', from: i.from ?? '', password: '' })); }).catch(() => undefined);
+  useEffect(() => void load(), []);
+  const run = async (key: string, fn: () => Promise<string>) => {
+    setBusy(key);
+    setMsg(null);
+    try {
+      setMsg({ ok: true, text: await fn() });
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Card title={<span className="inline-flex items-center gap-2"><Mail className="h-3.5 w-3.5" /> Outgoing mail</span>}>
+      <p className="mb-3 text-xs text-zinc-500">The SMTP server email channels send through (alerts and scheduled snapshots). Set here it overrides <code className="font-mono">notifications.smtp</code> in the configuration.{info?.source === 'config' ? ' Currently from the configuration file.' : ''}</p>
+      <div className="grid max-w-2xl gap-3 md:grid-cols-3">
+        <div className="md:col-span-2"><Label>Host</Label><Input value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })} className="font-mono" placeholder="smtp.example.com" /></div>
+        <div><Label>Port</Label><Input value={f.port} onChange={(e) => setF({ ...f, port: e.target.value })} className="font-mono" /></div>
+        <div><Label>User <span className="normal-case text-zinc-600">(optional)</span></Label><Input value={f.user} onChange={(e) => setF({ ...f, user: e.target.value })} autoComplete="off" /></div>
+        <div><Label>Password {info?.password_set && <span className="normal-case text-zinc-600">(stored)</span>}</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} placeholder={info?.password_set ? '••••••••' : ''} autoComplete="off" /></div>
+        <div><Label>From</Label><Input value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} placeholder="DuckView <alerts@example.com>" /></div>
+      </div>
+      <label className="mt-2 flex items-center gap-2 text-xs text-zinc-400"><input type="checkbox" className="accent-accent-500" checked={f.secure} onChange={(e) => setF({ ...f, secure: e.target.checked })} /> TLS from the start (port 465) — otherwise STARTTLS when the server offers it</label>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button variant="primary" size="sm" loading={busy === 'save'} disabled={!f.host.trim() || !f.from.trim()} onClick={() => void run('save', async () => { const i = await api.put<SmtpInfo>('/api/admin/integrations/smtp', { host: f.host.trim(), port: Number(f.port) || 587, secure: f.secure, user: f.user.trim() || null, from: f.from.trim(), ...(f.password ? { password: f.password } : {}) }); setInfo(i); setF((x) => ({ ...x, password: '' })); return 'Saved.'; })}><KeyRound className="h-3.5 w-3.5" /> Save</Button>
+        {info?.configured && <Badge tone="green"><CheckCircle2 className="mr-1 inline h-3 w-3" /> configured</Badge>}
+        {info?.source === 'console' && <Button variant="ghost" size="sm" className="text-red-300" onClick={() => void run('clear', async () => { setInfo(await api.del<SmtpInfo>('/api/admin/integrations/smtp')); return 'Removed.'; })}><Trash2 className="h-3.5 w-3.5" /> Remove</Button>}
+        <span className="ml-auto flex items-center gap-1"><Input className="h-7 w-56 text-xs" value={to} onChange={(e) => setTo(e.target.value)} placeholder="you@example.com" /><Button size="sm" variant="secondary" disabled={!info?.configured || !to.trim()} loading={busy === 'test'} onClick={() => void run('test', async () => { await api.post('/api/admin/integrations/smtp/test', { to: to.trim() }); return `Test email sent to ${to.trim()}.`; })}><Send className="h-3.5 w-3.5" /> Send test</Button></span>
+      </div>
+      {msg && <p className={msg.ok ? 'mt-2 text-xs text-emerald-300' : 'mt-2 font-mono text-xs text-red-300'}>{msg.text}</p>}
+    </Card>
   );
 }

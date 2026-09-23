@@ -599,6 +599,53 @@ export const dataApps = sqliteTable(
   (t) => [index('data_apps_workspace_idx').on(t.workspace_id)],
 );
 
+export const CHANNEL_TYPES = ['slack', 'teams', 'email', 'pagerduty', 'webhook'] as const;
+export type ChannelType = (typeof CHANNEL_TYPES)[number];
+export const DELIVERY_STATUSES = ['ok', 'error'] as const;
+
+/** Where alerts and scheduled snapshots are delivered: a workspace's channel, or an org-wide one (workspace_id null). */
+export const notificationChannels = sqliteTable(
+  'notification_channels',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    type: text('type', { enum: CHANNEL_TYPES }).notNull(),
+    /** Non-secret settings: email recipients, PagerDuty severity mapping, a masked hint of the URL. */
+    config: text('config', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    /** AES-256-GCM JSON: { url } for Slack / Teams / webhooks, { routing_key } for PagerDuty, { signing_secret } for webhooks. */
+    encrypted_secret: text('encrypted_secret'),
+    iv: text('iv'),
+    tag: text('tag'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    last_status: text('last_status', { enum: DELIVERY_STATUSES }),
+    last_error: text('last_error'),
+    last_sent_at: integer('last_sent_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('notification_channels_workspace_idx').on(t.workspace_id)],
+);
+
+/** One attempt to deliver a notification (kept for the channel's history). */
+export const notificationDeliveries = sqliteTable(
+  'notification_deliveries',
+  {
+    id: text('id').primaryKey(),
+    channel_id: text('channel_id').notNull().references(() => notificationChannels.id, { onDelete: 'cascade' }),
+    /** test · alert:<id> · snapshot:<id> */
+    source: text('source').notNull(),
+    title: text('title').notNull(),
+    status: text('status', { enum: DELIVERY_STATUSES }).notNull(),
+    error: text('error'),
+    attempts: integer('attempts').notNull().default(1),
+    duration_ms: integer('duration_ms'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('notification_deliveries_channel_idx').on(t.channel_id, t.created_at)],
+);
+
 /** Platform-wide settings set from the console (e.g. the Google OAuth client), secrets encrypted. */
 export const appSettings = sqliteTable('app_settings', {
   key: text('key').primaryKey(),
@@ -711,3 +758,5 @@ export type AppSetting = typeof appSettings.$inferSelect;
 export type DataSync = typeof dataSyncs.$inferSelect;
 export type DataSyncRun = typeof dataSyncRuns.$inferSelect;
 export type CopilotUsageRow = typeof copilotUsage.$inferSelect;
+export type NotificationChannel = typeof notificationChannels.$inferSelect;
+export type NotificationDelivery = typeof notificationDeliveries.$inferSelect;

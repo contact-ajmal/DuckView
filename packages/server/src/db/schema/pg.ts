@@ -155,7 +155,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -442,6 +442,44 @@ export const connectorConnections = pgTable(
     updated_at: ts('updated_at').notNull(),
   },
   (t) => [index('connector_connections_user_idx').on(t.user_id)],
+);
+
+export const notificationChannels = pgTable(
+  'notification_channels',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    type: text('type', { enum: CHANNEL_TYPES }).notNull(),
+    config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+    encrypted_secret: text('encrypted_secret'),
+    iv: text('iv'),
+    tag: text('tag'),
+    enabled: boolean('enabled').notNull().default(true),
+    created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    last_status: text('last_status', { enum: DELIVERY_STATUSES }),
+    last_error: text('last_error'),
+    last_sent_at: ts('last_sent_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('notification_channels_workspace_idx').on(t.workspace_id)],
+);
+
+export const notificationDeliveries = pgTable(
+  'notification_deliveries',
+  {
+    id: text('id').primaryKey(),
+    channel_id: text('channel_id').notNull().references(() => notificationChannels.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    title: text('title').notNull(),
+    status: text('status', { enum: DELIVERY_STATUSES }).notNull(),
+    error: text('error'),
+    attempts: integer('attempts').notNull().default(1),
+    duration_ms: integer('duration_ms'),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('notification_deliveries_channel_idx').on(t.channel_id, t.created_at)],
 );
 
 export const appSettings = pgTable('app_settings', {

@@ -70,6 +70,8 @@ program
     const { app, appsServer } = await buildApp(ctx);
     const shutdown = async (signal: string) => {
       logger().info({ signal }, 'Shutting down');
+      // Whatever is still open after 15 s (a client holding a socket), the process goes.
+      setTimeout(() => process.exit(0), 15_000).unref();
       try {
         await app.close();
         await appsServer?.close();

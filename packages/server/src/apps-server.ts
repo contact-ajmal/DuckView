@@ -17,7 +17,8 @@ import { registerAppProxy, appCookie, visitor, isNavigation, page, hostPart } fr
 
 export async function buildAppsServer(ctx: AppContext): Promise<FastifyInstance> {
   const cfg = ctx.cfg;
-  const app = Fastify({ trustProxy: cfg.server.trust_proxy, bodyLimit: cfg.server.body_limit_bytes, disableRequestLogging: true });
+  // Apps hold long-lived connections (Streamlit's WebSocket, Gradio's event streams): a shutdown must not wait for them.
+  const app = Fastify({ trustProxy: cfg.server.trust_proxy, bodyLimit: cfg.server.body_limit_bytes, forceCloseConnections: true });
   await app.register(jwt, { secret: cfg.security.jwt_secret, sign: { iss: 'duckview' }, verify: { allowedIss: 'duckview' } });
   await app.register(websocket, { options: { maxPayload: cfg.server.body_limit_bytes } });
 

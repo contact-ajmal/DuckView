@@ -14,7 +14,9 @@
  * scenario creates an app that runs in the viewer's browser (stlite) through the New-app dialog, waits for Pyodide
  * to render it in the editor's preview and checks that it reads as the viewer, read-only. The frameworks scenario
  * runs a real Dash app (a callback queries DuckView) and the Gradio template (a click runs SQL through the queue)
- * behind the proxy, in the editor's cross-origin preview.
+ * behind the proxy, in the editor's cross-origin preview. The alert-channels scenario (server started with
+ * DUCKVIEW__notifications__allow_private_targets=true) creates a webhook channel in Alerts → Channels, sends a test
+ * and checks the delivery and its signature against a receiver the script runs.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -294,6 +296,35 @@ try {
     report.details.gradio = await frameEval(appsOrigin, `({ path: location.pathname, status: [...document.querySelectorAll('.prose, .md')].map(e => e.innerText).find(t => t.includes('asked by')) ?? null, answer: document.body.innerText.includes('42') })`);
     report.details.charts = report.details.dash?.plot ? 1 : 0;
   }
+  else if (scenario === 'alert-channels') {
+    const http = await import('node:http');
+    const crypto = await import('node:crypto');
+    const got = [];
+    const receiver = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { got.push({ headers: req.headers, body: b }); res.end('ok'); }); });
+    await new Promise((r) => receiver.listen(0, '127.0.0.1', r));
+    const hookUrl = `http://127.0.0.1:${receiver.address().port}/duckview`;
+    let channelId = null;
+    cleanup = async () => { receiver.close(); if (channelId) await authed(`/api/channels/${channelId}`, { method: 'DELETE' }); };
+    await send('Page.navigate', { url: `${BASE}/#/alerts/channels` });
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New channel')`, 20000, 'alerts page');
+    await clickButton('New channel');
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Webhook').click(); true`);
+    await setField('input[placeholder="#data-alerts"]', 'E2E webhook');
+    await setField('input[placeholder="https://…"]', hookUrl);
+    await clickButton('Create');
+    await waitFor(`document.body.innerText.includes('Signing secret')`, 15000, 'signing secret shown once');
+    const secret = await evaluate(`document.querySelector('code.select-all')?.textContent`);
+    const wsList = await (await authed('/api/workspaces')).json();
+    const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
+    channelId = (await (await authed(`/api/workspaces/${wsId}/channels`)).json()).channels.find((c) => c.name === 'E2E webhook')?.id ?? null;
+    await evaluate(`[...document.querySelectorAll('div.rounded-lg')].find(d => d.innerText.includes('E2E webhook')).querySelector('button[title="Send a test message"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('div.rounded-lg')].find(d => d.innerText.includes('E2E webhook'))?.innerText.includes('delivered')`, 20000, 'delivered badge');
+    await sleep(500);
+    const w = got.at(-1);
+    const body = w ? JSON.parse(w.body) : null;
+    report.details.delivery = { received: got.length, event: body?.event, title: body?.title, signatureValid: !!w && w.headers['x-duckview-signature'] === `sha256=${crypto.createHmac('sha256', secret).update(`${w.headers['x-duckview-timestamp']}.${w.body}`).digest('hex')}`, secretShownOnce: !!secret && !(await (await authed(`/api/workspaces/${wsId}/channels`)).text()).includes(secret) };
+    report.details.charts = 1;
+  }
   else if (scenario === 'mosaic-dashboard') {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
@@ -366,6 +397,9 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'alert-channels') {
+    if (d.delivery?.received !== 1 || d.delivery?.event !== 'channel.test' || !d.delivery?.signatureValid || !d.delivery?.secretShownOnce) problems.push(`webhook channel delivery wrong: ${JSON.stringify(d.delivery)}`);
+  }
   if (scenario === 'frameworks') {
     if (!/rows 6 viewer admin@example\.com/.test(d.dash?.text ?? '')) problems.push(`the Dash callback did not answer: ${JSON.stringify(d.dash)}`);
     if (!/1 rows · asked by admin@example\.com/.test(d.gradio?.status ?? '') || !d.gradio?.answer) problems.push(`Gradio did not answer: ${JSON.stringify(d.gradio)}`);
