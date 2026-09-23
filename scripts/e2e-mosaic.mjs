@@ -19,7 +19,9 @@
  * and checks the delivery and its signature against a receiver the script runs. The sql-alerts scenario (same server
  * setting) builds a threshold alert in the dialog, tests it, checks it, and drives it through triggered and resolved
  * while the receiver collects the webhooks. The snapshots scenario (same setting) schedules a grid dashboard in the
- * dialog, sends it now, and renders a Mosaic dashboard; both pictures are saved next to the screenshot.
+ * dialog, sends it now, and renders a Mosaic dashboard; both pictures are saved next to the screenshot. The
+ * access-policies scenario creates a row filter and a mask in Governance, previews it as a viewer, then signs in as
+ * that viewer and opens a Mosaic dashboard over the protected table: only the permitted region may show.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -417,6 +419,58 @@ try {
     if (m?.image?.base64 && m.title === 'E2E mosaic') fs.writeFileSync(out.replace('.png', '_mosaic.png'), Buffer.from(m.image.base64, 'base64'));
     report.details.charts = 1;
   }
+  else if (scenario === 'access-policies') {
+    const wsList = await (await authed('/api/workspaces')).json();
+    const remembered = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const ws = (wsList.workspaces ?? wsList).find((w) => w.id === remembered) ?? (wsList.workspaces ?? wsList)[0];
+    const j = async (method, url, body, token) => (await fetch(`${BASE}${url}`, { method, headers: { 'content-type': 'application/json', authorization: `Bearer ${token ?? login.token}` }, body: body ? JSON.stringify(body) : undefined })).json();
+    await j('POST', `/api/workspaces/${ws.id}/query`, { sql: "CREATE OR REPLACE TABLE e2e_rls_customers AS SELECT * FROM (VALUES ('EU', 120.0, '111-11-1111'), ('EU', 80.0, '222-22-2222'), ('US', 300.0, '333-33-3333'), ('APAC', 50.0, '444-44-4444')) t(region, revenue, ssn)" });
+    const email = `e2e-viewer-${Date.now()}@example.com`;
+    const viewer = (await j('POST', '/api/admin/users', { email, password: 'e2e-viewer-pass-123', role: 'USER' })).user;
+    await j('PUT', `/api/workspaces/${ws.id}/members`, { subject_type: 'user', subject_id: viewer.id, role: 'VIEWER' });
+    const dash = (await j('POST', `/api/workspaces/${ws.id}/dashboards`, { name: 'E2E RLS board', kind: 'mosaic', spec: { data: { c: { query: 'SELECT region, revenue, ssn FROM e2e_rls_customers' } }, vconcat: [{ plot: [{ mark: 'barY', data: { from: 'c' }, x: 'region', y: { sum: 'revenue' }, fill: 'steelblue' }], width: 500, height: 220 }, { input: 'table', from: 'c', height: 200 }] } })).dashboard;
+    cleanup = async () => {
+      for (const p of (await j('GET', `/api/workspaces/${ws.id}/policies`)).policies ?? []) if (p.table_name === 'e2e_rls_customers') await j('DELETE', `/api/policies/${p.id}`);
+      await j('DELETE', `/api/dashboards/${dash.id}`);
+      await j('DELETE', `/api/admin/users/${viewer.id}`);
+      await j('POST', `/api/workspaces/${ws.id}/query`, { sql: 'DROP TABLE IF EXISTS e2e_rls_customers' });
+    };
+    // 1. The owner writes the policy in Governance.
+    await send('Page.navigate', { url: `${BASE}/#/governance/policies` });
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New policy')`, 20000, 'governance page');
+    await clickButton('New policy');
+    report.details.tableOptions = await evaluate(`[...document.querySelectorAll('select')].map(s => [...s.options].map(o => o.value).slice(0, 12))`);
+    await waitFor(`[...document.querySelectorAll('select')].some(s => [...s.options].some(o => o.value === 'e2e_rls_customers'))`, 10000, 'the table in the picker');
+    await evaluate(`(() => { const sel = [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.value === 'e2e_rls_customers')); const setV = (el, v) => { Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, v); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); }; setV(sel, 'e2e_rls_customers'); return true; })()`);
+    await setField('input[placeholder="EU sales only"]', 'E2E EU only');
+    await evaluate(`(() => { const t = document.querySelector('textarea'); const setV = (el, v) => { Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, v); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); }; setV(t, "region = 'EU'"); return true; })()`);
+    await waitFor(`[...document.querySelectorAll('span.font-mono')].some(s => s.textContent === 'ssn')`, 10000, 'columns listed');
+    await evaluate(`(() => { const row = [...document.querySelectorAll('span.font-mono')].find(s => s.textContent === 'ssn').parentElement; const sel = row.querySelector('select'); const setV = (el, v) => { Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, v); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); }; setV(sel, 'null'); return true; })()`);
+    await clickButton('Create policy');
+    await waitFor(`document.body.innerText.includes('E2E EU only') && !document.body.innerText.includes('Create policy')`, 15000, 'policy created');
+    // 2. Preview as the viewer.
+    await clickButton('Preview as…');
+    await evaluate(`(() => { const sel = [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.textContent.startsWith(${JSON.stringify(email)}))); const v = [...sel.options].find(o => o.textContent.startsWith(${JSON.stringify(email)})).value; const setV = (el, v) => { Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, v); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); }; setV(sel, v); return true; })()`);
+    await setField('input.font-mono', 'SELECT region, ssn FROM e2e_rls_customers ORDER BY revenue');
+    await clickButton('Run');
+    await waitFor(`document.body.innerText.includes('Policies apply')`, 15000, 'preview ran');
+    report.details.preview = await evaluate(`[...document.querySelectorAll('table tbody tr')].map(r => r.innerText.replace(/\s+/g, ' ').trim())`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_preview.png'), Buffer.from(shot.result.data, 'base64')); }
+    // 3. The viewer's own session: the dashboard over the protected table.
+    const viewerToken = (await (await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'e2e-viewer-pass-123' }) })).json()).token;
+    report.details.viewerInfo = await j('GET', `/api/mosaic/info?workspace_id=${ws.id}`, null, viewerToken);
+    await evaluate(`localStorage.setItem('duckview.session', ${JSON.stringify(viewerToken)}); true`);
+    await send('Page.navigate', { url: `${BASE}/?as=viewer#/dashboards/${dash.id}` });
+    await waitFor(`document.querySelectorAll('.mosaic-dashboard svg rect, svg rect').length > 0 && document.querySelectorAll('table tbody tr').length > 0`, 60000, 'viewer dashboard rendered');
+    await sleep(2500);
+    report.details.viewerDashboard = await evaluate(`({ axis: [...document.querySelectorAll('svg g[aria-label="x-axis tick label"] text, svg text')].map(t => t.textContent).filter(t => /^(EU|US|APAC)$/.test(t)), tableRows: [...document.querySelectorAll('table tbody tr')].map(r => r.innerText.replace(/\s+/g, ' ').trim()), error: document.body.innerText.match(/error|forbidden|not available/i)?.[0] ?? null })`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_viewer.png'), Buffer.from(shot.result.data, 'base64')); }
+    await send('Page.navigate', { url: `${BASE}/?as=viewer2#/governance/policies` });
+    await waitFor(`document.body.innerText.includes('What applies to you')`, 20000, 'viewer governance page');
+    report.details.viewerGovernance = await evaluate(`document.body.innerText.includes('Masked for you: ssn')`);
+    await evaluate(`localStorage.setItem('duckview.session', ${JSON.stringify(login.token)}); true`);
+    report.details.charts = 1;
+  }
   else if (scenario === 'mosaic-dashboard') {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
@@ -489,6 +543,13 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'access-policies') {
+    if (JSON.stringify((d.preview ?? []).map((r) => r.replace(/\s+/g, ' '))) !== JSON.stringify(['EU NULL', 'EU NULL'])) problems.push(`preview wrong: ${JSON.stringify(d.preview)}`);
+    if (!d.viewerInfo?.restricted) problems.push('mosaic info not restricted for the viewer');
+    if (d.viewerDashboard?.axis?.some((t) => t !== 'EU') || !d.viewerDashboard?.axis?.includes('EU')) problems.push(`the viewer's chart shows other regions: ${JSON.stringify(d.viewerDashboard)}`);
+    if (d.viewerDashboard?.tableRows?.some((r) => /\d{3}-\d{2}-\d{4}|US|APAC/.test(r))) problems.push(`the viewer's table leaks: ${JSON.stringify(d.viewerDashboard.tableRows)}`);
+    if (!d.viewerGovernance) problems.push('the viewer does not see what restricts them');
+  }
   if (scenario === 'snapshots') {
     if (d.gridDelivery?.event !== 'snapshot.delivered' || !(d.gridDelivery?.bytes > 10000)) problems.push(`grid snapshot not delivered: ${JSON.stringify(d.gridDelivery)} ${d.gridCard}`);
     if (d.mosaicRun?.status !== 'ok' || d.mosaicRun?.delivered !== 1) problems.push(`mosaic snapshot failed: ${JSON.stringify(d.mosaicRun)}`);

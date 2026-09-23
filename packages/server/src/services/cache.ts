@@ -19,6 +19,7 @@ import path from 'node:path';
 import type { DuckViewConfig } from '../config/index.js';
 import { DataJail, isRemoteUri, looksLikePath } from '../engine/sandbox.js';
 import { extractPathLiterals, tokenize } from '../engine/sql-guard.js';
+import type { WorkspaceRole } from '../db/schema/sqlite.js';
 import type { Principal } from './principal.js';
 import type { WorkspaceService, WorkspaceAccess } from './workspaces.js';
 import { metrics } from '../observability/metrics.js';
@@ -131,6 +132,9 @@ export class ResultCache {
    * Decides whether and how an operation is cacheable and computes its key. Resolves workspace access on the way
    * (404/403 propagate exactly as they would from the operation itself), so callers can rely on it as an authz step.
    */
+  /** The caller's access-policy scope in a workspace (null: unrestricted); set by the context. */
+  policyScope: ((p: Principal, workspaceId: string, role: WorkspaceRole) => Promise<string | null>) | null = null;
+
   async plan(p: Principal, workspaceId: string, kind: CacheKind, text: string, options: unknown = null): Promise<CachePlan> {
     const workspace = await this.workspaces.get(p, workspaceId);
     const none: CachePlan = { key: null, ttlMs: 0, versioned: false, workspace };
@@ -150,7 +154,9 @@ export class ResultCache {
       if (this.cfg.cache.remote_ttl_seconds <= 0) return none;
       ttlMs = this.cfg.cache.remote_ttl_seconds * 1000;
     }
-    const material = [kind, workspaceId, text.trim(), options ?? null, fp.parts, versioned ? workspace.data_version : null, touchesRemote ? 'remote' : 'local'];
+    // People under an access policy see other rows and values: their results are keyed apart.
+    const restricted = this.policyScope ? await this.policyScope(p, workspaceId, workspace.role) : null;
+    const material = [kind, workspaceId, text.trim(), options ?? null, fp.parts, versioned ? workspace.data_version : null, touchesRemote ? 'remote' : 'local', restricted];
     const key = crypto.createHash('sha256').update(JSON.stringify(material)).digest('hex').slice(0, 40);
     return { key, ttlMs, versioned, workspace };
   }

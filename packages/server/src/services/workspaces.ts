@@ -1,5 +1,6 @@
 import { eq, and, or, asc, desc, inArray, sql } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
+import type { PolicyService } from './policies.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Workspace, SessionTab, EngineSettings, ChartConfig, WorkspaceFolder, WorkspaceRole, WorkspaceMember, MemberSubjectType, CloudSyncState } from '../db/schema/sqlite.js';
@@ -51,6 +52,8 @@ export class WorkspaceService {
   lakehouse: LakehouseService | null = null;
   /** Database connections (Postgres/MySQL/SQLite/DuckDB files) attached to every engine of the owner's workspaces. */
   databases: { resolveAttachments(userId: string): Promise<AttachSpec[]> } | null = null;
+  /** Row- and column-level security: people under a policy get a guarded engine. */
+  policies: PolicyService | null = null;
   private versionListeners: ((workspaceId: string, version: number, reason: string) => void)[] = [];
 
   /** Cloud-backed database sync (set by the context right after construction). */
@@ -570,7 +573,8 @@ export class WorkspaceService {
       dbPath = this.cloudSync.localPath(workspace.id);
     }
     const engine = await this.engines.get({ workspaceId: workspace.id, dbPath, settings: workspace.engine_settings, secrets, attachments: [...lake.attachments, ...dbs] });
-    return { workspace, engine, role: workspace.role };
+    const restriction = this.policies ? await this.policies.restrictionFor(p, workspace.id, workspace.role) : null;
+    return { workspace, engine: restriction ? this.policies!.guard(engine, restriction) : engine, role: workspace.role };
   }
 
   // ---------- Tabs (per user, inside a possibly shared workspace) ----------

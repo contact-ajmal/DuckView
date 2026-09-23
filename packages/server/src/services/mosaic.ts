@@ -34,6 +34,7 @@ import { requireScope } from './principal.js';
 import { badRequest, forbidden } from './errors.js';
 import type { CacheMeta } from './cache.js';
 import { prepareSpec, sourceStatements, validateSpecStructure, type PreparedSpec, type Spec } from './mosaic-spec.js';
+import { PolicyService, type Restriction } from './policies.js';
 import { logger } from '../observability/logger.js';
 import { metrics } from '../observability/metrics.js';
 
@@ -69,6 +70,22 @@ export class MosaicService {
   /** Attached in-memory database holding materialised datasets. */
   get memDb() {
     return `${this.cfg.mosaic.schema}_mem`;
+  }
+
+  /** Row- and column-level security (set by the context): restricted callers get their own, rewritten objects. */
+  policies: PolicyService | null = null;
+
+  /** The caller's restriction in a workspace, if any. */
+  async restriction(p: Principal, workspaceId: string): Promise<Restriction | null> {
+    if (!this.policies) return null;
+    const w = await this.workspaces.get(p, workspaceId);
+    return this.policies.restrictionFor(p, workspaceId, w.role);
+  }
+
+  /** What the browser needs: the schema, limits, and — per workspace — whether pre-aggregation is off for the caller. */
+  async info(p: Principal | null, workspaceId?: string): Promise<{ enabled: boolean; schema: string; max_rows: number; restricted: boolean; suffix: string }> {
+    const r = p && workspaceId ? await this.restriction(p, workspaceId).catch(() => null) : null;
+    return { enabled: this.enabled, schema: this.schema, max_rows: this.cfg.mosaic.max_rows, restricted: !!r, suffix: r ? PolicyService.suffix(r.scope) : '' };
   }
 
   private assertEnabled() {
@@ -134,6 +151,8 @@ export class MosaicService {
     if (statements.length === 0) throw badRequest('sql is required');
     const kinds = statements.map((st) => this.classifyExec(st));
     const start = performance.now();
+    const restriction = await this.restriction(p, workspaceId);
+    if (restriction) return this.execRestricted(p, workspaceId, statements, restriction, start, sql);
     try {
       const { engine } = await this.workspaces.engine(p, workspaceId);
       const actor = p.actorType === 'AGENT' ? 'agent' : 'user';
@@ -146,6 +165,50 @@ export class MosaicService {
       for (const st of statements) await engine.execute(st, { maxRows: 1, actor, timeoutMs: this.cfg.duckdb.query_timeout_seconds * 1000 });
       const duration_ms = Math.round(performance.now() - start);
       metrics.mosaicExec.inc({ kind: kinds.includes('create_preagg') ? 'preagg' : kinds.includes('create_table') ? 'table' : kinds.includes('create_view') ? 'view' : kinds.includes('drop_schema') ? 'drop' : 'schema' });
+      this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'mosaic.exec', resource: `workspace:${workspaceId}`, queryText: sql.slice(0, 4000), durationMs: duration_ms, ip: p.ip });
+      return { statements: statements.length, duration_ms };
+    } catch (err) {
+      this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'mosaic.exec', resource: `workspace:${workspaceId}`, queryText: sql.slice(0, 4000), durationMs: performance.now() - start, ip: p.ip, status: 'error', error: (err as Error).message });
+      throw err;
+    }
+  }
+
+  /**
+   * Mosaic plumbing for someone under an access policy: dataset views and tables are created from the rewritten
+   * query (their rows, their masks) under names salted with their scope, and recorded as theirs; pre-aggregates —
+   * shared by design — are not available (the browser turns them off for such callers).
+   */
+  private async execRestricted(p: Principal, workspaceId: string, statements: string[], r: Restriction, start: number, sql: string): Promise<MosaicExecOutcome> {
+    const { engine } = await this.workspaces.engine(p, workspaceId);
+    const policies = this.policies!;
+    try {
+      for (const raw of statements) {
+        const st = stripTrailingSemicolon(raw).trim();
+        const view = new RegExp(`^CREATE\\s+(?:OR\\s+REPLACE\\s+)?VIEW\\s+"(${this.viewPrefix}${HEX})"\\s+AS\\s+([\\s\\S]+)$`, 'i').exec(st);
+        const table = new RegExp(`^CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+"${this.memDb}"\\."(src_${HEX})"\\s+AS\\s+([\\s\\S]+)$`, 'i').exec(st);
+        const drop = new RegExp(`^DROP\\s+(VIEW|TABLE)\\s+IF\\s+EXISTS\\s+(?:"${this.memDb}"\\.)?"(${this.viewPrefix}${HEX}|src_${HEX})"$`, 'i').exec(st);
+        if (/^CREATE\s+SCHEMA\s+IF\s+NOT\s+EXISTS/i.test(st)) continue;
+        if (view || table) {
+          const [, name, body] = (view ?? table)!;
+          const catalog = table ? this.memDb : '';
+          const owner = policies.scopeOf(catalog, name!);
+          if (owner !== undefined && owner !== r.scope) throw forbidden(`${name} belongs to someone else`);
+          const rewritten = await policies.rewrite(engine, body!, r);
+          if (table) {
+            await this.ensureMemDb(engine);
+            await engine.runInternal(`CREATE ${owner === r.scope ? 'TABLE IF NOT EXISTS' : 'OR REPLACE TABLE'} "${this.memDb}"."${name}" AS ${rewritten}`, this.cfg.duckdb.query_timeout_seconds * 1000);
+          } else await engine.runInternal(`CREATE OR REPLACE VIEW "${name}" AS ${rewritten}`, this.cfg.duckdb.query_timeout_seconds * 1000);
+          policies.registerScoped(catalog, name!, r.scope);
+          continue;
+        }
+        if (drop) {
+          const catalog = drop[1]!.toUpperCase() === 'TABLE' ? this.memDb : '';
+          if (policies.scopeOf(catalog, drop[2]!) === r.scope) await engine.runInternal(st, 30_000);
+          continue;
+        }
+        throw forbidden('Access policies apply to you in this workspace: Mosaic pre-aggregation is not available');
+      }
+      const duration_ms = Math.round(performance.now() - start);
       this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'mosaic.exec', resource: `workspace:${workspaceId}`, queryText: sql.slice(0, 4000), durationMs: duration_ms, ip: p.ip });
       return { statements: statements.length, duration_ms };
     } catch (err) {
@@ -170,7 +233,8 @@ export class MosaicService {
     const cap = this.cfg.mosaic.materialize_max_rows;
     let prepared: PreparedSpec = { spec, statements: [], sources: [], tables: [] };
     try {
-      prepared = prepareSpec(spec, { viewPrefix: this.viewPrefix, memDb: this.memDb, materialize: cap > 0 });
+      const r = await this.restriction(p, workspaceId);
+      prepared = prepareSpec(spec, { viewPrefix: this.viewPrefix, memDb: this.memDb, materialize: cap > 0, salt: r ? PolicyService.suffix(r.scope) : '' });
     } catch (err) {
       errors.push((err as Error).message);
     }

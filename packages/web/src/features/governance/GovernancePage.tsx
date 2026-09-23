@@ -1,0 +1,37 @@
+import { useEffect, useState } from 'react';
+import { Landmark } from 'lucide-react';
+import { useWorkspace } from '../../store/workspace';
+import { Eyebrow, PageTitle } from '../../components/layout';
+import { cn } from '../../components/ui';
+import { PoliciesPanel } from './PoliciesPanel';
+
+type Tab = 'policies';
+const TABS: { id: Tab; label: string }[] = [{ id: 'policies', label: 'Access policies' }];
+
+/** #/governance — who may see what, and (later) where data comes from and who touched it. */
+export function GovernancePage() {
+  const ws = useWorkspace();
+  const active = ws.workspaces.find((w) => w.id === ws.activeId);
+  const parse = (): Tab => (/^#\/governance\/([a-z]+)/.exec(location.hash)?.[1] as Tab | undefined) ?? 'policies';
+  const [tab, setTab] = useState<Tab>(parse);
+  useEffect(() => {
+    const on = () => setTab(parse());
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+  return (
+    <div className="h-full min-h-0 overflow-auto">
+      <div className="mx-auto max-w-6xl space-y-4 p-5 pb-16">
+        <div>
+          <Eyebrow>Govern</Eyebrow>
+          <PageTitle><span className="inline-flex items-center gap-2"><Landmark className="h-5 w-5 text-accent-300" /> Governance</span></PageTitle>
+          <p className="mt-1 text-xs text-zinc-500">Who may see which data in <b className="text-zinc-300">{active?.name ?? 'the active workspace'}</b>.</p>
+        </div>
+        <div className="flex gap-1 border-b border-zinc-800 text-xs">
+          {TABS.map((t) => <button key={t.id} onClick={() => (location.hash = `#/governance/${t.id}`)} className={cn('-mb-px border-b-2 px-3 py-1.5', tab === t.id ? 'border-accent-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-200')}>{t.label}</button>)}
+        </div>
+        {ws.activeId && tab === 'policies' && <PoliciesPanel key={ws.activeId} workspaceId={ws.activeId} isOwner={active?.role === 'OWNER'} />}
+      </div>
+    </div>
+  );
+}

@@ -13,15 +13,27 @@ export interface MosaicInfo {
   enabled: boolean;
   schema: string;
   max_rows: number;
+  /** Access policies restrict the caller in this workspace: no pre-aggregation, their own dataset objects. */
+  restricted?: boolean;
+  /** Appended to dataset object names for restricted callers (hex). */
+  suffix?: string;
 }
 
-let infoPromise: Promise<MosaicInfo> | null = null;
-export function mosaicInfo(): Promise<MosaicInfo> {
-  if (!infoPromise) infoPromise = api.get<MosaicInfo>('/api/mosaic/info').catch((e) => {
-    infoPromise = null;
-    throw e;
-  });
-  return infoPromise;
+const infoPromises = new Map<string, Promise<MosaicInfo>>();
+/** Mosaic settings, per workspace (access policies change what the caller may use there). */
+export function mosaicInfo(workspaceId?: string): Promise<MosaicInfo> {
+  const key = workspaceId ?? '';
+  let p = infoPromises.get(key);
+  if (!p) {
+    p = api.get<MosaicInfo>(`/api/mosaic/info${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`).catch((e) => {
+      infoPromises.delete(key);
+      throw e;
+    });
+    infoPromises.set(key, p);
+    // Policies can change: ask again after a minute.
+    setTimeout(() => infoPromises.delete(key), 60_000);
+  }
+  return p;
 }
 
 export type VgPlot = typeof import('@uwdata/vgplot');
@@ -63,7 +75,7 @@ export function fnv1a(text: string): string {
 }
 
 export async function createMosaic(workspaceId: string, opts: CreateMosaicOptions = {}): Promise<MosaicHandle> {
-  const [vg, info] = await Promise.all([import('@uwdata/vgplot'), mosaicInfo()]);
+  const [vg, info] = await Promise.all([import('@uwdata/vgplot'), mosaicInfo(workspaceId)]);
   if (!info.enabled) throw new Error('Mosaic is disabled on this server (mosaic.enabled)');
   const problems: string[] = [];
   const noop = () => undefined;
@@ -80,7 +92,7 @@ export async function createMosaic(workspaceId: string, opts: CreateMosaicOption
       }
     },
   };
-  const coordinator = new vg.Coordinator(duckviewConnector(workspaceId) as never, { preagg: { schema: info.schema }, logger });
+  const coordinator = new vg.Coordinator(duckviewConnector(workspaceId) as never, { preagg: { schema: info.schema, enabled: !info.restricted }, logger });
   const ctx = vg.createAPIContext({ coordinator }) as VgPlot;
   return {
     vg,

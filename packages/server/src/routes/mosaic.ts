@@ -26,7 +26,8 @@ export async function mosaicRoutes(app: FastifyInstance, ctx: AppContext) {
   const keyGenerator = (req: FastifyRequest) => (req.headers.authorization ? `mosaic:${req.headers.authorization.slice(-40)}` : `mosaic:${req.ip}`);
   const connectorLimit: { rateLimit: RateLimitOptions | false } = perMinute > 0 ? { rateLimit: { max: perMinute, timeWindow: '1 minute', keyGenerator } } : { rateLimit: false };
 
-  app.get('/api/mosaic/info', async () => ({ enabled: ctx.mosaic.enabled, schema: ctx.mosaic.schema, max_rows: ctx.cfg.mosaic.max_rows }));
+  /** ?workspace_id=… adds whether access policies restrict the caller there (no pre-aggregation, salted names). */
+  app.get('/api/mosaic/info', async (req) => ctx.mosaic.info(req.principal, (req.query as { workspace_id?: string }).workspace_id));
 
   app.post('/api/workspaces/:id/mosaic/prepare', async (req, reply) => {
     const { id } = req.params as { id: string };

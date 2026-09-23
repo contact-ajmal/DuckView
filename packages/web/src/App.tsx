@@ -13,6 +13,7 @@ import { DashboardsPage } from './features/dashboards/DashboardsPage';
 import { ConnectionsPage } from './features/connections/ConnectionsPage';
 import { AppsPage } from './features/apps/AppsPage';
 import { AlertsPage } from './features/alerts/AlertsPage';
+import { GovernancePage } from './features/governance/GovernancePage';
 import { SnapshotView } from './features/dashboards/SnapshotView';
 import { CopilotDrawer } from './features/copilot/CopilotDrawer';
 import { ShareDialog } from './features/workspace/ShareDialog';
@@ -24,13 +25,14 @@ import { Logo } from './components/Logo';
 import { Tag } from './components/layout';
 import { Button, Input, Label, Modal, Spinner, cn } from './components/ui';
 
-type Route = 'overview' | 'query' | 'dashboards' | 'apps' | 'alerts' | 'connections' | 'settings' | 'mcp';
+type Route = 'overview' | 'query' | 'dashboards' | 'apps' | 'alerts' | 'governance' | 'connections' | 'settings' | 'mcp';
 const ROUTES: { id: Route; hash: string; label: string }[] = [
   { id: 'overview', hash: '#/', label: 'Overview' },
   { id: 'query', hash: '#/query', label: 'Query' },
   { id: 'dashboards', hash: '#/dashboards', label: 'Dashboards' },
   { id: 'apps', hash: '#/apps', label: 'Apps' },
   { id: 'alerts', hash: '#/alerts', label: 'Alerts' },
+  { id: 'governance', hash: '#/governance', label: 'Governance' },
   { id: 'connections', hash: '#/connections', label: 'Connections' },
   { id: 'settings', hash: '#/settings', label: 'Settings' },
   { id: 'mcp', hash: '#/mcp', label: 'MCP' },
@@ -42,6 +44,7 @@ function parseRoute(): Route {
   if (h.startsWith('dashboards')) return 'dashboards';
   if (h.startsWith('apps')) return 'apps';
   if (h.startsWith('alerts')) return 'alerts';
+  if (h.startsWith('governance')) return 'governance';
   if (h.startsWith('connections')) return 'connections';
   if (h.startsWith('settings')) return 'settings';
   if (h.startsWith('mcp') || h.startsWith('agents')) return 'mcp';
@@ -137,7 +140,7 @@ export default function App() {
         </nav>
         <div className="ml-auto flex items-center gap-3">
           <ThemeMenu />
-          <LayoutMenu currentPage={route === 'dashboards' || route === 'connections' || route === 'apps' || route === 'alerts' ? null : route} />
+          <LayoutMenu currentPage={route === 'dashboards' || route === 'connections' || route === 'apps' || route === 'alerts' || route === 'governance' ? null : route} />
           <button onClick={() => cp.toggle()} className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs', cp.open ? 'border-accent-600/60 bg-accent-600/20 text-accent-100' : 'border-zinc-800 bg-zinc-900/70 text-zinc-300 hover:text-zinc-100')} title="DuckCopilot — context-aware AI assistant">
             <Bot className="h-3.5 w-3.5" /> Copilot
           </button>
@@ -222,6 +225,7 @@ export default function App() {
           {route === 'connections' && <ConnectionsPage />}
           {route === 'apps' && <AppsPage />}
           {route === 'alerts' && <AlertsPage />}
+          {route === 'governance' && <GovernancePage />}
           {route === 'settings' && <SettingsPage />}
           {route === 'mcp' && (
             <div className="h-full overflow-auto">

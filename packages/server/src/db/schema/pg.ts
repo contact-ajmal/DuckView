@@ -155,7 +155,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -564,6 +564,25 @@ export const snapshotRuns = pgTable(
     created_at: ts('created_at').notNull(),
   },
   (t) => [index('snapshot_runs_snapshot_idx').on(t.snapshot_id, t.created_at)],
+);
+
+export const accessPolicies = pgTable(
+  'access_policies',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    table_name: text('table_name').notNull(),
+    row_filter: text('row_filter'),
+    column_masks: jsonb('column_masks').$type<Record<string, ColumnMask>>().notNull().default({}),
+    applies_to: jsonb('applies_to').$type<PolicySubjects>().notNull().default({ roles: ['VIEWER'] }),
+    enabled: boolean('enabled').notNull().default(true),
+    created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('access_policies_workspace_idx').on(t.workspace_id)],
 );
 
 export const appSettings = pgTable('app_settings', {

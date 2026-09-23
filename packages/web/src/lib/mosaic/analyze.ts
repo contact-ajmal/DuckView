@@ -46,7 +46,7 @@ export function sourceBody(source: DataSource): string | null {
 export async function resolveSource(handle: MosaicHandle, source: DataSource): Promise<string> {
   const body = sourceBody(source);
   if (body === null) return source.target;
-  const name = `${handle.info.schema}_src_${fnv1a(`${source.kind}:${source.target}`)}`;
+  const name = `${handle.info.schema}_src_${fnv1a(`${source.kind}:${source.target}`)}${handle.info.suffix ?? ''}`;
   await handle.coordinator.exec([`CREATE OR REPLACE VIEW ${quoteIdent(name)} AS ${body}`]);
   return name;
 }

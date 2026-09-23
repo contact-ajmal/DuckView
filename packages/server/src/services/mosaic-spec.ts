@@ -37,6 +37,8 @@ export interface PrepareOptions {
   memDb: string;
   /** Default for datasets that do not say `materialize:` themselves. */
   materialize: boolean;
+  /** Appended to object hashes (hex): per access-policy scope. */
+  salt?: string;
 }
 
 export interface PreparedSpec {
@@ -166,7 +168,8 @@ export function prepareSpec(spec: Spec, opts: PrepareOptions): PreparedSpec {
     if (!isObject(data)) throw badRequest('`data` must be a mapping of dataset name → definition');
     for (const [name, def] of Object.entries(data)) {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw badRequest(`data.${name}: dataset names must be plain identifiers`);
-      const hash = fnv1a(`${name}\n${JSON.stringify(def)}`);
+      // A salt (the caller's access-policy scope) keeps restricted callers' objects apart from everyone else's.
+      const hash = `${fnv1a(`${name}\n${JSON.stringify(def)}`)}${opts.salt ?? ''}`;
       const view = `${opts.viewPrefix}${hash}`;
       const st = sourceStatement(name, def, view);
       if (!st) continue;

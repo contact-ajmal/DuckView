@@ -748,6 +748,42 @@ export const snapshotRuns = sqliteTable(
   (t) => [index('snapshot_runs_snapshot_idx').on(t.snapshot_id, t.created_at)],
 );
 
+export const MASK_KINDS = ['null', 'redact', 'hash', 'partial', 'expression'] as const;
+export type MaskKind = (typeof MASK_KINDS)[number];
+export type ColumnMask = { kind: Exclude<MaskKind, 'expression'> } | { kind: 'expression'; sql: string };
+/** Who a policy restricts: workspace roles, users, teams — or everyone but the workspace's owners. */
+export interface PolicySubjects {
+  all?: boolean;
+  roles?: ('VIEWER' | 'EDITOR')[];
+  users?: string[];
+  groups?: string[];
+}
+
+/**
+ * Row- and column-level security on a table (or view) of a workspace: people it applies to read it through a
+ * filtered, masked subquery. Owners of the workspace are never restricted.
+ */
+export const accessPolicies = sqliteTable(
+  'access_policies',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** The table as queries name it: "orders", "sales.orders" or "db.sales.orders". */
+    table_name: text('table_name').notNull(),
+    /** A SQL predicate with {{user.email}}, {{user.id}}, {{user.role}}, {{user.groups}} placeholders; null: all rows. */
+    row_filter: text('row_filter'),
+    column_masks: text('column_masks', { mode: 'json' }).$type<Record<string, ColumnMask>>().notNull().default({}),
+    applies_to: text('applies_to', { mode: 'json' }).$type<PolicySubjects>().notNull().default({ roles: ['VIEWER'] }),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('access_policies_workspace_idx').on(t.workspace_id)],
+);
+
 /** Platform-wide settings set from the console (e.g. the Google OAuth client), secrets encrypted. */
 export const appSettings = sqliteTable('app_settings', {
   key: text('key').primaryKey(),
@@ -866,3 +902,4 @@ export type Alert = typeof alerts.$inferSelect;
 export type AlertEvent = typeof alertEvents.$inferSelect;
 export type Snapshot = typeof snapshots.$inferSelect;
 export type SnapshotRun = typeof snapshotRuns.$inferSelect;
+export type AccessPolicy = typeof accessPolicies.$inferSelect;

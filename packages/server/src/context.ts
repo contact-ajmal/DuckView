@@ -23,6 +23,7 @@ import { DataAppService } from './services/apps.js';
 import { NotificationService } from './services/notifications.js';
 import { AlertService } from './services/alerts.js';
 import { SnapshotService } from './services/snapshots.js';
+import { PolicyService } from './services/policies.js';
 import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
@@ -60,6 +61,7 @@ export interface AppContext {
   notifications: NotificationService;
   alerts: AlertService;
   snapshots: SnapshotService;
+  policies: PolicyService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -87,7 +89,10 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   lakehouse.bind(workspaces, audit);
   const databases = new DatabaseConnectionService(store, cipher, engines, cfg);
   workspaces.databases = databases;
+  const policies = new PolicyService(store, workspaces, groups, audit, cfg.mosaic.schema);
+  workspaces.policies = policies;
   const cache = new ResultCache(cfg, workspaces, engines.jail);
+  cache.policyScope = async (p, workspaceId, role) => (await policies.restrictionFor(p, workspaceId, role))?.scope ?? null;
   workspaces.onVersion((id) => cache.invalidateWorkspace(id));
   const cloudSync = new WorkspaceCloudSync(store, engines, cloud, cfg.duckdb.cloud_sync_delay_seconds);
   workspaces.cloudSync = cloudSync;
@@ -132,6 +137,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   }
   await apps.init();
   copilot.mosaic = mosaic;
+  mosaic.policies = policies;
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
   await auth.bootstrapAdmin();
@@ -168,6 +174,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     notifications,
     alerts,
     snapshots,
+    policies,
     lakehouse,
     agents,
     groups,

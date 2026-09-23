@@ -44,6 +44,7 @@ Most "SQL UIs" stop at the query box. DuckView is a complete, self-hosted data w
 |---|---|
 | ⚡ **Query anything, instantly** | Parquet, CSV, JSON, Excel, DuckDB files, S3 / R2 / GCS / Azure objects, Iceberg catalogs on AWS Glue, S3 Tables, any Iceberg REST catalog and Databricks. Drop a file, add a folder from anywhere on the machine, or pick a bucket — it's queryable in seconds. |
 | 🔌 **Every source, one page** | **Connections** covers object storage, lakehouse catalogs, PostgreSQL / MySQL / SQLite / DuckDB files, **Snowflake · BigQuery · Redshift · ClickHouse · Microsoft Fabric**, **Salesforce · HubSpot · Stripe · Google Analytics 4 · Airtable · Notion**, HTTP endpoints and **Google Drive / Sheets with your Google account** — health-checked, browsable in place, credentials encrypted and write-only. **Syncs** load any of them into a workspace table on a schedule, with a transformation validated before it is saved. |
+| 🛡 **Row & column security** | Access policies per table: a row filter (`region = 'EU'`, `owner_email = {{user.email}}`, team membership) and column masks (hidden, redacted, hashed, last-4) for viewers, editors, people or teams — rewritten into every query with DuckDB's own parser, so joins, CTEs, dashboards, Mosaic, alerts, exports and agents all see only what's allowed. Owners preview a query as any member. |
 | 🔔 **Alerts & snapshots** | A read-only SQL query, a condition (returns rows · returns none · a value crosses a threshold) and a schedule; when it fires, resolves or fails, **Slack, Microsoft Teams, email, PagerDuty or a signed webhook** hears about it. **Scheduled snapshots** render a dashboard or app to PNG / PDF on a cron and send it the same way — the Monday numbers in #leadership. Secrets are encrypted and write-only; webhooks only reach public addresses. |
 | 🧩 **Data apps (Streamlit)** | Build Streamlit apps on a workspace's data with the `duckview` Python SDK — or generate one from a dashboard or saved queries, or let Copilot draft it. DuckView runs them (Python environment on first start, editor with live preview and static checks) and serves them at `/apps/<id>/` with a read-only, workspace-scoped token. Agents do the same over MCP: `create_app` → `preview_app` (screenshot) → `update_app` → `publish_app`. |
 | 🔍 **Explore & Mosaic dashboards** | Every column of a file, table or query becomes a linked chart — brush one and the rest cross-filter at data-cube speed on millions of rows. Declarative, cross-filtered **Mosaic dashboards** from a YAML/JSON spec: live-preview editor, generated from any dataset in one click, drafted by Copilot or created by agents, validated against your data before they are saved. |
@@ -286,7 +287,6 @@ Full details — configuration keys, every endpoint, the MCP tool contracts, CLI
 
 ## 🗺 Roadmap
 
-- Row-level access policies per workspace
 - Per-user data directories (isolation inside the jail)
 - Comments on dashboards and saved queries
 
