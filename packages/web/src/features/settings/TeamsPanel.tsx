@@ -68,7 +68,7 @@ export function TeamsPanel() {
         }
       >
         {groups.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-zinc-800 px-3 py-6 text-center text-xs text-zinc-500">
+          <div className="border-y border-zinc-800 px-3 py-6 text-center text-xs text-zinc-500">
             {isAdmin ? 'No teams yet. Create one to share workspaces with several people at once — or sign in with SSO to mirror your IdP groups.' : 'No teams yet. Ask an administrator to create one.'}
           </div>
         ) : (
@@ -174,10 +174,10 @@ export function TeamsPanel() {
             {members === null ? (
               <div className="text-xs text-zinc-500">Loading…</div>
             ) : members.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-zinc-800 px-3 py-4 text-center text-xs text-zinc-500">No members yet.</div>
+              <div className="border-y border-zinc-800 px-3 py-4 text-center text-xs text-zinc-500">No members yet.</div>
             ) : (
               <table className="w-full text-xs">
-                <thead className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
+                <thead className="text-left text-[10px] text-zinc-500">
                   <tr>
                     <th className="pb-2">Member</th>
                     <th className="pb-2">Role</th>

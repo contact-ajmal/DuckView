@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
-import { UploadCloud, ArrowRight, ArrowUpRight } from 'lucide-react';
+import { UploadCloud, ArrowRight, ArrowUpRight, Search } from 'lucide-react';
+import { useCopilot } from '../../store/copilot';
 import { DataSourceBar } from './DataSourceBar';
 import '../../lib/chart';
 import { withAlpha, compactNumber, useChartTheme } from '../../lib/chart';
@@ -11,30 +12,12 @@ import { ExploreView, type ExploreSource } from '../explore/ExploreView';
 import { Sparkles } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { ResultsGrid } from '../workspace/ResultsGrid';
-import { Eyebrow, PageTitle, Panel, TypePill, Tag } from '../../components/layout';
+import { TypePill } from '../../components/layout';
 import { SplitPane } from '../../components/panes';
 import { useLayout } from '../../store/layout';
-import { HideButton } from '../../components/LayoutMenu';
-import { Empty, Spinner, cn } from '../../components/ui';
+import { Button, Empty, Spinner, Stat, Tabs, cn } from '../../components/ui';
 import { quoteIdent } from '../workspace/SchemaTree';
 
-
-function Kpi({ label, value, sub, sql, onSql, tone }: { label: string; value: React.ReactNode; sub?: React.ReactNode; sql?: string; onSql?: (sql: string) => void; tone?: 'warn' | 'bad' }) {
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4">
-      <div className="flex items-center justify-between">
-        <div className="text-[12px] text-zinc-400">{label}</div>
-        {sql && onSql && (
-          <button onClick={() => onSql(sql)} className="inline-flex items-center gap-0.5 font-mono text-[10px] text-zinc-500 hover:text-accent-300" title={sql}>
-            SQL <ArrowUpRight className="h-3 w-3" />
-          </button>
-        )}
-      </div>
-      <div className={cn('mt-1 text-3xl font-semibold tracking-tight', tone === 'bad' ? 'text-red-300' : tone === 'warn' ? 'text-amber-200' : 'text-zinc-50')}>{value}</div>
-      {sub && <div className="mt-1 font-mono text-[11px] text-zinc-500">{sub}</div>}
-    </div>
-  );
-}
 
 function Distribution({ col }: { col: OverviewColumn }) {
   const ct = useChartTheme();
@@ -87,10 +70,14 @@ function exploreSource(kind: string, target: string): ExploreSource {
   return { kind: kind === 'table' ? 'table' : kind === 'query' ? 'query' : 'file', target };
 }
 
+type DataTab = 'overview' | 'schema' | 'preview' | 'profile' | 'explore' | 'sql';
+
 export function OverviewPage() {
   const ws = useWorkspace();
+  const cp = useCopilot();
+  const [dtab, setDtab] = useState<DataTab>('overview');
+  const [previewFilter, setPreviewFilter] = useState('');
   const { canEdit: canWrite } = useWorkspaceAccess();
-  const [explore, setExplore] = useState(false);
   const [uploads, setUploads] = useState<{ name: string; pct: number; error?: string }[]>([]);
   const wsId = ws.activeId;
   const hidden = useLayout((l) => l.hidden);
@@ -161,18 +148,31 @@ export function OverviewPage() {
     : null;
   const selectedFile = files.find((f) => f.path === target);
 
+  const snippets = overview
+    ? [
+        { label: 'First 100 rows', sql: `SELECT * FROM ${relation} LIMIT 100;` },
+        { label: 'Row count', sql: `SELECT count(*) AS rows FROM ${relation};` },
+        { label: 'Column types', sql: `DESCRIBE SELECT * FROM ${relation};` },
+        { label: 'Summary statistics', sql: `SUMMARIZE SELECT * FROM ${relation};` },
+        { label: 'Duplicate rows', sql: `SELECT count(*) - count(DISTINCT *) AS duplicate_rows FROM ${relation};` },
+        ...overview.columns.filter((c) => c.kind === 'string').slice(0, 3).map((c) => ({ label: `Top values of ${c.name}`, sql: `SELECT ${quoteIdent(c.name)}, count(*) AS n FROM ${relation} GROUP BY 1 ORDER BY 2 DESC LIMIT 20;` })),
+      ]
+    : [];
+  const attention = overview ? [...overview.columns].filter((c) => c.null_percentage > 0).sort((x, y) => y.null_percentage - x.null_percentage).slice(0, 6) : [];
+  const displayName = overview ? (selectedFile?.root ? `${selectedFile.root.split('/').filter(Boolean).pop()}/${overview.target.slice(selectedFile.root.length + 1)}` : overview.target) : target ?? '';
+
   return (
     <SplitPane
       direction="horizontal"
       storageKey="overview.sidebar"
-      defaultSize={290}
+      defaultSize={272}
       min={220}
       max={640}
       minSecondary={480}
       collapsed={!!hidden['overview.sidebar']}
-      className="h-full p-5"
+      className="h-full"
       primary={
-      <aside className="flex h-full flex-col gap-4 overflow-auto pr-2">
+      <aside className="h-full overflow-auto border-r border-zinc-800 bg-zinc-900" aria-label="Sources">
         {wsId && (
           <DataSourceBar
             workspaceId={wsId}
@@ -191,146 +191,192 @@ export function OverviewPage() {
       </aside>
       }
       secondary={
-      <main className="h-full min-w-0 overflow-auto pl-3">
+      <main className="@container flex h-full min-w-0 flex-col">
         {!target ? (
-          <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-zinc-800">
-            <Empty icon={<UploadCloud className="h-10 w-10" />} title="Ingest a dataset to get started" hint="Drop a Parquet, CSV or JSON file onto the left panel. DuckView profiles it instantly: row/column counts, null ratios, a sample and distributions." />
-          </div>
+          <Empty icon={<UploadCloud />} title="Add a dataset to get started" hint="Drop a Parquet, CSV or JSON file on Sources, or connect a database or bucket. DuckView profiles it on the spot: size, types, nulls, distributions and a sample." action={<a href="#/connections" className="text-xs text-accent-300 hover:underline">Connect a source</a>} />
         ) : loading && !overview ? (
-          <div className="flex h-full items-center justify-center gap-2 text-sm text-zinc-400">
+          <div className="flex h-full items-center justify-center gap-2 text-[13px] text-zinc-400">
             <Spinner /> Profiling {target}…
           </div>
         ) : error ? (
-          <div className="rounded-xl border border-red-900 bg-red-950/40 p-4 font-mono text-xs text-red-200">{error}</div>
+          <div className="m-5 rounded-lg border border-red-500/30 bg-red-500/5 p-4 font-mono text-xs text-red-300">{error}</div>
         ) : overview ? (
-          <div className="space-y-5">
-            <div>
-              <Eyebrow>Overview · auto-generated on load</Eyebrow>
-              <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
+          <>
+            <div className="shrink-0 px-5 pt-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <PageTitle className="truncate font-mono" title={overview.target}>{selectedFile?.root ? `${selectedFile.root.split('/').filter(Boolean).pop()}/${overview.target.slice(selectedFile.root.length + 1)}` : overview.target}</PageTitle>
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <Tag>{selectedFile ? selectedFile.kind.toUpperCase() : overview.kind.toUpperCase()}</Tag>
-                    {overview.size_bytes != null && <Tag>{formatBytes(overview.size_bytes)}</Tag>}
-                    <Tag>{overview.kind === 'file' ? 'native file scan' : overview.kind === 'table' ? 'in-database' : 'subquery'}</Tag>
-                    <span className="ml-1 font-mono text-[11px] text-zinc-500">
-                      query it as <Tag className="text-zinc-300">{relation}</Tag>
-                    </span>
-                    {loading && <Spinner className="h-3.5 w-3.5" />}
+                  <h1 className="truncate font-mono text-[15px] font-semibold text-zinc-50" title={overview.target} data-testid="dataset-name">{displayName}</h1>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+                    <span>{selectedFile ? selectedFile.kind : overview.kind === 'table' ? 'table' : overview.kind}</span>
+                    {overview.size_bytes != null && <span>{formatBytes(overview.size_bytes)}</span>}
+                    <span>{overview.row_count.toLocaleString()} rows · {overview.column_count} columns</span>
+                    <span className="inline-flex items-center gap-1">query as <code className="rounded bg-zinc-900 px-1 font-mono text-[11px] text-zinc-300">{relation}</code></span>
+                    {loading && <Spinner className="h-3 w-3" />}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-[11px] text-zinc-500">overview suite finished in {overview.duration_ms} ms</span>
+                <div className="flex shrink-0 items-center gap-2">
                   <CacheChip state={ov.state} computedAt={ov.computedAt} fromCache={ov.fromCache} serverCached={ov.serverCached} onRefresh={ov.refresh} verb="profiled" />
-                  <button onClick={() => setExplore((e) => !e)} className={cn('inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium', explore ? 'border-accent-600/60 bg-accent-600/20 text-accent-100' : 'border-zinc-700 bg-zinc-900/70 text-zinc-200 hover:border-zinc-500')} title="Interactive, cross-filtered charts of every column (Mosaic)">
-                    <Sparkles className="h-3.5 w-3.5" /> {explore ? 'Hide explore' : 'Explore'}
-                  </button>
-                  <button onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)} className="inline-flex items-center gap-1.5 rounded-md border border-accent-600/60 bg-accent-600/20 px-3 py-1.5 text-xs font-medium text-accent-100 hover:bg-accent-600/30">
-                    Open Query tool <ArrowRight className="h-3.5 w-3.5" />
-                  </button>
+                  <Button size="sm" variant="ghost" onClick={() => { if (target) cp.setTargets([target]); cp.toggle(true); }}><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
+                  <Button size="sm" variant="primary" onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)}>Open in SQL <ArrowRight className="h-3.5 w-3.5" /></Button>
                 </div>
               </div>
+              <Tabs<DataTab>
+                className="mt-3"
+                value={dtab}
+                onChange={setDtab}
+                tabs={[
+                  { id: 'overview', label: 'Overview' },
+                  { id: 'schema', label: 'Schema', count: overview.column_count },
+                  { id: 'preview', label: 'Preview' },
+                  { id: 'profile', label: 'Profile' },
+                  { id: 'explore', label: 'Explore' },
+                  { id: 'sql', label: 'SQL' },
+                ]}
+              />
             </div>
 
-            {explore && target && (
-              <div className="h-[720px] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
-                <ExploreView workspaceId={wsId!} source={exploreSource(overview.kind, target)} />
-              </div>
-            )}
-
-            {!hidden['overview.kpis'] && <div className="group/kpi relative grid grid-cols-1 gap-4 md:grid-cols-3">
-              <HideButton id="overview.kpis" className="absolute -top-5 right-0 opacity-0 group-hover/kpi:opacity-100" />
-              <Kpi label="Total rows" value={overview.row_count.toLocaleString()} sub={`COUNT(*) · ${overview.duration_ms} ms suite`} sql={`SELECT count(*) AS rows FROM ${relation};`} onSql={openInQuery} />
-              <Kpi label="Total columns" value={overview.column_count} sub={kindCounts ? `${kindCounts.numeric} numeric · ${kindCounts.text} text · ${kindCounts.temporal} temporal · ${kindCounts.other} other` : undefined} sql={`DESCRIBE SELECT * FROM ${relation};`} onSql={openInQuery} />
-              <Kpi
-                label="Data quality"
-                value={`${(overview.null_cell_ratio * 100).toFixed(2)}% null`}
-                tone={overview.null_cell_ratio > 0.2 ? 'bad' : overview.null_cell_ratio > 0 || (overview.duplicate_rows ?? 0) > 0 ? 'warn' : undefined}
-                sub={`${overview.duplicate_rows == null ? 'duplicates skipped (>2M rows)' : `${overview.duplicate_rows.toLocaleString()} duplicate rows`}${overview.size_bytes != null && overview.row_count ? ` · ≈${formatBytes(overview.size_bytes / overview.row_count)}/row` : ''}`}
-                sql={`SELECT count(*) - count(DISTINCT *) AS duplicate_rows FROM ${relation};`}
-                onSql={openInQuery}
-              />
-            </div>}
-
-            {!hidden['overview.schema'] && <Panel
-              hideId="overview.schema"
-              title="Schema"
-              meta={`profiled with SUMMARIZE in ${overview.duration_ms} ms`}
-              bodyClassName="p-0"
-              actions={
-                <div className="flex items-center gap-3 font-mono text-[11px]">
-                  <button className="inline-flex items-center gap-0.5 text-zinc-400 hover:text-accent-300" onClick={() => openInQuery(`DESCRIBE SELECT * FROM ${relation};`)}>
-                    DESCRIBE <ArrowUpRight className="h-3 w-3" />
-                  </button>
-                  <button className="inline-flex items-center gap-0.5 text-zinc-400 hover:text-accent-300" onClick={() => openInQuery(`SUMMARIZE SELECT * FROM ${relation};`)}>
-                    SUMMARIZE <ArrowUpRight className="h-3 w-3" />
-                  </button>
-                </div>
-              }
-            >
-              <table className="w-full font-mono text-xs">
-                <thead className="text-left text-[11px] text-zinc-500">
-                  <tr className="border-b border-zinc-800">
-                    <th className="px-4 py-2 font-normal">#</th>
-                    <th className="px-2 py-2 font-normal">column</th>
-                    <th className="px-2 py-2 font-normal">type</th>
-                    <th className="px-2 py-2 text-right font-normal">nulls</th>
-                    <th className="px-2 py-2 text-right font-normal">distinct ≈</th>
-                    <th className="px-2 py-2 font-normal">min</th>
-                    <th className="px-2 py-2 font-normal">max</th>
-                    <th className="px-4 py-2 text-right font-normal">avg</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {overview.columns.map((c, i) => (
-                    <tr key={c.name} className="border-b border-zinc-800/60 last:border-0 hover:bg-zinc-800/30">
-                      <td className="px-4 py-2 text-zinc-600">{i + 1}</td>
-                      <td className="px-2 py-2">
-                        <button className="text-zinc-100 hover:text-accent-300" onClick={() => openInQuery(`SELECT ${quoteIdent(c.name)}, count(*) AS n FROM ${relation} GROUP BY 1 ORDER BY 2 DESC LIMIT 20;`)} title="Open value counts in the Query tool">
-                          {c.name}
-                        </button>
-                      </td>
-                      <td className="px-2 py-2">
-                        <TypePill type={c.type} />
-                      </td>
-                      <td className="px-2 py-2">
-                        <div className="flex items-center justify-end gap-2">
-                          <div className="h-1.5 w-14 overflow-hidden rounded bg-zinc-800">
-                            <div className="h-full rounded" style={{ width: `${Math.min(100, c.null_percentage)}%`, background: nullTone(c.null_percentage) }} />
-                          </div>
-                          <span className="w-10 text-right text-zinc-300">{c.null_percentage.toFixed(c.null_percentage > 0 && c.null_percentage < 1 ? 1 : 0)}%</span>
-                        </div>
-                      </td>
-                      <td className="px-2 py-2 text-right text-zinc-300">{c.approx_unique?.toLocaleString() ?? '—'}</td>
-                      <td className="max-w-[180px] truncate px-2 py-2 text-zinc-300" title={c.min ?? ''}>{c.min ?? '—'}</td>
-                      <td className="max-w-[180px] truncate px-2 py-2 text-zinc-300" title={c.max ?? ''}>{c.max ?? '—'}</td>
-                      <td className="px-4 py-2 text-right text-zinc-300">{c.avg != null ? Number(c.avg).toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Panel>}
-
-            {!hidden['overview.distributions'] && <Panel hideId="overview.distributions" title="Distributions" meta="equi-width histograms · top values · time buckets">
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {overview.columns.map((c) => (
-                  <div key={c.name} className="rounded-lg border border-zinc-800/80 bg-zinc-950/60 p-3">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <span className="truncate font-mono text-xs text-zinc-100">{c.name}</span>
-                      <TypePill type={c.type} />
+            <div className={cn('min-h-0 flex-1', dtab === 'preview' || dtab === 'explore' ? 'overflow-hidden' : 'overflow-auto px-5 py-4')}>
+              {dtab === 'overview' && (
+                <div className="space-y-6" data-testid="dataset-overview">
+                  {!hidden['overview.kpis'] && (
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-4 border-b border-zinc-800 pb-5 @2xl:grid-cols-3 @4xl:grid-cols-5">
+                      <Stat label="Rows" value={overview.row_count.toLocaleString()} sub={`counted in ${overview.duration_ms} ms`} />
+                      <Stat label="Columns" value={overview.column_count} sub={kindCounts ? `${kindCounts.numeric} numeric · ${kindCounts.text} text · ${kindCounts.temporal} time` : undefined} />
+                      <Stat label="Null cells" value={<span className={overview.null_cell_ratio > 0.2 ? 'text-red-400' : overview.null_cell_ratio > 0 ? 'text-amber-500' : undefined}>{(overview.null_cell_ratio * 100).toFixed(overview.null_cell_ratio > 0 && overview.null_cell_ratio < 0.01 ? 2 : 1)}%</span>} sub="of all values" />
+                      <Stat label="Duplicate rows" value={overview.duplicate_rows == null ? '—' : overview.duplicate_rows.toLocaleString()} sub={overview.duplicate_rows == null ? 'skipped above 2M rows' : 'exact duplicates'} />
+                      <Stat label="Size" value={overview.size_bytes != null ? formatBytes(overview.size_bytes) : '—'} sub={overview.size_bytes != null && overview.row_count ? `≈${formatBytes(overview.size_bytes / overview.row_count)} per row` : undefined} />
                     </div>
-                    <Distribution col={c} />
+                  )}
+                  <div className="grid gap-8 @4xl:grid-cols-2">
+                    <section>
+                      <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Columns with missing values</h2>
+                      {attention.length === 0 ? (
+                        <p className="text-xs text-zinc-500">Every column is complete.</p>
+                      ) : (
+                        <ul className="divide-y divide-zinc-800/70 border-y border-zinc-800">
+                          {attention.map((c) => (
+                            <li key={c.name} className="flex items-center gap-3 py-1.5 text-xs">
+                              <span className="min-w-0 flex-1 truncate font-mono text-zinc-200">{c.name}</span>
+                              <TypePill type={c.type} />
+                              <span className="h-1.5 w-24 overflow-hidden rounded-full bg-zinc-800"><span className="block h-full rounded-full" style={{ width: `${Math.min(100, c.null_percentage)}%`, background: nullTone(c.null_percentage) }} /></span>
+                              <span className="w-12 text-right tabular-nums text-zinc-400">{c.null_percentage.toFixed(c.null_percentage < 1 ? 1 : 0)}%</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </section>
+                    <section>
+                      <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Columns</h2>
+                      <ul className="grid grid-cols-2 gap-x-6 border-y border-zinc-800 py-1 text-xs @5xl:grid-cols-3">
+                        {overview.columns.slice(0, 18).map((c) => (
+                          <li key={c.name} className="flex min-w-0 items-center justify-between gap-2 py-1">
+                            <span className="truncate font-mono text-zinc-200">{c.name}</span>
+                            <TypePill type={c.type} />
+                          </li>
+                        ))}
+                      </ul>
+                      {overview.columns.length > 18 && <button className="mt-1.5 text-xs text-zinc-500 hover:text-zinc-200" onClick={() => setDtab('schema')}>All {overview.columns.length} columns in Schema</button>}
+                    </section>
                   </div>
-                ))}
-              </div>
-            </Panel>}
+                  {!hidden['overview.sample'] && (
+                    <section>
+                      <div className="mb-2 flex items-center justify-between">
+                        <h2 className="text-[13px] font-semibold text-zinc-100">Sample</h2>
+                        <button className="text-xs text-zinc-500 hover:text-zinc-200" onClick={() => setDtab('preview')}>Open preview</button>
+                      </div>
+                      <div className="h-64 overflow-hidden rounded-md border border-zinc-800">
+                        <ResultsGrid columns={overview.sample.columns} rows={overview.sample.rows.slice(0, 20)} />
+                      </div>
+                    </section>
+                  )}
+                </div>
+              )}
 
-            {!hidden['overview.sample'] && <Panel hideId="overview.sample" title="Sample" meta={`first ${overview.sample.rows.length} rows`} bodyClassName="p-0" actions={<button className="inline-flex items-center gap-0.5 font-mono text-[11px] text-zinc-400 hover:text-accent-300" onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)}>SELECT * <ArrowUpRight className="h-3 w-3" /></button>}>
-              <div className="h-80 overflow-hidden rounded-b-xl">
-                <ResultsGrid columns={overview.sample.columns} rows={overview.sample.rows} />
-              </div>
-            </Panel>}
-          </div>
+              {dtab === 'schema' && (
+                <table className="w-full text-xs" data-testid="dataset-schema">
+                  <thead className="text-left text-xs text-zinc-500">
+                    <tr className="border-b border-zinc-800">
+                      <th className="w-10 py-2 pr-2 font-normal">#</th>
+                      <th className="py-2 pr-2 font-normal">Column</th>
+                      <th className="py-2 pr-2 font-normal">Type</th>
+                      <th className="py-2 pr-2 text-right font-normal">Nulls</th>
+                      <th className="py-2 pr-2 text-right font-normal">Distinct ≈</th>
+                      <th className="py-2 pr-2 font-normal">Min</th>
+                      <th className="py-2 pr-2 font-normal">Max</th>
+                      <th className="py-2 text-right font-normal">Avg</th>
+                    </tr>
+                  </thead>
+                  <tbody className="font-mono">
+                    {overview.columns.map((c, i) => (
+                      <tr key={c.name} className="border-b border-zinc-800/60 hover:bg-zinc-900">
+                        <td className="py-1.5 pr-2 text-zinc-600">{i + 1}</td>
+                        <td className="py-1.5 pr-2">
+                          <button className="text-zinc-100 hover:text-accent-300" onClick={() => openInQuery(`SELECT ${quoteIdent(c.name)}, count(*) AS n FROM ${relation} GROUP BY 1 ORDER BY 2 DESC LIMIT 20;`)} title="Value counts in SQL">
+                            {c.name}
+                          </button>
+                        </td>
+                        <td className="py-1.5 pr-2"><TypePill type={c.type} /></td>
+                        <td className="py-1.5 pr-2">
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="h-1.5 w-12 overflow-hidden rounded-full bg-zinc-800"><div className="h-full rounded-full" style={{ width: `${Math.min(100, c.null_percentage)}%`, background: nullTone(c.null_percentage) }} /></div>
+                            <span className="w-10 text-right tabular-nums text-zinc-400">{c.null_percentage.toFixed(c.null_percentage > 0 && c.null_percentage < 1 ? 1 : 0)}%</span>
+                          </div>
+                        </td>
+                        <td className="py-1.5 pr-2 text-right tabular-nums text-zinc-400">{c.approx_unique?.toLocaleString() ?? '—'}</td>
+                        <td className="max-w-[180px] truncate py-1.5 pr-2 text-zinc-400" title={c.min ?? ''}>{c.min ?? '—'}</td>
+                        <td className="max-w-[180px] truncate py-1.5 pr-2 text-zinc-400" title={c.max ?? ''}>{c.max ?? '—'}</td>
+                        <td className="py-1.5 text-right tabular-nums text-zinc-400">{c.avg != null ? Number(c.avg).toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {dtab === 'preview' && (
+                <div className="flex h-full flex-col">
+                  <div className="flex h-9 shrink-0 items-center gap-2 border-b border-zinc-800 px-5 text-xs text-zinc-500">
+                    First {overview.sample.rows.length} rows
+                    <div className="relative ml-auto">
+                      <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-500" />
+                      <input value={previewFilter} onChange={(e) => setPreviewFilter(e.target.value)} placeholder="Filter rows" aria-label="Filter preview rows" className="h-[26px] w-44 rounded-md border border-zinc-800 bg-zinc-950 pl-6 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none" />
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 1000;`)}>Query all rows <ArrowUpRight className="h-3 w-3" /></Button>
+                  </div>
+                  <div className="min-h-0 flex-1"><ResultsGrid columns={overview.sample.columns} rows={overview.sample.rows} filter={previewFilter} /></div>
+                </div>
+              )}
+
+              {dtab === 'profile' && (
+                <div className="grid gap-x-6 gap-y-5 @2xl:grid-cols-2 @5xl:grid-cols-3" data-testid="dataset-profile">
+                  {overview.columns.map((c) => (
+                    <div key={c.name} className="min-w-0">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className="truncate font-mono text-xs text-zinc-100">{c.name}</span>
+                        <TypePill type={c.type} />
+                      </div>
+                      <Distribution col={c} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {dtab === 'explore' && target && <ExploreView workspaceId={wsId!} source={exploreSource(overview.kind, target)} />}
+
+              {dtab === 'sql' && (
+                <ul className="max-w-4xl divide-y divide-zinc-800/70 border-y border-zinc-800">
+                  {snippets.map((sn) => (
+                    <li key={sn.label} className="flex items-center gap-4 py-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] text-zinc-100">{sn.label}</div>
+                        <code className="block truncate font-mono text-[11.5px] text-zinc-500">{sn.sql}</code>
+                      </div>
+                      <Button size="sm" variant="ghost" onClick={() => openInQuery(sn.sql)}>Open in SQL <ArrowUpRight className="h-3 w-3" /></Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
         ) : null}
       </main>
       }

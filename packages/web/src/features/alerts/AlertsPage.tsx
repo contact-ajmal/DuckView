@@ -1,16 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Bell } from 'lucide-react';
 import { useWorkspace } from '../../store/workspace';
-import { Eyebrow, PageTitle } from '../../components/layout';
-import { cn } from '../../components/ui';
 import { ChannelsPanel } from './ChannelsPanel';
 import { AlertsPanel } from './AlertsPanel';
 import { SnapshotsPanel } from './SnapshotsPanel';
 
 type Tab = 'alerts' | 'snapshots' | 'channels';
-const TABS: { id: Tab; label: string }[] = [{ id: 'alerts', label: 'Alerts' }, { id: 'snapshots', label: 'Snapshots' }, { id: 'channels', label: 'Channels' }];
 
-/** #/alerts — alerts, scheduled snapshots and the channels they are delivered to. */
+/** Dashboards › Alerts, Snapshots and Channels; the section tabs are in the shell. */
 export function AlertsPage() {
   const ws = useWorkspace();
   const parse = (): Tab => (/^#\/alerts\/([a-z]+)/.exec(location.hash)?.[1] as Tab | undefined) ?? 'alerts';
@@ -22,15 +18,7 @@ export function AlertsPage() {
   }, []);
   return (
     <div className="h-full min-h-0 overflow-auto">
-      <div className="mx-auto max-w-6xl space-y-4 p-5 pb-16">
-        <div>
-          <Eyebrow>Deliver</Eyebrow>
-          <PageTitle><span className="inline-flex items-center gap-2"><Bell className="h-5 w-5 text-accent-300" /> Alerts</span></PageTitle>
-          <p className="mt-1 text-xs text-zinc-500">Tell people when the data says so — in Slack, Teams, email, PagerDuty or your own webhook — for <b className="text-zinc-300">{ws.workspaces.find((w) => w.id === ws.activeId)?.name ?? 'the active workspace'}</b>.</p>
-        </div>
-        <div className="flex gap-1 border-b border-zinc-800 text-xs">
-          {TABS.map((t) => <button key={t.id} onClick={() => (location.hash = `#/alerts/${t.id}`)} className={cn('-mb-px border-b-2 px-3 py-1.5', tab === t.id ? 'border-accent-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-200')}>{t.label}</button>)}
-        </div>
+      <div className="mx-auto max-w-[1400px] px-6 py-5">
         {ws.activeId && tab === 'alerts' && <AlertsPanel workspaceId={ws.activeId} />}
         {ws.activeId && tab === 'snapshots' && <SnapshotsPanel workspaceId={ws.activeId} />}
         {ws.activeId && tab === 'channels' && <ChannelsPanel workspaceId={ws.activeId} />}

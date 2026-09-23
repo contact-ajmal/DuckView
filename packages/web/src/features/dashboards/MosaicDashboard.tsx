@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bot, Check, Pencil, RefreshCw, Save, Sparkles, Trash2, Wand2, X, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { ArrowLeft, Check, Pencil, RefreshCw, Save, Sparkles, Trash2, Wand2, X, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { api, type CatalogObject, type Dashboard, type JailEntry } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
@@ -7,8 +7,7 @@ import { createMosaic } from '../../lib/mosaic';
 import { analyzeColumns, resolveSource, templateSpec, type DataSource } from '../../lib/mosaic/analyze';
 import { parseSpecText, specToText, type Spec } from '../../lib/mosaic/spec';
 import { describeSpec } from '../../lib/mosaic/summary';
-import { PageTitle } from '../../components/layout';
-import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, cn } from '../../components/ui';
 import { MosaicSpecView, type SpecRenderStatus } from './MosaicSpecView';
 import { SpecEditor } from './SpecEditor';
 
@@ -146,35 +145,35 @@ export function MosaicDashboard({ id }: { id: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-end justify-between gap-3 px-5 pt-5 pb-3">
-        <div className="min-w-0">
-          <a href="#/dashboards" className="mb-1 inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-200"><ArrowLeft className="h-3 w-3" /> All dashboards</a>
+      <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-6 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <a href="#/dashboards" className="rounded p-1 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200" title="All dashboards" aria-label="All dashboards"><ArrowLeft className="h-4 w-4" /></a>
           {renaming ? (
             <form className="flex items-center gap-2" onSubmit={async (e) => { e.preventDefault(); await api.patch(`/api/dashboards/${id}`, { name }); setRenaming(false); await load(); }}>
-              <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="h-9 w-72 text-lg font-semibold" />
-              <Button size="sm" variant="primary" type="submit"><Check className="h-3.5 w-3.5" /></Button>
+              <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="w-72 font-semibold" />
+              <Button size="sm" variant="primary" type="submit"><Check className="h-3.5 w-3.5" /> Save</Button>
             </form>
           ) : (
-            <PageTitle className="flex items-center gap-2">
-              {dash.name}
-              <Badge tone="violet" className="gap-1"><Sparkles className="h-3 w-3" /> Mosaic</Badge>
-              {canWrite && <button onClick={() => setRenaming(true)} className="text-zinc-500 hover:text-zinc-200" title="Rename"><Pencil className="h-4 w-4" /></button>}
-            </PageTitle>
+            <div className="min-w-0">
+              <h1 className="flex items-center gap-2 truncate text-[15px] font-semibold text-zinc-50">
+                {dash.name}
+                {canWrite && <button onClick={() => setRenaming(true)} className="text-zinc-600 hover:text-zinc-200" title="Rename" aria-label="Rename dashboard"><Pencil className="h-3.5 w-3.5" /></button>}
+              </h1>
+              <p className="truncate text-xs text-zinc-500">
+                Mosaic{!empty && ` · ${info.plots} plot${info.plots === 1 ? '' : 's'}${info.inputs ? ` · ${info.inputs} input${info.inputs === 1 ? '' : 's'}` : ''}`}{(dash.description || info.title) && ` · ${dash.description || info.title}`}
+              </p>
+            </div>
           )}
-          <p className="mt-0.5 text-xs text-zinc-500">
-            {dash.description || info.title || 'Interactive, cross-filtered charts from a declarative spec.'}
-            {!empty && <span className="text-zinc-600"> · {info.plots} plot{info.plots === 1 ? '' : 's'}{info.inputs ? ` · ${info.inputs} input${info.inputs === 1 ? '' : 's'}` : ''}{info.datasets ? ` · ${info.datasets} dataset${info.datasets === 1 ? '' : 's'}` : ''}</span>}
-          </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Button size="sm" variant="ghost" onClick={() => setNonce((n) => n + 1)} title="Re-render"><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>
-          <Button size="sm" variant="ghost" onClick={() => cp.toggle()} title="DuckCopilot"><Bot className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => cp.toggle()} title="Ask AI about this dashboard"><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
           {canWrite && (
             <>
               <Button size="sm" variant="secondary" onClick={() => setGenerator(true)} title="Draft a spec from a table or file"><Wand2 className="h-3.5 w-3.5" /> Generate</Button>
               <Button size="sm" variant={edit ? 'primary' : 'secondary'} onClick={() => setEdit(!edit)} title={edit ? 'Hide the editor' : 'Edit the spec'}>{edit ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />} {edit ? 'Editing' : 'Edit'}</Button>
               <Button size="sm" variant="primary" disabled={!dirty || saving} loading={saving} onClick={() => void save()} title="Save the spec (⌘S)"><Save className="h-3.5 w-3.5" /> Save</Button>
-              <Button size="sm" variant="danger" onClick={async () => { if (confirm(`Delete dashboard "${dash.name}"?`)) { await api.del(`/api/dashboards/${id}`); location.hash = '#/dashboards'; } }} title="Delete dashboard"><Trash2 className="h-3.5 w-3.5" /></Button>
+              <IconButton label="Delete dashboard" className="hover:text-red-400" onClick={async () => { if (confirm(`Delete dashboard "${dash.name}"?`)) { await api.del(`/api/dashboards/${id}`); location.hash = '#/dashboards'; } }}><Trash2 className="h-3.5 w-3.5" /></IconButton>
             </>
           )}
         </div>

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Plug, Database, Cloud, Layers, Globe, Warehouse, Boxes, Plus, RefreshCw, Play, Pause, Trash2, Pencil, CheckCircle2, AlertTriangle, Clock, Bot, ExternalLink, Search } from 'lucide-react';
+import { Plug, Database, Cloud, Layers, Globe, Warehouse, Boxes, Plus, RefreshCw, Play, Pause, Trash2, Pencil, CheckCircle2, AlertTriangle, Clock, ExternalLink, Search, Sparkles } from 'lucide-react';
 import { api, timeAgo, type SourceType, type SourceFamily, type CloudConnection, type LakehouseConnection, type DatabaseConnection, type PublicConnection, type DataSync, type DataSyncRun, type ConnectorConnection, type ConnectorSummary } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { useCopilot } from '../../store/copilot';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
-import { Eyebrow, PageTitle } from '../../components/layout';
-import { Badge, Button, Empty, Input, cn } from '../../components/ui';
+import { PageHeader } from '../../components/layout';
+import { Badge, Button, Empty, Input, Tabs, cn } from '../../components/ui';
 import { CloudWizard } from '../explorer/CloudWizard';
 import { LakehouseWizard } from '../explorer/LakehouseWizard';
 import { DatabaseWizard } from './DatabaseWizard';
@@ -144,27 +144,21 @@ export function ConnectionsPage() {
 
   return (
     <div className="h-full min-h-0 overflow-auto">
-    <div className="mx-auto max-w-7xl space-y-5 p-5 pb-16">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <Eyebrow>Data</Eyebrow>
-          <PageTitle>Connections</PageTitle>
-          <p className="mt-1 text-xs text-zinc-500">Object storage, lakehouse catalogs, databases, warehouses, SaaS applications and Google Drive / Sheets — connected once, queried from every workspace, loaded on a schedule, and reachable by agents through <code className="font-mono">list_data_sources</code>, <code className="font-mono">browse_connector</code> and the sync tools.</p>
-        </div>
-        <div className="flex items-center gap-1 rounded-lg border border-zinc-800 p-0.5">
-          {([['sources', `Configured (${configuredCount})`], ['catalog', 'Add a source'], ['syncs', `Syncs (${syncs.length})`]] as [Tab, string][]).map(([t, label]) => (
-            <button key={t} onClick={() => go(t)} className={cn('rounded-md px-3 py-1.5 text-xs', tab === t ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-100')}>{label}</button>
-          ))}
-        </div>
-      </div>
+    <div className="mx-auto max-w-[1180px] space-y-4 px-6 py-5 pb-16">
+      <PageHeader
+        title="Connections"
+        description="Storage, databases, warehouses, SaaS apps and lakehouse catalogs — connected once, used by every workspace."
+        actions={canEdit ? <Button variant="primary" onClick={() => go('catalog')}><Plus className="h-3.5 w-3.5" /> Add a source</Button> : undefined}
+      />
+      <Tabs<Tab> value={tab} onChange={go} tabs={[{ id: 'sources', label: 'Configured', count: configuredCount }, { id: 'catalog', label: 'Add a source' }, { id: 'syncs', label: 'Syncs', count: syncs.length }]} />
 
       {notice && <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs', notice.tone === 'ok' ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-200' : 'border-red-900/60 bg-red-950/30 text-red-200')}>{notice.tone === 'ok' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{notice.text}</span><button className="ml-auto text-zinc-500 hover:text-zinc-200" onClick={() => setNotice(null)}>×</button></div>}
 
       {tab === 'sources' && configured && (
         <div className="space-y-4">
-          {configuredCount === 0 && <div className="rounded-xl border border-dashed border-zinc-800 py-14"><Empty icon={<Plug className="h-10 w-10" />} title="No connections yet" hint="Pick a source type under Add a source — object storage, a lakehouse catalog, a database, a web endpoint or a shared sheet." /><div className="mt-3 flex justify-center"><Button variant="primary" onClick={() => go('catalog')}><Plus className="h-4 w-4" /> Add a source</Button></div></div>}
+          {configuredCount === 0 && <div className="border-y border-zinc-800 py-14"><Empty icon={<Plug />} title="No connections yet" hint="Connect object storage, a lakehouse catalog, a database, a warehouse or a SaaS app." action={<Button size="sm" onClick={() => go('catalog')}><Plus className="h-3.5 w-3.5" /> Add a source</Button>} /></div>}
           {configured.databases.length > 0 && (
-            <Section title="Databases" icon={FAMILY_ICON.database} hint="Attached read-only to every engine of your workspaces; query as alias.schema.table.">
+            <Section title="Databases" icon={FAMILY_ICON.database} hint="Attached to every workspace engine as alias.schema.table.">
               {configured.databases.map((c) => (
                 <Row key={c.id} title={c.name} badge={<Badge>{c.engine}</Badge>} status={c.status} onOpen={() => setWizard({ kind: 'database', source: sources.find((s) => s.backend.family === 'database' && s.backend.engine === c.engine) ?? null, edit: c })} sub={<><code className="font-mono">{c.alias}</code> · {c.engine === 'sqlite' || c.engine === 'duckdb' ? c.config.path : `${c.config.user}@${c.config.host}:${c.config.port ?? (c.engine === 'postgres' ? 5432 : 3306)}/${c.config.database}`}{c.config.read_only === false ? ' · read-write' : ' · read-only'}{c.last_tested_at ? ` · tested ${timeAgo(c.last_tested_at)}` : ''}{c.last_error ? <span className="text-red-300"> · {c.last_error}</span> : null}{testing[c.id] ? <span className="text-zinc-400"> · {testing[c.id]}</span> : null}{c.needs_external_access && !configured.external_access ? <span className="text-amber-300"> · needs security.enable_external_access</span> : null}</>}
                   actions={<>
@@ -177,7 +171,7 @@ export function ConnectionsPage() {
             </Section>
           )}
           {configured.connectors.length > 0 && (
-            <Section title="Warehouses, applications & Google" icon={FAMILY_ICON.saas} hint="Browsed from the sync editor and by agents; rows are staged into DuckDB by syncs. Credentials stay encrypted on the server.">
+            <Section title="Warehouses & SaaS" icon={FAMILY_ICON.saas} hint="Loaded into DuckDB by syncs; browsable by agents.">
               {configured.connectors.map((c) => (
                 <Row key={c.id} title={c.name} badge={<Badge>{c.connector_label}</Badge>} status={c.status} onOpen={() => { const k = connectorCatalog.find((x) => x.id === c.connector); if (k) setWizard({ kind: 'connector', source: sources.find((s) => s.backend.family === 'connector' && s.backend.connector === c.connector) ?? null, connector: k, edit: c }); }} sub={<>{c.account_label ? <><span className="text-zinc-300">{c.account_label}</span> · </> : null}{c.auth_kind === 'google' ? (c.credential_fields.includes('refresh_token') ? 'Google account' : c.credential_fields.includes('service_account_key') ? 'service account' : 'not signed in') : `${c.credential_fields.length} credential${c.credential_fields.length === 1 ? '' : 's'} on file`}{c.remote_sql ? ' · remote SQL' : ''}{c.last_tested_at ? ` · tested ${timeAgo(c.last_tested_at)}` : ''}{c.last_error ? <span className={c.status === 'error' ? 'text-red-300' : 'text-amber-300'}> · {c.last_error}</span> : null}{testing[c.id] ? <span className="text-zinc-400"> · {testing[c.id]}</span> : null}{!configured.external_access ? <span className="text-amber-300"> · needs security.enable_external_access</span> : null}</>}
                   actions={<>
@@ -190,7 +184,7 @@ export function ConnectionsPage() {
             </Section>
           )}
           {configured.lakehouse.length > 0 && (
-            <Section title="Lakehouse catalogs" icon={FAMILY_ICON.lakehouse} hint="Iceberg / Unity catalogs attached as alias.schema.table; browse them in the explorer.">
+            <Section title="Lakehouse" icon={FAMILY_ICON.lakehouse} hint="Iceberg and Unity catalogs, attached as alias.schema.table.">
               {configured.lakehouse.map((c) => (
                 <Row key={c.id} title={c.name} badge={<Badge>{c.provider.toLowerCase().replace('_', ' ')}</Badge>} status={c.status} onOpen={() => setWizard({ kind: 'lakehouse', provider: c.provider, edit: c })} sub={<><code className="font-mono">{c.alias}</code> · {c.example_sql}{c.last_tested_at ? ` · tested ${timeAgo(c.last_tested_at)}` : ''}{c.last_error ? <span className="text-red-300"> · {c.last_error}</span> : null}{testing[c.id] ? <span className="text-zinc-400"> · {testing[c.id]}</span> : null}</>}
                   actions={<>
@@ -202,7 +196,7 @@ export function ConnectionsPage() {
             </Section>
           )}
           {configured.cloud.length > 0 && (
-            <Section title="Object storage" icon={FAMILY_ICON.storage} hint="Buckets browsed in the explorer and queried by URI; also where cloud-backed workspaces live.">
+            <Section title="Storage" icon={FAMILY_ICON.storage} hint="Buckets queried by URI; also where cloud workspaces live.">
               {configured.cloud.map((c) => (
                 <Row key={c.id} title={c.name} badge={<Badge>{c.provider}</Badge>} status="ok" onOpen={() => setWizard({ kind: 'cloud', provider: c.provider, edit: c })} sub={<>{c.uri_scheme}://{c.bucket ?? '<bucket>'}/… · {c.fields.join(', ')}{c.region ? ` · ${c.region}` : ''}{c.endpoint_url ? ` · ${c.endpoint_url}` : ''}</>}
                   actions={<>
@@ -213,7 +207,7 @@ export function ConnectionsPage() {
             </Section>
           )}
           {configured.http.length > 0 && (
-            <Section title="HTTP credentials" icon={FAMILY_ICON.web} hint="Bearer tokens applied to https:// reads and URL syncs.">
+            <Section title="HTTP credentials" icon={FAMILY_ICON.web} hint="Tokens applied to https:// reads and URL syncs.">
               {configured.http.map((c) => <Row key={c.id} title={c.name} badge={<Badge>HTTP</Badge>} status="ok" sub={<>{c.fields.join(', ')}</>} actions={<Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Remove "${c.name}"?`)) { await api.del(`/api/connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>} />)}
             </Section>
           )}
@@ -222,28 +216,25 @@ export function ConnectionsPage() {
 
       {tab === 'catalog' && catalog && (
         <div className="space-y-5">
-          <div className="relative max-w-md"><Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" /><Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search sources… postgres, sheets, iceberg" className="pl-8" /></div>
+          <div className="relative max-w-md"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" /><Input autoFocus value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search sources — postgres, sheets, iceberg…" className="pl-8" /></div>
           {(Object.keys(catalog.families) as SourceFamily[]).map((fam) => {
             const items = sources.filter((s) => s.family === fam && matches(s));
             if (!items.length) return null;
             return (
               <div key={fam}>
-                <div className="mb-2 flex items-baseline gap-2"><span className="text-zinc-400">{FAMILY_ICON[fam]}</span><h3 className="text-sm font-semibold text-zinc-100">{catalog.families[fam].label}</h3><span className="text-[11px] text-zinc-500">{catalog.families[fam].blurb}</span></div>
-                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                <div className="mb-2 flex items-baseline gap-2"><span className="text-zinc-500">{FAMILY_ICON[fam]}</span><h3 className="text-[13px] font-semibold text-zinc-100">{catalog.families[fam].label}</h3><span className="truncate text-xs text-zinc-500">{catalog.families[fam].blurb}</span></div>
+                <div className="grid gap-x-6 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
                   {items.map((s) => (
-                    <button key={s.id} type="button" disabled={s.status === 'planned' || !canEdit} onClick={() => openWizard(s)} className={cn('group rounded-lg border p-3 text-left', s.status === 'planned' ? 'cursor-default border-zinc-800/60 opacity-60' : 'border-zinc-800 hover:border-accent-500/60 hover:bg-accent-500/5')} title={s.status === 'planned' ? 'Planned — not available yet' : `Connect ${s.label}`}>
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="truncate text-[13px] font-semibold text-zinc-100">{s.label}</span>
-                        {s.status === 'planned' ? <Badge tone="zinc">planned</Badge> : <span className="font-mono text-[9px] uppercase tracking-wide text-zinc-500">{s.vendor}</span>}
+                    <button key={s.id} type="button" disabled={s.status === 'planned' || !canEdit} onClick={() => openWizard(s)} className={cn('group flex items-start gap-3 border-b border-zinc-800/70 px-1 py-2.5 text-left', s.status === 'planned' ? 'cursor-default opacity-50' : 'hover:bg-zinc-900')} title={s.status === 'planned' ? 'Planned — not available yet' : `Connect ${s.label}`}>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-[13px] font-medium text-zinc-100">{s.label}</span>
+                          {s.status === 'planned' && <Badge>planned</Badge>}
+                        </div>
+                        <div className="truncate text-xs text-zinc-500">{s.blurb}</div>
+                        <div className="mt-0.5 truncate text-[11px] text-zinc-600">{[s.capabilities.attach && 'attach', s.capabilities.browse && 'browse', s.capabilities.remote_sql && 'remote SQL', s.capabilities.sync && 'sync'].filter(Boolean).join(' · ')}{' · '}{s.auth === 'keys' ? 'access keys' : s.auth === 'token' ? 'token' : s.auth === 'password' ? 'password' : s.auth === 'file' ? 'file' : s.auth === 'connection_string' ? 'connection string' : s.auth === 'oauth' ? (s.backend.family === 'connector' && connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector)?.auth.kind === 'google' ? 'Google account' : 'OAuth') : 'no auth'}</div>
                       </div>
-                      <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-zinc-500">{s.blurb}</div>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {s.capabilities.attach && <Badge tone="violet">attach</Badge>}
-                        {s.capabilities.browse && <Badge>browse</Badge>}
-                        {s.capabilities.remote_sql && <Badge tone="blue">remote SQL</Badge>}
-                        {s.capabilities.sync && <Badge tone="green">sync</Badge>}
-                        <Badge>{s.auth === 'keys' ? 'access keys' : s.auth === 'token' ? 'token' : s.auth === 'password' ? 'password' : s.auth === 'file' ? 'file' : s.auth === 'connection_string' ? 'connection string' : s.auth === 'oauth' ? (s.backend.family === 'connector' && connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector)?.auth.kind === 'google' ? 'Google account' : 'OAuth') : 'no auth'}</Badge>
-                      </div>
+                      {s.status !== 'planned' && <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600 group-hover:text-zinc-200" />}
                     </button>
                   ))}
                 </div>
@@ -257,18 +248,18 @@ export function ConnectionsPage() {
       {tab === 'syncs' && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs text-zinc-500">Scheduled loads into <b className="text-zinc-300">{ws.workspaces.find((w) => w.id === wsId)?.name ?? 'the active workspace'}</b>: a source, a target table, a schedule, an optional transformation — run by the server, recorded per run, driven by agents through <code className="font-mono">create_data_sync</code> / <code className="font-mono">run_data_sync</code>.</p>
+            <p className="text-xs text-zinc-500">Scheduled loads into {ws.workspaces.find((w) => w.id === wsId)?.name ?? 'this workspace'}: a source, a target table, a schedule and an optional transformation.</p>
             <div className="ml-auto flex gap-2">
-              <Button size="sm" variant="ghost" onClick={() => cp.toggle(true)} title="Ask Copilot to design a pipeline"><Bot className="h-3.5 w-3.5" /> Copilot</Button>
+              <Button size="sm" variant="ghost" onClick={() => cp.toggle(true)} title="Ask AI to design a pipeline"><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
               <Button size="sm" variant="primary" disabled={!wsId || !canEdit} onClick={() => setWizard({ kind: 'sync', edit: null })}><Plus className="h-3.5 w-3.5" /> New sync</Button>
             </div>
           </div>
           {syncs.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-zinc-800 py-14"><Empty icon={<Clock className="h-10 w-10" />} title="No syncs yet" hint="Load a table from a connected database or warehouse, an application object, a Google Sheet or Drive file, a CSV/JSON endpoint or any SELECT into this workspace on a schedule." /></div>
+            <div className="border-y border-zinc-800 py-14"><Empty icon={<Clock />} title="No syncs yet" hint="Load a table from a database or warehouse, a SaaS object, a Google Sheet, a CSV/JSON endpoint or any SELECT into this workspace on a schedule." /></div>
           ) : (
-            <div className="divide-y divide-zinc-800 rounded-xl border border-zinc-800">
+            <div className="divide-y divide-zinc-800 border-y border-zinc-800">
               {syncs.map((s) => (
-                <div key={s.id} className="p-3">
+                <div key={s.id} className="px-1 py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusDot status={s.last_run?.status ?? 'unknown'} />
                     <span className="text-sm font-semibold text-zinc-100">{s.name}</span>
@@ -329,28 +320,28 @@ export function describeResource(r: Record<string, unknown>): string {
   return parts.join(' · ') || JSON.stringify(r).slice(0, 80);
 }
 
+const ROW_GRID = 'grid grid-cols-[minmax(0,1.1fr)_120px_96px_minmax(0,2fr)_auto] items-center gap-4';
 function Section({ title, icon, hint, children }: { title: string; icon: ReactNode; hint: string; children: ReactNode }) {
   return (
-    <section className="rounded-xl border border-zinc-800 bg-zinc-900/40">
-      <header className="flex items-baseline gap-2 border-b border-zinc-800 px-4 py-2"><span className="text-zinc-400">{icon}</span><h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-300">{title}</h3><span className="text-[11px] text-zinc-500">{hint}</span></header>
-      <div className="divide-y divide-zinc-800/60">{children}</div>
+    <section>
+      <header className="mb-1 flex items-baseline gap-2"><span className="self-center text-zinc-500">{icon}</span><h3 className="text-[13px] font-semibold text-zinc-100">{title}</h3><span className="truncate text-xs text-zinc-500">{hint}</span></header>
+      <div className={cn(ROW_GRID, 'border-b border-zinc-800 px-1 py-1.5 text-xs text-zinc-500')}><span>Name</span><span>Type</span><span>Status</span><span>Details</span><span className="sr-only">Actions</span></div>
+      <div className="divide-y divide-zinc-800/70 border-b border-zinc-800">{children}</div>
     </section>
   );
 }
 function Row({ title, badge, status, sub, actions, onOpen }: { title: string; badge: ReactNode; status: 'ok' | 'error' | 'unknown'; sub: ReactNode; actions: ReactNode; onOpen?: () => void }) {
   return (
-    <div className={cn('flex flex-wrap items-center gap-2 px-4 py-2.5', onOpen && 'cursor-pointer hover:bg-zinc-900/60')} onClick={onOpen} title={onOpen ? 'Open settings' : undefined}>
-      <StatusDot status={status} />
-      <span className="text-sm font-medium text-zinc-100">{title}</span>
-      {badge}
-      <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-500">{sub}</span>
-      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>{actions}</div>
+    <div className={cn(ROW_GRID, 'group px-1 py-2', onOpen && 'cursor-pointer hover:bg-zinc-900')} onClick={onOpen} title={onOpen ? 'Open settings' : undefined}>
+      <span className="truncate text-[13px] font-medium text-zinc-100">{title}</span>
+      <span className="min-w-0 truncate text-xs text-zinc-400 [&>span]:bg-transparent [&>span]:p-0 [&>span]:text-xs [&>span]:font-normal [&>span]:text-zinc-400">{badge}</span>
+      <span className="text-xs text-zinc-400"><span className="inline-flex items-center gap-1.5"><StatusDot status={status} />{status === 'ok' ? 'connected' : status === 'error' ? 'failing' : 'untested'}</span></span>
+      <span className="min-w-0 truncate text-xs text-zinc-500">{sub}</span>
+      <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>{actions}</div>
     </div>
   );
 }
 function StatusDot({ status }: { status: string }) {
-  if (status === 'ok') return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />;
-  if (status === 'error') return <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-400" />;
-  if (status === 'running') return <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin text-accent-300" />;
-  return <span className="h-2 w-2 shrink-0 rounded-full bg-zinc-600" title="not tested yet" />;
+  if (status === 'running') return <RefreshCw className="h-3 w-3 shrink-0 animate-spin text-sky-500" />;
+  return <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', status === 'ok' ? 'bg-emerald-500' : status === 'error' ? 'bg-red-500' : 'bg-zinc-600')} title={status === 'ok' ? 'ok' : status === 'error' ? 'failing' : 'not tested yet'} />;
 }

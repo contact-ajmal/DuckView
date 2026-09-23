@@ -131,7 +131,7 @@ export function StackedPanes({ storageKey, sections, className }: { storageKey: 
   const [collapsed, setCollapsed] = usePersisted<Record<string, boolean>>(`duckview.stack.${storageKey}.collapsed`, {});
   const ref = useRef<HTMLDivElement>(null);
   const start = useRef<Record<string, number>>({});
-  const HEADER = 34;
+  const HEADER = 30;
   // The last non-collapsed section is flexible; everything above has an explicit height.
   const flexibleKey = [...sections].reverse().find((s) => !collapsed[s.key])?.key;
 
@@ -152,11 +152,11 @@ export function StackedPanes({ storageKey, sections, className }: { storageKey: 
         return (
           <div key={s.key} className={cn('flex min-h-0 flex-col', isFlex && !isCollapsed ? 'flex-1' : 'shrink-0')} style={isCollapsed ? { height: HEADER } : isFlex ? undefined : { height: heightOf(s) }}>
             <header
-              className="group/sec flex h-[34px] shrink-0 cursor-pointer select-none items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-900/60 px-3"
+              className="group/sec flex h-[30px] shrink-0 cursor-pointer select-none items-center justify-between gap-2 px-2.5 hover:bg-zinc-800/40"
               onClick={() => setCollapsed((c) => ({ ...c, [s.key]: !c[s.key] }))}
               title={isCollapsed ? 'Expand section' : 'Collapse section'}
             >
-              <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-300">
+              <span className="flex min-w-0 items-center gap-1 text-xs font-semibold text-zinc-300">
                 {isCollapsed ? <ChevronRight className="h-3 w-3 text-zinc-500" /> : <ChevronDown className="h-3 w-3 text-zinc-500" />}
                 <span className="truncate">{s.title}</span>
               </span>
@@ -177,7 +177,7 @@ export function StackedPanes({ storageKey, sections, className }: { storageKey: 
                   setHeights((h) => ({ ...h, [s.key]: clamp((start.current[s.key] ?? heightOf(s)) + delta, s.minHeight ?? 80, 2000) }));
                 }}
                 onReset={() => setHeights((h) => ({ ...h, [s.key]: s.defaultHeight ?? 220 }))}
-                className="border-b border-zinc-800"
+                className="border-b border-zinc-800/70"
               />
             )}
           </div>

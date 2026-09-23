@@ -137,7 +137,7 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
     <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
       <div className="space-y-3">
         <div>
-          <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-zinc-500">Metrics <button className="normal-case text-accent-300 hover:underline" onClick={onDefine}>edit definitions</button></div>
+          <div className="mb-1 flex items-center justify-between text-[10px] text-zinc-500">Metrics <button className="normal-case text-accent-300 hover:underline" onClick={onDefine}>edit definitions</button></div>
           <div className="space-y-0.5">
             {layer.metrics.map((m) => (
               <label key={m.name} className={cn('flex cursor-pointer items-start gap-2 rounded px-1.5 py-1', picked.includes(m.name) ? 'bg-zinc-800/80' : 'hover:bg-zinc-800/40')} title={m.error ?? m.description ?? ''} data-metric={m.name}>
@@ -151,7 +151,7 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
           </div>
         </div>
         <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">Group by</div>
+          <div className="mb-1 text-[10px] text-zinc-500">Group by</div>
           <div className="flex flex-wrap gap-1">
             {groupBy.map((g) => (
               <span key={g} className="inline-flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-zinc-200">
@@ -174,7 +174,7 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
           )}
         </div>
         <div>
-          <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="mb-1 flex items-center justify-between text-[10px] text-zinc-500">
             Filters
             <button className="rounded p-0.5 hover:bg-zinc-800 hover:text-zinc-200" onClick={() => setFilters((f) => [...f, { dimension: dims[0]?.name ?? '', op: '=', value: '' }])} title="Add a filter"><Plus className="h-3.5 w-3.5" /></button>
           </div>
@@ -195,7 +195,7 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
       </div>
       <div className="min-w-0 space-y-2">
         {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}
-        {!result && !error && <div className="rounded-lg border border-dashed border-zinc-800 p-8 text-center text-zinc-500">Pick metrics and dimensions, then Compute. The same definitions answer agents (query_metrics) and Copilot.</div>}
+        {!result && !error && <div className="border-y border-zinc-800 p-8 text-center text-zinc-500">Pick metrics and dimensions, then Compute. The same definitions answer agents (query_metrics) and Copilot.</div>}
         {result && (
           <>
             <div className="flex flex-wrap items-center gap-2" data-testid="metrics-result">
@@ -285,14 +285,14 @@ function Definitions({ workspaceId, layer, onSaved }: { workspaceId: string; lay
           </div>
         )}
         <div className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[11px] text-zinc-400">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-500">How it reads</div>
+          <div className="text-[10px] text-zinc-500">How it reads</div>
           <p><b className="text-zinc-300">semantic_models</b>: a table (or sql), <span className="font-mono">entities</span> (keys; a foreign entity joins to the model where it is primary), <span className="font-mono">dimensions</span> (categorical or time) and <span className="font-mono">measures</span> (sum · count · count_distinct · avg · min · max · median).</p>
           <p><b className="text-zinc-300">metrics</b>: <span className="font-mono">simple</span> (a measure, optional filter), <span className="font-mono">ratio</span> (numerator / denominator), <span className="font-mono">derived</span> (an expression over metrics).</p>
           <p>Group by <span className="font-mono">metric_time__month</span>, a dimension, or <span className="font-mono">customer__tier</span> across a join. Filters may use <span className="font-mono">{"{{ Dimension('order__status') }}"}</span>.</p>
         </div>
         {imported.length > 0 && (
           <div className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[11px] text-zinc-400">
-            <div className="text-[10px] uppercase tracking-wide text-zinc-500">From dbt projects</div>
+            <div className="text-[10px] text-zinc-500">From dbt projects</div>
             {imported.map((s) => (
               <div key={s.source} className="flex items-center justify-between">
                 <a className="text-accent-300 hover:underline" href={`#/transform/dbt/${s.source.slice(4)}`}>{s.source}</a>

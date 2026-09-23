@@ -72,7 +72,7 @@ export function SchemaPanel({ workspaceId, target, remoteConnectionId, onQuery, 
           {error && <div className="m-4 rounded-md border border-red-900 bg-red-950/40 p-3 font-mono text-xs text-red-200">{error}</div>}
           {result && (
             <table className="w-full font-mono text-xs">
-              <thead className="sticky top-0 bg-zinc-950 text-left text-[10px] uppercase tracking-wide text-zinc-500">
+              <thead className="sticky top-0 bg-zinc-950 text-left text-[10px] text-zinc-500">
                 <tr className="border-b border-zinc-800">
                   <th className="px-4 py-2 font-normal">#</th>
                   <th className="px-2 py-2 font-normal">column</th>
@@ -96,7 +96,7 @@ export function SchemaPanel({ workspaceId, target, remoteConnectionId, onQuery, 
       </div>
       {result && (
         <aside className="flex w-80 shrink-0 flex-col gap-2 border-l border-zinc-800 p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{remoteConnectionId ? 'Query on the SQL warehouse' : 'Query this file'}</div>
+          <div className="text-[10px] font-semibold text-zinc-500">{remoteConnectionId ? 'Query on the SQL warehouse' : 'Query this file'}</div>
           <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-2 font-mono text-[11px] text-zinc-300">{suggested}</pre>
           <div className="flex flex-wrap gap-2">
             <Button variant="primary" size="sm" onClick={() => onQuery(suggested, title)}><Play className="h-3.5 w-3.5" /> {remoteConnectionId ? 'Run on warehouse' : 'Query this file'}</Button>

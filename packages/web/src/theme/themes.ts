@@ -44,7 +44,11 @@ const TW = {
   gray: ramp(['#f9fafb', '#f3f4f6', '#e5e7eb', '#d1d5db', '#9ca3af', '#6b7280', '#4b5563', '#374151', '#1f2937', '#111827', '#030712']),
 };
 const DARK_TONES: Record<ToneName, Ramp> = { emerald: TW.emerald, amber: TW.amber, red: TW.red, sky: TW.sky, fuchsia: TW.fuchsia };
+/** With the yellow accent, warnings move to orange so they never read as "active". */
+const TW_ORANGE = ramp(['#fff7ed', '#ffedd5', '#fed7aa', '#fdba74', '#fb923c', '#f97316', '#ea580c', '#c2410c', '#9a3412', '#7c2d12', '#431407']);
 const LIGHT_TONES: Record<ToneName, Ramp> = { emerald: mirror(TW.emerald), amber: mirror(TW.amber), red: mirror(TW.red), sky: mirror(TW.sky), fuchsia: mirror(TW.fuchsia) };
+const DUCK_DARK_TONES: Record<ToneName, Ramp> = { ...DARK_TONES, amber: TW_ORANGE };
+const DUCK_LIGHT_TONES: Record<ToneName, Ramp> = { ...LIGHT_TONES, amber: mirror(TW_ORANGE) };
 
 /**
  * Accent ramps. 500–700 stay saturated (solid buttons, sliders); on light themes 50–400 are re-pointed at darker
@@ -56,6 +60,9 @@ const VIOLET = ['#f5f3ff', '#ede9fe', '#ddd6fe', '#c4b5fd', '#a78bfa', '#8b5cf6'
 const BLUE = ['#eff6ff', '#dbeafe', '#bfdbfe', '#93c5fd', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e3a8a'];
 const TEAL = ['#e8f6fa', '#cfeaf3', '#b3dde9', '#9bcfdd', '#88c0d0', '#6faabc', '#5591a3', '#45788a', '#365f6e'];
 const NAVY = ['#eef2ff', '#e0e7ff', '#c7d2fe', '#a5b4fc', '#6366f1', '#4f46e5', '#3730a3', '#312e81', '#1e1b4b'];
+/** DuckView's accent: duckbill yellow. Fills carry dark ink text (see --accent-ink); text uses the deeper steps. */
+const DUCK_DARK: AccentRamp = { '50': '#fff8e1', '100': '#ffefb8', '200': '#fde58a', '300': '#f5d06a', '400': '#f2c94c', '500': '#f0b429', '600': '#e8a70f', '700': '#b8860b' };
+const DUCK_LIGHT: AccentRamp = { '50': '#5c3d00', '100': '#664400', '200': '#6b4700', '300': '#7a5200', '400': '#8a5d00', '500': '#f0b429', '600': '#e8a70f', '700': '#c78a00' };
 const ORANGE = ['#fff7ed', '#ffedd5', '#fed7aa', '#fdba74', '#fb923c', '#f97316', '#ea580c', '#c2410c', '#9a3412'];
 
 // Chart palettes validated with the dataviz validator on each theme's card surface.
@@ -100,14 +107,14 @@ export const THEMES: Theme[] = [
     id: 'midnight',
     name: 'Midnight',
     kind: 'dark',
-    description: 'Zinc and violet — the default DuckView look.',
-    fonts: { sans: FONT_STACKS.inter, mono: FONT_STACKS.jetbrains },
-    zinc: TW.zinc,
-    accent: accentDark(VIOLET),
-    tones: DARK_TONES,
-    series: SERIES_DARK_VIOLET,
-    status: STATUS_DARK,
-    swatches: ['#09090b', '#18181b', '#27272a', '#f4f4f5', '#7c3aed'],
+    description: 'Graphite surfaces with the duckbill-yellow accent — the default dark look.',
+    fonts: { sans: FONT_STACKS.plexSans, mono: FONT_STACKS.jetbrains },
+    zinc: ramp(['#f1f3f5', '#e3e6ea', '#c9ced5', '#a9b0b8', '#8a929b', '#6b737c', '#4c535b', '#363c43', '#272c32', '#181b1f', '#0f1113']),
+    accent: DUCK_DARK,
+    tones: DUCK_DARK_TONES,
+    series: SERIES_DARK_BLUE,
+    status: { ...STATUS_DARK, warning: '#f97316' },
+    swatches: ['#0f1113', '#181b1f', '#272c32', '#e3e6ea', '#f0b429'],
   },
   {
     id: 'graphite',
@@ -139,14 +146,14 @@ export const THEMES: Theme[] = [
     id: 'daylight',
     name: 'Daylight',
     kind: 'light',
-    description: 'Clean white surfaces with the violet accent.',
-    fonts: { sans: FONT_STACKS.inter, mono: FONT_STACKS.jetbrains },
-    zinc: light(['#09090b', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e9e9ec', '#f7f7f8', '#ffffff']),
-    accent: accentLight(VIOLET),
-    tones: LIGHT_TONES,
+    description: 'White workspace, cool gray chrome and the duckbill-yellow accent — the default light look.',
+    fonts: { sans: FONT_STACKS.plexSans, mono: FONT_STACKS.jetbrains },
+    zinc: light(['#0f1115', '#1b1e24', '#2b2f36', '#3e434b', '#565c66', '#6e7580', '#9aa1ab', '#d5d9de', '#e7e9ec', '#f5f6f8', '#ffffff']),
+    accent: DUCK_LIGHT,
+    tones: DUCK_LIGHT_TONES,
     series: SERIES_LIGHT,
-    status: STATUS_LIGHT,
-    swatches: ['#ffffff', '#f7f7f8', '#e9e9ec', '#18181b', '#7c3aed'],
+    status: { ...STATUS_LIGHT, warning: '#c2410c' },
+    swatches: ['#ffffff', '#f5f6f8', '#e7e9ec', '#1b1e24', '#f0b429'],
   },
   {
     id: 'professional',

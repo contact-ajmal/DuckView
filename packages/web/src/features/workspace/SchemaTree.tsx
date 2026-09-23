@@ -48,7 +48,7 @@ function ObjectNode({ o, defaultOpen, onInsert, onSnippet }: { o: CatalogObject;
         <button className="min-w-0 flex-1 truncate text-left font-mono text-xs text-zinc-100 hover:text-accent-300" onClick={() => onInsert(fq)} title={`Insert ${fq} at cursor`}>
           {fq}
         </button>
-        <span className="rounded border border-accent-700/60 bg-accent-600/15 px-1 font-mono text-[9px] text-accent-200">{o.type === 'VIEW' ? 'view' : 'table'}</span>
+        <span className="font-mono text-[10px] text-zinc-500">{o.type === 'VIEW' ? 'view' : 'table'}</span>
         <span className="font-mono text-[10px] text-zinc-500">{o.column_count} cols</span>
         <button className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-accent-300 group-hover:opacity-100" onClick={() => onSnippet(`SELECT * FROM ${fq} LIMIT 100;`)} title="Insert SELECT snippet">
           <Plus className="h-3.5 w-3.5" />
@@ -92,7 +92,7 @@ export function SchemaTree({ catalog, loading, onInsert, onSnippet }: { catalog:
       {objects.map((o) => (
         <ObjectNode key={`${o.database}.${o.schema}.${o.name}`} o={o} defaultOpen={objects.length <= 4} onInsert={onInsert} onSnippet={onSnippet} />
       ))}
-      {files.length > 0 && <div className={cn('mb-1 px-1 font-mono text-[10px] uppercase tracking-wider text-zinc-500', objects.length > 0 && 'mt-2')}>files</div>}
+      {files.length > 0 && <div className={cn('mb-1 px-1 font-mono text-[10px] text-zinc-500', objects.length > 0 && 'mt-2')}>files</div>}
       {files.map((f) => (
         <div key={f.path} className="group flex items-center gap-2 rounded px-1 py-1 hover:bg-zinc-800/60">
           {fileIcon(f.kind)}

@@ -114,9 +114,9 @@ function ProjectList({ workspaceId }: { workspaceId: string }) {
       {projects.length === 0 ? (
         <Empty title="No dbt projects yet" hint="Start from the starter project (a seed, a staging view, a table and tests) or import a project folder." icon={<Workflow className="h-6 w-6" />} />
       ) : (
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="divide-y divide-zinc-800/70 border-y border-zinc-800">
           {projects.map((p) => (
-            <button key={p.id} data-project={p.name} onClick={() => (location.hash = `#/transform/dbt/${p.id}`)} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-left hover:border-zinc-600">
+            <button key={p.id} data-project={p.name} onClick={() => (location.hash = `#/transform/dbt/${p.id}`)} className="block w-full px-1 py-2.5 text-left hover:bg-zinc-900">
               <div className="flex items-center gap-2">
                 <Workflow className="h-4 w-4 text-accent-300" />
                 <span className="font-medium text-zinc-100">{p.name}</span>
@@ -302,7 +302,7 @@ function ProjectView({ id }: { id: string }) {
 
       <div className="grid gap-3 lg:grid-cols-[220px_1fr]">
         <div className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
-          <div className="flex items-center justify-between px-1 pb-1 text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="flex items-center justify-between px-1 pb-1 text-[10px] text-zinc-500">
             Files
             {canEdit && <button className="rounded p-0.5 hover:bg-zinc-800 hover:text-zinc-200" title="New file" onClick={addFile}><FilePlus2 className="h-3.5 w-3.5" /></button>}
           </div>
@@ -352,7 +352,7 @@ function ProjectView({ id }: { id: string }) {
 
       <div className="grid gap-3 lg:grid-cols-[220px_1fr]">
         <div className="space-y-1">
-          <div className="px-1 text-[10px] uppercase tracking-wide text-zinc-500">Runs</div>
+          <div className="px-1 text-[10px] text-zinc-500">Runs</div>
           {runs.length === 0 && <div className="px-1 text-zinc-500">No runs yet.</div>}
           {runs.map((r) => (
             <button key={r.id} onClick={() => { selectedRun.current = r.id; void api.get<{ run: DbtRun }>(`/api/dbt/runs/${r.id}`).then((x) => setRun(x.run)); }} className={cn('block w-full rounded px-2 py-1.5 text-left', run?.id === r.id ? 'bg-zinc-800' : 'hover:bg-zinc-800/60')}>
@@ -382,7 +382,7 @@ function ProjectView({ id }: { id: string }) {
               {showLog && run.log && <pre className="max-h-72 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[11px] text-zinc-400">{run.log}</pre>}
               {results.length > 0 && (
                 <table className="w-full">
-                  <thead className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
+                  <thead className="text-left text-[10px] text-zinc-500">
                     <tr><th className="pb-1">Node</th><th className="pb-1">Type</th><th className="pb-1">Status</th><th className="pb-1 text-right">Rows</th><th className="pb-1 text-right">Time</th><th className="pb-1 pl-3">Message</th></tr>
                   </thead>
                   <tbody>

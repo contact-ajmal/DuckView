@@ -91,7 +91,7 @@ export function AppsAdminPanel() {
         {apps.length === 0 ? <p className="text-xs text-zinc-500">No data apps on this server yet.</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="text-[10.5px] uppercase tracking-wide text-zinc-500">
+              <thead className="text-[10.5px] text-zinc-500">
                 <tr><th className="py-1.5 pr-3 font-medium">App</th><th className="pr-3 font-medium">Workspace · owner</th><th className="pr-3 font-medium">Status</th><th className="pr-3 font-medium">Audience</th><th className="pr-3 font-medium">Instance</th><th className="font-medium" /></tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/70">

@@ -41,7 +41,7 @@ export function AppearanceSettings() {
     <div className="space-y-6">
       {groups.map((g) => (
         <section key={g.kind}>
-          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500">
             {g.icon} {g.label}
           </div>
           <div className="grid gap-3 md:grid-cols-3">

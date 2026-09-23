@@ -47,7 +47,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
         <Input className="h-7 w-56" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name, text or tag" />
       </div>
       {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}
-      {shown.length === 0 ? <div className="rounded-xl border border-dashed border-zinc-800 py-12"><Empty icon={<BookOpen className="h-10 w-10" />} title="No tables" hint="Tables and views of the workspace appear here." /></div> : (
+      {shown.length === 0 ? <div className="border-y border-zinc-800 py-12"><Empty icon={<BookOpen className="h-10 w-10" />} title="No tables" hint="Tables and views of the workspace appear here." /></div> : (
         <div className="divide-y divide-zinc-800/70 rounded-lg border border-zinc-800">
           {shown.map((o) => {
             const name = nameOf(o);

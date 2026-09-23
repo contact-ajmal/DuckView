@@ -68,7 +68,7 @@ export function AlertsPanel({ workspaceId }: { workspaceId: string }) {
       </div>
       {error && !draft && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
       {alerts.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 py-12"><Empty icon={<BellRing className="h-10 w-10" />} title="No alerts yet" hint="“Tell #ops when yesterday's orders drop below 1,000”, “page on-call when the sync table is stale” — a query and a condition." /></div>
+        <div className="border-y border-zinc-800 py-12"><Empty icon={<BellRing className="h-10 w-10" />} title="No alerts yet" hint="“Tell #ops when yesterday's orders drop below 1,000”, “page on-call when the sync table is stale” — a query and a condition." /></div>
       ) : (
         <div className="space-y-2">
           {alerts.map((a) => (

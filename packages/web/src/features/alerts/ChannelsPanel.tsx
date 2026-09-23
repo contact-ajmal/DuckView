@@ -67,7 +67,7 @@ export function ChannelsPanel({ workspaceId }: { workspaceId: string }) {
         </div>
       )}
       {channels.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 py-12"><Empty icon={<Bell className="h-10 w-10" />} title="No channels yet" hint="Add Slack, Teams, email, PagerDuty or a webhook — alerts and scheduled snapshots are delivered there." /></div>
+        <div className="border-y border-zinc-800 py-12"><Empty icon={<Bell className="h-10 w-10" />} title="No channels yet" hint="Add Slack, Teams, email, PagerDuty or a webhook — alerts and scheduled snapshots are delivered there." /></div>
       ) : (
         <div className="grid gap-2 md:grid-cols-2">
           {channels.map((c) => (

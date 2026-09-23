@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, KeyRound, Radio, Trash2, ShieldCheck, Terminal, Wrench, Activity, Pause, Play } from 'lucide-react';
+import { KeyRound, Radio, Trash2, Terminal, Wrench, Activity, Pause, Play } from 'lucide-react';
 import { api, timeAgo, type ApiToken, type McpSession, type AuditEvent, type Workspace, type AgentRecord, type AgentFramework, type FrameworkMeta } from '../../api/client';
 import { AgentsCard, FrameworksCard } from './AgentsPanel';
 import { subscribeLiveEvents, type LiveEvent } from '../../lib/liveEvents';
-import { Button, Badge, Card, CopyButton, Input, Label, Modal, Select, Stat, cn } from '../../components/ui';
+import { Button, CopyButton, Input, Label, Modal, Select, StatusDot, Tabs, cn } from '../../components/ui';
 import { useAuth } from '../../store/auth';
-import { Eyebrow, PageTitle } from '../../components/layout';
+import { PageHeader } from '../../components/layout';
 import { useLayout } from '../../store/layout';
-import { HideButton } from '../../components/LayoutMenu';
 
 interface McpInfo { transports: { sse: string; streamable_http: string; stdio: string }; tools: string[]; resources: string[]; prompts: string[]; limits: { default_page_size: number; max_page_size: number; max_cell_chars: number }; hitl_enabled: boolean; snippets: Record<string, string> }
 
@@ -32,8 +31,11 @@ function toFeed(e: LiveEvent): Feed | null {
   return null;
 }
 
+type AiTab = 'agents' | 'tools' | 'mcp' | 'activity' | 'approvals';
+
 export function McpPage() {
   const auth = useAuth();
+  const [aiTab, setAiTab] = useState<AiTab>(() => (['agents', 'tools', 'mcp', 'activity', 'approvals'].includes(location.hash.split('/')[2] ?? '') ? (location.hash.split('/')[2] as AiTab) : 'agents'));
   const [info, setInfo] = useState<McpInfo | null>(null);
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [sessions, setSessions] = useState<McpSession[]>([]);
@@ -99,209 +101,196 @@ export function McpPage() {
   const snippetText = info ? (info.snippets[snippet] ?? '').replace(/<TOKEN>/g, lastToken ?? '<TOKEN>') : '';
   const visible = feed.filter((f) => filter === 'all' || f.kind === filter || (filter === 'audit' && f.kind === 'session'));
 
+  const approvals = feed.filter((f) => f.status === 'approval_required' || f.status === 'blocked');
+  const feedTable = (items: Feed[], empty: string) =>
+    items.length === 0 ? (
+      <div className="border-y border-zinc-800 py-10 text-center text-xs text-zinc-500">{empty}</div>
+    ) : (
+      <table className="w-full table-fixed text-[13px]" data-testid="activity-feed">
+        <thead>
+          <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
+            <th className="w-36 py-1.5 pr-3 font-normal">Agent</th>
+            <th className="py-1.5 pr-3 font-normal">Action</th>
+            <th className="w-28 py-1.5 pr-3 font-normal">Status</th>
+            <th className="w-20 py-1.5 pr-3 text-right font-normal">Duration</th>
+            <th className="w-24 py-1.5 font-normal">When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((f) => (
+            <tr key={f.id} className="border-b border-zinc-800/70 align-top hover:bg-zinc-900">
+              <td className="py-2 pr-3">
+                <div className="truncate text-zinc-200">{f.agent ?? f.user ?? '—'}</div>
+                {f.via === 'rest' && <div className="text-[11px] text-zinc-500">REST</div>}
+              </td>
+              <td className="py-2 pr-3">
+                <div className="flex items-center gap-1.5">
+                  {f.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : f.kind === 'session' ? <Radio className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Activity className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
+                  <span className="truncate font-mono text-xs text-zinc-100">{f.title}</span>
+                </div>
+                {f.detail && <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500" title={f.detail}>{f.detail}</div>}
+              </td>
+              <td className="py-2 pr-3"><StatusDot tone={f.status === 'ok' ? 'ok' : f.status === 'approval_required' || f.status === 'blocked' ? 'warn' : f.status === 'info' ? 'busy' : 'error'}>{f.status === 'approval_required' ? 'needs approval' : f.status}</StatusDot></td>
+              <td className="py-2 pr-3 text-right text-xs tabular-nums text-zinc-500">{f.ms != null ? `${Math.round(f.ms)} ms` : ''}</td>
+              <td className="py-2 text-xs text-zinc-500">{timeAgo(f.at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+
   return (
-    <div className="mx-auto max-w-[1400px] space-y-5 p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <Eyebrow>AI agents · MCP · Bedrock AgentCore</Eyebrow>
-          <PageTitle className="flex items-center gap-2">
-            <Bot className="h-6 w-6 text-accent-400" /> Agent & MCP hub
-          </PageTitle>
-          <p className="mt-1 text-xs text-zinc-500">Connect Claude Desktop, Cursor, Claude Code and your own Strands / LangGraph / LangChain / CrewAI agents — locally, on AgentCore or behind Bedrock — to your DuckDB workspaces and lakehouse catalogs, and watch what they do in real time.</p>
+    <div className="h-full overflow-auto">
+    <div className="mx-auto max-w-[1280px] space-y-4 px-6 py-5">
+      <PageHeader
+        title="AI"
+        description="Agents and MCP clients working with this server, what they do, and what waits for your approval."
+        actions={<Button onClick={() => setCreating(true)}><KeyRound className="h-3.5 w-3.5" /> New API token</Button>}
+      />
+      {!hidden['mcp.stats'] && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-zinc-500">
+          <span><b className="font-semibold text-zinc-200">{agents.length}</b> agents</span>
+          <span><b className="font-semibold text-zinc-200">{sessions.length}</b> live sessions</span>
+          <span><b className="font-semibold text-zinc-200">{tokens.length}</b> tokens</span>
+          <span><b className={cn('font-semibold', approvals.length ? 'text-amber-500' : 'text-zinc-200')}>{approvals.length}</b> awaiting approval</span>
+          <StatusDot tone={info?.hitl_enabled ? 'ok' : 'warn'}>{info?.hitl_enabled ? 'Changes to data need human approval' : 'Human approval is off'}</StatusDot>
+          <StatusDot tone={status === 'live' ? 'ok' : status === 'connecting' ? 'busy' : 'error'}>feed {status}</StatusDot>
         </div>
-        <Button onClick={() => setCreating(true)} className="shrink-0 whitespace-nowrap">
-          <KeyRound className="h-4 w-4" /> New API token
-        </Button>
-      </div>
+      )}
+      <Tabs<AiTab>
+        value={aiTab}
+        onChange={(t) => { setAiTab(t); history.replaceState(null, '', `#/mcp/${t}`); }}
+        tabs={[
+          { id: 'agents', label: 'Agents', count: agents.length },
+          { id: 'tools', label: 'Tools', count: info?.tools.length },
+          { id: 'mcp', label: 'MCP clients', count: sessions.length },
+          { id: 'activity', label: 'Activity' },
+          { id: 'approvals', label: 'Approvals', count: approvals.length },
+        ]}
+      />
 
-      {!hidden['mcp.stats'] && <div className="group/st relative grid grid-cols-2 gap-3 md:grid-cols-5">
-        <HideButton id="mcp.stats" className="absolute -top-5 right-0 opacity-0 group-hover/st:opacity-100" />
-        <Stat label="Registered agents" value={agents.length} sub={`${agents.filter((a) => a.can_invoke).length} invokable from DuckView`} />
-        <Stat label="Live sessions" value={sessions.length} sub="SSE + streamable HTTP" />
-        <Stat label="Tokens" value={tokens.length} sub={`${tokens.filter((t) => t.expires_at && new Date(t.expires_at) < new Date()).length} expired`} />
-        <Stat label="Agent activity (feed)" value={feed.filter((f) => f.kind === 'tool' || f.title.startsWith('agent')).length} sub={`${feed.filter((f) => f.status === 'approval_required' || f.status === 'blocked').length} awaiting approval / blocked`} />
-        <Stat label="Safety" value={info?.hitl_enabled ? 'HITL on' : 'HITL off'} sub={`${info?.limits.default_page_size ?? 50}/${info?.limits.max_page_size ?? 200} rows per call`} />
-      </div>}
+      {aiTab === 'agents' && (
+        <div className="space-y-6">
+          {!hidden['mcp.agents'] && <AgentsCard agents={agents} workspaces={workspaces} frameworks={frameworks} onChanged={refresh} onToken={(t) => setLastToken(t)} hideId="mcp.agents" />}
+          {!hidden['mcp.frameworks'] && <FrameworksCard frameworks={frameworks} workspaceId={workspaces[0]?.id ?? null} token={lastToken} hideId="mcp.frameworks" />}
+        </div>
+      )}
 
-      <div className="grid gap-6 lg:grid-cols-5">
-        {!hidden['mcp.agents'] && <AgentsCard agents={agents} workspaces={workspaces} frameworks={frameworks} onChanged={refresh} onToken={(t) => setLastToken(t)} hideId="mcp.agents" />}
-        {!hidden['mcp.frameworks'] && <FrameworksCard frameworks={frameworks} workspaceId={workspaces[0]?.id ?? null} token={lastToken} hideId="mcp.frameworks" />}
-        {!hidden['mcp.connect'] && <Card
-          title="Connect a client"
-          className="lg:col-span-2"
-          actions={<span className="flex items-center gap-1"><CopyButton text={snippetText} label={lastToken ? 'Copy with token' : 'Copy'} /><HideButton id="mcp.connect" /></span>}
-        >
-          <div className="mb-3 flex flex-wrap gap-1">
-            {SNIPPETS.map((s) => (
-              <button key={s.id} onClick={() => setSnippet(s.id)} className={cn('rounded-md px-2.5 py-1 text-xs', snippet === s.id ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200')}>
-                {s.label}
-              </button>
-            ))}
+      {aiTab === 'tools' && info && (
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <section>
+            <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Tools <span className="font-normal text-zinc-500">· {info.tools.length}, over MCP and the REST/OpenAPI façade</span></h2>
+            <ul className="grid grid-cols-1 gap-x-6 border-y border-zinc-800 py-1 sm:grid-cols-2">
+              {info.tools.map((t) => <li key={t} className="truncate py-1 font-mono text-xs text-zinc-300">{t}</li>)}
+            </ul>
+          </section>
+          <section className="space-y-6">
+            <div>
+              <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Resources</h2>
+              <ul className="border-y border-zinc-800 py-1">{info.resources.map((t) => <li key={t} className="break-all py-1 font-mono text-xs text-zinc-300">{t}</li>)}</ul>
+            </div>
+            <div>
+              <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Guided prompts</h2>
+              <ul className="border-y border-zinc-800 py-1">{info.prompts.map((t) => <li key={t} className="py-1 font-mono text-xs text-zinc-300">{t}</li>)}</ul>
+            </div>
+            <div className="text-xs text-zinc-500">
+              <StatusDot tone="ok"><span className="text-zinc-300">Changes to data are held for approval</span></StatusDot>
+              <p className="mt-1">Results are paged {info.limits.default_page_size} rows by default ({info.limits.max_page_size} at most) and cells are cut at {info.limits.max_cell_chars} characters.</p>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {aiTab === 'mcp' && (
+        <div className="space-y-8">
+          {!hidden['mcp.connect'] && (
+            <section>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="text-[13px] font-semibold text-zinc-100">Connect a client</h2>
+                <CopyButton text={snippetText} label={lastToken ? 'Copy with token' : 'Copy'} />
+              </div>
+              <Tabs size="sm" value={snippet} onChange={setSnippet} tabs={SNIPPETS.map((x) => ({ id: x.id, label: x.label }))} />
+              <div className="mb-1 mt-2 font-mono text-[11px] text-zinc-500">{SNIPPETS.find((x) => x.id === snippet)?.file}</div>
+              <pre className="overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-3 font-mono text-xs leading-relaxed text-zinc-300">{snippetText}</pre>
+              <p className="mt-1.5 text-xs text-zinc-500">{lastToken ? 'Your new token is filled in.' : 'Create an API token and it is filled in for <TOKEN>.'}</p>
+            </section>
+          )}
+          {!hidden['mcp.sessions'] && (
+            <section>
+              <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Live sessions</h2>
+              {sessions.length === 0 ? (
+                <p className="border-y border-zinc-800 py-4 text-xs text-zinc-500">No clients connected right now.</p>
+              ) : (
+                <ul className="divide-y divide-zinc-800/70 border-y border-zinc-800">
+                  {sessions.map((x) => (
+                    <li key={x.id} className="flex items-center gap-3 py-2 text-xs">
+                      <StatusDot tone="ok" pulse />
+                      <span className="min-w-0 flex-1 truncate text-zinc-200">{x.user} <span className="text-zinc-500">· {x.transport} · {x.ip}</span></span>
+                      <span className="text-zinc-500">workspace {x.workspace_id ? (workspaces.find((w) => w.id === x.workspace_id)?.name ?? x.workspace_id.slice(0, 8)) : 'any'} · active {timeAgo(x.last_activity)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+          {!hidden['mcp.tokens'] && (
+            <section>
+              <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">API tokens</h2>
+              {tokens.length === 0 ? (
+                <p className="border-y border-zinc-800 py-4 text-xs text-zinc-500">No tokens yet. A token is shown once, when it is created.</p>
+              ) : (
+                <table className="w-full text-[13px]">
+                  <thead className="text-left text-xs text-zinc-500">
+                    <tr className="border-b border-zinc-800">
+                      <th className="py-1.5 pr-3 font-normal">Name</th>
+                      <th className="py-1.5 pr-3 font-normal">Scopes</th>
+                      <th className="py-1.5 pr-3 font-normal">Workspace</th>
+                      <th className="py-1.5 pr-3 font-normal">Last used</th>
+                      <th className="py-1.5 pr-3 font-normal">Expires</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tokens.map((t) => (
+                      <tr key={t.id} className="group border-b border-zinc-800/70">
+                        <td className="py-2 pr-3"><div className="text-zinc-200">{t.name}</div><div className="font-mono text-[11px] text-zinc-500">{t.token_prefix}…</div></td>
+                        <td className="py-2 pr-3 text-xs text-zinc-400">{t.scopes.join(', ')}</td>
+                        <td className="py-2 pr-3 text-xs text-zinc-400">{t.workspace_id ? (workspaces.find((w) => w.id === t.workspace_id)?.name ?? t.workspace_id.slice(0, 8)) : 'all'}</td>
+                        <td className="py-2 pr-3 text-xs text-zinc-500">{timeAgo(t.last_used_at)}</td>
+                        <td className="py-2 pr-3 text-xs text-zinc-500">{t.expires_at ? (new Date(t.expires_at) < new Date() ? <span className="text-red-400">expired</span> : new Date(t.expires_at).toLocaleDateString()) : 'never'}</td>
+                        <td className="py-2 text-right">
+                          <button className="rounded p-1 text-zinc-500 opacity-0 hover:text-red-400 group-hover:opacity-100" onClick={async () => { if (confirm(`Revoke token "${t.name}"?`)) { await api.del(`/api/tokens/${t.id}`); await refresh(); } }} title="Revoke" aria-label={`Revoke ${t.name}`}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          )}
+        </div>
+      )}
+
+      {aiTab === 'activity' && !hidden['mcp.inspector'] && (
+        <section>
+          <div className="mb-2 flex items-center gap-2">
+            <Tabs size="sm" className="border-b-0" value={filter} onChange={setFilter} tabs={[{ id: 'all', label: 'All' }, { id: 'tool', label: 'Tool calls' }, { id: 'query', label: 'Queries' }, { id: 'audit', label: 'Other' }]} />
+            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => { pausedRef.current = !paused; setPaused(!paused); }}>
+              {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />} {paused ? 'Resume' : 'Pause'}
+            </Button>
           </div>
-          <div className="mb-1 font-mono text-[10px] text-zinc-500">{SNIPPETS.find((s) => s.id === snippet)?.file}</div>
-          <pre className="overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-300">{snippetText}</pre>
-          <p className="mt-2 text-[11px] text-zinc-500">{lastToken ? 'The token you just created is substituted into the snippet.' : 'Create a token to have it substituted for <TOKEN> automatically.'}</p>
-          {info && (
-            <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-zinc-400">
-              <div>
-                <div className="mb-1 font-semibold uppercase tracking-wide text-zinc-500">Tools</div>
-                {info.tools.map((t) => (
-                  <div key={t} className="font-mono">{t}</div>
-                ))}
-              </div>
-              <div>
-                <div className="mb-1 font-semibold uppercase tracking-wide text-zinc-500">Resources</div>
-                {info.resources.map((t) => (
-                  <div key={t} className="break-all font-mono">{t}</div>
-                ))}
-              </div>
-              <div>
-                <div className="mb-1 font-semibold uppercase tracking-wide text-zinc-500">Prompts</div>
-                {info.prompts.map((t) => (
-                  <div key={t} className="font-mono">{t}</div>
-                ))}
-                <div className="mt-2 flex items-center gap-1 text-emerald-300">
-                  <ShieldCheck className="h-3.5 w-3.5" /> mutations need approval
-                </div>
-              </div>
-            </div>
-          )}
-        </Card>}
+          {feedTable(visible, 'Waiting for activity. Tool calls, queries and audit events appear here as they happen.')}
+        </section>
+      )}
 
-        {!hidden['mcp.inspector'] && <Card
-          title={
-            <span className="flex items-center gap-2">
-              Live inspector
-              <span className={cn('inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] normal-case tracking-normal', status === 'live' ? 'bg-emerald-900/40 text-emerald-300' : status === 'connecting' ? 'bg-zinc-800 text-zinc-400' : 'bg-red-900/40 text-red-300')}>
-                <span className={cn('h-1.5 w-1.5 rounded-full', status === 'live' ? 'animate-pulse bg-emerald-400' : status === 'connecting' ? 'bg-zinc-500' : 'bg-red-400')} /> {status}
-              </span>
-            </span>
-          }
-          className="lg:col-span-3"
-          actions={
-            <div className="flex items-center gap-1">
-              {(['all', 'tool', 'query', 'audit'] as const).map((f) => (
-                <button key={f} onClick={() => setFilter(f)} className={cn('rounded px-2 py-0.5 text-[11px]', filter === f ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-200')}>
-                  {f}
-                </button>
-              ))}
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  pausedRef.current = !paused;
-                  setPaused(!paused);
-                }}
-                title={paused ? 'Resume' : 'Pause'}
-              >
-                {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
-              </Button>
-              <HideButton id="mcp.inspector" />
-            </div>
-          }
-        >
-          <div className="max-h-[520px] space-y-1 overflow-auto">
-            {visible.length === 0 && <p className="text-xs text-zinc-500">Waiting for activity… tool invocations, queries and audit events stream here in real time.</p>}
-            {visible.map((f) => (
-              <div key={f.id} className="rounded-md border border-zinc-800/80 bg-zinc-950 px-3 py-2 text-xs">
-                <div className="flex items-center gap-2">
-                  {f.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 text-accent-300" /> : f.kind === 'session' ? <Radio className="h-3.5 w-3.5 text-sky-300" /> : <Activity className="h-3.5 w-3.5 text-zinc-500" />}
-                  <span className="font-mono text-zinc-200">{f.title}</span>
-                  <Badge tone={f.status === 'ok' ? 'green' : f.status === 'approval_required' || f.status === 'blocked' ? 'amber' : f.status === 'info' ? 'blue' : 'red'}>{f.status}</Badge>
-                  {f.agent && <Badge tone="violet">{f.agent}</Badge>}
-                  {f.via === 'rest' && <span className="rounded border border-zinc-700 px-1 font-mono text-[9px] text-zinc-400">REST</span>}
-                  {f.user && <span className="truncate text-[10px] text-zinc-500">{f.user}</span>}
-                  <span className="ml-auto shrink-0 text-[10px] text-zinc-500">
-                    {f.ms != null && `${Math.round(f.ms)} ms · `}
-                    {timeAgo(f.at)}
-                  </span>
-                </div>
-                {f.detail && <pre className="mt-1 max-h-16 overflow-hidden whitespace-pre-wrap break-all font-mono text-[10px] text-zinc-500">{f.detail}</pre>}
-              </div>
-            ))}
-          </div>
-        </Card>}
-
-        {!hidden['mcp.tokens'] && <Card title="API tokens" className="lg:col-span-3" actions={<HideButton id="mcp.tokens" />}>
-          {tokens.length === 0 ? (
-            <p className="text-xs text-zinc-500">No tokens yet. Tokens are shown once at creation and stored as SHA-256 hashes.</p>
-          ) : (
-            <table className="w-full text-xs">
-              <thead className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
-                <tr>
-                  <th className="pb-2">Name</th>
-                  <th className="pb-2">Scopes</th>
-                  <th className="pb-2">Workspace</th>
-                  <th className="pb-2">Last used</th>
-                  <th className="pb-2">Expires</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {tokens.map((t) => (
-                  <tr key={t.id} className="border-t border-zinc-800">
-                    <td className="py-2">
-                      <div className="font-medium text-zinc-200">{t.name}</div>
-                      <div className="font-mono text-[10px] text-zinc-500">{t.token_prefix}…</div>
-                    </td>
-                    <td className="py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {t.scopes.map((s) => (
-                          <Badge key={s} tone={s === 'admin' ? 'red' : s === 'write' ? 'amber' : s === 'mcp' ? 'violet' : 'zinc'}>
-                            {s}
-                          </Badge>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="py-2 text-zinc-400">{t.workspace_id ? (workspaces.find((w) => w.id === t.workspace_id)?.name ?? t.workspace_id.slice(0, 8)) : 'all'}</td>
-                    <td className="py-2 text-zinc-400">{timeAgo(t.last_used_at)}</td>
-                    <td className="py-2 text-zinc-400">{t.expires_at ? new Date(t.expires_at).toLocaleDateString() : 'never'}</td>
-                    <td className="py-2 text-right">
-                      <button
-                        className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300"
-                        onClick={async () => {
-                          if (confirm(`Revoke token "${t.name}"?`)) {
-                            await api.del(`/api/tokens/${t.id}`);
-                            await refresh();
-                          }
-                        }}
-                        title="Revoke"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>}
-
-        {!hidden['mcp.sessions'] && <Card title="Live MCP sessions" className="lg:col-span-2" actions={<HideButton id="mcp.sessions" />}>
-          {sessions.length === 0 ? (
-            <div className="flex items-center gap-2 text-xs text-zinc-500">
-              <Radio className="h-4 w-4" /> No agents connected right now.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {sessions.map((s) => (
-                <div key={s.id} className="flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-zinc-200">
-                      {s.user} <Badge tone="violet">{s.transport}</Badge>
-                    </div>
-                    <div className="text-[10px] text-zinc-500">
-                      {s.ip} · started {timeAgo(s.started_at)} · active {timeAgo(s.last_activity)} · ws {s.workspace_id ? (workspaces.find((w) => w.id === s.workspace_id)?.name ?? s.workspace_id.slice(0, 8)) : 'any'}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>}
-      </div>
-
+      {aiTab === 'approvals' && (
+        <section className="space-y-3">
+          <p className="max-w-3xl text-xs text-zinc-500">An agent that tries to change data (mutating SQL, dbt builds, publishing an app) gets an approval challenge instead. Show it to a person; if they approve, the agent repeats the call with <code className="font-mono">dry_run: false</code>.</p>
+          {feedTable(approvals, 'Nothing is waiting for approval.')}
+        </section>
+      )}
       <Modal open={creating} onClose={() => setCreating(false)} title="Create API token">
         <div className="space-y-4">
           <div>
@@ -358,6 +347,7 @@ export function McpPage() {
           <CopyButton text={newToken ?? ''} label="Copy token" />
         </div>
       </Modal>
+    </div>
     </div>
   );
 }

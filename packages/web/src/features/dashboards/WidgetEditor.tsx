@@ -110,7 +110,7 @@ export function WidgetEditor({ open, onClose, onSave, workspaceId, initial, save
         </div>
 
         <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Configuration</div>
+          <div className="text-[10px] font-semibold text-zinc-500">Configuration</div>
           {d.widget_type === 'CHART' && (
             <>
               <div><Label>Chart</Label><Select value={cfg.chart ?? 'bar'} onChange={(e) => setCfg({ chart: e.target.value as WidgetChartConfig['chart'] })} className="w-full">{['bar', 'line', 'area', 'scatter', 'pie'].map((c) => <option key={c} value={c}>{c}</option>)}</Select></div>

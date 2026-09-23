@@ -146,10 +146,10 @@ export function AgentsCard({ agents, workspaces, frameworks, onChanged, onToken,
       }
     >
       {agents.length === 0 ? (
-        <p className="text-xs text-zinc-500">Register the agents that call DuckView — Strands, LangGraph, LangChain or CrewAI agents (locally or on AgentCore Runtime), AgentCore Gateway targets, Bedrock Agents action groups, or any HTTP client. Each agent gets its own workspace-scoped token, its calls are attributed in the inspector, and AWS-hosted agents can be chatted with from here.</p>
+        <p className="py-2 text-xs text-zinc-500">No agents yet. Register one (Strands, LangGraph, LangChain, CrewAI, AgentCore, Bedrock or any HTTP client) to give it its own token and see its calls under Activity.</p>
       ) : (
         <table className="w-full text-xs">
-          <thead className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
+          <thead className="text-left text-[10px] text-zinc-500">
             <tr>
               <th className="pb-2 pr-3">Agent</th>
               <th className="whitespace-nowrap pb-2 pr-3">Framework</th>
@@ -327,7 +327,7 @@ function NewAgentModal({ open, onClose, workspaces, frameworks, onCreated }: { o
 
         {isAws && (
           <div className="space-y-3 rounded-md border border-zinc-800 bg-zinc-950 p-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">AWS {form.framework === 'agentcore_gateway' ? '(informational)' : '— lets DuckView invoke this agent'}</div>
+            <div className="text-[10px] font-semibold text-zinc-500">AWS {form.framework === 'agentcore_gateway' ? '(informational)' : '— lets DuckView invoke this agent'}</div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Region</Label>

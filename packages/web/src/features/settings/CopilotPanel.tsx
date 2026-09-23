@@ -28,7 +28,7 @@ function ProviderPicker({ presets, value, onPick, compact }: { presets: CopilotP
         <button key={p.id} type="button" onClick={() => onPick(p.id)} className={cn('rounded-lg border p-2.5 text-left transition', value === p.id ? 'border-accent-500 bg-accent-500/10' : 'border-zinc-800 hover:border-zinc-600')} title={p.blurb}>
           <div className="flex items-center justify-between gap-1">
             <span className="truncate text-[13px] font-semibold text-zinc-100">{p.label}</span>
-            <span className="shrink-0 font-mono text-[9px] uppercase tracking-wide text-zinc-500">{p.vendor}</span>
+            <span className="shrink-0 font-mono text-[9px] text-zinc-500">{p.vendor}</span>
           </div>
           {!compact && <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-zinc-500">{p.blurb}</div>}
         </button>
@@ -171,7 +171,7 @@ function ServerProviderCard({ cfg, reload }: { cfg: CopilotConfig; reload: () =>
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/60">
       <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-2.5">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Server provider · for everyone</h3>
+        <h3 className="text-xs font-semibold text-zinc-400">Server provider · for everyone</h3>
         {cfg.server_provider ? (
           <Badge tone={cfg.has_server_key ? 'green' : 'amber'}>{cfg.providers.find((p) => p.id === cfg.server_provider)?.label ?? cfg.server_provider} · {cfg.server_model}{cfg.server_key_hint ? ` · key ····${cfg.server_key_hint}` : ''}{source === 'config' ? ' · from config file' : ''}</Badge>
         ) : (
@@ -226,7 +226,7 @@ function OwnKeyCard({ cfg }: { cfg: CopilotConfig }) {
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/60">
       <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-2.5">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Your own key · this browser only</h3>
+        <h3 className="text-xs font-semibold text-zinc-400">Your own key · this browser only</h3>
         {own ? <Badge tone="violet">{preset?.label ?? cp.settings.provider} · {cp.settings.model || preset?.defaultModel}</Badge> : <Badge>using the server provider</Badge>}
         {own && <button onClick={() => { cp.setSettings({ provider: '', model: '', apiKey: '', baseUrl: '' }); setTest({ state: 'idle' }); }} className="ml-auto text-[11px] text-zinc-400 hover:text-zinc-100">Use the server provider instead</button>}
       </header>
@@ -251,7 +251,7 @@ function OwnKeyCard({ cfg }: { cfg: CopilotConfig }) {
 function Tile({ label, totals, sub }: { label: string; totals: CopilotUsageTotals | { requests: number; input_tokens: number; output_tokens: number; errors?: number }; sub?: string }) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="text-[10px] font-semibold text-zinc-500">{label}</div>
       <div className="mt-1 flex items-baseline gap-2">
         <span className="text-xl font-semibold text-zinc-50">{fmtTokens(totals.input_tokens + totals.output_tokens)}</span>
         <span className="text-[11px] text-zinc-500">tokens</span>
@@ -279,7 +279,7 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/60">
       <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-2.5">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Usage {report.scope === 'all' ? '· everyone' : '· you'}</h3>
+        <h3 className="text-xs font-semibold text-zinc-400">Usage {report.scope === 'all' ? '· everyone' : '· you'}</h3>
         <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500"><Activity className={cn('h-3 w-3', report.active.length ? 'text-emerald-400' : 'text-zinc-600')} /> {report.active.length} active</span>
         <Select value={days} onChange={(e) => setDays(Number(e.target.value))} className="ml-auto h-7 text-[11px]">
           <option value={7}>last 7 days</option>
@@ -289,7 +289,7 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
       </header>
       <div className="space-y-4 p-4">
         <div>
-          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Sessions running now</div>
+          <div className="mb-1.5 text-[10px] font-semibold text-zinc-500">Sessions running now</div>
           {report.active.length === 0 ? (
             <p className="text-[11px] text-zinc-600">No Copilot request is in flight.</p>
           ) : (
@@ -314,7 +314,7 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
         </div>
         {report.by_day.length > 1 && (
           <div>
-            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Tokens per day</div>
+            <div className="mb-1.5 text-[10px] font-semibold text-zinc-500">Tokens per day</div>
             <div className="flex h-16 items-end gap-0.5">
               {report.by_day.map((d) => (
                 <div key={d.day} className="flex-1 rounded-t bg-accent-500/70" style={{ height: `${Math.max(4, (100 * (d.input_tokens + d.output_tokens)) / maxDay)}%` }} title={`${d.day}: ${fmtTokens(d.input_tokens + d.output_tokens)} tokens · ${d.requests} requests`} />
@@ -325,7 +325,7 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
         )}
         <div className={cn('grid gap-4', report.scope === 'all' ? 'lg:grid-cols-2' : '')}>
           <div>
-            <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500"><Gauge className="h-3 w-3" /> By model</div>
+            <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold text-zinc-500"><Gauge className="h-3 w-3" /> By model</div>
             {report.by_model.length === 0 ? <p className="text-[11px] text-zinc-600">Nothing yet.</p> : (
               <table className="w-full text-[11px]">
                 <thead className="text-left text-[10px] uppercase text-zinc-500"><tr><th className="py-1">Model</th><th className="py-1 text-right">Requests</th><th className="py-1 text-right">In</th><th className="py-1 text-right">Out</th></tr></thead>
@@ -344,7 +344,7 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
           </div>
           {report.scope === 'all' && (
             <div>
-              <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500"><Users className="h-3 w-3" /> By person</div>
+              <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold text-zinc-500"><Users className="h-3 w-3" /> By person</div>
               {report.by_user.length === 0 ? <p className="text-[11px] text-zinc-600">Nothing yet.</p> : (
                 <table className="w-full text-[11px]">
                   <thead className="text-left text-[10px] uppercase text-zinc-500"><tr><th className="py-1">Person</th><th className="py-1 text-right">Requests</th><th className="py-1 text-right">In</th><th className="py-1 text-right">Out</th></tr></thead>
@@ -365,7 +365,7 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
         </div>
         {report.recent.length > 0 && (
           <details className="text-[11px]">
-            <summary className="cursor-pointer select-none text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Recent turns ({report.recent.length})</summary>
+            <summary className="cursor-pointer select-none text-[10px] font-semibold text-zinc-500">Recent turns ({report.recent.length})</summary>
             <ul className="mt-1.5 max-h-64 divide-y divide-zinc-800/60 overflow-auto rounded-lg border border-zinc-800">
               {report.recent.map((r) => (
                 <li key={r.id} className="flex flex-wrap items-center gap-2 px-2.5 py-1 font-mono text-[10.5px]">

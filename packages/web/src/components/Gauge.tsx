@@ -16,7 +16,7 @@ export function Gauge({ value, label, primary, secondary, tone }: { value: numbe
           {pct.toFixed(0)}%
         </text>
       </svg>
-      <div className="-mt-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{label}</div>
+      <div className="-mt-1 text-[11px] font-semibold text-zinc-400">{label}</div>
       <div className={cn('mt-1 text-sm font-medium text-zinc-100')}>{primary}</div>
       {secondary && <div className="text-[11px] text-zinc-500">{secondary}</div>}
     </div>

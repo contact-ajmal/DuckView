@@ -147,7 +147,7 @@ await sleep(800);
 await evaluate(`localStorage.setItem('duckview.session', ${JSON.stringify(login.token)}); 'ok'`);
 await send('Page.reload');
 await sleep(1500);
-await waitFor(`!!document.querySelector('header nav')`, 30000, 'signed-in shell');
+await waitFor(`!!document.querySelector('nav[aria-label="Primary"]')`, 30000, 'signed-in shell');
 
 const report = { scenario, ok: false, details: {} };
 const authed = (url, init = {}) => fetch(`${BASE}${url}`, { ...init, headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}`, ...(init.headers ?? {}) } });
@@ -157,9 +157,10 @@ const clickButton = (text, which = 'first') => evaluate(`(() => { const all = [.
 let cleanup = null;
 try {
   if (scenario === 'overview-explore') {
-    await send('Page.navigate', { url: `${BASE}/#/` });
-    await waitFor(`!!document.querySelector('button[title*="Interactive, cross-filtered"]')`, 40000, 'overview loaded with Explore button');
-    await evaluate(`document.querySelector('button[title*="Interactive, cross-filtered"]').click(); 'clicked'`);
+    // Data › Explorer: the dataset opens on Overview; its Explore tab holds the cross-filtered Mosaic view.
+    await send('Page.navigate', { url: `${BASE}/#/data` });
+    await waitFor(`!!document.querySelector('[data-testid="dataset-name"]') && [...document.querySelectorAll('[role=tab]')].some(b => b.textContent.trim() === 'Explore')`, 40000, 'dataset loaded with its Explore tab');
+    await evaluate(`[...document.querySelectorAll('[role=tab]')].find(b => b.textContent.trim() === 'Explore').click(); 'clicked'`);
     await waitFor(`document.querySelectorAll('.mosaic-cell svg').length > 0`, 60000, 'mosaic charts rendered');
     await sleep(2500);
     report.details.charts = await evaluate(`document.querySelectorAll('.mosaic-cell svg').length`);
@@ -182,8 +183,8 @@ try {
     report.details.brush = { rowsBefore, rowsAfter: await evaluate(`document.querySelector('.mosaic-table-host tbody')?.children.length ?? 0`), firstBarTextAfter: await evaluate(`[...document.querySelectorAll('.mosaic-cell')[3].querySelectorAll('text')].map(t => t.textContent).slice(0, 6)`), secondChartChanged: (await evaluate(`document.querySelectorAll('.mosaic-cell svg')[1]?.innerHTML.length ?? 0`)) !== secondChartBefore, selectionRect: await evaluate(`!!document.querySelector('.mosaic-cell svg .selection, .mosaic-cell svg rect[fill*="var("], .mosaic-cell svg g[aria-label="selection"]')`) };
   } else if (scenario === 'workbench-explore') {
     await send('Page.navigate', { url: `${BASE}/#/query` });
-    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'explore')`, 40000, 'workbench loaded');
-    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'explore').click(); 'clicked'`);
+    await waitFor(`[...document.querySelectorAll('[role=tab]')].some(b => b.textContent.trim() === 'Explore')`, 40000, 'workbench loaded');
+    await evaluate(`[...document.querySelectorAll('[role=tab]')].find(b => b.textContent.trim() === 'Explore').click(); 'clicked'`);
     await waitFor(`document.querySelectorAll('.mosaic-cell svg').length > 0 || !!document.querySelector('.mosaic-explore .text-red-200')`, 60000, 'explore rendered or errored');
     await sleep(2000);
     report.details.charts = await evaluate(`document.querySelectorAll('.mosaic-cell svg').length`);
@@ -592,7 +593,10 @@ try {
     await waitFor(`[...document.querySelectorAll('span.truncate')].some(s => s.textContent === 'E2E dbt tab')`, 20000, 'tab listed');
     await evaluate(`[...document.querySelectorAll('span.truncate')].find(s => s.textContent === 'E2E dbt tab').closest('div').click(); true`);
     await sleep(500);
-    await clickButton('dbt model');
+    // Save as dbt model lives in the run toolbar's ⋯ menu.
+    await evaluate(`document.querySelector('button[aria-label="More query actions"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Save as dbt model'))`, 5000, 'query menu');
+    await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.includes('Save as dbt model')).click(); true`);
     await waitFor(`!!document.querySelector('[data-testid="dbt-model-name"]')`, 5000, 'dbt model dialog');
     await waitFor(`[...(document.querySelector('[data-testid="dbt-model-project"]')?.options ?? [])].some(o => o.value === ${JSON.stringify(project.id)})`, 10000, 'projects loaded');
     await evaluate(`(() => { const sel = document.querySelector('[data-testid="dbt-model-project"]'); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sel), 'value').set.call(sel, ${JSON.stringify(project.id)}); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
@@ -604,8 +608,8 @@ try {
     // 2. Copilot writes a dbt model; "Add to dbt project" saves and builds it.
     await evaluate(`localStorage.setItem('duckview.copilot.settings', JSON.stringify({ provider: 'ollama', model: 'mock', apiKey: '', baseUrl: 'http://127.0.0.1:${llm.address().port}' })); true`);
     await send('Page.reload', {});
-    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Copilot')`, 20000, 'app reloaded');
-    await clickButton('Copilot');
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app reloaded');
+    await evaluate(`document.querySelector('[data-testid="ai-toggle"]').click(); true`);
     await waitFor(`!!document.querySelector('textarea[placeholder^="Ask about your data"]:not([disabled])')`, 15000, 'copilot ready');
     await setField('textarea[placeholder^="Ask about your data"]', 'Write a dbt model that bands orders by amount');
     await evaluate(`document.querySelector('button[title="Send"]').click(); true`);

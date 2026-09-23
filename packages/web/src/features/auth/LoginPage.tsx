@@ -45,7 +45,7 @@ export function LoginPage() {
               <a href={cfg.oidc_login_url} className="flex h-10 w-full items-center justify-center rounded-md bg-accent-600 text-sm font-medium text-white hover:bg-accent-500">
                 Continue with SSO
               </a>
-              <div className="flex items-center gap-3 text-[11px] uppercase tracking-wider text-zinc-600">
+              <div className="flex items-center gap-3 text-[11px] text-zinc-600">
                 <div className="h-px flex-1 bg-zinc-800" /> or <div className="h-px flex-1 bg-zinc-800" />
               </div>
             </>

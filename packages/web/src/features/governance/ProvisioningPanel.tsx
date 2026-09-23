@@ -93,10 +93,10 @@ export function ProvisioningPanel() {
           A team linked to an IdP group takes its members from SSO sign-in and SCIM. Link one in <a className="text-accent-300 hover:underline" href="#/settings/teams">Settings → Teams</a> before anyone signs in, share workspaces with it, and access follows the IdP from then on.
         </p>
         {groups.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-zinc-800 p-4 text-center text-zinc-500">No linked teams yet.</div>
+          <div className="border-y border-zinc-800 p-4 text-center text-zinc-500">No linked teams yet.</div>
         ) : (
           <table className="w-full max-w-3xl">
-            <thead className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
+            <thead className="text-left text-[10px] text-zinc-500">
               <tr><th className="pb-1.5">Team</th><th className="pb-1.5">IdP group</th><th className="pb-1.5">Members</th><th className="pb-1.5">Updated</th></tr>
             </thead>
             <tbody>

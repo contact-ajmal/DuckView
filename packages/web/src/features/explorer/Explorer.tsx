@@ -46,17 +46,17 @@ const fileIcon = (kind?: string, cls = 'h-3.5 w-3.5') => {
   switch (kind) {
     case 'parquet':
     case 'arrow':
-      return <Box className={cn(cls, 'text-accent-300')} />;
+      return <Box className={cn(cls, 'text-zinc-500')} />;
     case 'csv':
     case 'excel':
-      return <FileSpreadsheet className={cn(cls, 'text-emerald-300')} />;
+      return <FileSpreadsheet className={cn(cls, 'text-zinc-500')} />;
     case 'json':
-      return <FileJson className={cn(cls, 'text-amber-300')} />;
+      return <FileJson className={cn(cls, 'text-zinc-500')} />;
     case 'duckdb':
-      return <Database className={cn(cls, 'text-sky-300')} />;
+      return <Database className={cn(cls, 'text-zinc-500')} />;
     case 'delta':
     case 'iceberg':
-      return <Layers className={cn(cls, 'text-fuchsia-300')} />;
+      return <Layers className={cn(cls, 'text-zinc-500')} />;
     default:
       return <File className={cn(cls, 'text-zinc-500')} />;
   }
@@ -203,16 +203,16 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
     const isSelected = selected && node.target === selected;
     const icon =
       node.kind === 'local-root' ? <HardDrive className="h-3.5 w-3.5 text-zinc-400" /> :
-      node.kind === 'folder-root' ? (open ? <FolderOpen className="h-3.5 w-3.5 text-accent-300" /> : <Folder className="h-3.5 w-3.5 text-accent-300" />) :
+      node.kind === 'folder-root' ? (open ? <FolderOpen className="h-3.5 w-3.5 text-zinc-500" /> : <Folder className="h-3.5 w-3.5 text-zinc-500" />) :
       node.kind === 'cloud-root' ? <Cloud className="h-3.5 w-3.5 text-zinc-400" /> :
-      node.kind === 'connection' ? <Cloud className="h-3.5 w-3.5 text-sky-300" /> :
-      node.kind === 'bucket' ? <Database className="h-3.5 w-3.5 text-sky-300" /> :
+      node.kind === 'connection' ? <Cloud className="h-3.5 w-3.5 text-zinc-500" /> :
+      node.kind === 'bucket' ? <Database className="h-3.5 w-3.5 text-zinc-500" /> :
       node.kind === 'lakehouse-root' ? <Layers className="h-3.5 w-3.5 text-zinc-400" /> :
       node.kind === 'lakehouse' ? <Layers className={cn('h-3.5 w-3.5', node.lakehouse?.status === 'error' ? 'text-red-300' : 'text-fuchsia-300')} /> :
-      node.kind === 'lh-catalog' ? <Database className="h-3.5 w-3.5 text-fuchsia-300/80" /> :
-      node.kind === 'lh-schema' ? (open ? <FolderOpen className="h-3.5 w-3.5 text-fuchsia-300/70" /> : <Folder className="h-3.5 w-3.5 text-fuchsia-300/70" />) :
-      node.kind === 'lh-table' ? <Table2 className={cn('h-3.5 w-3.5', node.lakehouse?.engine === 'remote' ? 'text-amber-300' : 'text-fuchsia-300')} /> :
-      node.kind === 'dir' || node.kind === 'prefix' ? (open ? <FolderOpen className="h-3.5 w-3.5 text-amber-300/80" /> : <Folder className="h-3.5 w-3.5 text-amber-300/80" />) :
+      node.kind === 'lh-catalog' ? <Database className="h-3.5 w-3.5 text-zinc-500/80" /> :
+      node.kind === 'lh-schema' ? (open ? <FolderOpen className="h-3.5 w-3.5 text-zinc-500/70" /> : <Folder className="h-3.5 w-3.5 text-zinc-500/70" />) :
+      node.kind === 'lh-table' ? <Table2 className="h-3.5 w-3.5 text-zinc-500" /> :
+      node.kind === 'dir' || node.kind === 'prefix' ? (open ? <FolderOpen className="h-3.5 w-3.5 text-zinc-500/80" /> : <Folder className="h-3.5 w-3.5 text-zinc-500/80" />) :
       fileIcon(node.fileKind);
     return (
       <div>
@@ -233,8 +233,8 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
             <span className="w-3.5" />
           )}
           {icon}
-          <span className={cn('min-w-0 flex-1 truncate', node.kind === 'local-root' || node.kind === 'cloud-root' || node.kind === 'folder-root' || node.kind === 'lakehouse-root' ? 'font-semibold uppercase tracking-wider text-[10px] text-zinc-400' : 'text-zinc-200')} title={node.localPath ?? node.name}>{node.name}</span>
-          {node.kind === 'connection' && <span className="rounded border border-sky-900 bg-sky-950/40 px-1 font-mono text-[9px] text-sky-300">{node.provider}</span>}
+          <span className={cn('min-w-0 flex-1 truncate', node.kind === 'local-root' || node.kind === 'cloud-root' || node.kind === 'folder-root' || node.kind === 'lakehouse-root' ? 'text-[12px] font-medium text-zinc-400' : 'text-zinc-200')} title={node.localPath ?? node.name}>{node.name}</span>
+          {node.kind === 'connection' && <span className="font-mono text-[10px] text-zinc-500">{node.provider}</span>}
           {node.kind === 'lakehouse' && <span className="rounded border border-fuchsia-900 bg-fuchsia-950/40 px-1 font-mono text-[9px] text-fuchsia-300" title={node.lakehouse?.attached ? `attached as ${node.lakehouse.alias}` : 'remote SQL'}>{node.provider === 'AWS_GLUE' ? 'GLUE' : node.provider === 'AWS_S3_TABLES' ? 'S3T' : node.provider === 'DATABRICKS' ? 'DBX' : 'IRC'}</span>}
           {node.kind === 'lh-table' && node.lakehouse?.engine === 'remote' && <span className="rounded border border-amber-900 bg-amber-950/40 px-1 font-mono text-[9px] text-amber-300" title="Runs on the SQL warehouse">remote</span>}
           {node.kind === 'lh-table' && node.lakehouse?.format && node.lakehouse.engine !== 'remote' && <span className="font-mono text-[9px] text-zinc-600">{node.lakehouse.format.toLowerCase()}</span>}
@@ -282,11 +282,11 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
             {node.loaded && node.children!.length === 0 && !node.error && (
               <div className="px-2 py-1 text-[10px] text-zinc-600" style={{ paddingLeft: 22 + depth * 14 }}>
                 {node.kind === 'cloud-root' ? (
-                  <button className="text-accent-300 hover:underline" onClick={actions.onAddConnection}>
+                  <button className="text-zinc-500 hover:text-zinc-200" onClick={actions.onAddConnection}>
                     + connect S3 / R2 / GCS / Azure
                   </button>
                 ) : node.kind === 'lakehouse-root' ? (
-                  <button className="text-accent-300 hover:underline" onClick={actions.onAddLakehouse}>
+                  <button className="text-zinc-500 hover:text-zinc-200" onClick={actions.onAddLakehouse}>
                     + connect AWS Glue / S3 Tables / Databricks / Iceberg
                   </button>
                 ) : (

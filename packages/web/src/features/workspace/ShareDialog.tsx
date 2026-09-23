@@ -167,7 +167,7 @@ export function ShareDialog({ open, onClose, workspace }: { open: boolean; onClo
         <div>
           <Label>Who has access</Label>
           {members.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-zinc-800 px-3 py-4 text-center text-xs text-zinc-500">Only the owner{workspace.role === 'OWNER' && auth.user?.role === 'ADMIN' && !isPrimaryOwner ? ' (and administrators)' : ''} can use this workspace.</div>
+            <div className="border-y border-zinc-800 px-3 py-4 text-center text-xs text-zinc-500">Only the owner{workspace.role === 'OWNER' && auth.user?.role === 'ADMIN' && !isPrimaryOwner ? ' (and administrators)' : ''} can use this workspace.</div>
           ) : (
             <ul className="divide-y divide-zinc-800 rounded-lg border border-zinc-800">
               {members.map((m) => (

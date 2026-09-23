@@ -13,8 +13,8 @@ export function CacheChip({ state, computedAt, fromCache, serverCached, onRefres
   const label = state === 'stale' ? `offline · ${verb} ${timeAgo(computedAt!)}` : fromCache ? `cached · ${verb} ${timeAgo(computedAt!)}` : serverCached ? `${verb} ${timeAgo(computedAt!)} · shared cache` : `${verb} ${timeAgo(computedAt!)}`;
   const title = state === 'stale' ? 'Could not reach the server; showing the last cached copy.' : fromCache ? 'Restored from this browser; checking with the server…' : serverCached ? 'Served from the server cache — computed once for everyone with access to this workspace.' : 'Computed just now.';
   return (
-    <span className={cn('inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-[10px]', state === 'stale' ? 'border-amber-800 bg-amber-950/40 text-amber-200' : fromCache || serverCached ? 'border-zinc-700 bg-zinc-900 text-zinc-400' : 'border-zinc-800 text-zinc-500', className)} title={title}>
-      {fromCache || serverCached ? <Zap className="h-3 w-3 text-accent-300" /> : <Database className="h-3 w-3" />}
+    <span className={cn('inline-flex items-center gap-1.5 text-[11px]', state === 'stale' ? 'text-amber-500' : 'text-zinc-500', className)} title={title}>
+      {fromCache || serverCached ? <Zap className="h-3 w-3" /> : <Database className="h-3 w-3" />}
       {label}
       {onRefresh && (
         <button onClick={onRefresh} disabled={busy} className={cn('ml-0.5 rounded p-0.5 hover:text-zinc-100 disabled:opacity-60', busy && 'animate-spin')} title="Recompute now (bypasses every cache)">

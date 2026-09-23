@@ -48,7 +48,7 @@ export function LayoutMenu({ currentPage }: { currentPage: LayoutPage | null }) 
             <>
               {pages.map((page) => (
                 <div key={page} className="mb-2">
-                  <div className="flex items-center justify-between px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  <div className="flex items-center justify-between px-2 pb-1 text-[10px] font-semibold text-zinc-500">
                     <span>{PAGE_LABELS[page]}</span>
                     <button onClick={() => reset(page)} className="inline-flex items-center gap-1 normal-case tracking-normal text-accent-300 hover:underline">
                       <RotateCcw className="h-3 w-3" /> show all
@@ -93,7 +93,7 @@ export function LayoutSettings() {
         {pages.map((page) => (
           <div key={page} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">{PAGE_LABELS[page]}</span>
+              <span className="text-[10px] font-semibold text-zinc-400">{PAGE_LABELS[page]}</span>
               <button onClick={() => reset(page)} className="text-[10px] text-accent-300 hover:underline">show all</button>
             </div>
             <div className="space-y-1">

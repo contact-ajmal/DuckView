@@ -23,7 +23,7 @@ export function ThemeMenu() {
         <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-zinc-800 bg-zinc-900 p-1 shadow-xl">
           {(['dark', 'light'] as const).map((kind) => (
             <div key={kind} className="mb-1">
-              <div className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{kind} themes</div>
+              <div className="px-2 pb-1 pt-1 text-[10px] font-semibold text-zinc-500">{kind} themes</div>
               {th.themes
                 .filter((t) => t.kind === kind)
                 .map((t) => (

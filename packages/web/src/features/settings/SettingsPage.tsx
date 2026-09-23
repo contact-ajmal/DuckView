@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, ChevronRight, Layers, Pencil, AppWindow } from 'lucide-react';
+import { Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, Layers, Pencil, AppWindow, ScrollText } from 'lucide-react';
 import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type CloudConnection, type CopilotConfig, type LakehouseConnection } from '../../api/client';
 import { Gauge } from '../../components/Gauge';
-import { Eyebrow, PageTitle, SideCard, Panel, KvRows, Tag } from '../../components/layout';
+import { PageHeader, SideCard, Panel, KvRows, Tag } from '../../components/layout';
 import { Button, Badge, Card, Input, Label, Modal, Select, cn } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
@@ -18,26 +18,31 @@ import { TeamsPanel } from './TeamsPanel';
 import { CachePanel } from './CachePanel';
 import { IntegrationsPanel } from './IntegrationsPanel';
 import { AppsAdminPanel } from './AppsAdminPanel';
+import { AuditPanel } from '../governance/AuditPanel';
+import { ProvisioningPanel } from '../governance/ProvisioningPanel';
 
-type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users';
-const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; admin?: boolean }[] = [
-  { id: 'appearance', label: 'Appearance', blurb: 'Themes, fonts, size', icon: <Palette className="h-4 w-4" /> },
-  { id: 'layout', label: 'Layout', blurb: 'Show or hide components', icon: <LayoutTemplate className="h-4 w-4" /> },
-  { id: 'hardware', label: 'Hardware', blurb: 'Live resources & engines', icon: <Cpu className="h-4 w-4" /> },
-  { id: 'engine', label: 'Engine', blurb: 'Memory, threads, timeout', icon: <Database className="h-4 w-4" /> },
-  { id: 'storage', label: 'Storage', blurb: 'Lakehouse, cloud & data connections', icon: <Cloud className="h-4 w-4" /> },
-  { id: 'copilot', label: 'Copilot', blurb: 'AI provider', icon: <Bot className="h-4 w-4" /> },
-  { id: 'integrations', label: 'Integrations', blurb: 'Google sign-in for Drive, Sheets, BigQuery', icon: <Plug className="h-4 w-4" /> },
-  { id: 'account', label: 'Account', blurb: 'Password & identity', icon: <UserRound className="h-4 w-4" /> },
-  { id: 'teams', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
-  { id: 'apps', label: 'Data apps', blurb: 'Runtime, running apps, publish requests', icon: <AppWindow className="h-4 w-4" />, admin: true },
-  { id: 'users', label: 'Users', blurb: 'Roles & access', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
+type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning';
+const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; group: string; admin?: boolean }[] = [
+  { id: 'account', group: 'General', label: 'Account', blurb: 'Your password and identity', icon: <UserRound className="h-4 w-4" /> },
+  { id: 'teams', group: 'General', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
+  { id: 'appearance', group: 'Appearance', label: 'Theme & fonts', blurb: 'Themes, fonts and interface size', icon: <Palette className="h-4 w-4" /> },
+  { id: 'layout', group: 'Appearance', label: 'Layout', blurb: 'Show or hide parts of the interface', icon: <LayoutTemplate className="h-4 w-4" /> },
+  { id: 'storage', group: 'Connections', label: 'Storage & credentials', blurb: 'Cloud storage, lakehouse catalogs and stored credentials', icon: <Cloud className="h-4 w-4" /> },
+  { id: 'integrations', group: 'Connections', label: 'Integrations', blurb: 'Google sign-in for Drive, Sheets and BigQuery', icon: <Plug className="h-4 w-4" /> },
+  { id: 'users', group: 'Security', label: 'Users', blurb: 'Roles, access and deactivation', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
+  { id: 'audit', group: 'Security', label: 'Audit log', blurb: 'Who did what, and where the log is streamed', icon: <ScrollText className="h-4 w-4" /> },
+  { id: 'provisioning', group: 'Security', label: 'Provisioning', blurb: 'SCIM 2.0 users and teams from your identity provider', icon: <KeyRound className="h-4 w-4" />, admin: true },
+  { id: 'copilot', group: 'AI', label: 'AI assistant', blurb: 'The model DuckView AI uses, keys and usage', icon: <Bot className="h-4 w-4" /> },
+  { id: 'engine', group: 'Data', label: 'Engine', blurb: 'Memory, threads, timeouts and storage of this workspace', icon: <Database className="h-4 w-4" /> },
+  { id: 'hardware', group: 'Data', label: 'Resources', blurb: 'Live memory, CPU, disk and warm engines', icon: <Cpu className="h-4 w-4" /> },
+  { id: 'apps', group: 'Advanced', label: 'Data apps', blurb: 'App runtime, running apps and publish requests', icon: <AppWindow className="h-4 w-4" />, admin: true },
 ];
+const GROUPS = ['General', 'Appearance', 'Connections', 'Security', 'AI', 'Data', 'Advanced'];
 
 function useCategory(): [Category, (c: Category) => void] {
   const parse = (): Category => {
     const m = /^#\/settings\/?([a-z]*)/.exec(location.hash)?.[1] as Category | undefined;
-    return m && CATEGORIES.some((c) => c.id === m) ? m : 'appearance';
+    return m && CATEGORIES.some((c) => c.id === m) ? m : 'account';
   };
   const [cat, setCat] = useState<Category>(parse);
   useEffect(() => {
@@ -114,36 +119,35 @@ export function SettingsPage() {
     <>
     <div className="flex h-full min-h-0">
       {/* Category navigation */}
-      <nav className="flex w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950 p-3">
-        <div className="px-2 pb-3 pt-1">
-          <Eyebrow>Settings</Eyebrow>
-        </div>
-        {CATEGORIES.filter((c) => !c.admin || isAdmin).map((c) => (
-          <button key={c.id} onClick={() => setCat(c.id)} className={cn('flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left', cat === c.id ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100')}>
-            <span className={cn(cat === c.id ? 'text-accent-300' : 'text-zinc-500')}>{c.icon}</span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm">{c.label}</span>
-              <span className="block truncate text-[10px] text-zinc-500">{c.blurb}</span>
-            </span>
-            {cat === c.id && <ChevronRight className="h-3.5 w-3.5 text-zinc-600" />}
-          </button>
-        ))}
+      <nav aria-label="Settings" className="flex w-56 shrink-0 flex-col overflow-y-auto border-r border-zinc-800 bg-zinc-900 px-2 py-3">
+        {GROUPS.map((g) => {
+          const items = CATEGORIES.filter((c) => c.group === g && (!c.admin || isAdmin));
+          if (!items.length) return null;
+          return (
+            <div key={g} className="mb-3">
+              <div className="px-2 pb-1 text-[11px] font-medium text-zinc-500">{g}</div>
+              {items.map((c) => (
+                <button key={c.id} onClick={() => setCat(c.id)} aria-current={cat === c.id ? 'page' : undefined} className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]', cat === c.id ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100')}>
+                  <span className={cn('shrink-0', cat === c.id ? 'text-zinc-200' : 'text-zinc-500')}>{c.icon}</span>
+                  <span className="truncate">{c.label}</span>
+                </button>
+              ))}
+            </div>
+          );
+        })}
         {sys && (
-          <div className="mt-auto px-2 pt-3 font-mono text-[10px] text-zinc-600">
+          <div className="mt-auto px-2 pt-3 text-[11px] leading-relaxed text-zinc-600">
             DuckDB {sys.duckdb.version} · {sys.server.metadata_dialect}
             <br />
-            v{sys.server.version} · up {Math.round(sys.server.uptime_s / 60)} min
+            DuckView {sys.server.version} · up {Math.round(sys.server.uptime_s / 60)} min
           </div>
         )}
       </nav>
 
       {/* Category content */}
       <main className="min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-5xl space-y-5 p-6">
-          <div>
-            <PageTitle className="flex items-center gap-2">{current.icon} {current.label}</PageTitle>
-            <p className="mt-1 text-xs text-zinc-500">{current.blurb}</p>
-          </div>
+        <div className="mx-auto max-w-5xl space-y-5 px-6 py-5">
+          <PageHeader title={current.label} description={current.blurb} />
 
           {cat === 'appearance' && <AppearanceSettings />}
 
@@ -193,17 +197,17 @@ export function SettingsPage() {
                 <Panel title="Capacity" meta="host vs engine ceiling" bodyClassName="p-0" hideId="settings.machine">
                   <div className="grid gap-px bg-zinc-800 md:grid-cols-3">
                     <div className="bg-zinc-900/60 p-4">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">This machine</div>
+                      <div className="text-[10px] font-semibold text-zinc-500">This machine</div>
                       <div className="mt-1 text-lg font-semibold text-zinc-50">{sys ? `${formatBytes(sys.host.total_memory_bytes)} RAM · ${sys.host.cpus} cores` : '…'}</div>
                       <p className="mt-1 text-[11px] text-zinc-500">Native DuckDB addresses all host memory and cores; per-workspace limits keep tenants from starving each other.</p>
                     </div>
                     <div className="bg-zinc-900/60 p-4">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Engine ceiling</div>
+                      <div className="text-[10px] font-semibold text-zinc-500">Engine ceiling</div>
                       <div className="mt-1 text-lg font-semibold text-zinc-50">{live ? `${formatBytes(live.duckdb.memory_limit_bytes)} · ${live.duckdb.threads} threads` : '…'}</div>
                       <p className="mt-1 text-[11px] text-zinc-500">The largest working set one query can hold before spilling to <span className="font-mono">{sys?.duckdb.temp_directory ?? 'scratch'}</span>.</p>
                     </div>
                     <div className="bg-zinc-900/60 p-4">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Bigger than RAM?</div>
+                      <div className="text-[10px] font-semibold text-zinc-500">Bigger than RAM?</div>
                       <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">Parquet is read column-by-column with predicate push-down, so files far larger than RAM still query fine — the limit is the <em>working set</em> of one query, not the file. Filter early, aggregate, avoid <Tag>SELECT *</Tag>.</p>
                     </div>
                   </div>
@@ -212,7 +216,7 @@ export function SettingsPage() {
               {live && live.duckdb.engines.length > 0 && !hidden['settings.engines'] && (
                 <Panel hideId="settings.engines" title="Warm engines" meta={`${live.duckdb.engines.length} cached`} bodyClassName="p-0">
                   <table className="w-full font-mono text-xs">
-                    <thead className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
+                    <thead className="text-left text-[10px] text-zinc-500">
                       <tr className="border-b border-zinc-800">
                         <th className="px-4 py-2 font-normal">workspace</th>
                         <th className="px-2 py-2 font-normal">database</th>
@@ -392,12 +396,16 @@ export function SettingsPage() {
 
           {cat === 'teams' && <TeamsPanel />}
 
+          {cat === 'audit' && <AuditPanel isAdmin={!!isAdmin} />}
+
+          {cat === 'provisioning' && isAdmin && <ProvisioningPanel />}
+
           {cat === 'apps' && isAdmin && <AppsAdminPanel />}
 
           {cat === 'users' && isAdmin && (
             <Card title="Users" actions={<Button size="sm" onClick={() => setNewUser({ open: true, email: '', password: '', role: 'USER' })}><Users className="h-3.5 w-3.5" /> Add</Button>}>
               <table className="w-full text-xs">
-                <thead className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
+                <thead className="text-left text-[10px] text-zinc-500">
                   <tr><th className="pb-2">User</th><th className="pb-2">Provider</th><th className="pb-2">Created</th><th className="pb-2">Role</th><th className="pb-2">Status</th><th /></tr>
                 </thead>
                 <tbody>

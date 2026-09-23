@@ -2,8 +2,8 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import GridLayout, { WidthProvider, type Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { LayoutDashboard, Plus, Pencil, Trash2, RefreshCw, GripVertical, Settings2, Check, ArrowLeft, Bot, Lock, Unlock, Sparkles } from 'lucide-react';
-import { api, type Dashboard, type DashboardKind, type DashboardWidget, type LayoutItem, type SavedQuery } from '../../api/client';
+import { LayoutDashboard, Plus, Pencil, Trash2, RefreshCw, GripVertical, Settings2, Check, ArrowLeft, Lock, Unlock, Sparkles, MoreHorizontal, Camera } from 'lucide-react';
+import { api, timeAgo, type Dashboard, type DashboardKind, type DashboardWidget, type LayoutItem, type SavedQuery } from '../../api/client';
 import { describeSpec } from '../../lib/mosaic/summary';
 
 // The Mosaic page brings the spec parser, YAML and the editor modes with it — loaded only when such a dashboard opens.
@@ -12,8 +12,8 @@ import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
 import { WidgetBody } from './widgets';
 import { WidgetEditor, type WidgetDraft } from './WidgetEditor';
-import { Eyebrow, PageTitle, Panel } from '../../components/layout';
-import { Badge, Button, Empty, Input, Label, Modal, cn } from '../../components/ui';
+import { PageHeader } from '../../components/layout';
+import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, cn } from '../../components/ui';
 
 const Grid = WidthProvider(GridLayout);
 
@@ -54,41 +54,60 @@ function DashboardList() {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [kind, setKind] = useState<DashboardKind>('grid');
+  const [filter, setFilter] = useState('');
   const wsId = ws.activeId;
+  // #/dashboards?new=1 (Home, the command palette) opens the new-dashboard dialog.
+  useEffect(() => {
+    if (/[?&]new=1/.test(location.hash) && access.canEdit) {
+      setCreating(true);
+      history.replaceState(null, '', location.pathname + '#/dashboards');
+    }
+  }, [access.canEdit]);
   const load = useCallback(async () => {
     if (!wsId) return;
     setList((await api.get<{ dashboards: Dashboard[] }>(`/api/workspaces/${wsId}/dashboards`)).dashboards);
   }, [wsId]);
   useEffect(() => void load(), [load]);
+  const q = filter.trim().toLowerCase();
+  const shown = [...list].filter((d) => !q || `${d.name} ${d.description ?? ''}`.toLowerCase().includes(q)).sort((x, y) => y.updated_at.localeCompare(x.updated_at));
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <Eyebrow>Business intelligence</Eyebrow>
-          <PageTitle>Dashboards</PageTitle>
-          <p className="mt-1 text-xs text-zinc-500">Grid dashboards: KPI cards, charts, tables and notes bound to saved queries or SQL. Mosaic dashboards: cross-filtered, interactive charts from a declarative spec.</p>
-        </div>
-        {access.canEdit && (
-          <Button variant="primary" onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New dashboard</Button>
-        )}
-      </div>
+    <div className="h-full overflow-auto">
+    <div className="mx-auto max-w-[1180px] space-y-4 px-6 py-5">
+      <PageHeader
+        title="Dashboards"
+        actions={
+          <>
+            {list.length > 0 && <Input uiSize="sm" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter dashboards" aria-label="Filter dashboards" className="w-52" />}
+            {access.canEdit && <Button variant="primary" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New dashboard</Button>}
+          </>
+        }
+      />
       {list.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 py-16"><Empty icon={<LayoutDashboard className="h-10 w-10" />} title="No dashboards yet" hint="Create one and add widgets from your saved queries — or ask an MCP agent to build one with create_dashboard_widget." /></div>
+        <div className="border-y border-zinc-800 py-14"><Empty icon={<LayoutDashboard />} title="No dashboards yet" hint="A grid dashboard holds KPIs, charts and tables from saved queries; a Mosaic dashboard is interactive and cross-filtered." action={access.canEdit ? <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New dashboard</Button> : undefined} /></div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {list.map((d) => (
-            <a key={d.id} href={`#/dashboards/${d.id}`} className="group rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 hover:border-zinc-600">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-zinc-50">{d.name}</div>
-                  <div className="mt-0.5 line-clamp-2 text-xs text-zinc-500">{d.description || 'No description'}</div>
-                </div>
-                {d.kind === 'mosaic' ? <Badge tone="violet" className="shrink-0 gap-1"><Sparkles className="h-3 w-3" /> Mosaic</Badge> : <LayoutDashboard className="h-4 w-4 shrink-0 text-accent-400" />}
-              </div>
-              <div className="mt-3 font-mono text-[10px] text-zinc-500">{d.kind === 'mosaic' ? mosaicSummary(d) : `${d.layout.length} widget${d.layout.length === 1 ? '' : 's'}`} · updated {new Date(d.updated_at).toLocaleString()}</div>
-            </a>
-          ))}
-        </div>
+        <table className="w-full table-fixed text-[13px]" data-testid="dashboard-list">
+          <thead>
+            <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
+              <th className="py-2 pr-4 font-normal">Name</th>
+              <th className="w-28 py-2 pr-4 font-normal @max-2xl:hidden">Type</th>
+              <th className="w-40 py-2 pr-4 font-normal @max-3xl:hidden">Contents</th>
+              <th className="w-32 py-2 font-normal">Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((d) => (
+              <tr key={d.id} className="cursor-pointer border-b border-zinc-800/70 hover:bg-zinc-900" onClick={() => (location.hash = `#/dashboards/${d.id}`)}>
+                <td className="py-2.5 pr-4">
+                  <a href={`#/dashboards/${d.id}`} className="block truncate font-medium text-zinc-100" onClick={(e) => e.stopPropagation()}>{d.name}</a>
+                  {d.description && <div className="truncate text-xs text-zinc-500">{d.description}</div>}
+                </td>
+                <td className="py-2.5 pr-4 text-xs text-zinc-400 @max-2xl:hidden"><span className="inline-flex items-center gap-1.5">{d.kind === 'mosaic' ? <Sparkles className="h-3.5 w-3.5 text-zinc-500" /> : <LayoutDashboard className="h-3.5 w-3.5 text-zinc-500" />}{d.kind === 'mosaic' ? 'Mosaic' : 'Grid'}</span></td>
+                <td className="py-2.5 pr-4 text-xs text-zinc-500 @max-3xl:hidden">{d.kind === 'mosaic' ? mosaicSummary(d) : `${d.layout.length} widget${d.layout.length === 1 ? '' : 's'}`}</td>
+                <td className="py-2.5 text-xs text-zinc-500" title={new Date(d.updated_at).toLocaleString()}>{timeAgo(d.updated_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
       <Modal open={creating} onClose={() => setCreating(false)} title="New dashboard">
         <div className="space-y-3">
@@ -114,6 +133,7 @@ function DashboardList() {
           </div>
         </div>
       </Modal>
+    </div>
     </div>
   );
 }
@@ -179,46 +199,62 @@ function DashboardCanvas({ id }: { id: string }) {
   });
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-auto p-5">
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <a href="#/dashboards" className="mb-1 inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-200"><ArrowLeft className="h-3 w-3" /> All dashboards</a>
+    <div className="flex h-full min-h-0 flex-col overflow-auto">
+      <div className="sticky top-0 z-20 flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/95 px-6 py-2 backdrop-blur">
+        <div className="flex min-w-0 items-center gap-2">
+          <a href="#/dashboards" className="rounded p-1 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200" title="All dashboards" aria-label="All dashboards"><ArrowLeft className="h-4 w-4" /></a>
           {renaming ? (
             <form className="flex items-center gap-2" onSubmit={async (e) => { e.preventDefault(); await api.patch(`/api/dashboards/${id}`, { name }); setRenaming(false); await load(); }}>
-              <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="h-9 w-72 text-lg font-semibold" />
-              <Button size="sm" variant="primary" type="submit"><Check className="h-3.5 w-3.5" /></Button>
+              <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="w-72 font-semibold" />
+              <Button size="sm" variant="primary" type="submit"><Check className="h-3.5 w-3.5" /> Save</Button>
             </form>
           ) : (
-            <PageTitle className="flex items-center gap-2">
-              {dash.name}
-              {canWrite && <button onClick={() => setRenaming(true)} className="text-zinc-500 hover:text-zinc-200" title="Rename"><Pencil className="h-4 w-4" /></button>}
-            </PageTitle>
+            <div className="min-w-0">
+              <h1 className="flex items-center gap-2 truncate text-[15px] font-semibold text-zinc-50">
+                {dash.name}
+                {canWrite && <button onClick={() => setRenaming(true)} className="text-zinc-600 hover:text-zinc-200" title="Rename" aria-label="Rename dashboard"><Pencil className="h-3.5 w-3.5" /></button>}
+              </h1>
+              {dash.description && <p className="truncate text-xs text-zinc-500">{dash.description}</p>}
+            </div>
           )}
-          {dash.description && <p className="mt-0.5 text-xs text-zinc-500">{dash.description}</p>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Button size="sm" variant="ghost" onClick={() => setTick((t) => t + 1)} title="Refresh all widgets"><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>
-          <Button size="sm" variant="ghost" onClick={() => cp.toggle()} title="DuckCopilot"><Bot className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => cp.toggle()} title="Ask AI about this dashboard"><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
           {canWrite && (
             <>
-              <Button size="sm" variant={edit ? 'primary' : 'secondary'} onClick={() => setEdit(!edit)} title={edit ? 'Lock layout' : 'Edit layout'}>{edit ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />} {edit ? 'Editing' : 'Edit'}</Button>
-              <Button size="sm" variant="primary" onClick={() => setEditor({ open: true, widget: null })}><Plus className="h-3.5 w-3.5" /> Add widget</Button>
-              <Button size="sm" variant="danger" onClick={async () => { if (confirm(`Delete dashboard "${dash.name}"?`)) { await api.del(`/api/dashboards/${id}`); location.hash = '#/dashboards'; } }} title="Delete dashboard"><Trash2 className="h-3.5 w-3.5" /></Button>
+              <Button size="sm" variant={edit ? 'primary' : 'secondary'} onClick={() => setEdit(!edit)} title={edit ? 'Lock layout' : 'Edit layout'}>{edit ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />} {edit ? 'Done' : 'Edit'}</Button>
+              <Button size="sm" onClick={() => setEditor({ open: true, widget: null })}><Plus className="h-3.5 w-3.5" /> Add widget</Button>
+              <Menu
+                width="w-48"
+                trigger={(open, toggle) => (
+                  <IconButton label="More dashboard actions" onClick={toggle} active={open}><MoreHorizontal className="h-4 w-4" /></IconButton>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <MenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => { close(); setRenaming(true); }}>Rename</MenuItem>
+                    <MenuItem icon={<Camera className="h-3.5 w-3.5" />} onClick={() => { close(); location.hash = '#/alerts/snapshots'; }}>Schedule a snapshot…</MenuItem>
+                    <MenuDivider />
+                    <MenuItem danger icon={<Trash2 className="h-3.5 w-3.5" />} onClick={async () => { close(); if (confirm(`Delete dashboard "${dash.name}"?`)) { await api.del(`/api/dashboards/${id}`); location.hash = '#/dashboards'; } }}>Delete dashboard</MenuItem>
+                  </>
+                )}
+              </Menu>
             </>
           )}
         </div>
       </div>
+      <div className="px-4 py-4">
 
       {dash.widgets.length === 0 ? (
-        <Panel><Empty icon={<LayoutDashboard className="h-10 w-10" />} title="Empty dashboard" hint="Add a KPI, chart, table or markdown widget. Bind it to a saved query or paste SQL." /></Panel>
+        <div className="py-16"><Empty icon={<LayoutDashboard />} title="This dashboard is empty" hint="Add a KPI, chart, table or note, from a saved query or SQL." action={canWrite ? <Button size="sm" onClick={() => setEditor({ open: true, widget: null })}><Plus className="h-3.5 w-3.5" /> Add widget</Button> : undefined} /></div>
       ) : (
         <Grid className={cn('layout', edit && 'editing')} layout={layout} cols={12} rowHeight={64} margin={[12, 12]} isDraggable={edit} isResizable={edit} draggableHandle=".widget-drag" onLayoutChange={onLayoutChange} compactType="vertical">
           {dash.widgets.map((w) => (
-            <div key={w.id} className={cn('flex flex-col overflow-hidden rounded-xl border bg-zinc-900/40', edit ? 'border-accent-700/60' : 'border-zinc-800')}>
-              <header className="flex h-8 shrink-0 items-center gap-1.5 border-b border-zinc-800 px-2.5">
+            <div key={w.id} className={cn('flex flex-col overflow-hidden rounded-lg border bg-zinc-950', edit ? 'border-accent-500/50 border-dashed' : 'border-zinc-800')}>
+              <header className="flex h-8 shrink-0 items-center gap-1.5 px-3">
                 {edit && <GripVertical className="widget-drag h-3.5 w-3.5 cursor-grab text-zinc-500" />}
-                <span className="truncate text-xs font-semibold text-zinc-100">{w.title}</span>
-                <span className="rounded border border-zinc-800 px-1 font-mono text-[9px] text-zinc-500">{w.widget_type}</span>
+                <span className="truncate text-xs font-semibold text-zinc-200">{w.title}</span>
                 {w.refresh_interval_sec > 0 && <span className="font-mono text-[9px] text-zinc-600" title="Auto-refresh">↻ {w.refresh_interval_sec}s</span>}
                 {edit && (
                   <span className="ml-auto flex items-center gap-1">
@@ -233,6 +269,7 @@ function DashboardCanvas({ id }: { id: string }) {
         </Grid>
       )}
 
+      </div>
       <WidgetEditor open={editor.open} onClose={() => setEditor({ open: false, widget: null })} onSave={saveWidget} workspaceId={dash.workspace_id} initial={editor.widget} savedQueries={saved} />
     </div>
   );

@@ -230,8 +230,17 @@ export function CopilotDrawer() {
     a: ({ children, href }: { children?: ReactNode; href?: string }) => <a href={href} className="text-accent-300 underline" target="_blank" rel="noreferrer">{children}</a>,
   };
 
+  // What the assistant is looking at: picked datasets, else the dataset or query or dashboard on screen.
+  const activeTab = ws.tabs.find((t) => t.id === ws.activeTabId);
+  const onScreen = location.hash.startsWith('#/data') || location.hash === '' || location.hash === '#/'
+    ? (wsId ? ws.overviewTarget[wsId] : null)
+    : location.hash.startsWith('#/query')
+      ? activeTab ? `${activeTab.title} (SQL)` : null
+      : location.hash.startsWith('#/dashboards/') ? 'this dashboard' : null;
+  const contextChips = cp.targets.length ? cp.targets : [...(onScreen ? [onScreen] : []), ws.workspaces.find((w) => w.id === wsId)?.name ?? 'workspace'];
+
   return (
-    <aside className="relative flex h-full shrink-0 flex-col border-l border-zinc-800 bg-zinc-950" style={{ width: cp.width }}>
+    <aside className="relative flex h-full shrink-0 flex-col border-l border-zinc-800 bg-zinc-950" style={{ width: cp.width, maxWidth: '38vw', minWidth: 320 }} aria-label="DuckView AI">
       <div
         className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent-700/40"
         onMouseDown={(e) => {
@@ -249,9 +258,9 @@ export function CopilotDrawer() {
         }}
       />
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-zinc-800 px-3">
-        <Bot className="h-4 w-4 text-accent-400" />
-        <span className="text-sm font-semibold">DuckCopilot</span>
-        <span className="truncate font-mono text-[10px] text-zinc-500" title={effectiveModel ?? ''}>
+        <Sparkles className="h-4 w-4 text-accent-500" />
+        <span className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-zinc-50">DuckView AI</span>
+        <span className="min-w-0 truncate text-[11px] text-zinc-500" title={effectiveModel ?? ''}>
           {effectiveProvider ? `${labelOf(effectiveProvider)} · ${effectiveModel}` : 'not configured'}
         </span>
         {(cp.usage.requests > 0 || cp.streaming) && (
@@ -272,9 +281,18 @@ export function CopilotDrawer() {
         </div>
       </header>
 
+      {/* What the assistant is looking at */}
+      <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-1.5 border-b border-zinc-800 px-3 py-1.5 text-xs" data-testid="ai-context">
+        <span className="text-zinc-500">Context</span>
+        {contextChips.map((c) => (
+          <span key={c} className="inline-flex max-w-[14rem] items-center truncate rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[11px] text-zinc-300" title={c}>{c}</span>
+        ))}
+        {cp.targets.length > 0 && <button className="text-[11px] text-zinc-500 hover:text-zinc-200" onClick={() => cp.setTargets([])}>clear</button>}
+      </div>
+
       {showConvs && (
         <div className="border-b border-zinc-800 bg-zinc-900/60 p-2 text-xs">
-          <div className="mb-1 flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <div className="mb-1 flex items-center justify-between px-1 text-[10px] font-semibold text-zinc-500">
             <span>Conversations</span>
             <button className="text-accent-300 hover:underline" onClick={() => wsId && void cp.openConversation(wsId, null)}>
               + new
@@ -294,7 +312,7 @@ export function CopilotDrawer() {
 
       {showSettings && cfg && (
         <div className="space-y-2 border-b border-zinc-800 bg-zinc-900/60 p-3 text-xs">
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-500">
             <KeyRound className="h-3 w-3" /> Provider
           </div>
           <Select value={cp.settings.provider} onChange={(e) => { cp.setSettings({ provider: e.target.value as typeof cp.settings.provider, model: '', apiKey: '', baseUrl: '' }); setModels([]); }} className="h-8 w-full text-xs" disabled={!cfg.allow_byok}>
@@ -403,21 +421,22 @@ export function CopilotDrawer() {
       <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-3 py-3 text-[13px] text-zinc-200">
         {!ready && (
           <div className="rounded-md border border-amber-900 bg-amber-950/40 p-3 text-xs text-amber-200">
-            {cfg?.enabled === false ? 'DuckCopilot is disabled on this server.' : <>No LLM provider configured yet. <a href="#/settings/copilot" onClick={() => cp.toggle(false)} className="text-accent-300 hover:underline">Open Settings → Copilot</a> to pick Claude, ChatGPT, Gemini, DeepSeek, OpenRouter, Kimi, Groq, Mistral, Grok, a local Ollama or any OpenAI-compatible endpoint and paste a key{cfg?.can_manage ? ' for everyone' : ' for yourself'}.</>}
+            {cfg?.enabled === false ? 'DuckView AI is turned off on this server.' : <>No model is set up yet. <a href="#/settings/copilot" onClick={() => cp.toggle(false)} className="text-accent-300 hover:underline">Open Settings → AI assistant</a> to pick Claude, ChatGPT, Gemini, DeepSeek, OpenRouter, Kimi, Groq, Mistral, Grok, a local Ollama or any OpenAI-compatible endpoint and paste a key{cfg?.can_manage ? ' for everyone' : ' for yourself'}.</>}
           </div>
         )}
         {ready && cp.messages.length === 0 && (
           <div className="space-y-3">
-            <p className="text-xs text-zinc-400">I can see your tables, files, buckets and the SQL in your active tab. Ask in plain English, or start from an action:</p>
-            <div className="grid gap-1.5">
+            <p className="text-xs text-zinc-500">Ask about your data in plain words. DuckView AI sees this workspace's tables, files, metrics and dbt models, and the SQL you are editing.</p>
+            <div className="text-[11px] font-medium text-zinc-500">Suggested questions</div>
+            <div className="grid gap-1">
               {[
                 ['Which regions had the highest revenue growth month over month?', 'Trend + window functions'],
                 ['Find duplicate customers by normalised email', 'Data quality'],
                 ['Pivot orders by product into monthly columns', 'PIVOT'],
                 ['Build a cross-filtered dashboard of trips by hour, distance and fare', 'Mosaic dashboard'],
               ].map(([q, hint]) => (
-                <button key={q} onClick={() => setInput(q ?? "")} className="rounded-md border border-zinc-800 px-2.5 py-1.5 text-left text-xs text-zinc-300 hover:border-zinc-600">
-                  {q} <span className="text-[10px] text-zinc-600">· {hint}</span>
+                <button key={q} onClick={() => setInput(q ?? "")} className="rounded-md px-2 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-900" title={hint}>
+                  {q}
                 </button>
               ))}
             </div>
@@ -426,7 +445,7 @@ export function CopilotDrawer() {
         {cp.messages.map((m) => (
           <div key={m.id} className={cn('mb-3', m.role === 'user' ? 'flex justify-end' : '')}>
             {m.role === 'user' ? (
-              <div className="max-w-[90%] whitespace-pre-wrap rounded-lg bg-accent-600/25 px-3 py-2 text-[13px] text-accent-50">{m.content}</div>
+              <div className="max-w-[90%] whitespace-pre-wrap rounded-lg bg-zinc-800 px-3 py-2 text-[13px] text-zinc-100">{m.content}</div>
             ) : (
               <div className="max-w-full">
                 {m.meta && (m.meta.tables != null || m.meta.model) && (
@@ -451,13 +470,13 @@ export function CopilotDrawer() {
       <div className="shrink-0 border-t border-zinc-800 p-2">
         <div className="mb-1.5 flex flex-wrap gap-1">
           <button onClick={() => submit('suggest')} disabled={!ready || cp.streaming} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title={cp.targets.length ? `Suggest questions for ${cp.targets.join(', ')}` : 'Suggest questions for this workspace'}>
-            <Sparkles className="h-3 w-3 text-accent-300" /> Suggest questions{cp.targets.length ? ` (${cp.targets.length})` : ''}
+            <Sparkles className="h-3 w-3 text-zinc-500" /> Suggest questions{cp.targets.length ? ` (${cp.targets.length})` : ''}
           </button>
           <button onClick={() => submit('fix')} disabled={!ready || cp.streaming || !host?.activeSql()} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title="Send the active tab's SQL and its last error">
-            <Wrench className="h-3 w-3 text-amber-300" /> Fix my query{host?.activeError() ? ' (error)' : ''}
+            <Wrench className="h-3 w-3 text-zinc-500" /> Fix my query{host?.activeError() ? ' (error)' : ''}
           </button>
           <button onClick={() => submit('dashboard')} disabled={!ready || cp.streaming} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title={cp.targets.length ? `Draft an interactive Mosaic dashboard for ${cp.targets.join(', ')} (type a goal above to steer it)` : 'Draft an interactive Mosaic dashboard — select a dataset or describe what you want above'}>
-            <LayoutDashboard className="h-3 w-3 text-accent-300" /> Build dashboard{cp.targets.length ? ` (${cp.targets.length})` : ''}
+            <LayoutDashboard className="h-3 w-3 text-zinc-500" /> Build dashboard{cp.targets.length ? ` (${cp.targets.length})` : ''}
           </button>
           {cp.messages.length > 0 && (
             <button onClick={() => wsId && void cp.clear(wsId)} className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:text-red-300" title="Delete this conversation">

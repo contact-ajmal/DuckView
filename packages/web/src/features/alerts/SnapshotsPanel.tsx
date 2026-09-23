@@ -75,7 +75,7 @@ export function SnapshotsPanel({ workspaceId }: { workspaceId: string }) {
       </div>
       {error && !draft && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
       {snaps.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 py-12"><Empty icon={<Camera className="h-10 w-10" />} title="No scheduled snapshots" hint="Pick a dashboard or app, a schedule and channels. Email gets the image inline (and the PDF); Slack and Teams show it through a signed link." /></div>
+        <div className="border-y border-zinc-800 py-12"><Empty icon={<Camera className="h-10 w-10" />} title="No scheduled snapshots" hint="Pick a dashboard or app, a schedule and channels. Email gets the image inline (and the PDF); Slack and Teams show it through a signed link." /></div>
       ) : (
         <div className="grid gap-2 md:grid-cols-2">
           {snaps.map((s) => (

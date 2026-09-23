@@ -2,40 +2,57 @@ import type { ReactNode } from 'react';
 import { cn } from './ui';
 import { HideButton } from './LayoutMenu';
 
-/** Small violet uppercase label above a page title (e.g. "OVERVIEW · AUTO-GENERATED ON LOAD"). */
-export function Eyebrow({ children }: { children: ReactNode }) {
-  return <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent-400">{children}</div>;
+/**
+ * Page-level eyebrow labels were template chrome; the top bar's breadcrumb now says where you are. Kept as a no-op so
+ * existing pages compile, and so nothing is shown twice.
+ */
+export function Eyebrow(_props: { children: ReactNode }) {
+  return null;
 }
 
 export function PageTitle({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
-  return <h1 className={cn('text-2xl font-semibold tracking-tight text-zinc-50', className)} title={title}>{children}</h1>;
+  return <h1 className={cn('text-[18px] font-semibold tracking-tight text-zinc-50', className)} title={title}>{children}</h1>;
 }
 
-/** Sidebar card: uppercase header with an optional right-aligned meta slot. */
+/** The compact header of a workspace page: title (and a one-line description), actions on the right. */
+export function PageHeader({ title, description, actions, children, className }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; children?: ReactNode; className?: string }) {
+  return (
+    <div className={cn('flex flex-wrap items-center gap-x-4 gap-y-2', className)}>
+      <div className="min-w-0 flex-1">
+        <PageTitle>{title}</PageTitle>
+        {description && <p className="mt-0.5 max-w-3xl truncate text-xs text-zinc-500">{description}</p>}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {children}
+    </div>
+  );
+}
+
+/** A labelled group in a side column: a small heading, then its content — no box around it. */
 export function SideCard({ title, meta, children, className, bodyClassName, hideId }: { title: ReactNode; meta?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string; hideId?: string }) {
   return (
-    <section className={cn('rounded-xl border border-zinc-800 bg-zinc-900/40', className)}>
-      <header className="group/hdr flex items-center justify-between gap-2 border-b border-zinc-800 px-4 py-2.5">
-        <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-300">{title}</h3>
+    <section className={cn('border-b border-zinc-800 last:border-0', className)}>
+      <header className="group/hdr flex h-9 items-center justify-between gap-2 px-3">
+        <h3 className="text-xs font-semibold text-zinc-300">{title}</h3>
         <div className="flex items-center gap-1.5">
           {meta && <div className="text-[11px] text-zinc-500">{meta}</div>}
           {hideId && <HideButton id={hideId} className="opacity-0 group-hover/hdr:opacity-100" />}
         </div>
       </header>
-      <div className={cn('p-3', bodyClassName)}>{children}</div>
+      <div className={cn('px-3 pb-3', bodyClassName)}>{children}</div>
     </section>
   );
 }
 
-/** Main-area card with a title row (e.g. "Schema  profiled with SUMMARIZE in 205 ms"). */
+/** A section of a page: a heading row with meta and actions, then the content. */
 export function Panel({ title, meta, actions, children, className, bodyClassName, hideId }: { title?: ReactNode; meta?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; bodyClassName?: string; hideId?: string }) {
   return (
-    <section className={cn('relative rounded-xl border border-zinc-800 bg-zinc-900/40', className)}>
+    <section className={cn('relative rounded-lg border border-zinc-800', className)}>
       {(title || actions || hideId) && (
-        <header className="group/hdr flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-zinc-800 px-4 py-2.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {title && <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>}
-            {meta && <span className="font-mono text-[11px] text-zinc-500">{meta}</span>}
+        <header className="group/hdr flex min-h-10 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-zinc-800 px-4 py-1.5">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+            {title && <h3 className="text-[13px] font-semibold text-zinc-100">{title}</h3>}
+            {meta && <span className="text-[11px] text-zinc-500">{meta}</span>}
           </div>
           <div className="flex items-center gap-2">
             {actions}
@@ -65,25 +82,26 @@ export function KvRows({ rows }: { rows: { k: string; v: ReactNode; sub?: ReactN
   );
 }
 
+/** Column types read as quiet monospace text; only the family is hinted by colour. */
 export function typeTone(type: string): string {
   const t = type.toUpperCase();
-  if (/INT|DOUBLE|FLOAT|DECIMAL|REAL|HUGEINT|NUMERIC/.test(t)) return 'border-amber-800/70 bg-amber-950/40 text-amber-300';
-  if (/DATE|TIME|INTERVAL/.test(t)) return 'border-emerald-800/70 bg-emerald-950/40 text-emerald-300';
-  if (t === 'BOOLEAN') return 'border-sky-800/70 bg-sky-950/40 text-sky-300';
-  if (/STRUCT|MAP|LIST|\[\]|JSON|UNION/.test(t)) return 'border-fuchsia-800/70 bg-fuchsia-950/40 text-fuchsia-300';
-  return 'border-zinc-700 bg-zinc-800/70 text-zinc-300';
+  if (/INT|DOUBLE|FLOAT|DECIMAL|REAL|HUGEINT|NUMERIC/.test(t)) return 'text-sky-500';
+  if (/DATE|TIME|INTERVAL/.test(t)) return 'text-emerald-500';
+  if (t === 'BOOLEAN') return 'text-fuchsia-500';
+  if (/STRUCT|MAP|LIST|\[\]|JSON|UNION/.test(t)) return 'text-fuchsia-500';
+  return 'text-zinc-500';
 }
 
 export function TypePill({ type, className }: { type: string; className?: string }) {
-  return <span className={cn('inline-flex rounded border px-1.5 py-0.5 font-mono text-[10px] leading-none', typeTone(type), className)}>{type}</span>;
+  return <span className={cn('inline-flex font-mono text-[11px] leading-none', typeTone(type), className)}>{type.toLowerCase()}</span>;
 }
 
 /** Pill row for the header: DuckDB version · cores · headroom · Safe. */
 export function StatusPill({ dot, children, tone = 'zinc', title }: { dot?: boolean; children: ReactNode; tone?: 'zinc' | 'green' | 'amber'; title?: string }) {
-  const dotColor = tone === 'green' ? 'bg-emerald-400' : tone === 'amber' ? 'bg-amber-400' : 'bg-zinc-500';
-  const text = tone === 'green' ? 'text-emerald-300' : tone === 'amber' ? 'text-amber-300' : 'text-zinc-400';
+  const dotColor = tone === 'green' ? 'bg-emerald-500' : tone === 'amber' ? 'bg-amber-500' : 'bg-zinc-500';
+  const text = 'text-zinc-400';
   return (
-    <span title={title} className={cn('inline-flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-1 font-mono text-[11px]', text)}>
+    <span title={title} className={cn('inline-flex items-center gap-1.5 text-[11px]', text)}>
       {dot && <span className={cn('h-1.5 w-1.5 rounded-full', dotColor)} />}
       {children}
     </span>
@@ -91,5 +109,5 @@ export function StatusPill({ dot, children, tone = 'zinc', title }: { dot?: bool
 }
 
 export function Tag({ children, className }: { children: ReactNode; className?: string }) {
-  return <span className={cn('inline-flex items-center rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400', className)}>{children}</span>;
+  return <span className={cn('inline-flex items-center rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[11px] text-zinc-400', className)}>{children}</span>;
 }

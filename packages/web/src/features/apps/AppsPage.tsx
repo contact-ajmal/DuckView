@@ -11,8 +11,8 @@ import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useTheme } from '../../store/theme';
 import { useCopilot } from '../../store/copilot';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
-import { Eyebrow, PageTitle } from '../../components/layout';
-import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { PageHeader } from '../../components/layout';
+import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, StatusDot, cn } from '../../components/ui';
 
 /** #/apps — the gallery of a workspace's Streamlit apps; #/apps/<id> — the editor with a live preview. */
 export function AppsPage() {
@@ -39,9 +39,9 @@ const RUNTIME_LABEL = { subprocess: 'next to the server', docker: 'in its own co
 /** Who sees the app, with a pending or rejected request to publish it. */
 function Audience({ app }: { app: DataApp }) {
   if (app.publish_status === 'pending') return <Badge tone="amber" className="gap-1"><Globe className="h-3 w-3" /> awaiting review</Badge>;
-  if (app.visibility === 'org') return <Badge tone="blue" className="gap-1"><Globe className="h-3 w-3" /> everyone</Badge>;
-  if (app.publish_status === 'rejected') return <Badge tone="red" className="gap-1"><Users className="h-3 w-3" /> workspace · not approved</Badge>;
-  return <Badge className="gap-1"><Users className="h-3 w-3" /> workspace</Badge>;
+  if (app.visibility === 'org') return <span className="inline-flex items-center gap-1 text-zinc-400"><Globe className="h-3 w-3 text-zinc-500" /> everyone</span>;
+  if (app.publish_status === 'rejected') return <Badge tone="red" className="gap-1"><Users className="h-3 w-3" /> not approved</Badge>;
+  return <span className="inline-flex items-center gap-1 text-zinc-400"><Users className="h-3 w-3 text-zinc-500" /> workspace</span>;
 }
 
 function Gallery() {
@@ -93,43 +93,65 @@ function Gallery() {
 
   return (
     <div className="h-full min-h-0 overflow-auto">
-      <div className="mx-auto max-w-7xl space-y-5 p-5 pb-16">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <Eyebrow>Build</Eyebrow>
-            <PageTitle>Data apps</PageTitle>
-            <p className="mt-1 text-xs text-zinc-500">Streamlit apps written on <b className="text-zinc-300">{ws.workspaces.find((w) => w.id === wsId)?.name ?? 'the active workspace'}</b>'s tables and files — each run by DuckView {RUNTIME_LABEL[runtime]}, reached through <code className="font-mono">duckview.connect()</code> with a read-only token, shared with the workspace's members.</p>
-          </div>
-          <Button variant="primary" disabled={!wsId || !canEdit || !enabled} onClick={() => { setForm({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [], execution: 'server' }); setCreating(true); }}><Plus className="h-4 w-4" /> New app</Button>
-        </div>
-        {!enabled && <div className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">Data apps are disabled on this server (<code className="font-mono">apps.enabled</code>). Apps run Python next to DuckView; an administrator turns them on in the configuration.</div>}
-        {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
+      <div className="mx-auto max-w-[1180px] space-y-4 px-6 py-5 pb-16">
+        <PageHeader
+          title="Apps"
+          description={`Streamlit, Dash and Gradio apps on ${ws.workspaces.find((w) => w.id === wsId)?.name ?? 'this workspace'}'s data, run ${RUNTIME_LABEL[runtime]} and shared with the workspace.`}
+          actions={<Button variant="primary" disabled={!wsId || !canEdit || !enabled} onClick={() => { setForm({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [], execution: 'server' }); setCreating(true); }}><Plus className="h-3.5 w-3.5" /> New app</Button>}
+        />
+        {!enabled && <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-zinc-300">Data apps are turned off on this server (<code className="font-mono">apps.enabled</code>). They run Python next to DuckView; an administrator can turn them on.</div>}
+        {error && <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 font-mono text-xs text-red-300">{error}</div>}
         {apps.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-800 py-14"><Empty icon={<AppWindow className="h-10 w-10" />} title="No apps yet" hint="Start from the table explorer template, or a blank app: pick tables, filters and charts in Python; DuckView runs it and serves it to the workspace." />{canEdit && enabled && <div className="mt-3 flex justify-center"><Button variant="primary" onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New app</Button></div>}</div>
+          <div className="border-y border-zinc-800 py-14"><Empty icon={<AppWindow />} title="No apps yet" hint="Start from a template, a dashboard or saved queries; DuckView runs the app and serves it to the workspace." action={canEdit && enabled ? <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New app</Button> : undefined} /></div>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {apps.map((a) => (
-              <div key={a.id} className="group flex flex-col rounded-xl border border-zinc-800 p-4 hover:border-zinc-700">
-                <div className="flex items-center gap-2">
-                  <AppWindow className="h-4 w-4 text-accent-300" />
-                  <a href={`#/apps/${a.id}`} className="truncate text-sm font-semibold text-zinc-100 hover:underline">{a.name}</a>
-                  <Badge tone={STATUS_TONE[a.status]} className="ml-auto">{a.execution === 'browser' && a.status === 'running' ? 'ready' : a.status}</Badge>
-                </div>
-                <p className="mt-1 line-clamp-2 min-h-[2rem] text-[11px] text-zinc-500">{a.description || `${a.entry} · ${(a.source_bytes / 1024).toFixed(1)} KB`}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10.5px] text-zinc-600"><Audience app={a} />{a.kind !== 'streamlit' && <Badge tone="blue">{APP_KIND_LABEL[a.kind]}</Badge>}{a.execution === 'browser' && <Badge tone="violet" className="gap-1"><Monitor className="h-3 w-3" /> in browser</Badge>}{a.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}<span>{a.execution === 'browser' ? 'runs in the viewer\'s browser' : a.last_started_at ? `started ${timeAgo(a.last_started_at)}` : 'never started'}</span>{a.last_error ? <span className="truncate text-red-300">· {a.last_error}</span> : null}</div>
-                <div className="mt-3 flex items-center gap-1">
-                  <Button size="sm" variant="secondary" onClick={() => void openInTab(a)} title="Open the app in a new tab"><ExternalLink className="h-3.5 w-3.5" /> Open</Button>
-                  <Button size="sm" variant="ghost" onClick={() => (location.hash = `#/apps/${a.id}`)} title="Edit and preview">Edit</Button>
-                  {a.execution === 'browser' ? null : a.status === 'running' || a.status === 'starting' ? (
-                    <Button size="sm" variant="ghost" loading={busy === a.id} onClick={async () => { setBusy(a.id); try { await api.post(`/api/apps/${a.id}/stop`, {}); } finally { setBusy(null); await load(); } }} title="Stop"><Square className="h-3.5 w-3.5" /></Button>
-                  ) : (
-                    <Button size="sm" variant="ghost" loading={busy === a.id} disabled={!enabled} onClick={async () => { setBusy(a.id); setError(null); try { await api.post(`/api/apps/${a.id}/start`, {}); } catch (e) { setError((e as Error).message); } finally { setBusy(null); await load(); } }} title="Start"><Play className="h-3.5 w-3.5" /></Button>
-                  )}
-                  <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!canEdit} onClick={async () => { if (confirm(`Delete "${a.name}"?`)) { await api.del(`/api/apps/${a.id}`); await load(); } }} title="Delete"><Trash2 className="h-3.5 w-3.5" /></Button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <table className="w-full table-fixed text-[13px]" data-testid="app-list">
+            <thead>
+              <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
+                <th className="py-2 pr-4 font-normal">App</th>
+                <th className="w-28 py-2 pr-4 font-normal">Status</th>
+                <th className="w-40 py-2 pr-4 font-normal @max-3xl:hidden">Runs</th>
+                <th className="w-28 py-2 pr-4 font-normal @max-4xl:hidden">Shared with</th>
+                <th className="w-28 py-2 pr-4 font-normal @max-2xl:hidden">Last started</th>
+                <th className="w-44 py-2 font-normal"><span className="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {apps.map((a) => {
+                const status = a.execution === 'browser' && a.status === 'running' ? 'ready' : a.status;
+                const tone = a.status === 'running' ? 'ok' : a.status === 'error' ? 'error' : a.status === 'starting' || a.status === 'installing' ? 'busy' : 'idle';
+                return (
+                  <tr key={a.id} className="group border-b border-zinc-800/70 hover:bg-zinc-900" data-app={a.name}>
+                    <td className="py-2.5 pr-4">
+                      <a href={`#/apps/${a.id}`} className="block truncate font-medium text-zinc-100 hover:underline">{a.name}</a>
+                      <div className="truncate text-xs text-zinc-500" title={a.last_error ?? a.description ?? ''}>{a.last_error ? <span className="text-red-400">{a.last_error}</span> : a.description || `${a.entry} · ${(a.source_bytes / 1024).toFixed(1)} KB`}</div>
+                    </td>
+                    <td className="py-2.5 pr-4"><StatusDot tone={tone} pulse={tone === 'busy'}>{status}</StatusDot></td>
+                    <td className="py-2.5 pr-4 text-xs text-zinc-400 @max-3xl:hidden">
+                      <span className="inline-flex items-center gap-1.5">
+                        {a.execution === 'browser' ? <Monitor className="h-3.5 w-3.5 text-zinc-500" /> : <Server className="h-3.5 w-3.5 text-zinc-500" />}
+                        {APP_KIND_LABEL[a.kind]} · {a.execution === 'browser' ? 'browser' : 'server'}
+                        {a.always_on && <Pin className="h-3 w-3 text-zinc-500" aria-label="always on" />}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-4 text-xs @max-4xl:hidden"><Audience app={a} /></td>
+                    <td className="py-2.5 pr-4 text-xs text-zinc-500 @max-2xl:hidden">{a.execution === 'browser' ? '—' : a.last_started_at ? timeAgo(a.last_started_at) : 'never'}</td>
+                    <td className="py-2.5">
+                      <div className="flex items-center justify-end gap-0.5">
+                        <Button size="sm" variant="ghost" onClick={() => void openInTab(a)} title="Open the app in a new tab"><ExternalLink className="h-3.5 w-3.5" /> Open</Button>
+                        <Button size="sm" variant="ghost" onClick={() => (location.hash = `#/apps/${a.id}`)} title="Edit and preview">Edit</Button>
+                        {a.execution === 'browser' ? null : a.status === 'running' || a.status === 'starting' ? (
+                          <IconButton label="Stop" disabled={busy === a.id} onClick={async () => { setBusy(a.id); try { await api.post(`/api/apps/${a.id}/stop`, {}); } finally { setBusy(null); await load(); } }}><Square className="h-3.5 w-3.5" /></IconButton>
+                        ) : (
+                          <IconButton label="Start" disabled={busy === a.id || !enabled} onClick={async () => { setBusy(a.id); setError(null); try { await api.post(`/api/apps/${a.id}/start`, {}); } catch (e) { setError((e as Error).message); } finally { setBusy(null); await load(); } }}><Play className="h-3.5 w-3.5" /></IconButton>
+                        )}
+                        <IconButton label="Delete" className="opacity-0 hover:text-red-400 group-hover:opacity-100" disabled={!canEdit} onClick={async () => { if (confirm(`Delete "${a.name}"?`)) { await api.del(`/api/apps/${a.id}`); await load(); } }}><Trash2 className="h-3.5 w-3.5" /></IconButton>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
         <Modal open={creating} onClose={() => setCreating(false)} title="New data app" width="max-w-lg">
           <div className="space-y-3">
