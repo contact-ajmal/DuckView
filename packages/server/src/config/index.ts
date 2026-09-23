@@ -323,6 +323,10 @@ export const ConfigSchema = z.object({
       /** Let webhooks reach private / loopback addresses (an intranet endpoint; tests). Off: public targets only. */
       allow_private_targets: z.coerce.boolean().default(false),
       timeout_seconds: z.coerce.number().int().min(1).max(120).default(10),
+      /** Check due alerts (and, later, snapshots) from this process; turn off on replicas that should not. */
+      scheduler_enabled: z.coerce.boolean().default(true),
+      /** Rows an alert query may return (the first ones are quoted in the message). */
+      alert_max_rows: z.coerce.number().int().min(1).max(10_000).default(100),
       /** PagerDuty Events API v2 endpoint (EU accounts: https://events.eu.pagerduty.com/v2/enqueue). */
       pagerduty_url: z.string().default('https://events.pagerduty.com/v2/enqueue'),
       /** Outgoing mail; administrators can also set it from Settings → Integrations (that one wins). */

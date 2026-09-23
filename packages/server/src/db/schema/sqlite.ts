@@ -646,6 +646,60 @@ export const notificationDeliveries = sqliteTable(
   (t) => [index('notification_deliveries_channel_idx').on(t.channel_id, t.created_at)],
 );
 
+export const ALERT_STATES = ['unknown', 'ok', 'triggered', 'error'] as const;
+export type AlertState = (typeof ALERT_STATES)[number];
+export const ALERT_SEVERITIES = ['info', 'warning', 'critical'] as const;
+export type AlertSeverity = (typeof ALERT_SEVERITIES)[number];
+/** rows: the query returns rows · no_rows: it returns none · threshold: a column of the first row compared with a value */
+export type AlertCondition = { kind: 'rows' } | { kind: 'no_rows' } | { kind: 'threshold'; column: string; op: '>' | '>=' | '<' | '<=' | '=' | '!='; value: number };
+
+/** A query checked on a schedule; state changes are delivered to notification channels. */
+export const alerts = sqliteTable(
+  'alerts',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** The alert runs as this user, read-only. */
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    sql: text('sql').notNull(),
+    condition: text('condition', { mode: 'json' }).$type<AlertCondition>().notNull(),
+    schedule: text('schedule', { mode: 'json' }).$type<SyncSchedule>().notNull(),
+    channel_ids: text('channel_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    severity: text('severity', { enum: ALERT_SEVERITIES }).notNull().default('warning'),
+    /** change: when the state changes (and when it clears) · always: on every triggered check */
+    notify: text('notify', { enum: ['change', 'always'] }).notNull().default('change'),
+    notify_resolved: integer('notify_resolved', { mode: 'boolean' }).notNull().default(true),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    state: text('state', { enum: ALERT_STATES }).notNull().default('unknown'),
+    last_value: text('last_value'),
+    last_error: text('last_error'),
+    last_checked_at: integer('last_checked_at', { mode: 'timestamp_ms' }),
+    last_triggered_at: integer('last_triggered_at', { mode: 'timestamp_ms' }),
+    next_run_at: integer('next_run_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('alerts_workspace_idx').on(t.workspace_id), index('alerts_next_run_idx').on(t.next_run_at)],
+);
+
+/** Each check of an alert: its state, the value it saw, and how many channels were told. */
+export const alertEvents = sqliteTable(
+  'alert_events',
+  {
+    id: text('id').primaryKey(),
+    alert_id: text('alert_id').notNull().references(() => alerts.id, { onDelete: 'cascade' }),
+    state: text('state', { enum: ALERT_STATES }).notNull(),
+    value: text('value'),
+    message: text('message'),
+    notified: integer('notified').notNull().default(0),
+    triggered_by: text('triggered_by').notNull().default('schedule'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('alert_events_alert_idx').on(t.alert_id, t.created_at)],
+);
+
 /** Platform-wide settings set from the console (e.g. the Google OAuth client), secrets encrypted. */
 export const appSettings = sqliteTable('app_settings', {
   key: text('key').primaryKey(),
@@ -760,3 +814,5 @@ export type DataSyncRun = typeof dataSyncRuns.$inferSelect;
 export type CopilotUsageRow = typeof copilotUsage.$inferSelect;
 export type NotificationChannel = typeof notificationChannels.$inferSelect;
 export type NotificationDelivery = typeof notificationDeliveries.$inferSelect;
+export type Alert = typeof alerts.$inferSelect;
+export type AlertEvent = typeof alertEvents.$inferSelect;

@@ -21,6 +21,7 @@ import { DataSyncService } from './services/syncs.js';
 import { ConnectorConnectionService } from './services/connector-connections.js';
 import { DataAppService } from './services/apps.js';
 import { NotificationService } from './services/notifications.js';
+import { AlertService } from './services/alerts.js';
 import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
@@ -56,6 +57,7 @@ export interface AppContext {
   connectors: ConnectorConnectionService;
   apps: DataAppService;
   notifications: NotificationService;
+  alerts: AlertService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -117,6 +119,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   syncs.stageDir = path.join(engines.jail.baseDir, '.duckview', 'sync');
   if (cfg.duckdb.sync_scheduler_enabled) syncs.start();
   const notifications = new NotificationService(store, cfg, cipher, workspaces, audit);
+  const alerts = new AlertService(store, cfg, workspaces, queries, auth, notifications, audit);
+  if (cfg.notifications.scheduler_enabled) alerts.start();
   const apps = new DataAppService(store, cfg, workspaces, auth, audit);
   apps.bind({ dashboards, savedQueries });
   await apps.init();
@@ -155,6 +159,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     connectors,
     apps,
     notifications,
+    alerts,
     lakehouse,
     agents,
     groups,
@@ -163,6 +168,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     startedAt: new Date(),
     async shutdown() {
       syncs.stop();
+      alerts.stop();
       await apps.shutdown().catch(() => undefined);
       await agents.flush();
       await cloudSync.flush().catch(() => undefined);

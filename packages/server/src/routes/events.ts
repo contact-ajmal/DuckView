@@ -17,6 +17,7 @@ function eventUserId(e: LiveEvent): string | null {
       return e.user_id;
     case 'sync':
     case 'app':
+    case 'alert':
       return null; // fanned out to workspace members below
     default:
       return e.user_id;
@@ -66,7 +67,7 @@ export async function eventRoutes(app: FastifyInstance, ctx: AppContext) {
         return ok;
       };
       unsubscribe = liveEvents.subscribe((e) => {
-        if (e.type === 'workspace' || e.type === 'sync' || e.type === 'app') {
+        if (e.type === 'workspace' || e.type === 'sync' || e.type === 'app' || e.type === 'alert') {
           void canSee(e.workspace_id).then((ok) => ok && send(e));
           return;
         }

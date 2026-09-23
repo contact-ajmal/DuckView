@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (25 tools · 4 resources · 5 prompts)        │
+│  Agent tools: one registry → MCP (28 tools · 4 resources · 5 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -338,6 +338,16 @@ API: `GET /api/apps/templates` · `GET /api/apps/guide` · `POST /api/apps/valid
 
 The API returns a masked hint instead of any secret. Every URL is called through the egress guard (`security/egress.ts`): https only, and the name must resolve to a public address — loopback, private, link-local (cloud metadata), CGNAT, multicast and reserved ranges are refused — checked inside the connection's own DNS lookup, so there is no rebinding window; `notifications.allow_private_targets` lifts this for intranet endpoints. Redirects are not followed. A delivery is retried twice on network errors, 429 and 5xx (not on 4xx or policy refusals); each series is logged (`GET /api/channels/:id/deliveries`, a month kept) and sets the channel's `last_status` / `last_error`. `POST /api/channels/:id/test` sends a test message.
 
+**SQL alerts** (`#/alerts/alerts`, `services/alerts.ts`): a query of the workspace, a condition and a schedule (`{kind: "interval", minutes}`, `{kind: "cron", expression, timezone}` or `manual`). Conditions: `{kind: "rows"}` (it returns rows), `{kind: "no_rows"}` (it returns none — freshness checks), `{kind: "threshold", column, op, value}` (the first row's column, `> >= < <= = !=`). The query is one read-only statement (refused when saved otherwise) and runs as the alert's author with the `read` scope only (whoever changes the SQL becomes the author), returning at most `notifications.alert_max_rows` rows. Each check sets `state` — `ok`, `triggered` or `error` (`unknown` before the first) — and `last_value`; what is delivered to the alert's `channel_ids` (the workspace's channels or org-wide ones):
+
+| From → to | Delivered | Event · severity |
+|---|---|---|
+| anything → `triggered` | always (and on every triggered check with `notify: "always"`) | `alert.triggered` · the alert's `severity` (`info`, `warning`, `critical`) |
+| `triggered` → `ok` | when `notify_resolved` (default) | `alert.resolved` · `resolved` (PagerDuty resolves the incident) |
+| anything else → `error` | once | `alert.error` · `warning` |
+
+Messages carry the description, what the check found (a sample of up to 5 rows for `rows`), the condition, value, workspace and a link, with `dedup_key: duckview-alert-<id>`. The scheduler (`notifications.scheduler_enabled`, every 30 s) checks due alerts and moves `next_run_at` first; a changed query or condition resets the state. Checks are recorded (`GET /api/alerts/:id/events`, 90 days) when the state changes, something was delivered, or a person ran it; live events `{type: "alert"}` refresh open pages. API: `GET/POST /api/workspaces/:id/alerts` · `POST /api/workspaces/:id/alerts/preview {sql, condition}` (runs once as the caller, saves and sends nothing) · `GET/PATCH/DELETE /api/alerts/:id` · `POST /api/alerts/:id/run` (editors). Agents: `list_alerts`, `create_alert` (tries the query first), `run_alert`.
+
 **Outgoing mail**: Settings → Integrations → Outgoing mail (`GET/PUT/DELETE /api/admin/integrations/smtp`, `POST …/smtp/test {to}`) — host, port, TLS or STARTTLS, user, password (encrypted, write-only), from — overrides `notifications.smtp` in the configuration. Links in messages use `server.public_url`.
 
 ## Overview: the data source bar
@@ -474,6 +484,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 
 | `browse_connector(connection_id, path?)` | Walks a warehouse, SaaS or Google connection one level at a time; leaves carry the `resource` for `create_data_sync`. |
 | `connector_query(connection_id, sql, limit?)` | Read-only SQL on Snowflake, BigQuery, Redshift or ClickHouse; rows capped. |
+| `list_alerts` · `create_alert(name, sql, condition, every_minutes \| cron, channel_ids, …)` · `run_alert` | SQL alerts: a read-only query and a condition checked on a schedule; state changes go to Slack, Teams, email, PagerDuty or webhooks — see [Alerts & delivery](#alerts--delivery). |
 | `list_apps` · `create_app(name, source, …)` · `update_app` · `run_app` · `stop_app` · `get_app_logs` · `preview_app` · `publish_app` | Streamlit data apps: generated from a dashboard, saved queries or code (validated first), run, previewed with a screenshot, published after human approval — see [Data apps](#data-apps-streamlit-dash-gradio). |
 
 **Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec), `duckdb://guides/data-app` (how to write a Streamlit data app with the SDK).

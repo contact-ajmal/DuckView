@@ -5,9 +5,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
-import { CHANNEL_TYPES } from '../db/schema/sqlite.js';
+import { CHANNEL_TYPES, ALERT_SEVERITIES } from '../db/schema/sqlite.js';
 
 const Secret = z.object({ url: z.string().max(2000).optional(), routing_key: z.string().max(100).optional(), signing_secret: z.string().max(200).optional() });
+const Condition = z.union([z.object({ kind: z.literal('rows') }), z.object({ kind: z.literal('no_rows') }), z.object({ kind: z.literal('threshold'), column: z.string().max(200), op: z.enum(['>', '>=', '<', '<=', '=', '!=']), value: z.number() })]);
+const Schedule = z.union([z.object({ kind: z.literal('manual') }), z.object({ kind: z.literal('interval'), minutes: z.number().int().min(1).max(525_600) }), z.object({ kind: z.literal('cron'), expression: z.string().max(200), timezone: z.string().max(64).optional() })]);
+const AlertBody = z.object({ name: z.string().max(120), description: z.string().max(2000).nullable().optional(), sql: z.string().max(100_000), condition: Condition, schedule: Schedule.optional(), channel_ids: z.array(z.string().max(64)).max(20).optional(), severity: z.enum(ALERT_SEVERITIES).optional(), notify: z.enum(['change', 'always']).optional(), notify_resolved: z.boolean().optional(), enabled: z.boolean().optional() });
 const ChannelBody = z.object({ name: z.string().max(120), type: z.enum(CHANNEL_TYPES), enabled: z.boolean().optional(), config: z.record(z.string(), z.unknown()).optional(), secret: Secret.optional() });
 
 export async function notificationRoutes(app: FastifyInstance, ctx: AppContext) {
@@ -42,4 +45,27 @@ export async function notificationRoutes(app: FastifyInstance, ctx: AppContext) 
     await n.testSmtp(req.principal!, body.to);
     return { ok: true };
   });
+
+  // ---------------------------------------------------------------- alerts
+  const al = ctx.alerts;
+  app.get('/api/workspaces/:id/alerts', async (req) => ({ alerts: await al.list(req.principal!, (req.params as { id: string }).id) }));
+  app.post('/api/workspaces/:id/alerts', async (req) => ({ alert: await al.create(req.principal!, (req.params as { id: string }).id, AlertBody.parse(req.body ?? {})) }));
+  /** Tries a query and condition as the caller, without saving or notifying (the editor's "Test"). */
+  app.post('/api/workspaces/:id/alerts/preview', async (req) => {
+    const body = z.object({ sql: z.string().max(100_000), condition: Condition }).parse(req.body ?? {});
+    return { evaluation: await al.preview(req.principal!, (req.params as { id: string }).id, body.sql, body.condition) };
+  });
+  app.get('/api/alerts/:id', async (req) => ({ alert: await al.get(req.principal!, (req.params as { id: string }).id) }));
+  app.patch('/api/alerts/:id', async (req) => ({ alert: await al.update(req.principal!, (req.params as { id: string }).id, AlertBody.partial().parse(req.body ?? {})) }));
+  app.delete('/api/alerts/:id', async (req) => {
+    await al.remove(req.principal!, (req.params as { id: string }).id);
+    return { ok: true };
+  });
+  /** Checks the alert now and delivers what changed (editors). */
+  app.post('/api/alerts/:id/run', async (req) => {
+    const { id } = req.params as { id: string };
+    await al.get(req.principal!, id, 'EDITOR');
+    return al.run(id, `manual:${req.principal!.email}`, req.principal!);
+  });
+  app.get('/api/alerts/:id/events', async (req) => ({ events: await al.events(req.principal!, (req.params as { id: string }).id) }));
 }

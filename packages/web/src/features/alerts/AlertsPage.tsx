@@ -4,14 +4,15 @@ import { useWorkspace } from '../../store/workspace';
 import { Eyebrow, PageTitle } from '../../components/layout';
 import { cn } from '../../components/ui';
 import { ChannelsPanel } from './ChannelsPanel';
+import { AlertsPanel } from './AlertsPanel';
 
-type Tab = 'channels';
-const TABS: { id: Tab; label: string }[] = [{ id: 'channels', label: 'Channels' }];
+type Tab = 'alerts' | 'channels';
+const TABS: { id: Tab; label: string }[] = [{ id: 'alerts', label: 'Alerts' }, { id: 'channels', label: 'Channels' }];
 
 /** #/alerts — alerts, scheduled snapshots and the channels they are delivered to. */
 export function AlertsPage() {
   const ws = useWorkspace();
-  const parse = (): Tab => (/^#\/alerts\/([a-z]+)/.exec(location.hash)?.[1] as Tab | undefined) ?? 'channels';
+  const parse = (): Tab => (/^#\/alerts\/([a-z]+)/.exec(location.hash)?.[1] as Tab | undefined) ?? 'alerts';
   const [tab, setTab] = useState<Tab>(parse);
   useEffect(() => {
     const on = () => setTab(parse());
@@ -29,6 +30,7 @@ export function AlertsPage() {
         <div className="flex gap-1 border-b border-zinc-800 text-xs">
           {TABS.map((t) => <button key={t.id} onClick={() => (location.hash = `#/alerts/${t.id}`)} className={cn('-mb-px border-b-2 px-3 py-1.5', tab === t.id ? 'border-accent-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-200')}>{t.label}</button>)}
         </div>
+        {ws.activeId && tab === 'alerts' && <AlertsPanel workspaceId={ws.activeId} />}
         {ws.activeId && tab === 'channels' && <ChannelsPanel workspaceId={ws.activeId} />}
       </div>
     </div>

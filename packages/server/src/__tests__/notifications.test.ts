@@ -14,6 +14,7 @@ import { initLogger } from '../observability/logger.js';
 import { createContext, type AppContext } from '../context.js';
 import { buildApp } from '../app.js';
 import { isPrivateAddress } from '../security/egress.js';
+import { buildTools, runTool, type ToolEnv } from '../agent/tools.js';
 
 let dir: string;
 let ctx: AppContext;
@@ -96,7 +97,7 @@ beforeAll(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-notify-'));
   const cfg = loadConfig({
     configPath: null,
-    env: { DUCKVIEW_DATA_DIR: path.join(dir, 'data'), DUCKVIEW_FILESYSTEM_MODE: 'full', DUCKDB_TEMP_DIRECTORY: path.join(dir, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '512MB', DUCKVIEW_ADMIN_EMAIL: 'admin@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', DUCKVIEW__duckdb__sync_scheduler_enabled: 'false', DUCKVIEW__apps__enabled: 'false', DUCKVIEW__notifications__allow_private_targets: 'true', DUCKVIEW__notifications__pagerduty_url: `${hook}/pd`, DUCKVIEW_PUBLIC_URL: 'https://duckview.example.com', LOG_LEVEL: 'silent' },
+    env: { DUCKVIEW_DATA_DIR: path.join(dir, 'data'), DUCKVIEW_FILESYSTEM_MODE: 'full', DUCKDB_TEMP_DIRECTORY: path.join(dir, 'spill'), DATABASE_URL: ':memory:', DUCKDB_MEMORY_LIMIT: '512MB', DUCKVIEW_ADMIN_EMAIL: 'admin@test.local', DUCKVIEW_ADMIN_PASSWORD: 'super-secret-pw', DUCKVIEW__duckdb__sync_scheduler_enabled: 'false', DUCKVIEW__apps__enabled: 'false', DUCKVIEW__notifications__allow_private_targets: 'true', DUCKVIEW__notifications__scheduler_enabled: 'false', DUCKVIEW__notifications__pagerduty_url: `${hook}/pd`, DUCKVIEW_PUBLIC_URL: 'https://duckview.example.com', LOG_LEVEL: 'silent' },
   });
   ctx = await createContext(cfg);
   const admin = ctx.auth.principalFromUser((await ctx.auth.findByEmail('admin@test.local'))!, 'jwt', '127.0.0.1');
@@ -243,5 +244,97 @@ describe('channels', () => {
     expect((await api('GET', `/api/workspaces/${otherWsId}/channels`, undefined, userJwt)).status).toBe(404);
     expect((await api('GET', '/api/admin/integrations/smtp', undefined, userJwt)).status).toBe(403);
     await api('DELETE', `/api/channels/${ch.id}`);
+  });
+});
+
+describe('alerts', () => {
+  it('checks a threshold on a schedule, notifies on change, resolves, reports failures, stays read-only', async () => {
+    const admin = ctx.auth.principalFromUser((await ctx.auth.findByEmail('admin@test.local'))!, 'jwt', '127.0.0.1');
+    await ctx.queries.run(admin, wsId, 'CREATE TABLE orders AS SELECT * FROM (VALUES (1, 20.0), (2, 40.0)) t(id, amount)', { cache: false });
+    const ch = (await api('POST', `/api/workspaces/${wsId}/channels`, { name: 'Alert hook', type: 'webhook', secret: { url: `${hook}/alert-hook` } })).json.channel;
+    const pd = (await api('POST', `/api/workspaces/${wsId}/channels`, { name: 'Pager', type: 'pagerduty', secret: { routing_key: 'R0UTINGKEY0123456789abcd' } })).json.channel;
+    const hooks = () => received.filter((r) => r.path === '/alert-hook').map((r) => JSON.parse(r.body));
+    // Refused: writes, several statements, channels of another workspace.
+    const bad = (body: Record<string, unknown>) => api('POST', `/api/workspaces/${wsId}/alerts`, { name: 'x', condition: { kind: 'rows' }, ...body });
+    expect((await bad({ sql: 'DELETE FROM orders' })).json.message).toMatch(/only reads: DELETE/);
+    expect((await bad({ sql: 'SELECT 1; SELECT 2' })).json.message).toMatch(/one statement/);
+    const foreign = (await api('POST', `/api/workspaces/${otherWsId}/channels`, { name: 'Other', type: 'webhook', secret: { url: `${hook}/x` } })).json.channel;
+    expect((await bad({ sql: 'SELECT 1', channel_ids: [foreign.id] })).json.message).toMatch(/not a channel of this workspace/);
+    // Preview: evaluates without saving.
+    const pre = await api('POST', `/api/workspaces/${wsId}/alerts/preview`, { sql: 'SELECT sum(amount) AS total FROM orders', condition: { kind: 'threshold', column: 'total', op: '>', value: 100 } });
+    expect(pre.json.evaluation).toMatchObject({ state: 'ok', value: '60', summary: 'total is 60 — not > 100.' });
+
+    const created = await api('POST', `/api/workspaces/${wsId}/alerts`, { name: 'Revenue spike', description: 'Orders above plan', sql: 'SELECT sum(amount) AS total FROM orders', condition: { kind: 'threshold', column: 'total', op: '>', value: 100 }, schedule: { kind: 'interval', minutes: 5 }, channel_ids: [ch.id, pd.id], severity: 'critical' });
+    expect(created.status, JSON.stringify(created.json)).toBe(200);
+    const id = created.json.alert.id;
+    expect(created.json.alert).toMatchObject({ state: 'unknown', enabled: true });
+    expect(new Date(created.json.alert.next_run_at).getTime()).toBeGreaterThan(Date.now() + 4 * 60_000);
+    const run = () => api('POST', `/api/alerts/${id}/run`, {});
+    // ok: nothing delivered.
+    expect((await run()).json).toMatchObject({ changed: true, notified: 0, alert: { state: 'ok', last_value: '60' } });
+    expect(hooks()).toHaveLength(0);
+    // Triggered: delivered once, with the severity, fields and a dedup key; not again while it stays triggered.
+    await ctx.queries.run(admin, wsId, 'INSERT INTO orders VALUES (3, 90.0)', { cache: false });
+    expect((await run()).json).toMatchObject({ changed: true, notified: 2, alert: { state: 'triggered', last_value: '150' } });
+    const t = hooks().at(-1);
+    expect(t).toMatchObject({ event: 'alert.triggered', title: 'Revenue spike', severity: 'critical', dedup_key: `duckview-alert-${id}`, url: `https://duckview.example.com/#/alerts/alerts?alert=${id}` });
+    expect(t.text).toMatch(/Orders above plan\n\ntotal is 150 — > 100\./);
+    expect(t.fields).toEqual(expect.arrayContaining([{ label: 'Condition', value: 'total > 100' }, { label: 'Value', value: '150' }, { label: 'Workspace', value: 'Sales' }]));
+    expect(JSON.parse(last('/pd').body)).toMatchObject({ event_action: 'trigger', dedup_key: `duckview-alert-${id}`, payload: { severity: 'critical' } });
+    expect((await run()).json).toMatchObject({ changed: false, notified: 0 });
+    // notify: always → every triggered check.
+    await api('PATCH', `/api/alerts/${id}`, { notify: 'always' });
+    expect((await run()).json.notified).toBe(2);
+    // Resolved: a "resolved" message, and PagerDuty resolves the same incident.
+    await ctx.queries.run(admin, wsId, 'DELETE FROM orders WHERE id = 3', { cache: false });
+    expect((await run()).json).toMatchObject({ changed: true, notified: 2, alert: { state: 'ok' } });
+    expect(hooks().at(-1)).toMatchObject({ event: 'alert.resolved', title: 'Resolved: Revenue spike', severity: 'resolved' });
+    expect(JSON.parse(last('/pd').body)).toEqual({ routing_key: 'R0UTINGKEY0123456789abcd', event_action: 'resolve', dedup_key: `duckview-alert-${id}`, client: 'DuckView' });
+    // A broken query: reported once, as failing.
+    await api('PATCH', `/api/alerts/${id}`, { sql: 'SELECT sum(nope) AS total FROM orders' });
+    expect((await api('GET', `/api/alerts/${id}`)).json.alert.state).toBe('unknown');
+    const failed = (await run()).json;
+    expect(failed.alert.state).toBe('error');
+    expect(failed.evaluation.error).toMatch(/nope/);
+    expect(hooks().at(-1)).toMatchObject({ event: 'alert.error', title: 'Alert failing: Revenue spike', severity: 'warning' });
+    expect((await run()).json.notified).toBe(0);
+    // History: newest first.
+    const events = (await api('GET', `/api/alerts/${id}/events`)).json.events as { state: string; notified: number; triggered_by: string }[];
+    expect(events.slice(0, 3).map((e) => e.state)).toEqual(['error', 'error', 'ok']);
+    expect(events[0]!.triggered_by).toBe('manual:admin@test.local');
+    // The scheduler: due alerts run and move their next check forward.
+    await api('PATCH', `/api/alerts/${id}`, { sql: 'SELECT sum(amount) AS total FROM orders' });
+    const later = new Date(Date.now() + 10 * 60_000);
+    expect(await ctx.alerts.tick(later)).toEqual([id]);
+    const after = (await api('GET', `/api/alerts/${id}`)).json.alert;
+    expect(after.state).toBe('ok');
+    expect(new Date(after.next_run_at).getTime()).toBeGreaterThan(later.getTime());
+    expect(await ctx.alerts.tick(later)).toEqual([]);
+    // Disabled alerts are not scheduled.
+    await api('PATCH', `/api/alerts/${id}`, { enabled: false });
+    expect((await api('GET', `/api/alerts/${id}`)).json.alert.next_run_at).toBeNull();
+    // A "no rows" freshness alert, and "rows" quoting a sample of what it found.
+    const fresh = (await api('POST', `/api/workspaces/${wsId}/alerts`, { name: 'Nothing today', sql: 'SELECT * FROM orders WHERE id > 100', condition: { kind: 'no_rows' }, channel_ids: [ch.id] })).json.alert;
+    expect((await api('POST', `/api/alerts/${fresh.id}/run`, {})).json.alert.state).toBe('triggered');
+    const rows = (await api('POST', `/api/workspaces/${wsId}/alerts`, { name: 'Big orders', sql: 'SELECT id, amount FROM orders ORDER BY id', condition: { kind: 'rows' }, channel_ids: [ch.id] })).json.alert;
+    await api('POST', `/api/alerts/${rows.id}/run`, {});
+    expect(hooks().at(-1).text).toMatch(/The query returned 2 rows\.\n\nid  amount\n──  ──────\n1   20(\.0)?\n2   40(\.0)?/);
+    // Viewers see alerts, cannot run or change them.
+    expect((await api('GET', `/api/workspaces/${wsId}/alerts`, undefined, userJwt)).json.alerts.length).toBe(3);
+    expect((await api('POST', `/api/alerts/${id}/run`, {}, userJwt)).status).toBe(403);
+    expect((await api('PATCH', `/api/alerts/${id}`, { name: 'x' }, userJwt)).status).toBe(403);
+    // Agents: create_alert tries the query first and checks it once.
+    const env: ToolEnv = { ctx, principal: admin, via: 'rest', defaultWorkspaceId: wsId, agent: null };
+    const tools = buildTools(ctx.cfg);
+    const tool = (n: string) => tools.find((x) => x.name === n)!;
+    const broken = await runTool(env, tool('create_alert'), { name: 'Broken', sql: 'SELECT * FROM missing_table', condition: { kind: 'rows' } });
+    expect(broken.isError).toBe(true);
+    expect((await api('GET', `/api/workspaces/${wsId}/alerts`)).json.alerts).toHaveLength(3);
+    const made = await runTool(env, tool('create_alert'), { name: 'Agent watch', sql: 'SELECT count(*) AS n FROM orders', condition: { kind: 'threshold', column: 'n', op: '>=', value: 2 }, every_minutes: 15, channel_ids: [ch.id] });
+    expect(made.structuredContent).toMatchObject({ status: 'ok', state: 'triggered', value: '2', notified: 1 });
+    const listed = await runTool(env, tool('list_alerts'), {});
+    expect((listed.structuredContent as { alerts: unknown[]; channels: unknown[] }).alerts).toHaveLength(4);
+    expect(((await runTool(env, tool('run_alert'), { alert_id: (made.structuredContent as { alert_id: string }).alert_id })).structuredContent as { changed: boolean }).changed).toBe(false);
+    for (const a of (await api('GET', `/api/workspaces/${wsId}/alerts`)).json.alerts) await api('DELETE', `/api/alerts/${a.id}`);
   });
 });

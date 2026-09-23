@@ -734,7 +734,65 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(message)], structuredContent: { status: outcome === 'pending' ? 'pending' : 'ok', outcome, app_id, visibility: updated.visibility, publish_status: updated.publish_status, url: updated.url } };
       },
     }),
+
+    define({
+      name: 'list_alerts',
+      title: 'List SQL alerts',
+      description: 'The workspace\'s SQL alerts: query, condition, schedule, state (ok / triggered / error / unknown), last value and the channels they notify — plus the notification channels (Slack, Teams, email, PagerDuty, webhooks) an alert can use.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const alerts = await env.ctx.alerts.list(env.principal, ws);
+        const channels = await env.ctx.notifications.list(env.principal, ws);
+        const lines = alerts.map((a) => `- **${a.name}** (\`${a.id}\`) · ${a.state}${a.last_value !== null ? ` (${a.last_value})` : ''} · ${a.condition.kind === 'threshold' ? `${a.condition.column} ${a.condition.op} ${a.condition.value}` : a.condition.kind} · ${a.schedule.kind === 'interval' ? `every ${a.schedule.minutes} min` : a.schedule.kind === 'cron' ? a.schedule.expression : 'manual'}${a.enabled ? '' : ' · disabled'}`);
+        return { content: [text(`${alerts.length} alert${alerts.length === 1 ? '' : 's'}:\n${lines.join('\n') || '(none)'}\n\nChannels: ${channels.map((c) => `${c.name} [${c.type}] \`${c.id}\``).join(', ') || '(none — create one under Alerts → Channels)'}`)], structuredContent: { alerts: alerts.map((a) => ({ id: a.id, name: a.name, state: a.state, last_value: a.last_value, condition: a.condition, schedule: a.schedule, enabled: a.enabled, channel_ids: a.channel_ids })), channels: channels.map((c) => ({ id: c.id, name: c.name, type: c.type, scope: c.scope })) } };
+      },
+    }),
+
+    define({
+      name: 'create_alert',
+      title: 'Create SQL alert',
+      description: 'Creates an alert: a read-only SQL query checked on a schedule, with a condition — {kind:"rows"} (returns rows), {kind:"no_rows"} (returns none, e.g. data freshness) or {kind:"threshold", column, op, value} (the first row\'s column compared with a number). When the state changes it notifies channel_ids (see list_alerts). With test_first (default true) the query is tried once and the result is shown; nothing is saved when it fails.',
+      inputSchema: {
+        name: z.string().min(1).max(120),
+        sql: z.string().max(100_000),
+        condition: z.union([z.object({ kind: z.literal('rows') }), z.object({ kind: z.literal('no_rows') }), z.object({ kind: z.literal('threshold'), column: z.string(), op: z.enum(['>', '>=', '<', '<=', '=', '!=']), value: z.number() })]),
+        every_minutes: z.number().int().min(1).optional().describe('Check interval (default 60)'),
+        cron: z.string().optional().describe('Cron expression instead of every_minutes, e.g. "0 8 * * 1-5"'),
+        timezone: z.string().optional(),
+        channel_ids: z.array(z.string()).optional(),
+        severity: z.enum(['info', 'warning', 'critical']).optional(),
+        description: z.string().max(2000).optional(),
+        test_first: z.boolean().optional(),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, { name, sql, condition, every_minutes, cron, timezone, channel_ids, severity, description, test_first, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        if (test_first !== false) {
+          const e = await env.ctx.alerts.preview(env.principal, ws, sql, condition);
+          if (e.state === 'error') return { content: [text(`Not saved — the query failed: ${e.error}`)], structuredContent: { status: 'error', error: e.error }, isError: true };
+        }
+        const alert = await env.ctx.alerts.create(env.principal, ws, { name, sql, condition, description: description ?? null, schedule: cron ? { kind: 'cron', expression: cron, timezone } : { kind: 'interval', minutes: every_minutes ?? 60 }, channel_ids, severity });
+        const first = await env.ctx.alerts.run(alert.id, 'agent', env.principal);
+        return { content: [text(`Created alert **${alert.name}** (\`${alert.id}\`): ${first.evaluation.summary} State: ${first.alert.state}${first.notified ? `, ${first.notified} channel${first.notified === 1 ? '' : 's'} notified` : ''}. ${alert.channel_ids.length ? '' : 'It has no channels yet — add channel_ids with the Alerts page or update it.'}`)], structuredContent: { status: 'ok', alert_id: alert.id, state: first.alert.state, value: first.evaluation.value, notified: first.notified, next_run_at: alert.next_run_at } };
+      },
+    }),
+
+    define({
+      name: 'run_alert',
+      title: 'Check SQL alert now',
+      description: 'Runs an alert\'s query now, updates its state and notifies its channels if the state changed; returns what it found.',
+      inputSchema: { alert_id: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, { alert_id }) {
+        await env.ctx.alerts.get(env.principal, alert_id, 'EDITOR');
+        const r = await env.ctx.alerts.run(alert_id, 'agent', env.principal);
+        return { content: [text(`**${r.alert.name}**: ${r.evaluation.summary} State ${r.alert.state}${r.changed ? ' (changed)' : ''}${r.notified ? `, ${r.notified} notified` : ''}.`)], structuredContent: { status: r.evaluation.state === 'error' ? 'error' : 'ok', alert_id, state: r.alert.state, changed: r.changed, value: r.evaluation.value, notified: r.notified, error: r.evaluation.error }, isError: r.evaluation.state === 'error' };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert'] as const;

@@ -16,7 +16,9 @@
  * runs a real Dash app (a callback queries DuckView) and the Gradio template (a click runs SQL through the queue)
  * behind the proxy, in the editor's cross-origin preview. The alert-channels scenario (server started with
  * DUCKVIEW__notifications__allow_private_targets=true) creates a webhook channel in Alerts → Channels, sends a test
- * and checks the delivery and its signature against a receiver the script runs.
+ * and checks the delivery and its signature against a receiver the script runs. The sql-alerts scenario (same server
+ * setting) builds a threshold alert in the dialog, tests it, checks it, and drives it through triggered and resolved
+ * while the receiver collects the webhooks.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -325,6 +327,50 @@ try {
     report.details.delivery = { received: got.length, event: body?.event, title: body?.title, signatureValid: !!w && w.headers['x-duckview-signature'] === `sha256=${crypto.createHmac('sha256', secret).update(`${w.headers['x-duckview-timestamp']}.${w.body}`).digest('hex')}`, secretShownOnce: !!secret && !(await (await authed(`/api/workspaces/${wsId}/channels`)).text()).includes(secret) };
     report.details.charts = 1;
   }
+  else if (scenario === 'sql-alerts') {
+    const http = await import('node:http');
+    const got = [];
+    const receiver = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { got.push(JSON.parse(b)); res.end('ok'); }); });
+    await new Promise((r) => receiver.listen(0, '127.0.0.1', r));
+    const wsList = await (await authed('/api/workspaces')).json();
+    const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
+    const q = (sql) => authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) });
+    await q('CREATE OR REPLACE TABLE e2e_alert_orders AS SELECT * FROM (VALUES (1, 30.0), (2, 40.0)) t(id, amount)');
+    const channel = (await (await authed(`/api/workspaces/${wsId}/channels`, { method: 'POST', body: JSON.stringify({ name: 'E2E alert hook', type: 'webhook', secret: { url: `http://127.0.0.1:${receiver.address().port}/a` } }) })).json()).channel;
+    cleanup = async () => {
+      receiver.close();
+      const alerts = (await (await authed(`/api/workspaces/${wsId}/alerts`)).json()).alerts;
+      for (const a of alerts.filter((x) => x.name === 'E2E revenue')) await authed(`/api/alerts/${a.id}`, { method: 'DELETE' });
+      await authed(`/api/channels/${channel.id}`, { method: 'DELETE' });
+      await q('DROP TABLE IF EXISTS e2e_alert_orders');
+    };
+    await send('Page.navigate', { url: `${BASE}/#/alerts/alerts` });
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New alert')`, 20000, 'alerts tab');
+    await clickButton('New alert');
+    await setField('input[placeholder="Orders below plan"]', 'E2E revenue');
+    await setField('textarea', 'SELECT sum(amount) AS total FROM e2e_alert_orders');
+    await evaluate(`(() => { const inputs = [...document.querySelectorAll('input.font-mono')]; const set = (el, v) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); }; set(inputs[0], 'total'); set(inputs[1], '100'); return true; })()`);
+    await evaluate(`[...document.querySelectorAll('label')].find(l => l.textContent.includes('E2E alert hook')).querySelector('input').click(); true`);
+    await clickButton('Test');
+    await waitFor(`document.body.innerText.includes('Would stay quiet')`, 20000, 'preview says quiet');
+    report.details.preview = await evaluate(`[...document.querySelectorAll('div')].find(d => d.textContent.startsWith('Would stay quiet'))?.textContent`);
+    await clickButton('Create alert');
+    await waitFor(`document.body.innerText.includes('E2E revenue') && !document.body.innerText.includes('Create alert')`, 15000, 'alert created');
+    const card = `[...document.querySelectorAll('div.rounded-lg')].find(d => d.innerText.includes('E2E revenue'))`;
+    const check = async (label) => {
+      await evaluate(`${card}.querySelector('button[title^="Check now"]').click(); true`);
+      await waitFor(`${card}?.innerText.includes(${JSON.stringify(label)})`, 20000, `state ${label}`);
+    };
+    await check('ok · 70');
+    await q('INSERT INTO e2e_alert_orders VALUES (3, 90.0)');
+    await check('triggered · 160');
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_triggered.png'), Buffer.from(shot.result.data, 'base64')); }
+    await q('DELETE FROM e2e_alert_orders WHERE id = 3');
+    await check('ok · 70');
+    await sleep(500);
+    report.details.webhooks = got.map((g) => `${g.event}:${g.title}`);
+    report.details.charts = 1;
+  }
   else if (scenario === 'mosaic-dashboard') {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
@@ -397,6 +443,10 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'sql-alerts') {
+    if (!/total is 70 — not > 100/.test(d.preview ?? '')) problems.push(`preview wrong: ${d.preview}`);
+    if (JSON.stringify(d.webhooks) !== JSON.stringify(['alert.triggered:E2E revenue', 'alert.resolved:Resolved: E2E revenue'])) problems.push(`webhooks wrong: ${JSON.stringify(d.webhooks)}`);
+  }
   if (scenario === 'alert-channels') {
     if (d.delivery?.received !== 1 || d.delivery?.event !== 'channel.test' || !d.delivery?.signatureValid || !d.delivery?.secretShownOnce) problems.push(`webhook channel delivery wrong: ${JSON.stringify(d.delivery)}`);
   }

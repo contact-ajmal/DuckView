@@ -14,7 +14,9 @@ export type LiveEvent =
   | { type: 'workspace'; at: string; user_id: string | null; workspace_id: string; data_version: number; reason: string }
   /** A scheduled sync started or finished. */
   | { type: 'sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; rows: number | null; duration_ms: number | null; error: string | null }
-  | { type: 'app'; at: string; workspace_id: string; app_id: string; status: 'stopped' | 'installing' | 'starting' | 'running' | 'error'; error: string | null };
+  | { type: 'app'; at: string; workspace_id: string; app_id: string; status: 'stopped' | 'installing' | 'starting' | 'running' | 'error'; error: string | null }
+  /** An alert was checked (its state may have changed). */
+  | { type: 'alert'; at: string; workspace_id: string; alert_id: string; state: 'unknown' | 'ok' | 'triggered' | 'error'; changed: boolean };
 
 class LiveBus extends EventEmitter {
   publish(e: LiveEvent) {

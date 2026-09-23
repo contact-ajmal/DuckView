@@ -155,7 +155,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, type AlertCondition, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -480,6 +480,49 @@ export const notificationDeliveries = pgTable(
     created_at: ts('created_at').notNull(),
   },
   (t) => [index('notification_deliveries_channel_idx').on(t.channel_id, t.created_at)],
+);
+
+export const alerts = pgTable(
+  'alerts',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    sql: text('sql').notNull(),
+    condition: jsonb('condition').$type<AlertCondition>().notNull(),
+    schedule: jsonb('schedule').$type<SyncSchedule>().notNull(),
+    channel_ids: jsonb('channel_ids').$type<string[]>().notNull().default([]),
+    severity: text('severity', { enum: ALERT_SEVERITIES }).notNull().default('warning'),
+    notify: text('notify', { enum: ['change', 'always'] }).notNull().default('change'),
+    notify_resolved: boolean('notify_resolved').notNull().default(true),
+    enabled: boolean('enabled').notNull().default(true),
+    state: text('state', { enum: ALERT_STATES }).notNull().default('unknown'),
+    last_value: text('last_value'),
+    last_error: text('last_error'),
+    last_checked_at: ts('last_checked_at'),
+    last_triggered_at: ts('last_triggered_at'),
+    next_run_at: ts('next_run_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('alerts_workspace_idx').on(t.workspace_id), index('alerts_next_run_idx').on(t.next_run_at)],
+);
+
+export const alertEvents = pgTable(
+  'alert_events',
+  {
+    id: text('id').primaryKey(),
+    alert_id: text('alert_id').notNull().references(() => alerts.id, { onDelete: 'cascade' }),
+    state: text('state', { enum: ALERT_STATES }).notNull(),
+    value: text('value'),
+    message: text('message'),
+    notified: integer('notified').notNull().default(0),
+    triggered_by: text('triggered_by').notNull().default('schedule'),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('alert_events_alert_idx').on(t.alert_id, t.created_at)],
 );
 
 export const appSettings = pgTable('app_settings', {
