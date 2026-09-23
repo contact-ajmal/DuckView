@@ -30,6 +30,7 @@ import { ScimService } from './services/scim.js';
 import { DbtService } from './services/dbt.js';
 import { SemanticService } from './services/semantic.js';
 import { QualityService } from './services/quality.js';
+import { InsightService } from './services/insights.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
 import { CommentService } from './services/comments.js';
@@ -83,6 +84,7 @@ export interface AppContext {
   dbt: DbtService;
   semantic: SemanticService;
   quality: QualityService;
+  insights: InsightService;
   reverse: ReverseEtlService;
   notebooks: NotebookService;
   comments: CommentService;
@@ -180,6 +182,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const quality = new QualityService(store, workspaces, queries, auth, notifications, audit);
   quality.dbt = dbt;
   copilot.quality = quality;
+  const insights = new InsightService(store, workspaces, semantic, auth, notifications, audit);
+  copilot.insights = insights;
   const reverse = new ReverseEtlService(store, cfg, cipher, engines, workspaces, databases, cloud, auth, notifications, audit);
   copilot.reverse = reverse;
   const notebooks = new NotebookService(store, workspaces, queries, audit);
@@ -213,6 +217,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   if (cfg.transform.scheduler_enabled) {
     dbt.startScheduler();
     quality.start();
+    insights.start();
     reverse.start();
   }
   // Pre-aggregates are only valid for the epoch they were built in.
@@ -258,6 +263,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     dbt,
     semantic,
     quality,
+    insights,
     reverse,
     notebooks,
     comments,
@@ -278,6 +284,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       auditExport.stop();
       dbt.stop();
       quality.stop();
+      insights.stop();
       reverse.stop();
       await apps.shutdown().catch(() => undefined);
       await agents.flush();

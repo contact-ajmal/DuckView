@@ -157,7 +157,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -888,4 +888,48 @@ export const embedKeys = pgTable(
     created_at: ts('created_at').notNull(),
   },
   (t) => [index('embed_keys_workspace_idx').on(t.workspace_id)],
+);
+
+export const metricMonitors = pgTable(
+  'metric_monitors',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    metric: text('metric').notNull(),
+    grain: text('grain', { enum: MONITOR_GRAINS }).notNull().default('day'),
+    segment_by: text('segment_by'),
+    sensitivity: integer('sensitivity').notNull().default(3),
+    lookback: integer('lookback').notNull().default(28),
+    schedule: jsonb('schedule').$type<SyncSchedule>().notNull().default({ kind: 'manual' }),
+    channel_ids: jsonb('channel_ids').$type<string[]>().notNull().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    status: text('status', { enum: MONITOR_STATUSES }).notNull().default('unknown'),
+    last_run: jsonb('last_run').$type<MonitorLastRun | null>(),
+    next_run_at: ts('next_run_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('metric_monitors_workspace_idx').on(t.workspace_id), index('metric_monitors_next_run_idx').on(t.next_run_at)],
+);
+
+export const insights = pgTable(
+  'insights',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    monitor_id: text('monitor_id').notNull().references(() => metricMonitors.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    metric: text('metric').notNull(),
+    grain: text('grain', { enum: MONITOR_GRAINS }).notNull(),
+    period: text('period').notNull(),
+    segment: text('segment'),
+    direction: text('direction', { enum: ['up', 'down'] }).notNull(),
+    summary: text('summary').notNull(),
+    detail: jsonb('detail').$type<InsightDetail>().notNull(),
+    status: text('status', { enum: INSIGHT_STATUSES }).notNull().default('new'),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('insights_key_idx').on(t.key), index('insights_workspace_idx').on(t.workspace_id, t.created_at)],
 );

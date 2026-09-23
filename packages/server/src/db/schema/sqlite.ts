@@ -328,6 +328,8 @@ export interface ChatContextSnapshot {
   metrics?: string;
   /** Data quality suites: status and failing checks. */
   quality?: string;
+  /** Unusual periods the metric monitors found lately (automated insights). */
+  insights?: string;
   /** Reverse syncs: destinations, modes and last runs. */
   reverse?: string;
   /** The notebook open on screen. */
@@ -1391,3 +1393,79 @@ export const embedKeys = sqliteTable(
   (t) => [index('embed_keys_workspace_idx').on(t.workspace_id)],
 );
 export type EmbedKey = typeof embedKeys.$inferSelect;
+
+/** Metric monitors: a semantic-layer metric watched per day, week or month for values out of its usual range. */
+export const MONITOR_GRAINS = ['day', 'week', 'month'] as const;
+export type MonitorGrain = (typeof MONITOR_GRAINS)[number];
+export const MONITOR_STATUSES = ['unknown', 'normal', 'anomaly', 'error'] as const;
+export type MonitorStatus = (typeof MONITOR_STATUSES)[number];
+export interface MonitorLastRun { status: Exclude<MonitorStatus, 'unknown'>; summary: string; period: string | null; finished_at: string }
+export interface SeriesPoint { period: string; value: number | null }
+export interface InsightDriver { segment: string; value: number | null; expected: number | null; delta: number; share: number | null }
+export interface InsightDetail {
+  value: number;
+  expected: number;
+  low: number;
+  high: number;
+  score: number;
+  change_pct: number | null;
+  /** The periods the baseline was taken from and the flagged one, oldest first. */
+  series: SeriesPoint[];
+  /** Segments of segment_by that moved the most, in the direction of the change. */
+  drivers: InsightDriver[];
+  segment_by: string | null;
+}
+
+export const metricMonitors = sqliteTable(
+  'metric_monitors',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** The metric is computed as this user (read-only, their access policies). */
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    metric: text('metric').notNull(),
+    grain: text('grain', { enum: MONITOR_GRAINS }).notNull().default('day'),
+    /** A dimension to explain a change with (the segments that moved most), and to watch segment by segment. */
+    segment_by: text('segment_by'),
+    /** How far from usual counts as unusual, in robust standard deviations. */
+    sensitivity: integer('sensitivity').notNull().default(3),
+    /** Periods of history the usual range is taken from. */
+    lookback: integer('lookback').notNull().default(28),
+    schedule: text('schedule', { mode: 'json' }).$type<SyncSchedule>().notNull().default({ kind: 'manual' }),
+    channel_ids: text('channel_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    status: text('status', { enum: MONITOR_STATUSES }).notNull().default('unknown'),
+    last_run: text('last_run', { mode: 'json' }).$type<MonitorLastRun | null>(),
+    next_run_at: integer('next_run_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('metric_monitors_workspace_idx').on(t.workspace_id), index('metric_monitors_next_run_idx').on(t.next_run_at)],
+);
+export type MetricMonitor = typeof metricMonitors.$inferSelect;
+
+/** What a monitor found: one unusual period of a metric (overall or for one segment). */
+export const INSIGHT_STATUSES = ['new', 'dismissed'] as const;
+export const insights = sqliteTable(
+  'insights',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    monitor_id: text('monitor_id').notNull().references(() => metricMonitors.id, { onDelete: 'cascade' }),
+    /** monitor|period|segment — one insight per unusual period and segment. */
+    key: text('key').notNull(),
+    metric: text('metric').notNull(),
+    grain: text('grain', { enum: MONITOR_GRAINS }).notNull(),
+    period: text('period').notNull(),
+    /** e.g. region = EU; null for the metric overall. */
+    segment: text('segment'),
+    direction: text('direction', { enum: ['up', 'down'] }).notNull(),
+    summary: text('summary').notNull(),
+    detail: text('detail', { mode: 'json' }).$type<InsightDetail>().notNull(),
+    status: text('status', { enum: INSIGHT_STATUSES }).notNull().default('new'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [uniqueIndex('insights_key_idx').on(t.key), index('insights_workspace_idx').on(t.workspace_id, t.created_at)],
+);
+export type Insight = typeof insights.$inferSelect;

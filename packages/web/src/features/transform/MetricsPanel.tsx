@@ -12,6 +12,7 @@ import { Badge, Button, Empty, Input, Label, Select, cn } from '../../components
 import { ChartPanel } from '../workspace/ChartPanel';
 import { ResultsGrid } from '../workspace/ResultsGrid';
 import { HistoryButton } from '../history/HistoryDrawer';
+import { MonitorsPanel } from './MonitorsPanel';
 
 const GRAINS = ['day', 'week', 'month', 'quarter', 'year'] as const;
 const OPS = ['=', '!=', '>', '>=', '<', '<=', 'in', 'not in', 'like', 'is null', 'is not null'] as const;
@@ -42,7 +43,7 @@ metrics:
 /** Transform → Metrics: explore the semantic layer's metrics, and edit the workspace's definitions. */
 export function MetricsPanel({ workspaceId }: { workspaceId: string }) {
   const [layer, setLayer] = useState<SemanticLayer | null>(null);
-  const [view, setView] = useState<'explore' | 'define'>('explore');
+  const [view, setView] = useState<'explore' | 'define' | 'monitors'>(() => (new URLSearchParams(location.hash.split('?')[1] ?? '').get('view') === 'monitors' ? 'monitors' : 'explore'));
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
@@ -57,9 +58,9 @@ export function MetricsPanel({ workspaceId }: { workspaceId: string }) {
     <div className="space-y-3 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-md border border-zinc-800 p-0.5">
-          {(['explore', 'define'] as const).map((v) => (
+          {(['explore', 'monitors', 'define'] as const).map((v) => (
             <button key={v} onClick={() => setView(v)} className={cn('rounded px-2.5 py-1', view === v ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-200')} data-testid={`metrics-${v}`}>
-              {v === 'explore' ? 'Explore' : 'Definitions'}
+              {v === 'explore' ? 'Explore' : v === 'monitors' ? 'Monitors' : 'Definitions'}
             </button>
           ))}
         </div>
@@ -69,7 +70,7 @@ export function MetricsPanel({ workspaceId }: { workspaceId: string }) {
         </span>
       </div>
       {layer.warnings.length > 0 && <div className="rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-amber-200">{layer.warnings.slice(0, 5).join(' · ')}</div>}
-      {view === 'explore' ? <Explorer workspaceId={workspaceId} layer={layer} onDefine={() => setView('define')} /> : <Definitions workspaceId={workspaceId} layer={layer} onSaved={(l) => setLayer(l)} />}
+      {view === 'explore' ? <Explorer workspaceId={workspaceId} layer={layer} onDefine={() => setView('define')} /> : view === 'monitors' ? <MonitorsPanel workspaceId={workspaceId} layer={layer} /> : <Definitions workspaceId={workspaceId} layer={layer} onSaved={(l) => setLayer(l)} />}
     </div>
   );
 }

@@ -1224,7 +1224,77 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`Built ${r.build} **${r.name}** (\`${r.id}\`) with ${r.created.length} item${r.created.length === 1 ? '' : 's'}.${r.skipped.length ? `\nSkipped:\n${r.skipped.map((x) => `- ${x.title} — ${x.error}`).join('\n')}` : ''}\nOpen it in DuckView: ${r.url}`)], structuredContent: { status: 'ok', ...r } };
       },
     }),
+    // ---------------------------------------------------------------- automated insights
+    define({
+      name: 'detect_anomalies',
+      title: 'Find unusual metric values',
+      description: 'Checks the semantic layer\'s metrics (all with a time dimension, or the ones named) for an unusual latest complete day, week or month: each against its usual range from the periods before it (median and robust spread; weekday pattern for days). With segment_by, says which segments drove the change. Returns what is unusual first, then what is normal. Nothing is saved — use create_metric_monitor to keep watching.',
+      inputSchema: {
+        metrics: z.array(z.string()).max(25).optional().describe('metric names; all metrics with a time dimension when omitted'),
+        grain: z.enum(['day', 'week', 'month']).optional(),
+        segment_by: z.string().optional().describe('a dimension to explain changes with, e.g. region'),
+        sensitivity: z.number().min(1).max(10).optional().describe('how far from usual counts as unusual, in robust standard deviations (default 3)'),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { metrics, grain, segment_by, sensitivity, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const r = await env.ctx.insights.scan(env.principal, ws, { metrics, grain, segment_by: segment_by ?? null, sensitivity });
+        const lines = r.findings.map((f) => `- ${f.status === 'anomaly' ? 'UNUSUAL' : f.status === 'normal' ? 'normal' : 'not enough history'}: ${f.summary}`);
+        for (const e of r.errors) lines.push(`- ${e.metric}: could not check — ${e.error}`);
+        return { content: [text(lines.length ? lines.join('\n') : 'No metrics with a time dimension to check. Define metrics (Transform → Metrics) with a default_time_dimension first.')], structuredContent: { status: 'ok', workspace_id: ws, findings: r.findings.map(({ detail, ...f }) => ({ ...f, value: detail?.value ?? null, expected: detail?.expected ?? null, low: detail?.low ?? null, high: detail?.high ?? null, change_pct: detail?.change_pct ?? null, drivers: detail?.drivers ?? [] })), errors: r.errors } };
+      },
+    }),
+
+    define({
+      name: 'list_insights',
+      title: 'List automated insights',
+      description: 'The workspace\'s metric monitors (metric, grain, segment_by, schedule, status) and the unusual periods they recorded, newest first — what changed, by how much against the usual range, and which segments drove it.',
+      inputSchema: { status: z.enum(['new', 'dismissed', 'all']).optional(), limit: z.number().int().min(1).max(200).optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { status, limit, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const monitors = await env.ctx.insights.list(env.principal, ws);
+        const found = await env.ctx.insights.insights(env.principal, ws, { status: status ?? 'new', limit: limit ?? 30 });
+        const lines = [
+          ...monitors.map((m) => `- monitor **${m.name}** (\`${m.id}\`): ${m.metric} by ${m.grain}${m.segment_by ? `, segments by ${m.segment_by}` : ''} · ${m.schedule.kind === 'manual' ? 'by hand' : m.schedule.kind === 'interval' ? `every ${m.schedule.minutes} min` : m.schedule.expression} · ${m.status}${m.last_run ? ` — ${m.last_run.summary}` : ''}`),
+          ...(found.length ? ['', 'Insights:', ...found.map((i) => `- ${i.period}${i.segment ? ` (${i.segment})` : ''}: ${i.summary}`)] : []),
+        ];
+        return { content: [text(lines.length ? lines.join('\n') : 'No metric monitors yet. Create one with create_metric_monitor, or check now with detect_anomalies.')], structuredContent: { status: 'ok', workspace_id: ws, monitors, insights: found } };
+      },
+    }),
+
+    define({
+      name: 'create_metric_monitor',
+      title: 'Watch a metric for unusual values',
+      description: 'Creates a monitor that checks a semantic-layer metric per day, week or month on a schedule and records each unusual period as an insight (delivered to notification channels when given). segment_by also watches the largest segments of a dimension and explains changes with them. With run_now the first check runs immediately.',
+      inputSchema: {
+        metric: z.string(),
+        grain: z.enum(['day', 'week', 'month']).optional(),
+        segment_by: z.string().optional(),
+        name: z.string().max(120).optional(),
+        sensitivity: z.number().min(1).max(10).optional(),
+        lookback: z.number().int().min(7).max(400).optional().describe('periods of history for the usual range (default 28)'),
+        schedule: z.object({ kind: z.enum(['manual', 'interval', 'cron']), minutes: z.number().int().optional(), expression: z.string().optional(), timezone: z.string().optional() }).optional().describe('default: manual; e.g. { kind: "cron", expression: "0 7 * * *" }'),
+        channel_ids: z.array(z.string()).max(20).optional(),
+        run_now: z.boolean().optional(),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, { metric, grain, segment_by, name, sensitivity, lookback, schedule, channel_ids, run_now, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const m = await env.ctx.insights.create(env.principal, ws, { metric, grain, segment_by: segment_by ?? null, name, sensitivity, lookback, schedule: schedule as never, channel_ids });
+        let first = '';
+        let findings: unknown[] = [];
+        if (run_now) {
+          const r = await env.ctx.insights.run(m.id, env.principal);
+          findings = r.findings;
+          first = `\nFirst check: ${r.findings.map((f) => `${f.status === 'anomaly' ? 'UNUSUAL — ' : ''}${f.summary}`).join('\n')}`;
+        }
+        return { content: [text(`Created monitor **${m.name}** (\`${m.id}\`) on ${m.metric} by ${m.grain}.${first}`)], structuredContent: { status: 'ok', monitor: m, findings } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor'] as const;

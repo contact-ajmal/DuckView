@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { SquareTerminal, Database, LayoutDashboard, Sparkles, FileText, Table2, ArrowUpRight } from 'lucide-react';
-import { api, formatBytes, timeAgo, storageKindOf, type Dashboard, type SavedQuery, type SystemInfo } from '../../api/client';
+import { api, formatBytes, timeAgo, storageKindOf, type Dashboard, type Insight, type SavedQuery, type SystemInfo } from '../../api/client';
+import { InsightCard } from '../transform/MonitorsPanel';
 import { useWorkspace } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
 import { useAuth } from '../../store/auth';
@@ -42,11 +43,13 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
   const [saved, setSaved] = useState<SavedQuery[]>([]);
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [sources, setSources] = useState<{ total: number; failing: number } | null>(null);
+  const [insights, setInsights] = useState<Insight[]>([]);
 
   useEffect(() => {
     if (!ws.activeId) return;
     void api.get<{ dashboards: Dashboard[] }>(`/api/workspaces/${ws.activeId}/dashboards`).then((r) => setDashboards(r.dashboards)).catch(() => setDashboards([]));
     void api.get<{ queries: SavedQuery[] }>(`/api/workspaces/${ws.activeId}/queries`).then((r) => setSaved(r.queries)).catch(() => setSaved([]));
+    void api.get<{ insights: Insight[] }>(`/api/workspaces/${ws.activeId}/insights?status=new&limit=4`).then((r) => setInsights(r.insights)).catch(() => setInsights([]));
     if (!ws.catalog) void ws.loadCatalog();
   }, [ws.activeId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -124,6 +127,13 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
 
         <div className="mt-6 grid gap-x-10 gap-y-8 @4xl:grid-cols-[minmax(0,1fr)_300px]">
           <div className="min-w-0 space-y-8">
+            {insights.length > 0 && ws.activeId && (
+              <Section title="What changed" action={<SeeAll href="#/transform/metrics?view=monitors">All insights</SeeAll>}>
+                <div className="grid gap-2 @2xl:grid-cols-2" data-testid="home-insights">
+                  {insights.slice(0, 4).map((i) => <InsightCard key={i.id} workspaceId={ws.activeId!} item={i} />)}
+                </div>
+              </Section>
+            )}
             <Section title="Recent queries" action={<SeeAll href="#/query">Open SQL</SeeAll>}>
               {recentQueries.length === 0 ? (
                 <Quiet>Queries you run and save appear here.</Quiet>

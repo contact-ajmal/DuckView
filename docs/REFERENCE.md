@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (52 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (55 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -576,6 +576,36 @@ limit: 10
 The server computes each block with the semantic layer, exactly as the metrics are defined and under the asker's access policies. The reply shows a card with the numbers: one value, or a chart and a table. From the card you can **Open in Metrics** (the explorer filled in with the same query), **Add to dashboard** (a chart or KPI widget with the compiled SQL) or see the SQL. A metric or dimension that does not exist shows as an error on the card, never as a wrong number. The guide is only in the prompt when the workspace has metrics, and not for fixes or dashboard specs.
 
 **Ask in the Metrics explorer.** Transform → Metrics has a question box. `POST /api/workspaces/:id/semantic/ask {question}` (optional `provider`, `model`, `api_key`, `base_url`, `region` for BYOK) makes one model call with the metric and dimension list. It returns `{query, title, explanation, unanswerable}`: a query that has already compiled, or the reason the metrics cannot answer. The explorer applies the query to its controls and computes it.
+
+## Automated insights
+
+**DuckView watches metrics for unusual values and says what drove the change** (`services/insights.ts`). The engine computes a metric per day, week or month through the semantic layer, as the person who asked (read-only, under their access policies). It then compares the **latest complete period** with the periods before it (`lookback`, default 28). The period that is still running is left out.
+
+- **Usual value:** the median of those periods. For daily numbers with three weeks of history, it is the median of the same weekday, so quiet weekends are not flagged.
+- **Usual spread:** the median absolute deviation, scaled to a standard deviation. When the history is constant, the standard deviation is used instead.
+- **Unusual:** further from usual than `sensitivity` spreads (default 3).
+- **Days without rows:** a sum or count is zero on those days, so a day with no orders shows up.
+
+With **`segment_by`** (a dimension such as `region`), each change is explained by the segments that moved the most in the same direction, with their share of the change: *"Revenue was 120 on Mon, Mar 9, 2026 — 60% below the usual 300 (usual range 244–356). Most of the drop came from region = EU (−180, 100% of the change)."* The largest segments (up to 12) are also watched on their own.
+
+**Transform → Metrics → Monitors** has three parts:
+
+- **Check all metrics:** checks every metric with a time dimension now and saves nothing.
+- **Monitors:** metric, period, explain-by dimension, how big a change to flag, a schedule, and notification channels. Each unusual period is recorded once as an **insight**, overall or per segment, and delivered to the channels.
+- **Found by monitors:** the insights, each with a chart of the series and its usual range, the segments that drove it, *Open in Metrics*, *Ask AI why* (DuckView AI breaks the metric down with metric queries) and *Dismiss*.
+
+Recent insights also appear on **Home** under *What changed*, and in DuckView AI's context.
+
+API:
+
+- `POST /api/workspaces/:id/insights/scan {metrics?, grain?, sensitivity?, segment_by?}`
+- `GET /api/workspaces/:id/insights?status=new|dismissed|all`
+- `PATCH /api/insights/:id {status}`
+- `GET/POST /api/workspaces/:id/monitors`
+- `PATCH/DELETE /api/monitors/:id`
+- `POST /api/monitors/:id/run`
+
+Agents: `detect_anomalies`, `list_insights`, `create_metric_monitor` (with `run_now`).
 
 ## Governance
 

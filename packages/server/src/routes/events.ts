@@ -19,6 +19,7 @@ function eventUserId(e: LiveEvent): string | null {
     case 'app':
     case 'alert':
     case 'quality':
+    case 'insight':
     case 'reverse_sync':
     case 'comment':
     case 'dbt':
@@ -78,7 +79,7 @@ export async function eventRoutes(app: FastifyInstance, ctx: AppContext) {
           }
           return;
         }
-        if (e.type === 'workspace' || e.type === 'sync' || e.type === 'app' || e.type === 'alert' || e.type === 'quality' || e.type === 'reverse_sync' || e.type === 'comment' || e.type === 'dbt') {
+        if (e.type === 'workspace' || e.type === 'sync' || e.type === 'app' || e.type === 'alert' || e.type === 'quality' || e.type === 'insight' || e.type === 'reverse_sync' || e.type === 'comment' || e.type === 'dbt') {
           void canSee(e.workspace_id).then((ok) => ok && send(e));
           return;
         }

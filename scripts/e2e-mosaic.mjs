@@ -55,6 +55,8 @@
  * checked (one item fails), created with one click, and the dashboard has the working widgets with real numbers.
  * The ai-metrics scenario asks DuckView AI a question the semantic layer answers (a metric card with the numbers),
  * opens it in the Metrics explorer, and asks the explorer's question box (the answer applied to the controls).
+ * The insights scenario checks every metric for an unusual latest day in Transform → Metrics → Monitors, creates a
+ * monitor that explains the drop by region, and finds the insight on the monitor feed and on Home.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -181,7 +183,14 @@ await sleep(1500);
 await waitFor(`!!document.querySelector('nav[aria-label="Primary"]')`, 30000, 'signed-in shell');
 
 const report = { scenario, ok: false, details: {} };
-const authed = (url, init = {}) => fetch(`${BASE}${url}`, { ...init, headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}`, ...(init.headers ?? {}) } });
+// Scenarios run back to back can hit the API rate limit: wait as told and try again.
+const authed = async (url, init = {}) => {
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(`${BASE}${url}`, { ...init, headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}`, ...(init.headers ?? {}) } });
+    if (r.status !== 429 || attempt >= 5) return r;
+    await new Promise((res) => setTimeout(res, (Number(r.headers.get('retry-after')) || 5) * 1000 + 250));
+  }
+};
 // React inputs ignore a plain `.value =`; set through the prototype setter and fire the event React listens to.
 const setField = (selector, value, event = 'input') => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set; set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); return el.value; })()`);
 const clickButton = (text, which = 'first') => evaluate(`(() => { const all = [...document.querySelectorAll('button')].filter(b => b.textContent.trim() === ${JSON.stringify(text)}); const b = ${JSON.stringify(which)} === 'last' ? all.at(-1) : all[0]; if (!b) throw new Error('no button: ' + ${JSON.stringify(text)}); b.click(); return true; })()`);
@@ -979,6 +988,53 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'insights') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const before = (await j('GET', `/api/workspaces/${wsId}/semantic`)).yaml ?? '';
+    cleanup = async () => {
+      for (const m of (await j('GET', `/api/workspaces/${wsId}/monitors`)).monitors ?? []) if (m.metric.startsWith('e2e_')) await j('DELETE', `/api/monitors/${m.id}`);
+      await j('PUT', `/api/workspaces/${wsId}/semantic`, { yaml: before, force: true });
+      await q('DROP TABLE IF EXISTS e2e_daily_orders');
+    };
+    // 35 days up to yesterday (UTC): EU 10 orders a day and US 5, but yesterday EU only 1.
+    const made = await q(`CREATE OR REPLACE TABLE e2e_daily_orders AS
+      SELECT ((now() AT TIME ZONE 'UTC')::DATE - d::INTEGER) AS order_date, r.region, 20.0 AS amount
+      FROM range(1, 36) t(d), (VALUES ('EU', 10), ('US', 5)) r(region, n), range(0, 10) k(i)
+      WHERE i < CASE WHEN d = 1 AND r.region = 'EU' THEN 1 ELSE r.n END`);
+    if (made.error) throw new Error(`table not created: ${made.message}`);
+    const saved = await j('PUT', `/api/workspaces/${wsId}/semantic`, { yaml: 'semantic_models:\n  - name: e2e_daily_orders\n    table: e2e_daily_orders\n    default_time_dimension: order_date\n    dimensions:\n      - { name: order_date, type: time }\n      - { name: region, type: categorical }\n    measures:\n      - { name: e2e_amount, agg: sum, expr: amount }\n      - { name: e2e_count, agg: count }\nmetrics:\n  - { name: e2e_revenue, label: E2E revenue, type: simple, measure: e2e_amount }\n  - { name: e2e_orders, label: E2E orders, type: simple, measure: e2e_count }\n', force: true });
+    if (!saved.metrics) throw new Error(`definitions not saved: ${JSON.stringify(saved).slice(0, 200)}`);
+    await send('Page.navigate', { url: `${BASE}/#/transform/metrics?view=monitors` });
+    await waitFor(`!!document.querySelector('[data-testid="insights-scan"]')`, 20000, 'monitors view');
+    // 1. Check every metric now.
+    await evaluate(`document.querySelector('[data-testid="insights-scan"]').click(); true`);
+    await waitFor(`document.querySelectorAll('[data-testid="scan-results"] [data-testid="insight-card"]').length >= 2`, 20000, 'scan findings');
+    report.details.scan = await evaluate(`[...document.querySelectorAll('[data-testid="scan-results"] [data-testid="insight-summary"]')].map(e => e.innerText)`);
+    // 2. A monitor that explains changes by region.
+    await evaluate(`document.querySelector('[data-testid="monitor-new"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="monitor-segment"] option[value="region"]')`, 10000, 'segment options');
+    await setField('[data-testid="monitor-segment"]', 'region', 'change');
+    await evaluate(`document.querySelector('[data-testid="monitor-save"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-monitor="e2e_revenue by day"]') && !!document.querySelector('[data-testid="insights-feed"] [data-testid="insight-drivers"]')`, 30000, 'monitor and its insight');
+    await sleep(400);
+    report.details.monitor = await evaluate(`document.querySelector('[data-monitor="e2e_revenue by day"]').innerText.replace(/\\s+/g, ' ')`);
+    report.details.drivers = await evaluate(`document.querySelector('[data-testid="insights-feed"] [data-testid="insight-drivers"]').innerText.replace(/\\s+/g, ' ')`);
+    report.details.feed = await evaluate(`document.querySelectorAll('[data-testid="insights-feed"] [data-testid="insight-card"]').length`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_monitors.png'), Buffer.from(shot.result.data, 'base64')); }
+    // 3. Home shows what changed.
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitFor(`!!document.querySelector('[data-testid="home-insights"] [data-testid="insight-card"]')`, 20000, 'home insights');
+    report.details.home = await evaluate(`document.querySelector('[data-testid="home-insights"] [data-testid="insight-summary"]').innerText`);
+    // 4. Dismissing takes it off the feed.
+    await send('Page.navigate', { url: `${BASE}/#/transform/metrics?view=monitors` });
+    await waitFor(`!!document.querySelector('[data-testid="insights-feed"] [data-testid="insight-dismiss"]')`, 20000, 'feed');
+    const n = await evaluate(`document.querySelectorAll('[data-testid="insights-feed"] [data-testid="insight-card"]').length`);
+    await evaluate(`document.querySelector('[data-testid="insights-feed"] [data-testid="insight-dismiss"]').click(); true`);
+    await waitFor(`document.querySelectorAll('[data-testid="insights-feed"] [data-testid="insight-card"]').length === ${n - 1}`, 10000, 'dismissed');
+    report.details.charts = 1;
+  }
   else if (scenario === 'ai-metrics') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -1321,6 +1377,13 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'insights') {
+    if (!(d.scan ?? []).some((t) => /^E2E revenue was 120 on .* — 60% below the usual 300/.test(t))) problems.push(`scan: ${JSON.stringify(d.scan)}`);
+    if (!/per day · by region/.test(d.monitor ?? '') || !/Most of the drop came from region = EU/.test(d.monitor ?? '')) problems.push(`monitor: ${d.monitor}`);
+    if (!/region = EU 200 → 20 100%/.test(d.drivers ?? '')) problems.push(`drivers: ${d.drivers}`);
+    if (d.feed !== 2) problems.push(`feed: ${d.feed} cards (expected the total and EU)`);
+    if (!/^E2E revenue was 120/.test(d.home ?? '')) problems.push(`home: ${d.home}`);
   }
   if (scenario === 'ai-metrics') {
     if (JSON.stringify(d.card) !== JSON.stringify(['EU 130', 'US 50'])) problems.push(`card: ${JSON.stringify(d.card)}`);

@@ -25,6 +25,7 @@ export type LiveEvent =
   | { type: 'reverse_sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; summary: string | null }
   /** A data quality suite ran. */
   | { type: 'quality'; at: string; workspace_id: string; suite_id: string; status: 'pass' | 'warn' | 'fail' | 'error'; changed: boolean }
+  | { type: 'insight'; at: string; workspace_id: string; monitor_id: string; count: number }
   /** A dbt run started or finished. */
   | { type: 'dbt'; at: string; workspace_id: string; project_id: string; run_id: string; status: 'running' | 'ok' | 'error'; summary: string | null }
   /** A user was deactivated or reactivated: their open event streams close. */

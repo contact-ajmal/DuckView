@@ -138,6 +138,7 @@ function renderContext(c: ChatContextSnapshot, cfg: DuckViewConfig): string {
   if (c.buckets.length) parts.push(`### Cloud storage buckets\n${c.buckets.map((b) => `- ${b}`).join('\n')}`);
   if (c.notes) parts.push(`### What the tables mean (the workspace's catalog notes — trust these over guesses from names)\n${c.notes.slice(0, 6000)}`);
   if (c.metrics) parts.push(`### Metrics defined in the semantic layer (compute these exactly as defined when asked; name the metric)\n${c.metrics.slice(0, 6000)}`);
+  if (c.insights) parts.push(`### Unusual changes the metric monitors found lately (Transform → Metrics → Monitors; when asked what changed or why, start from these and break the metric down with duckview-metric blocks)\n${c.insights.slice(0, 3000)}`);
   if (c.quality) parts.push(`### Data quality checks (Data → Quality; when asked why data looks wrong, or before trusting a table, mention failing checks)\n${c.quality.slice(0, 4000)}`);
   if (c.notebook) parts.push(`### The notebook open on screen (answer with SQL that fits it: a new cell may query earlier cells by name; say which cell name to use)\n${c.notebook}`);
   if (c.reverse) parts.push(`### Reverse ETL: data this workspace sends out (Connections → Reverse ETL; a change to these queries changes what other systems receive)\n${c.reverse.slice(0, 3000)}`);
@@ -323,6 +324,8 @@ export class CopilotService {
   semantic: SemanticService | null = null;
   /** Data quality suites and what is failing, for prompts (set by the context). */
   quality: { promptSummary(workspaceId: string): Promise<string> } | null = null;
+  /** Recent automated insights (unusual metric values), for prompts (set by the context). */
+  insights: { promptSummary(workspaceId: string): Promise<string> } | null = null;
   /** Reverse syncs (data sent out of the workspace), for prompts (set by the context). */
   reverse: { promptSummary(workspaceId: string): Promise<string> } | null = null;
   /** Checks build plans (set by the context). */
@@ -353,6 +356,7 @@ export class CopilotService {
       metrics: (await this.semantic?.promptSummary(workspaceId).catch(() => '')) || undefined,
       quality: (await this.quality?.promptSummary(workspaceId).catch(() => '')) || undefined,
       reverse: (await this.reverse?.promptSummary(workspaceId).catch(() => '')) || undefined,
+      insights: (await this.insights?.promptSummary(workspaceId).catch(() => '')) || undefined,
       notebook: (opts.notebookId && (await this.notebookContext(p, workspaceId, opts.notebookId))) || undefined,
     };
     const targets = (opts.targets ?? []).filter(Boolean).slice(0, 3);

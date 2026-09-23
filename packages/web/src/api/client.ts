@@ -391,6 +391,13 @@ export interface ChatMsg { id: string; role: 'user' | 'assistant' | 'system'; co
 /** A Mosaic spec the assistant wrote, validated against the workspace by the server. */
 export interface MetricQueryBody { metrics: string[]; group_by?: string[]; where?: { dimension: string; op: string; value?: unknown }[]; order_by?: { name: string; desc?: boolean }[]; limit?: number }
 export interface CopilotMetricBlock { text: string; ok: boolean; error: string | null; query: MetricQueryBody | null; title: string | null; sql: string | null; columns: { name: string; type: string }[]; rows: unknown[][]; row_count: number | null }
+
+/** Automated insights: metric monitors and the unusual periods they find. */
+export type MonitorGrain = 'day' | 'week' | 'month';
+export interface InsightDetail { value: number; expected: number; low: number; high: number; score: number; change_pct: number | null; series: { period: string; value: number | null }[]; drivers: { segment: string; value: number | null; expected: number | null; delta: number; share: number | null }[]; segment_by: string | null }
+export interface InsightFinding { metric: string; label: string; grain: MonitorGrain; segment: string | null; status: 'anomaly' | 'normal' | 'insufficient'; period: string | null; direction: 'up' | 'down' | null; summary: string; detail: InsightDetail | null }
+export interface Insight { id: string; workspace_id: string; monitor_id: string; metric: string; grain: MonitorGrain; period: string; segment: string | null; direction: 'up' | 'down'; summary: string; detail: InsightDetail; status: 'new' | 'dismissed'; created_at: string }
+export interface MetricMonitor { id: string; workspace_id: string; name: string; metric: string; grain: MonitorGrain; segment_by: string | null; sensitivity: number; lookback: number; schedule: SyncSchedule; channel_ids: string[]; enabled: boolean; status: 'unknown' | 'normal' | 'anomaly' | 'error'; last_run: { status: string; summary: string; period: string | null; finished_at: string } | null; next_run_at: string | null; created_at: string; updated_at: string }
 export interface CopilotBuildBlock { text: string; error: string | null; check: { build: 'dashboard' | 'app'; name: string; ok: boolean; items: { title: string; kind: 'kpi' | 'chart' | 'table' | 'text'; ok: boolean; error: string | null; columns: string[]; row_count: number | null }[] } | null }
 export interface CopilotSpecBlock { text: string; title: string | null; ok: boolean | null; errors: string[]; warnings: string[] }
 export type CopilotEvent =
