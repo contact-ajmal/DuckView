@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import { api, copilotChat, type CopilotConfig, type ChatMsg, type CopilotSpecBlock, type CopilotBuildBlock, type CopilotProvider } from '../api/client';
+import { api, copilotChat, type CopilotConfig, type ChatMsg, type CopilotSpecBlock, type CopilotBuildBlock, type CopilotMetricBlock, type CopilotProvider } from '../api/client';
 
 export interface CopilotSettings { provider: CopilotProvider | ''; model: string; apiKey: string; baseUrl: string; region?: string; agentId?: string; agentAliasId?: string; runtimeArn?: string }
-export interface LiveMessage { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean; error?: string; sqlBlocks?: string[]; specBlocks?: CopilotSpecBlock[]; buildBlocks?: CopilotBuildBlock[]; meta?: { model?: string; provider?: string; tables?: number; files?: number; targets?: string[]; duration_ms?: number; input_tokens?: number; output_tokens?: number } }
+export interface LiveMessage { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean; error?: string; sqlBlocks?: string[]; specBlocks?: CopilotSpecBlock[]; buildBlocks?: CopilotBuildBlock[]; metricBlocks?: CopilotMetricBlock[]; meta?: { model?: string; provider?: string; tables?: number; files?: number; targets?: string[]; duration_ms?: number; input_tokens?: number; output_tokens?: number } }
 
 const SETTINGS_KEY = 'duckview.copilot.settings';
 function loadSettings(): CopilotSettings {
@@ -36,6 +36,12 @@ interface CopilotState {
   send(input: { workspaceId: string; message: string; action?: 'chat' | 'fix' | 'suggest' | 'explain' | 'dashboard' | 'build'; activeSql?: string | null; errorMessage?: string | null; resultPreview?: { columns: { name: string; type: string }[]; rows: unknown[][]; rowCount?: number } | null; targets?: string[] }): Promise<void>;
   cancel(): void;
   clear(workspaceId: string): Promise<void>;
+}
+
+/** The model settings a person chose (bring-your-own key), for one-shot calls outside the chat. */
+export function byokBody(): Record<string, string | undefined> {
+  const { settings, config } = useCopilot.getState();
+  return config?.allow_byok && settings.provider ? { provider: settings.provider, model: settings.model || undefined, api_key: settings.apiKey || undefined, base_url: settings.baseUrl || undefined, region: settings.region || undefined } : {};
 }
 
 export const useCopilot = create<CopilotState>((set, get) => ({
@@ -114,7 +120,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
           upd({ content: cur + ev.text });
         } else if (ev.type === 'done') {
           const cur = get().messages.find((m) => m.id === asstId);
-          upd({ streaming: false, sqlBlocks: ev.sql_blocks, specBlocks: ev.spec_blocks, buildBlocks: ev.build_blocks ?? [], meta: { ...cur?.meta, duration_ms: ev.duration_ms, input_tokens: ev.usage.input_tokens ?? undefined, output_tokens: ev.usage.output_tokens ?? undefined } });
+          upd({ streaming: false, sqlBlocks: ev.sql_blocks, specBlocks: ev.spec_blocks, buildBlocks: ev.build_blocks ?? [], metricBlocks: ev.metric_blocks ?? [], meta: { ...cur?.meta, duration_ms: ev.duration_ms, input_tokens: ev.usage.input_tokens ?? undefined, output_tokens: ev.usage.output_tokens ?? undefined } });
           const u = get().usage;
           set({ usage: { input_tokens: u.input_tokens + (ev.usage.input_tokens ?? 0), output_tokens: u.output_tokens + (ev.usage.output_tokens ?? 0), requests: u.requests + 1 } });
         } else if (ev.type === 'error') {

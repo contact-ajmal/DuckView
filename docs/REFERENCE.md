@@ -560,6 +560,23 @@ Before you see it, DuckView **runs every item's query** as you (read-only, a few
 
 **Agents** build in one call with `build_dashboard` (`name`, `build`, `items`; `check_only` to test first); items that fail are skipped and reported. API: `POST /api/workspaces/:id/build/check {plan}` · `POST /api/workspaces/:id/build {plan}` (the plan as YAML text or an object).
 
+## Questions answered from metrics
+
+**When a workspace has metric definitions, DuckView AI answers questions with them** (`services/copilot.ts`). Rather than writing SQL for "what was revenue by region last quarter?", it answers with a ```` ```duckview-metric ```` block — a query against the semantic layer:
+
+```yaml
+title: Revenue by region
+metrics: [total_revenue]
+group_by: [region]              # dimensions, metric_time__month (day … year), joined: <entity>__<dimension>
+where: [{ dimension: channel, op: "=", value: web }]
+order_by: [{ name: total_revenue, desc: true }]
+limit: 10
+```
+
+The server computes each block with the semantic layer, exactly as the metrics are defined and under the asker's access policies. The reply shows a card with the numbers: one value, or a chart and a table. From the card you can **Open in Metrics** (the explorer filled in with the same query), **Add to dashboard** (a chart or KPI widget with the compiled SQL) or see the SQL. A metric or dimension that does not exist shows as an error on the card, never as a wrong number. The guide is only in the prompt when the workspace has metrics, and not for fixes or dashboard specs.
+
+**Ask in the Metrics explorer.** Transform → Metrics has a question box. `POST /api/workspaces/:id/semantic/ask {question}` (optional `provider`, `model`, `api_key`, `base_url`, `region` for BYOK) makes one model call with the metric and dimension list. It returns `{query, title, explanation, unanswerable}`: a query that has already compiled, or the reason the metrics cannot answer. The explorer applies the query to its controls and computes it.
+
 ## Governance
 
 **Catalog** (`#/governance/catalog`, `services/lineage.ts`): descriptions and tags (lower-case, e.g. `pii`, `finance`) on tables, views and columns, written by editors, read by every member (`GET /api/workspaces/:id/catalog/annotated`, `PUT /api/workspaces/:id/catalog/annotations {object_name, column_name?, description, tags}` — an empty description and no tags removes the note). Copilot's context carries the notes ("trust these over guesses from names"), and `inspect_schema` shows them next to the columns.

@@ -16,6 +16,8 @@ import type { AwsBridge } from './aws.js';
 import { HttpError, badRequest } from './errors.js';
 import { DBT_GUIDE } from './dbt.js';
 import { BUILD_GUIDE, parseBuildPlan, type BuildCheck, type BuilderService } from './builder.js';
+import type { MetricQuery, SemanticService } from './semantic.js';
+import YAML from 'yaml';
 import { MOSAIC_SPEC_GUIDE } from './mosaic-guide.js';
 import { describeSpec, parseSpecText, type Spec } from './mosaic-spec.js';
 import type { MosaicService } from './mosaic.js';
@@ -50,10 +52,13 @@ export interface CopilotRequest {
   signal?: AbortSignal;
 }
 
-/** A Mosaic spec the assistant wrote (a ```yaml / ```json block), validated against the workspace. */
+/** A ```duckview-metric query in a reply, computed through the semantic layer. */
+export interface MetricBlock { text: string; ok: boolean; error: string | null; query: MetricQuery | null; title: string | null; sql: string | null; columns: { name: string; type: string }[]; rows: unknown[][]; row_count: number | null }
+
 /** A ```duckview-build plan in a reply, checked against the workspace (each item's SQL run). */
 export interface BuildBlock { text: string; check: BuildCheck | null; error: string | null }
 
+/** A Mosaic spec the assistant wrote (a ```yaml / ```json block), validated against the workspace. */
 export interface SpecBlock {
   text: string;
   title: string | null;
@@ -66,7 +71,7 @@ export interface SpecBlock {
 export type CopilotEvent =
   | { type: 'context'; conversation_id: string; message_id: string; provider: ProviderId; model: string; tables: number; files: number; buckets: number; targets: string[] }
   | { type: 'delta'; text: string }
-  | { type: 'done'; message_id: string; usage: LlmUsage; sql_blocks: string[]; spec_blocks: SpecBlock[]; build_blocks: BuildBlock[]; duration_ms: number }
+  | { type: 'done'; message_id: string; usage: LlmUsage; sql_blocks: string[]; spec_blocks: SpecBlock[]; build_blocks: BuildBlock[]; metric_blocks: MetricBlock[]; duration_ms: number }
   | { type: 'error'; code: string; message: string };
 
 const SYSTEM_PROMPT = `You are DuckCopilot, the in-app data assistant inside DuckView — a native DuckDB analytics workspace.
@@ -96,6 +101,28 @@ const ACTION_PROMPTS: Record<CopilotAction, string> = {
   explain: 'Explain the query result below in plain business language for a non-technical stakeholder: what the query did, the key numbers, notable patterns or anomalies, and one suggested follow-up question with its SQL.',
   dashboard: 'Design an interactive Mosaic dashboard for the request below (or, if none, for the selected dataset(s)). Return exactly one ```yaml block with the complete spec — meta.title, data (only for files/queries), params, and the layout — followed by two or three bullets on how to read it. Use only columns that exist in the context, write read-only SQL, and follow the Mosaic spec guide in the system prompt.',
 };
+
+/** For questions a defined metric answers: a query of the semantic layer instead of hand-written SQL. */
+export const METRIC_GUIDE = `## Answering with the semantic layer's metrics
+When the question can be answered with the metrics listed in the context (totals, trends, breakdowns, comparisons of those metrics), do NOT write the aggregation in SQL. Answer in one or two sentences and one fenced block whose language is \`duckview-metric\` — YAML:
+title: <short title>
+metrics: [<metric name>, ...]
+group_by: [<dimension>, ...]   # time: metric_time__day|week|month|quarter|year (or <time_dimension>__<grain>); joined: <entity>__<dimension>
+where: [{ dimension: <name>, op: "=" | "!=" | ">" | ">=" | "<" | "<=" | in | not in | between | like | is null | is not null, value: <value or list> }]
+order_by: [{ name: <metric or dimension>, desc: true }]
+limit: <n>
+DuckView computes it exactly as defined and shows the numbers. Use only listed metric and dimension names. When no metric fits, say so and answer with SQL as usual.`;
+
+/** A metric query from a model's JSON / YAML, shaped and bounded. */
+export function normaliseMetricQuery(raw: Record<string, unknown>): MetricQuery {
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : typeof v === 'string' && v ? [v] : []);
+  const metrics = list(raw.metrics).slice(0, 30);
+  if (!metrics.length) throw badRequest('The query names no metric');
+  const where = Array.isArray(raw.where) ? (raw.where as Record<string, unknown>[]).slice(0, 20).map((w) => ({ dimension: String(w.dimension ?? ''), op: String(w.op ?? '=') as MetricQuery['where'] extends (infer T)[] | undefined ? T extends { op: infer O } ? O : never : never, value: w.value })) : undefined;
+  const order_by = Array.isArray(raw.order_by) ? (raw.order_by as Record<string, unknown>[]).slice(0, 10).map((o) => ({ name: String(o.name ?? ''), desc: !!o.desc })) : undefined;
+  const limit = Number.isFinite(Number(raw.limit)) ? Math.min(Math.max(1, Math.floor(Number(raw.limit))), 10_000) : undefined;
+  return { metrics, group_by: list(raw.group_by).slice(0, 10), ...(where ? { where } : {}), ...(order_by ? { order_by } : {}), ...(limit ? { limit } : {}) };
+}
 
 const WANTS_BUILD = /\b(build|create|make|set up|design|put together)\b[^.?!]{0,60}\b(dashboard|report|data app|app)\b/i;
 const WANTS_CHART = /\b(dashboard|chart|visuali[sz]e|visualization|plot|histogram|graph|scatter|heatmap)\b/i;
@@ -293,7 +320,7 @@ export class CopilotService {
   /** dbt projects for prompts (set by the context). */
   dbt: { promptSummary(workspaceId: string): Promise<string> } | null = null;
   /** The semantic layer's metric catalog for prompts (set by the context). */
-  semantic: { promptSummary(workspaceId: string): Promise<string> } | null = null;
+  semantic: SemanticService | null = null;
   /** Data quality suites and what is failing, for prompts (set by the context). */
   quality: { promptSummary(workspaceId: string): Promise<string> } | null = null;
   /** Reverse syncs (data sent out of the workspace), for prompts (set by the context). */
@@ -392,7 +419,8 @@ export class CopilotService {
     const wantsBuild = action === 'build' || (action !== 'dashboard' && WANTS_BUILD.test(req.message ?? '') && !/\b(mosaic|cross-?filter(ed|ing)?|interactive|brush(ing)?)\b/i.test(req.message ?? ''));
     const wantsChart = action === 'dashboard' || (!wantsBuild && WANTS_CHART.test(req.message ?? ''));
     const wantsDbt = /\bdbt\b|\{\{\s*(ref|source|config)\(|\bincremental\b/i.test(req.message ?? '');
-    const system = `${SYSTEM_PROMPT}${wantsBuild ? `\n\n${BUILD_GUIDE}` : ''}${wantsDbt ? `\n\n${DBT_GUIDE}` : ''}${wantsChart ? `\n\n${MOSAIC_SPEC_GUIDE}\n\nWhen you produce a dashboard spec, put it in a single \`\`\`yaml block; the user can create it with one click.` : ''}\n\n${renderContext(snapshot, this.cfg)}`;
+    const useMetrics = !!snapshot.metrics && !wantsBuild && action !== 'fix' && action !== 'dashboard';
+    const system = `${SYSTEM_PROMPT}${wantsBuild ? `\n\n${BUILD_GUIDE}` : ''}${useMetrics ? `\n\n${METRIC_GUIDE}` : ''}${wantsDbt ? `\n\n${DBT_GUIDE}` : ''}${wantsChart ? `\n\n${MOSAIC_SPEC_GUIDE}\n\nWhen you produce a dashboard spec, put it in a single \`\`\`yaml block; the user can create it with one click.` : ''}\n\n${renderContext(snapshot, this.cfg)}`;
 
     let text = '';
     let usage: LlmUsage = { input_tokens: null, output_tokens: null };
@@ -429,6 +457,7 @@ export class CopilotService {
     const sqlBlocks = extractSqlBlocks(text);
     const specBlocks = await this.validateSpecBlocks(p, req.workspaceId, text);
     const buildBlocks = await this.checkBuildBlocks(p, req.workspaceId, text);
+    const metricBlocks = await this.checkMetricBlocks(p, req.workspaceId, text);
     await this.chat.append(p, req.workspaceId, conversationId, 'assistant', text, null);
     metrics.copilotRequests.inc({ provider, status: 'ok' });
     if (usage.input_tokens != null) metrics.copilotTokens.inc({ provider, direction: 'input' }, usage.input_tokens);
@@ -436,7 +465,58 @@ export class CopilotService {
     const durationMs = Math.round(performance.now() - started);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: `copilot.${action}`, resource: `conversation:${conversationId}`, queryText: req.message.slice(0, 2000), durationMs, ip: p.ip });
     await this.admin?.record({ user_id: p.userId, workspace_id: req.workspaceId, conversation_id: conversationId, message_id: messageId, provider, model: instance.model, action, byok, input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, duration_ms: durationMs, status: 'ok' }).catch(() => undefined);
-    yield { type: 'done', message_id: messageId, usage, sql_blocks: sqlBlocks, spec_blocks: specBlocks, build_blocks: buildBlocks, duration_ms: durationMs };
+    yield { type: 'done', message_id: messageId, usage, sql_blocks: sqlBlocks, spec_blocks: specBlocks, build_blocks: buildBlocks, metric_blocks: metricBlocks, duration_ms: durationMs };
+  }
+
+  /** Every ```duckview-metric block: the query computed through the semantic layer as the person asking. */
+  async checkMetricBlocks(p: Principal, workspaceId: string, text: string): Promise<MetricBlock[]> {
+    const out: MetricBlock[] = [];
+    for (const body of extractFencedBlocks(text, ['duckview-metric'])) {
+      const base: MetricBlock = { text: body, ok: false, error: null, query: null, title: null, sql: null, columns: [], rows: [], row_count: null };
+      try {
+        const raw = YAML.parse(body) as Record<string, unknown>;
+        const query = normaliseMetricQuery(raw);
+        if (!this.semantic) throw new Error('The semantic layer is not available');
+        const r = await this.semantic.query(p, workspaceId, query);
+        out.push({ ...base, ok: true, query, title: typeof raw.title === 'string' ? raw.title.slice(0, 200) : null, sql: r.sql, columns: r.result.columns.map((c) => ({ name: c.name, type: c.type })), rows: r.result.rows.slice(0, 200), row_count: r.result.rowCount });
+      } catch (err) {
+        out.push({ ...base, error: ((err as Error).message ?? String(err)).split('\n')[0]!.slice(0, 400) });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * A question in plain words → a metric query of the semantic layer (checked by compiling it), or the reason it
+   * cannot be answered with the metrics there are. One model call; nothing is kept in the conversation history.
+   */
+  async askMetrics(p: Principal, req: Pick<CopilotRequest, 'workspaceId' | 'provider' | 'model' | 'apiKey' | 'baseUrl' | 'region'> & { question: string }): Promise<{ query: MetricQuery | null; title: string | null; explanation: string | null; unanswerable: string | null }> {
+    requireScope(p, 'read');
+    await this.workspaces.get(p, req.workspaceId);
+    if (!this.semantic) throw badRequest('The semantic layer is not available');
+    const catalog = await this.semantic.promptSummary(req.workspaceId);
+    if (!catalog) return { query: null, title: null, explanation: null, unanswerable: 'This workspace has no metrics yet — define them under Data → Metrics.' };
+    const { instance } = await this.resolveProvider({ ...req, message: req.question } as CopilotRequest);
+    const system = `You turn questions into metric queries for DuckView's semantic layer. Reply with ONE JSON object and nothing else:
+{"title": "<short title of the answer>", "explanation": "<one sentence: which metrics, grouped how>", "metrics": [...], "group_by": [...], "where": [{"dimension": "...", "op": "=", "value": ...}], "order_by": [{"name": "...", "desc": true}], "limit": 100}
+or, when the metrics below cannot answer it: {"unanswerable": "<why, and what metric would be needed>"}.
+${METRIC_GUIDE}
+
+### Metrics (name (label): definition; by <dimensions>)
+${catalog}
+
+Today is ${new Date().toISOString().slice(0, 10)}.`;
+    let text = '';
+    const gen = instance.stream({ system, messages: [{ role: 'user', content: req.question.slice(0, 4000) }], model: instance.model, maxTokens: 800, temperature: 0, context: '', conversationId: newId() });
+    for (let n = await gen.next(); !n.done; n = await gen.next()) text += n.value;
+    const json = /\{[\s\S]*\}/.exec(text)?.[0];
+    if (!json) return { query: null, title: null, explanation: null, unanswerable: `The model did not return a query: ${text.slice(0, 200)}` };
+    const raw = JSON.parse(json) as Record<string, unknown>;
+    if (typeof raw.unanswerable === 'string') return { query: null, title: null, explanation: null, unanswerable: raw.unanswerable };
+    const query = normaliseMetricQuery(raw);
+    await this.semantic.compile(p, req.workspaceId, query);
+    this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'copilot.ask_metrics', resource: `workspace:${req.workspaceId}`, queryText: req.question.slice(0, 2000), ip: p.ip });
+    return { query, title: typeof raw.title === 'string' ? raw.title : null, explanation: typeof raw.explanation === 'string' ? raw.explanation : null, unanswerable: null };
   }
 
   /** Every ```duckview-build block: parsed, and each item's SQL run (read-only) as the person asking. */

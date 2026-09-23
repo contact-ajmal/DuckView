@@ -389,12 +389,14 @@ export async function* agentInvoke(agentId: string, body: Record<string, unknown
 export interface ChatMsg { id: string; role: 'user' | 'assistant' | 'system'; content: string; timestamp: string; context: { tables: number; files: number; model?: string; provider?: string; targets: string[] } | null }
 
 /** A Mosaic spec the assistant wrote, validated against the workspace by the server. */
+export interface MetricQueryBody { metrics: string[]; group_by?: string[]; where?: { dimension: string; op: string; value?: unknown }[]; order_by?: { name: string; desc?: boolean }[]; limit?: number }
+export interface CopilotMetricBlock { text: string; ok: boolean; error: string | null; query: MetricQueryBody | null; title: string | null; sql: string | null; columns: { name: string; type: string }[]; rows: unknown[][]; row_count: number | null }
 export interface CopilotBuildBlock { text: string; error: string | null; check: { build: 'dashboard' | 'app'; name: string; ok: boolean; items: { title: string; kind: 'kpi' | 'chart' | 'table' | 'text'; ok: boolean; error: string | null; columns: string[]; row_count: number | null }[] } | null }
 export interface CopilotSpecBlock { text: string; title: string | null; ok: boolean | null; errors: string[]; warnings: string[] }
 export type CopilotEvent =
   | { type: 'context'; conversation_id: string; message_id: string; provider: string; model: string; tables: number; files: number; buckets: number; targets: string[] }
   | { type: 'delta'; text: string }
-  | { type: 'done'; message_id: string; usage: { input_tokens: number | null; output_tokens: number | null }; sql_blocks: string[]; spec_blocks: CopilotSpecBlock[]; build_blocks?: CopilotBuildBlock[]; duration_ms: number }
+  | { type: 'done'; message_id: string; usage: { input_tokens: number | null; output_tokens: number | null }; sql_blocks: string[]; spec_blocks: CopilotSpecBlock[]; build_blocks?: CopilotBuildBlock[]; metric_blocks?: CopilotMetricBlock[]; duration_ms: number }
   | { type: 'error'; code: string; message: string };
 
 /** POSTs a copilot turn and yields SSE events as they arrive. */

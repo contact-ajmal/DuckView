@@ -3,10 +3,11 @@ import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
 import { yaml as yamlLang } from '@codemirror/lang-yaml';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { Play, Plus, X, Save, CheckCircle2, Code2, Sigma, Wand2, FileCode2, Copy, Workflow } from 'lucide-react';
-import { api, type ChartConfig, type MetricQueryResult, type SemanticDimension, type SemanticLayer, type SemanticMetric } from '../../api/client';
+import { Play, Plus, X, Save, CheckCircle2, Code2, Sigma, Wand2, FileCode2, Copy, Workflow, Sparkles } from 'lucide-react';
+import { api, type ChartConfig, type MetricQueryBody, type MetricQueryResult, type SemanticDimension, type SemanticLayer, type SemanticMetric } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useTheme } from '../../store/theme';
+import { byokBody } from '../../store/copilot';
 import { Badge, Button, Empty, Input, Label, Select, cn } from '../../components/ui';
 import { ChartPanel } from '../workspace/ChartPanel';
 import { ResultsGrid } from '../workspace/ResultsGrid';
@@ -103,24 +104,63 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
   }, [picked, workspaceId]);
 
   const typeOf = (name: string) => dims.find((d) => d.name === name.replace(/__(day|week|month|quarter|year)$/, ''))?.type;
-  const run = async () => {
+  const runQuery = async (body: Record<string, unknown>) => {
     setBusy(true);
     setError(null);
     try {
-      const body = {
-        metrics: picked,
-        group_by: groupBy.map((g) => (typeOf(g) === 'time' && !/__(day|week|month|quarter|year)$/.test(g) ? `${g}__${grain}` : g)),
-        where: filters.filter((f) => f.dimension).map((f) => ({ dimension: f.dimension, op: f.op, value: f.op === 'in' || f.op === 'not in' ? f.value.split(',').map((v) => v.trim()).filter(Boolean) : f.op.startsWith('is ') ? undefined : /^-?\d+(\.\d+)?$/.test(f.value.trim()) ? Number(f.value) : f.value })),
-        limit: 1000,
-      };
-      const r = await api.post<MetricQueryResult>(`/api/workspaces/${workspaceId}/semantic/query`, body);
+      const r = await api.post<MetricQueryResult>(`/api/workspaces/${workspaceId}/semantic/query`, { limit: 1000, ...body });
       setResult(r);
       const time = r.group_by.find((g) => /metric_time|__(day|week|month|quarter|year)$/.test(g));
-      setChart({ type: time ? 'line' : 'bar', x: r.group_by[0], y: picked.slice(0, 4) });
+      setChart({ type: time ? 'line' : 'bar', x: r.group_by[0], y: (body.metrics as string[]).slice(0, 4) });
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+  const run = () =>
+    runQuery({
+      metrics: picked,
+      group_by: groupBy.map((g) => (typeOf(g) === 'time' && !/__(day|week|month|quarter|year)$/.test(g) ? `${g}__${grain}` : g)),
+      where: filters.filter((f) => f.dimension).map((f) => ({ dimension: f.dimension, op: f.op, value: f.op === 'in' || f.op === 'not in' ? f.value.split(',').map((v) => v.trim()).filter(Boolean) : f.op.startsWith('is ') ? undefined : /^-?\d+(\.\d+)?$/.test(f.value.trim()) ? Number(f.value) : f.value })),
+    });
+  /** Shows a query (from a question, or a link from DuckView AI) in the controls and runs it as it is. */
+  const apply = (q: MetricQueryBody) => {
+    setPicked(q.metrics);
+    const grainOf = (q.group_by ?? []).map((g) => /__(day|week|month|quarter|year)$/.exec(g)?.[1]).find(Boolean) as (typeof GRAINS)[number] | undefined;
+    if (grainOf) setGrain(grainOf);
+    setGroupBy((q.group_by ?? []).map((g) => g.replace(/__(day|week|month|quarter|year)$/, '')));
+    setFilters((q.where ?? []).map((w) => ({ dimension: w.dimension, op: w.op as Filter['op'], value: Array.isArray(w.value) ? w.value.join(', ') : w.value == null ? '' : String(w.value) })));
+    void runQuery(q as unknown as Record<string, unknown>);
+  };
+  // #/transform/metrics?q=… (DuckView AI's "Open in Metrics").
+  useEffect(() => {
+    const raw = new URLSearchParams(location.hash.split('?')[1] ?? '').get('q');
+    if (!raw) return;
+    try {
+      apply(JSON.parse(decodeURIComponent(escape(atob(raw.replace(/-/g, '+').replace(/_/g, '/'))))) as MetricQueryBody);
+    } catch {
+      /* not a query */
+    }
+    history.replaceState(null, '', '#/transform/metrics');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState<{ title: string | null; explanation: string | null; unanswerable: string | null } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const askQuestion = async () => {
+    if (!question.trim()) return;
+    setAsking(true);
+    setAnswer(null);
+    setError(null);
+    try {
+      const r = await api.post<{ query: MetricQueryBody | null; title: string | null; explanation: string | null; unanswerable: string | null }>(`/api/workspaces/${workspaceId}/semantic/ask`, { question, ...byokBody() });
+      setAnswer(r);
+      if (r.query) apply(r.query);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAsking(false);
     }
   };
 
@@ -135,6 +175,13 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
   }
 
   return (
+    <div className="space-y-3">
+    <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); void askQuestion(); }}>
+      <Sparkles className="h-4 w-4 shrink-0 text-accent-400" />
+      <Input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask a question — “revenue by region last quarter”, “orders per month in the EU”" aria-label="Ask a question" data-testid="metrics-ask" />
+      <Button type="submit" variant="primary" loading={asking} disabled={!question.trim()} data-testid="metrics-ask-go">Ask</Button>
+    </form>
+    {answer && <p className={cn('text-xs', answer.unanswerable ? 'text-amber-300' : 'text-zinc-400')} data-testid="metrics-answer">{answer.unanswerable ?? `${answer.title ?? ''}${answer.explanation ? ` — ${answer.explanation}` : ''}`}</p>}
     <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
       <div className="space-y-3">
         <div>
@@ -218,6 +265,7 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
           </>
         )}
       </div>
+    </div>
     </div>
   );
 }

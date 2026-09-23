@@ -53,6 +53,8 @@
  * shows only that tenant's revenue, opens the embed page itself (no DuckView chrome) and a second tenant's link.
  * The ai-build scenario asks DuckView AI (a mock model through BYOK) to build a dashboard: the reply's build plan is
  * checked (one item fails), created with one click, and the dashboard has the working widgets with real numbers.
+ * The ai-metrics scenario asks DuckView AI a question the semantic layer answers (a metric card with the numbers),
+ * opens it in the Metrics explorer, and asks the explorer's question box (the answer applied to the controls).
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -977,6 +979,66 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'ai-metrics') {
+    const http = await import('node:http');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const before = (await j('GET', `/api/workspaces/${wsId}/semantic`)).yaml ?? '';
+    const chatAnswer = 'Revenue by region:\n\n```duckview-metric\ntitle: E2E revenue by region\nmetrics: [e2e_revenue]\ngroup_by: [region]\norder_by: [{ name: region }]\n```\n';
+    const askAnswer = '{"title": "E2E orders by region", "explanation": "e2e_orders grouped by region", "metrics": ["e2e_orders"], "group_by": ["region"], "order_by": [{"name": "region"}]}';
+    const llm = http.createServer((req, res) => {
+      let b = '';
+      req.on('data', (d) => (b += d));
+      req.on('end', () => {
+        if (!req.url.includes('chat/completions')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"models":[],"data":[]}'); return; }
+        const body = JSON.parse(b);
+        const system = String((body.messages ?? []).find((m) => m.role === 'system')?.content ?? '');
+        const answer = system.startsWith('You turn questions into metric queries') ? askAnswer : chatAnswer;
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        for (const piece of answer.match(/[\s\S]{1,40}/g)) res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: { content: piece }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 20 } })}\n\n`);
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    await new Promise((r) => llm.listen(0, '127.0.0.1', r));
+    cleanup = async () => {
+      llm.close();
+      await evaluate(`localStorage.removeItem('duckview.copilot.settings'); true`).catch(() => undefined);
+      await j('PUT', `/api/workspaces/${wsId}/semantic`, { yaml: before, force: true });
+      await q('DROP TABLE IF EXISTS e2e_metric_orders');
+    };
+    await q(`CREATE OR REPLACE TABLE e2e_metric_orders AS SELECT * FROM (VALUES (1, 'EU', 100.0), (2, 'US', 50.0), (3, 'EU', 30.0)) t(id, region, amount)`);
+    const saved = await j('PUT', `/api/workspaces/${wsId}/semantic`, { yaml: 'semantic_models:\n  - name: e2e_metric_orders\n    table: e2e_metric_orders\n    dimensions:\n      - { name: region, type: categorical }\n    measures:\n      - { name: e2e_amount, agg: sum, expr: amount }\n      - { name: e2e_count, agg: count }\nmetrics:\n  - { name: e2e_revenue, label: Revenue, type: simple, measure: e2e_amount }\n  - { name: e2e_orders, label: Orders, type: simple, measure: e2e_count }\n', force: true });
+    if (!saved.metrics) throw new Error(`definitions not saved: ${JSON.stringify(saved).slice(0, 200)}`);
+    await evaluate(`localStorage.setItem('duckview.copilot.settings', JSON.stringify({ provider: 'ollama', model: 'mock', apiKey: '', baseUrl: 'http://127.0.0.1:${llm.address().port}' })); true`);
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await send('Page.reload', {});
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app reloaded');
+    // 1. A question in the AI panel, answered from the metrics.
+    await evaluate(`document.querySelector('[data-testid="ai-toggle"]').click(); true`);
+    await waitFor(`!!document.querySelector('textarea[placeholder^="Ask about your data"]:not([disabled])')`, 15000, 'AI ready');
+    await setField('textarea[placeholder^="Ask about your data"]', 'What is e2e revenue by region?');
+    await evaluate(`document.querySelector('button[title="Send"]').click(); true`);
+    await waitFor(`/from metrics/.test(document.querySelector('[data-testid="metric-card"]')?.innerText ?? '')`, 30000, 'metric card');
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_card.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.card = await evaluate(`[...document.querySelectorAll('[data-testid="metric-card"] tbody tr')].map(r => r.innerText.replace(/\\s+/g, ' ').trim())`);
+    // 2. Open it in the Metrics explorer.
+    await evaluate(`document.querySelector('[data-testid="metric-open"]').click(); true`);
+    await waitFor(`location.hash.startsWith('#/transform/metrics') && document.body.innerText.includes('130')`, 20000, 'explorer shows it');
+    report.details.explorer = await evaluate(`document.body.innerText.includes('e2e_revenue') && document.body.innerText.includes('130') && document.body.innerText.includes('50')`);
+    // 3. The explorer's question box.
+    await evaluate(`document.querySelector('[data-testid="ai-toggle"]').click(); true`);
+    await setField('[data-testid="metrics-ask"]', 'How many orders per region?');
+    await evaluate(`document.querySelector('[data-testid="metrics-ask-go"]').click(); true`);
+    await waitFor(`/E2E orders by region/.test(document.querySelector('[data-testid="metrics-answer"]')?.innerText ?? '')`, 20000, 'answer applied');
+    await waitFor(`!!document.querySelector('label[data-metric="e2e_orders"] input')?.checked`, 10000, 'orders picked');
+    await sleep(800);
+    report.details.asked = await evaluate(`document.querySelector('[data-testid="metrics-result"]')?.innerText.split('\\n')[0] ?? ''`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_explorer.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -1259,6 +1321,11 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'ai-metrics') {
+    if (JSON.stringify(d.card) !== JSON.stringify(['EU 130', 'US 50'])) problems.push(`card: ${JSON.stringify(d.card)}`);
+    if (!d.explorer) problems.push('the explorer did not show the query');
+    if (!/Orders by region/i.test(d.asked ?? '')) problems.push(`asked: ${d.asked}`);
   }
   if (scenario === 'ai-build') {
     if (!d.guide) problems.push('the build guide was not in the prompt');

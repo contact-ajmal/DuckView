@@ -5,7 +5,8 @@ import { Bot, X, Send, Square, Settings2, Sparkles, Wrench, PlayCircle, FilePlus
 import { SaveDbtModelDialog, looksLikeDbtModel } from '../transform/SaveDbtModelDialog';
 import { useCopilot } from '../../store/copilot';
 import { useWorkspace } from '../../store/workspace';
-import { api, type AgentRecord, type CopilotBuildBlock, type CopilotSpecBlock, type Dashboard } from '../../api/client';
+import { api, type AgentRecord, type CopilotBuildBlock, type CopilotMetricBlock, type CopilotSpecBlock, type Dashboard } from '../../api/client';
+import { ChartWidget, type WidgetData } from '../dashboards/widgets';
 import { Button, Input, Label, Select, cn } from '../../components/ui';
 
 export interface CopilotHost {
@@ -28,6 +29,62 @@ export function registerCopilotHost(h: CopilotHost | null) {
 
 /** A ```yaml / ```json block that is a Mosaic spec — validated by the server when the reply completed. */
 const looksLikeSpec = (text: string) => /^\s*(plot|vconcat|hconcat|input|mark|legend)\s*:/m.test(text) || /"(plot|vconcat|hconcat|input|mark|legend)"\s*:/.test(text);
+
+/** Opens a metric query in Data › Metrics (the explorer reads ?q=). */
+export const metricsLink = (q: unknown) => `#/transform/metrics?q=${btoa(unescape(encodeURIComponent(JSON.stringify(q)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+
+/** A ```duckview-metric answer: computed through the semantic layer, shown as numbers and a chart. */
+function MetricCard({ block, workspaceId }: { block: CopilotMetricBlock | undefined; workspaceId: string | null }) {
+  const [sql, setSql] = useState(false);
+  const [dashboards, setDashboards] = useState<Dashboard[] | null>(null);
+  const [pinned, setPinned] = useState<string | null>(null);
+  if (!block) return <div className="my-2 rounded-md border border-zinc-800 px-2 py-1.5 text-[11px] text-zinc-500"><Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> computing from the metrics…</div>;
+  if (!block.ok) return <div className="my-2 rounded-md border border-amber-900/60 bg-amber-950/20 px-2 py-1.5 text-[11px] text-amber-200" data-testid="metric-card">Could not compute this from the metrics: {block.error}</div>;
+  const q = block.query!;
+  const dims = q.group_by ?? [];
+  const numeric = (t: string) => /INT|DOUBLE|DECIMAL|FLOAT|REAL|NUMERIC/i.test(t);
+  const data: WidgetData = { columns: block.columns.map((c) => ({ name: c.name, type: c.type, kind: numeric(c.type) ? 'number' : /DATE|TIME/i.test(c.type) ? 'temporal' : 'string' })) as never, rows: block.rows, rowCount: block.row_count ?? block.rows.length, totalRows: null, durationMs: 0 };
+  const time = dims.some((d) => /metric_time|__(day|week|month|quarter|year)$/.test(d));
+  const fmt = (v: unknown) => (v == null ? '—' : typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v).replace(/T00:00:00(\.000)?Z?$/, ''));
+  const pin = async (d: Dashboard) => {
+    await api.post(`/api/dashboards/${d.id}/widgets`, { title: block.title ?? q.metrics.join(', '), widget_type: dims.length ? 'CHART' : 'KPI', custom_sql: block.sql, chart_config: dims.length ? { chart: time ? 'line' : 'bar', x: dims[0], y: q.metrics.slice(0, 3) } : { value: q.metrics[0] } });
+    setPinned(d.name);
+    setDashboards(null);
+  };
+  return (
+    <div className="my-2 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950" data-testid="metric-card">
+      <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-400">
+        <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-400" /> <span className="truncate text-zinc-200">{block.title ?? q.metrics.join(', ')}</span>
+        <span className="ml-auto shrink-0">from metrics · {block.row_count} row{block.row_count === 1 ? '' : 's'}</span>
+      </div>
+      {dims.length === 0 && block.rows[0] ? (
+        <div className="flex flex-wrap gap-x-6 gap-y-1 px-3 py-2">{block.columns.map((c, i) => <div key={c.name}><div className="text-[10.5px] text-zinc-500">{c.name}</div><div className="text-lg font-semibold text-zinc-50" data-metric-value={c.name}>{fmt(block.rows[0]![i])}</div></div>)}</div>
+      ) : (
+        <>
+          {block.rows.length > 1 && <div className="h-40 px-1 pt-1"><ChartWidget data={data} config={{ chart: time ? 'line' : 'bar', x: dims[0], y: q.metrics.slice(0, 3) }} /></div>}
+          <div className="max-h-48 overflow-auto">
+            <table className="w-full font-mono text-[11px]">
+              <thead className="sticky top-0 bg-zinc-900 text-left text-zinc-500"><tr>{block.columns.map((c) => <th key={c.name} className="px-2 py-1 font-normal">{c.name}</th>)}</tr></thead>
+              <tbody>{block.rows.slice(0, 50).map((r, i) => <tr key={i} className="border-t border-zinc-800/60">{r.map((v, j) => <td key={j} className={cn('px-2 py-0.5 text-zinc-300', typeof v === 'number' && 'text-right')}>{fmt(v)}</td>)}</tr>)}</tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {sql && <pre className="max-h-48 overflow-auto border-t border-zinc-800 p-2 font-mono text-[10.5px] text-zinc-400">{block.sql}</pre>}
+      {pinned && <div className="border-t border-zinc-800 px-2 py-1 text-[11px] text-emerald-300">Added to “{pinned}”.</div>}
+      {dashboards && (
+        <div className="max-h-40 overflow-auto border-t border-zinc-800 py-1">
+          {dashboards.length === 0 ? <p className="px-2 py-1 text-[11px] text-zinc-500">No grid dashboards yet.</p> : dashboards.map((d) => <button key={d.id} onClick={() => void pin(d)} className="block w-full truncate px-2 py-1 text-left text-[11px] text-zinc-300 hover:bg-zinc-800">{d.name}</button>)}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1 border-t border-zinc-800 bg-zinc-900/60 px-1.5 py-1">
+        <a href={metricsLink(q)} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-accent-200 hover:bg-accent-600/20" data-testid="metric-open">Open in Metrics</a>
+        <button disabled={!workspaceId} onClick={() => void (dashboards ? setDashboards(null) : api.get<{ dashboards: Dashboard[] }>(`/api/workspaces/${workspaceId}/dashboards`).then((r) => setDashboards(r.dashboards.filter((d) => d.kind !== 'mosaic'))))} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"><LayoutDashboard className="h-3 w-3" /> Add to dashboard</button>
+        <button onClick={() => setSql((v) => !v)} className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">{sql ? 'Hide SQL' : 'SQL'}</button>
+      </div>
+    </div>
+  );
+}
 
 /** A ```duckview-build plan: what DuckView AI proposes to build, each item already run against the workspace. */
 function BuildCard({ text, block, workspaceId, onFix }: { text: string; block: CopilotBuildBlock | undefined; workspaceId: string | null; onFix: (problems: string[]) => void }) {
@@ -260,11 +317,12 @@ export function CopilotDrawer() {
     if (!wsId || cp.streaming) return;
     void cp.send({ workspaceId: wsId, message: `Some items of the build plan do not work in this workspace. Fix them and return the complete corrected plan:\n${problems.map((e) => `- ${e}`).join('\n')}`, action: 'build', targets: cp.targets });
   };
-  const mdComponentsFor = (m: { specBlocks?: CopilotSpecBlock[]; buildBlocks?: CopilotBuildBlock[] }) => ({
+  const mdComponentsFor = (m: { specBlocks?: CopilotSpecBlock[]; buildBlocks?: CopilotBuildBlock[]; metricBlocks?: CopilotMetricBlock[] }) => ({
     ...mdComponents,
     code(props: { className?: string; children?: ReactNode; inline?: boolean }) {
       const lang = /language-([\w-]+)/.exec(props.className ?? '')?.[1];
       const text = String(props.children ?? '').replace(/\n$/, '');
+      if (lang === 'duckview-metric') return <MetricCard block={m.metricBlocks?.find((b) => b.text.trim() === text.trim())} workspaceId={wsId} />;
       if (lang === 'duckview-build') return <BuildCard text={text} block={m.buildBlocks?.find((b) => b.text.trim() === text.trim())} workspaceId={wsId} onFix={fixBuild} />;
       if ((lang === 'yaml' || lang === 'yml' || lang === 'json') && looksLikeSpec(text)) return <SpecBlock text={text} verdict={m.specBlocks?.find((b) => b.text.trim() === text.trim())} workspaceId={wsId} onFix={fixSpec} />;
       return mdComponents.code(props);

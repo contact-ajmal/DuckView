@@ -156,4 +156,10 @@ export async function copilotRoutes(app: FastifyInstance, ctx: AppContext) {
     const body = z.object({ plan: Plan }).parse(req.body ?? {});
     return ctx.builder.create(req.principal!, (req.params as { id: string }).id, parseBuildPlan(body.plan as never));
   });
+
+  /** A question in plain words → a metric query (checked); the Metrics explorer applies and runs it. */
+  app.post('/api/workspaces/:id/semantic/ask', { preHandler: app.authenticate }, async (req) => {
+    const b = z.object({ question: z.string().min(1).max(4000), provider: Provider.optional(), model: z.string().max(120).optional(), api_key: z.string().max(400).optional(), base_url: z.string().max(500).optional(), region: z.string().max(40).optional() }).parse(req.body ?? {});
+    return ctx.copilot.askMetrics(req.principal!, { workspaceId: (req.params as { id: string }).id, question: b.question, provider: b.provider, model: b.model, apiKey: b.api_key, baseUrl: b.base_url, region: b.region });
+  });
 }
