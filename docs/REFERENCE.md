@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (45 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (49 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -162,7 +162,7 @@ Key settings:
 
 ## Layout
 
-**Navigation.** A narrow rail on the left holds the eight places: **Home** (recent queries, datasets and dashboards, workspace status), **Data** (the explorer, with Models, Metrics, Quality, Catalog, Lineage and Access policies as tabs), **SQL** (the workbench), **Dashboards** (with Alerts, Snapshots and Channels), **Apps**, **AI** (agents, tools, MCP clients, activity, approvals), **Connections** and **Settings**. The top bar shows the workspace switcher and where you are, the command bar, live status, the **AI** panel toggle and your account (theme, appearance, sign out). **⌘K / Ctrl+K** opens the command palette: go anywhere, open a dataset, saved query or dashboard, create things, switch workspace or theme. Every older link (`#/transform/…`, `#/governance/…`, `#/alerts/…`, `#/mcp`, `#/overview`) still opens the same page.
+**Navigation.** A narrow rail on the left holds the eight places: **Home** (recent queries, datasets and dashboards, workspace status), **Data** (the explorer, with Models, Metrics, Quality, Catalog, Lineage and Access policies as tabs), **SQL** (the workbench, with Notebooks as a tab), **Dashboards** (with Alerts, Snapshots and Channels), **Apps**, **AI** (agents, tools, MCP clients, activity, approvals), **Connections** and **Settings**. The top bar shows the workspace switcher and where you are, the command bar, live status, the **AI** panel toggle and your account (theme, appearance, sign out). **⌘K / Ctrl+K** opens the command palette: go anywhere, open a dataset, saved query or dashboard, create things, switch workspace or theme. Every older link (`#/transform/…`, `#/governance/…`, `#/alerts/…`, `#/mcp`, `#/overview`) still opens the same page.
 
 **The workbench** is IDE-shaped: a schema side bar (Explorer · Tables & views · Saved queries · History), query tabs, a run toolbar (Run / Stop, engine, execution time, rows, row limit, Save, and a ⋯ menu for import/export, *Save as dbt model* and more) above the editor, and a results pane with Results · Chart · Profile · Explain · Schema · Explore. Results sort by column (click a header), resize (drag its edge), filter, copy as tab-separated text, and export the full result as CSV, Parquet, JSON or Arrow.
 
@@ -468,6 +468,21 @@ API: `GET/POST /api/workspaces/:id/quality/suites` (the list includes `dbt_tests
 **From the workbench**: ⋯ → *Send results to…* opens a new reverse sync with the tab's SQL. **Agents** (`list_reverse_syncs`, `create_reverse_sync`, `run_reverse_sync`): data leaving the workspace needs approval — the first `run_reverse_sync` returns a challenge (rows, deletions, destination) and runs only when repeated with `dry_run: false`; a sync an agent creates has no schedule until a person sets one. DuckView AI's context lists the workspace's reverse syncs.
 
 API: `GET/POST /api/workspaces/:id/reverse-syncs` · `GET/PATCH/DELETE /api/reverse-syncs/:id` · `GET /api/reverse-syncs/:id/plan` · `POST /api/reverse-syncs/:id/run {dry_run?}` (agent tokens: 409 `APPROVAL_REQUIRED`) · `GET /api/reverse-syncs/:id/runs`. Audit: `reverse_sync.create`, `.update`, `.delete`, `.run`. Live event: `reverse_sync`. HTTP targets follow `notifications.allow_private_targets` (https and public addresses only, unless set).
+
+
+## Notebooks
+
+**Analyses as a sequence of cells** (SQL › Notebooks, `#/notebooks/<id>`, `services/notebooks.ts`): Markdown text, **inputs** and **SQL**.
+
+- **Cells build on each other.** Every SQL cell has a name (`df1`, `monthly`); a later cell that mentions it reads its result — `SELECT * FROM monthly WHERE revenue > 1000`. The earlier cell is added as a CTE (recursively, in dependency order), so nothing is materialised and every run is one query through the QueryService as the person running it: SQL guard, access policies, result cache and audit apply. Only cells above can be referenced; mentions inside strings, comments, quoted identifiers or after a dot (`t.monthly`) are not references. A cell that reads others must be one read-only query; cells that write (CREATE TABLE AS, INSERT) run on their own.
+- **Inputs are variables.** An input cell (text, number, date or a list of options) named `region` is used as `{{ region }}` and becomes a SQL literal — numbers as numbers, dates as `DATE '…'`, everything else quoted — never raw SQL.
+- **Outputs are saved** with the notebook (the first 500 rows, the row count, who ran it and when) when an editor runs a cell, so viewers, exports and agents see results without re-running. Viewers can change inputs and run cells for themselves; their outputs are not saved. A cell shows its result as a table or a chart (the workbench's chart settings).
+- **Saving** is automatic (under a second after typing). Each save carries the version it started from; if someone else saved in between, the save is refused with who it was, and the notebook offers to reload their version — nobody's work is silently overwritten.
+- **Run all** runs the SQL cells top to bottom and stops at the first error. ⌘/Ctrl+Enter runs the focused cell. Autocomplete knows the workspace's tables and the cells above with their columns.
+- **Export as Markdown**: text cells as they are, SQL in fenced blocks, outputs as tables (first 20 rows), errors as quotes.
+- **DuckView AI** sees the open notebook (cells, names, inputs, output columns) and writes SQL that fits it; *Add as cell* puts its SQL in a new cell below the focused one, *Run & inspect* runs it as a cell. **Agents**: `list_notebooks`, `get_notebook`, `create_notebook` (cells in order; runs them by default), `run_notebook`; cells that write need the usual approval (`dry_run: false`).
+
+API: `GET/POST /api/workspaces/:id/notebooks` · `GET/PATCH/DELETE /api/notebooks/:id` (`PATCH {title?, cells?, version}` → 409 with `details.version` when stale) · `POST /api/notebooks/:id/cells/:cell/run {cells?, dry_run?}` · `POST /api/notebooks/:id/cells/:cell/compile` · `POST /api/notebooks/:id/run` · `GET /api/notebooks/:id/export.md`. Audit: `notebook.create`, `notebook.delete`, `notebook.run`.
 
 ## Governance
 

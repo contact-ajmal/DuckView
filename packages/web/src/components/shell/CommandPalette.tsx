@@ -66,6 +66,7 @@ export function CommandPalette() {
     const out: Command[] = [
       { id: 'new-sql', group: 'Actions', label: 'New SQL tab', icon: <Plus className="h-4 w-4" />, keywords: 'query editor', run: () => { void ws.addTab(); location.hash = '#/query'; close(); } },
       { id: 'ask-ai', group: 'Actions', label: cp.open ? 'Hide AI panel' : 'Ask AI about this data', icon: <Sparkles className="h-4 w-4" />, keywords: 'copilot assistant', run: () => { cp.toggle(); close(); } },
+      { id: 'new-notebook', group: 'Actions', label: 'New notebook', icon: <Plus className="h-4 w-4" />, keywords: 'analysis cells markdown', run: go('#/notebooks?new=1') },
       { id: 'new-dashboard', group: 'Actions', label: 'New dashboard', icon: <LayoutDashboard className="h-4 w-4" />, run: go('#/dashboards?new=1') },
       { id: 'upload', group: 'Actions', label: 'Add data files', icon: <Upload className="h-4 w-4" />, keywords: 'upload import csv parquet', run: go('#/data') },
       { id: 'new-connection', group: 'Actions', label: 'Connect a source', icon: <Plus className="h-4 w-4" />, keywords: 'connection database warehouse s3', run: go('#/connections') },

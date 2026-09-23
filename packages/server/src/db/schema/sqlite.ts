@@ -330,6 +330,8 @@ export interface ChatContextSnapshot {
   quality?: string;
   /** Reverse syncs: destinations, modes and last runs. */
   reverse?: string;
+  /** The notebook open on screen. */
+  notebook?: string;
   model?: string;
   provider?: string;
 }
@@ -1218,3 +1220,50 @@ export const reverseSyncRuns = sqliteTable(
 );
 export type ReverseSync = typeof reverseSyncs.$inferSelect;
 export type ReverseSyncRun = typeof reverseSyncRuns.$inferSelect;
+
+/** Notebooks: SQL, Markdown and input cells run top to bottom; a SQL cell's result is named for later cells. */
+export const NOTEBOOK_CELL_TYPES = ['sql', 'markdown', 'input'] as const;
+export type NotebookCellType = (typeof NOTEBOOK_CELL_TYPES)[number];
+export interface NotebookOutput {
+  columns: { name: string; type: string; kind: string }[];
+  /** At most notebooks.max_output_rows rows are kept with the notebook. */
+  rows: unknown[][];
+  row_count: number;
+  truncated: boolean;
+  duration_ms: number;
+  ran_at: string;
+  ran_by: string | null;
+  /** Statements that wrote: rows changed. */
+  rows_changed: number | null;
+  error: string | null;
+}
+export interface NotebookCell {
+  id: string;
+  type: NotebookCellType;
+  /** sql: the name later cells query its result by (df1); input: the variable ({{ region }}). */
+  name?: string | null;
+  /** SQL text or Markdown. */
+  source: string;
+  input?: { kind: 'text' | 'number' | 'date' | 'select'; label?: string | null; value: string; options?: string[] } | null;
+  view?: 'table' | 'chart';
+  chart?: ChartConfig | null;
+  output?: NotebookOutput | null;
+}
+
+export const notebooks = sqliteTable(
+  'notebooks',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    cells: text('cells', { mode: 'json' }).$type<NotebookCell[]>().notNull().default([]),
+    /** Bumped on every save; a save carrying an older version is refused (someone else saved in between). */
+    version: integer('version').notNull().default(1),
+    updated_by: text('updated_by'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('notebooks_workspace_idx').on(t.workspace_id)],
+);
+export type Notebook = typeof notebooks.$inferSelect;

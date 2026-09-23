@@ -20,9 +20,12 @@ interface Props {
   onCursorChange?: (cursor: number) => void;
   onRun: (selection: string | null) => void;
   schema?: Record<string, string[]>;
+  /** Grow with the content (notebook cells) instead of filling the parent. */
+  autoHeight?: boolean;
+  placeholder?: string;
 }
 
-export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({ value, initialCursor, onChange, onCursorChange, onRun, schema }, ref) {
+export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({ value, initialCursor, onChange, onCursorChange, onRun, schema, autoHeight, placeholder }, ref) {
   const cm = useRef<ReactCodeMirrorRef>(null);
   const lastCursor = useRef<number>(initialCursor ?? 0);
   const kind = useTheme((t) => t.theme.kind);
@@ -75,7 +78,8 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({
     <CodeMirror
       ref={cm}
       value={value}
-      height="100%"
+      height={autoHeight ? undefined : '100%'}
+      minHeight={autoHeight ? '44px' : undefined}
       theme={kind === 'dark' ? oneDark : 'light'}
       extensions={extensions}
       basicSetup={{ foldGutter: false, highlightActiveLine: true, autocompletion: true, bracketMatching: true, closeBrackets: true }}
@@ -86,10 +90,11 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({
       }}
       onCreateEditor={(view) => {
         const pos = Math.min(initialCursor ?? 0, view.state.doc.length);
-        view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+        // In a notebook every cell mounts at once: scrolling each cursor into view would jump the page.
+        view.dispatch({ selection: { anchor: pos }, scrollIntoView: !autoHeight });
       }}
-      className="h-full"
-      placeholder="-- ⌘/Ctrl+Enter runs the editor contents, or just the selection."
+      className={autoHeight ? undefined : 'h-full'}
+      placeholder={placeholder ?? '-- ⌘/Ctrl+Enter runs the editor contents, or just the selection.'}
     />
   );
 });

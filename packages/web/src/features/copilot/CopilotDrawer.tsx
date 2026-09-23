@@ -9,6 +9,8 @@ import { api, type AgentRecord, type CopilotSpecBlock, type Dashboard } from '..
 import { Button, Input, Label, Select, cn } from '../../components/ui';
 
 export interface CopilotHost {
+  /** What "insert" means here (the workbench: into the tab; a notebook: a new cell). */
+  insertLabel?: string;
   /** Inserts SQL at the cursor of the active tab (falls back to a new tab). */
   insertSql(sql: string): void;
   /** Opens a fresh tab with the SQL. */
@@ -86,7 +88,7 @@ function SqlBlock({ sql, onInsert, onNewTab, onRun, onDbt, busy }: { sql: string
       <pre className="overflow-auto p-2.5 font-mono text-[11px] leading-relaxed text-zinc-200">{sql}</pre>
       <div className="flex flex-wrap gap-1 border-t border-zinc-800 bg-zinc-900/60 px-1.5 py-1">
         <button onClick={onInsert} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Insert at cursor in the active tab">
-          <ArrowDownToLine className="h-3 w-3" /> Insert into tab
+          <ArrowDownToLine className="h-3 w-3" /> {host?.insertLabel ?? 'Insert into tab'}
         </button>
         <button onClick={onNewTab} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Open in a fresh tab">
           <FilePlus2 className="h-3 w-3" /> New tab

@@ -34,6 +34,8 @@ export interface CopilotRequest {
   errorMessage?: string | null;
   /** Files/tables to include in depth (schema + SUMMARIZE). */
   targets?: string[];
+  /** The notebook open in the UI. */
+  notebookId?: string | null;
   resultPreview?: { columns: { name: string; type: string }[]; rows: unknown[][]; rowCount?: number } | null;
   provider?: ProviderId;
   model?: string;
@@ -104,6 +106,7 @@ function renderContext(c: ChatContextSnapshot, cfg: DuckViewConfig): string {
   if (c.notes) parts.push(`### What the tables mean (the workspace's catalog notes — trust these over guesses from names)\n${c.notes.slice(0, 6000)}`);
   if (c.metrics) parts.push(`### Metrics defined in the semantic layer (compute these exactly as defined when asked; name the metric)\n${c.metrics.slice(0, 6000)}`);
   if (c.quality) parts.push(`### Data quality checks (Data → Quality; when asked why data looks wrong, or before trusting a table, mention failing checks)\n${c.quality.slice(0, 4000)}`);
+  if (c.notebook) parts.push(`### The notebook open on screen (answer with SQL that fits it: a new cell may query earlier cells by name; say which cell name to use)\n${c.notebook}`);
   if (c.reverse) parts.push(`### Reverse ETL: data this workspace sends out (Connections → Reverse ETL; a change to these queries changes what other systems receive)\n${c.reverse.slice(0, 3000)}`);
   if (c.dbt) parts.push(`### dbt projects of this workspace (Transform → dbt)\n${c.dbt.slice(0, 5000)}`);
   if (c.summaries && Object.keys(c.summaries).length) {
@@ -289,8 +292,10 @@ export class CopilotService {
   quality: { promptSummary(workspaceId: string): Promise<string> } | null = null;
   /** Reverse syncs (data sent out of the workspace), for prompts (set by the context). */
   reverse: { promptSummary(workspaceId: string): Promise<string> } | null = null;
+  /** The notebook open in the UI, for prompts (set by the context). */
+  notebooks: { promptSummary(p: Principal, id: string): Promise<string> } | null = null;
 
-  async buildContext(p: Principal, workspaceId: string, opts: { activeSql?: string | null; targets?: string[] } = {}): Promise<ChatContextSnapshot> {
+  async buildContext(p: Principal, workspaceId: string, opts: { activeSql?: string | null; targets?: string[]; notebookId?: string | null } = {}): Promise<ChatContextSnapshot> {
     const { objects, files } = await this.queries.catalog(p, workspaceId);
     const conns = await this.cloud.list(p.userId);
     const snapshot: ChatContextSnapshot = {
@@ -304,6 +309,7 @@ export class CopilotService {
       metrics: (await this.semantic?.promptSummary(workspaceId).catch(() => '')) || undefined,
       quality: (await this.quality?.promptSummary(workspaceId).catch(() => '')) || undefined,
       reverse: (await this.reverse?.promptSummary(workspaceId).catch(() => '')) || undefined,
+      notebook: (opts.notebookId && (await this.notebooks?.promptSummary(p, opts.notebookId).catch(() => ''))) || undefined,
     };
     const targets = (opts.targets ?? []).filter(Boolean).slice(0, 3);
     if (targets.length) {
@@ -337,7 +343,7 @@ export class CopilotService {
     const conversationId = req.conversationId ?? newId();
     const started = performance.now();
 
-    const snapshot = await this.buildContext(p, req.workspaceId, { activeSql: req.activeSql, targets: req.targets });
+    const snapshot = await this.buildContext(p, req.workspaceId, { activeSql: req.activeSql, targets: req.targets, notebookId: req.notebookId });
     snapshot.provider = provider;
     snapshot.model = instance.model;
 

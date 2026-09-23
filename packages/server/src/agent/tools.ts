@@ -1101,7 +1101,76 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(run.status === 'ok' ? `Done: ${run.summary}` : `The run failed: ${run.error}`)], structuredContent: { status: run.status === 'ok' ? 'ok' : 'error', run_id: run.id, rows_read: run.rows_read, rows_sent: run.rows_sent, rows_deleted: run.rows_deleted, summary: run.summary, error: run.error }, isError: run.status !== 'ok' };
       },
     }),
+    // ---------------------------------------------------------------- notebooks
+    define({
+      name: 'list_notebooks',
+      title: 'List notebooks',
+      description: 'The workspace\'s SQL notebooks: title, number of cells, who saved last and when. Read one with get_notebook.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const list = await env.ctx.notebooks.list(env.principal, ws);
+        return { content: [text(list.length ? list.map((n) => `- **${n.title}** (\`${n.id}\`): ${n.cell_count} cells, ${n.sql_cells} SQL · saved ${n.updated_at.toISOString().slice(0, 16).replace('T', ' ')}`).join('\n') : 'No notebooks yet — create one with create_notebook.')], structuredContent: { status: 'ok', notebooks: list.map((n) => ({ id: n.id, title: n.title, cells: n.cell_count, sql_cells: n.sql_cells, updated_at: n.updated_at })) } };
+      },
+    }),
+
+    define({
+      name: 'get_notebook',
+      title: 'Read notebook',
+      description: 'A notebook\'s cells in order — Markdown, inputs ({{ name }} variables) and SQL cells with their names — and each SQL cell\'s saved output (columns, row count, first rows, or the error).',
+      inputSchema: { notebook_id: z.string(), max_rows: z.number().int().min(0).max(50).optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { notebook_id, max_rows }) {
+        const nb = await env.ctx.notebooks.get(env.principal, notebook_id);
+        const n = max_rows ?? 5;
+        const parts = [`# ${nb.title} (version ${nb.version})`];
+        for (const c of nb.cells) {
+          if (c.type === 'markdown') parts.push(`[markdown ${c.id}]\n${c.source}`);
+          else if (c.type === 'input') parts.push(`[input ${c.id}] {{ ${c.name} }} (${c.input?.kind}) = ${JSON.stringify(c.input?.value ?? '')}`);
+          else {
+            const o = c.output;
+            const out = !o ? '(not run)' : o.error ? `ERROR: ${o.error}` : `${o.row_count} rows\n${o.columns.length ? `| ${o.columns.map((x) => x.name).join(' | ')} |\n${o.rows.slice(0, n).map((r) => `| ${r.map((v) => (v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v))).join(' | ')} |`).join('\n')}` : ''}`;
+            parts.push(`[sql ${c.id}] ${c.name}\n\`\`\`sql\n${c.source}\n\`\`\`\n${out}`);
+          }
+        }
+        return { content: [text(parts.join('\n\n'))], structuredContent: { status: 'ok', id: nb.id, title: nb.title, version: nb.version, cells: nb.cells.map((c) => ({ id: c.id, type: c.type, name: c.name ?? null, source: c.source, input: c.input ?? null, output: c.output ? { columns: c.output.columns.map((x) => x.name), row_count: c.output.row_count, rows: c.output.rows.slice(0, n), error: c.output.error } : null })) } };
+      },
+    }),
+
+    define({
+      name: 'create_notebook',
+      title: 'Create notebook',
+      description: 'Creates a SQL notebook — an analysis people can read, re-run and edit — from cells in order: {type:"markdown", source} for text, {type:"input", name, input:{kind: text|number|date|select, value, options?}} for a variable used as {{ name }} in SQL, and {type:"sql", name, source} for a query. A SQL cell can query an earlier SQL cell\'s result by its name (SELECT * FROM monthly WHERE …). With run (default true) every SQL cell runs and the outputs are saved.',
+      inputSchema: { title: z.string().min(1).max(200), cells: z.array(z.record(z.string(), z.unknown())).min(1).max(100), run: z.boolean().optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { title, cells, run, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const nb = await env.ctx.notebooks.create(env.principal, ws, { title, cells: cells as never });
+        const r = run === false ? null : await env.ctx.notebooks.runAll(env.principal, nb.id);
+        const sqlCells = nb.cells.filter((c) => c.type === 'sql');
+        const summary = r ? sqlCells.map((c) => r.outputs[c.id]).filter(Boolean).map((o, i) => `- ${sqlCells[i]!.name}: ${o!.error ? `ERROR ${o!.error.split('\n')[0]}` : `${o!.row_count} rows`}`).join('\n') : '';
+        return { content: [text(`Created notebook **${nb.title}** (\`${nb.id}\`), ${nb.cells.length} cells.${r ? `\n${summary}${r.failed ? `\nStopped at ${r.failed}.` : ''}` : ''}\nOpen it in DuckView under SQL → Notebooks.`)], structuredContent: { status: r?.failed ? 'error' : 'ok', notebook_id: nb.id, failed: r?.failed ?? null } };
+      },
+    }),
+
+    define({
+      name: 'run_notebook',
+      title: 'Run notebook',
+      description: 'Runs every SQL cell of a notebook top to bottom (stopping at the first error), saves the outputs and returns each cell\'s row count, first rows or error. Cells that write need the usual approval (dry_run: false after a person approves).',
+      inputSchema: { notebook_id: z.string(), dry_run: z.boolean().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { notebook_id, dry_run }) {
+        const nb = await env.ctx.notebooks.get(env.principal, notebook_id);
+        const r = await env.ctx.notebooks.runAll(env.principal, notebook_id, { dryRun: dry_run });
+        const lines = nb.cells.filter((c) => c.type === 'sql' && r.outputs[c.id]).map((c) => {
+          const o = r.outputs[c.id]!;
+          return o.error ? `- ${c.name}: ERROR ${o.error.split('\n')[0]}` : `- ${c.name}: ${o.row_count} rows${o.columns.length ? ` (${o.columns.map((x) => x.name).join(', ')})` : ''}`;
+        });
+        return { content: [text(`Ran ${r.ran} SQL cell${r.ran === 1 ? '' : 's'} of **${nb.title}**${r.failed ? `, stopped at ${r.failed}` : ''}:\n${lines.join('\n')}`)], structuredContent: { status: r.failed ? 'error' : 'ok', ran: r.ran, failed: r.failed, outputs: Object.fromEntries(Object.entries(r.outputs).map(([k, o]) => [k, { row_count: o.row_count, columns: o.columns.map((x) => x.name), rows: o.rows.slice(0, 5), error: o.error }])) }, isError: !!r.failed };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook'] as const;

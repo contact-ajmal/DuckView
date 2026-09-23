@@ -197,6 +197,13 @@
       "when": 1790182940631,
       "tag": "0027_reverse_etl",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1790186003085,
+      "tag": "0028_notebooks",
+      "breakpoints": true
     }
   ]
 }

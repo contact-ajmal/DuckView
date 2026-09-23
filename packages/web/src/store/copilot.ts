@@ -105,7 +105,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     const upd = (patch: Partial<LiveMessage>) => set({ messages: get().messages.map((m) => (m.id === asstId ? { ...m, ...patch } : m)) });
     const byok = config?.allow_byok && settings.provider ? { provider: settings.provider, model: settings.model || undefined, api_key: settings.apiKey || undefined, base_url: settings.baseUrl || undefined, region: settings.region || undefined, agent_id: settings.agentId || undefined, agent_alias_id: settings.agentAliasId || undefined, runtime_arn: settings.runtimeArn || undefined } : {};
     try {
-      for await (const ev of copilotChat({ workspace_id: input.workspaceId, conversation_id: get().conversationId ?? undefined, message: input.message, action: input.action, active_sql: input.activeSql ?? null, error_message: input.errorMessage ?? null, result_preview: input.resultPreview ?? null, targets: input.targets ?? get().targets, ...byok }, abort.signal)) {
+      for await (const ev of copilotChat({ workspace_id: input.workspaceId, conversation_id: get().conversationId ?? undefined, message: input.message, action: input.action, active_sql: input.activeSql ?? null, error_message: input.errorMessage ?? null, result_preview: input.resultPreview ?? null, targets: input.targets ?? get().targets, notebook_id: /^#\/notebooks\/([\w-]+)/.exec(location.hash)?.[1] ?? null, ...byok }, abort.signal)) {
         if (ev.type === 'context') {
           set({ conversationId: ev.conversation_id });
           upd({ meta: { model: ev.model, provider: ev.provider, tables: ev.tables, files: ev.files, targets: ev.targets } });

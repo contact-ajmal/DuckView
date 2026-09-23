@@ -39,6 +39,9 @@
  * The reverse-etl scenario starts from a workbench query (⋯ → Send results to…), sends it to a local HTTP receiver in
  * upsert mode from Connections → Reverse ETL, runs it (every row), previews the next run (nothing changed), changes a
  * row and runs again (only that row).
+ * The notebooks scenario creates a notebook from SQL → Notebooks, runs the starter cell, adds a SQL cell that reads
+ * the first cell by name, an input and a cell that uses it, runs everything, reloads (outputs and title were saved),
+ * and exports it as Markdown.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -686,6 +689,54 @@ try {
     report.details.received = got.map((g) => ({ auth: g.auth, op: g.body.op, n: g.body.rows.length, first: g.body.rows[0] }));
     report.details.charts = 1;
   }
+  else if (scenario === 'notebooks') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    cleanup = async () => {
+      for (const n of (await j('GET', `/api/workspaces/${wsId}/notebooks`)).notebooks ?? []) if (n.title.startsWith('E2E')) await j('DELETE', `/api/notebooks/${n.id}`);
+    };
+    await cleanup();
+    const setVal = (sel, v) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); const proto = el.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${JSON.stringify(v)}); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); return true; })()`);
+    const typeInto = async (cell, text) => {
+      await evaluate(`document.querySelector('[data-cell="${cell}"] .cm-content').focus(); true`);
+      await send('Input.insertText', { text });
+    };
+    const outputOf = (cell) => `document.querySelector('[data-cell="${cell}"] [data-testid="cell-output"]')?.innerText ?? document.querySelector('[data-cell="${cell}"] [data-testid="cell-error"]')?.innerText ?? ''`;
+    // 1. A new notebook: the starter cell runs.
+    await send('Page.navigate', { url: `${BASE}/#/notebooks` });
+    await waitFor(`!!document.querySelector('[data-testid="new-notebook"]')`, 20000, 'notebooks page');
+    await evaluate(`document.querySelector('[data-testid="new-notebook"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-cell="df1"] [data-testid="run-cell"]')`, 15000, 'new notebook with a starter cell');
+    await setVal('[data-testid="notebook-title"]', 'E2E notebook');
+    await evaluate(`document.querySelector('[data-cell="df1"] [data-testid="run-cell"]').click(); true`);
+    await waitFor(`/answer/.test(${outputOf('df1')}) && /42/.test(${outputOf('df1')})`, 20000, 'starter cell output');
+    // 2. A SQL cell that reads df1 by name.
+    await evaluate(`document.querySelector('[data-cell="df1"]').nextElementSibling.querySelector('[data-add="sql"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-cell="df2"] .cm-content')`, 5000, 'second SQL cell');
+    await typeInto('df2', 'SELECT answer * 2 AS doubled FROM df1');
+    await evaluate(`document.querySelector('[data-cell="df2"] [data-testid="run-cell"]').click(); true`);
+    await waitFor(`/doubled/.test(${outputOf('df2')}) && /84/.test(${outputOf('df2')})`, 20000, 'df2 reads df1');
+    // 3. An input, and a cell that uses it; run everything.
+    await evaluate(`document.querySelector('[data-cell="df2"]').nextElementSibling.querySelector('[data-add="input"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-cell="param1"] [data-testid="input-value"]')`, 5000, 'input cell');
+    await setVal('[data-cell="param1"] select[aria-label="Input kind"]', 'number');
+    await setVal('[data-cell="param1"] [data-testid="input-value"]', '10');
+    await evaluate(`document.querySelector('[data-cell="param1"]').nextElementSibling.querySelector('[data-add="sql"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-cell="df3"] .cm-content')`, 5000, 'third SQL cell');
+    await typeInto('df3', 'SELECT doubled * {{ param1 }} AS scaled FROM df2');
+    await evaluate(`document.querySelector('[data-testid="run-all"]').click(); true`);
+    await waitFor(`/scaled/.test(${outputOf('df3')}) && /840/.test(${outputOf('df3')})`, 30000, 'run all');
+    await waitFor(`document.querySelector('[data-testid="save-state"]')?.innerText === 'Saved'`, 10000, 'saved');
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_notebook.png'), Buffer.from(shot.result.data, 'base64')); }
+    // 4. Reload: title, cells and outputs are kept.
+    await send('Page.reload', {});
+    await waitFor(`document.querySelector('[data-testid="notebook-title"]')?.value === 'E2E notebook' && /840/.test(${outputOf('df3')})`, 20000, 'kept after reload');
+    report.details.cells = await evaluate(`[...document.querySelectorAll('[data-cell]')].map(c => c.dataset.cell + ':' + c.dataset.cellType)`);
+    // 5. Markdown export.
+    const nb = ((await j('GET', `/api/workspaces/${wsId}/notebooks`)).notebooks ?? []).find((n) => n.title === 'E2E notebook');
+    report.details.markdown = await (await authed(`/api/notebooks/${nb.id}/export.md`)).text();
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -968,6 +1019,10 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'notebooks') {
+    if (JSON.stringify(d.cells) !== JSON.stringify(['df1:sql', 'df2:sql', 'param1:input', 'df3:sql']) && !(d.cells ?? []).join(',').endsWith('df1:sql,df2:sql,param1:input,df3:sql')) problems.push(`cells: ${JSON.stringify(d.cells)}`);
+    if (!/```sql\n-- df3\nSELECT doubled \* \{\{ param1 \}\} AS scaled FROM df2\n```\n\n\| scaled \|\n\| --- \|\n\| 840 \|/.test(d.markdown ?? '')) problems.push(`markdown: ${d.markdown}`);
   }
   if (scenario === 'reverse-etl') {
     if (d.handedSql !== 'SELECT id, email, score FROM e2e_rev_scores' || d.handedName !== 'E2E scores') problems.push(`workbench hand-over: ${d.handedName} / ${d.handedSql}`);

@@ -5,6 +5,7 @@ import { useWorkspace } from './store/workspace';
 import { LoginPage } from './features/auth/LoginPage';
 import { HomePage } from './features/home/HomePage';
 import { OverviewPage } from './features/overview/OverviewPage';
+import { NotebooksPage } from './features/notebooks/NotebooksPage';
 import { WorkspacePage } from './features/workspace/WorkspacePage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { McpPage } from './features/mcp/McpPage';
@@ -81,6 +82,7 @@ export default function App() {
             {page === 'home' && <HomePage onNewWorkspace={() => setCreating(true)} />}
             {page === 'data' && <OverviewPage />}
             {page === 'query' && <WorkspacePage />}
+            {page === 'notebooks' && <NotebooksPage />}
             {page === 'dashboards' && <DashboardsPage />}
             {page === 'connections' && <ConnectionsPage />}
             {page === 'apps' && <AppsPage />}

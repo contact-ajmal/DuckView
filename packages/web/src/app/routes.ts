@@ -7,12 +7,12 @@ import { House, Database, SquareTerminal, LayoutDashboard, AppWindow, Sparkles, 
 
 export type Section = 'home' | 'data' | 'sql' | 'dashboards' | 'apps' | 'ai' | 'connections' | 'settings';
 /** Which component renders the page. */
-export type Page = 'home' | 'data' | 'query' | 'transform' | 'governance' | 'dashboards' | 'alerts' | 'apps' | 'mcp' | 'connections' | 'settings';
+export type Page = 'home' | 'data' | 'query' | 'notebooks' | 'transform' | 'governance' | 'dashboards' | 'alerts' | 'apps' | 'mcp' | 'connections' | 'settings';
 
 export const SECTIONS: { id: Section; label: string; hash: string; icon: LucideIcon; hint: string }[] = [
   { id: 'home', label: 'Home', hash: '#/', icon: House, hint: 'Recent work and workspace status' },
   { id: 'data', label: 'Data', hash: '#/data', icon: Database, hint: 'Datasets, models, metrics, quality, catalog and lineage' },
-  { id: 'sql', label: 'SQL', hash: '#/query', icon: SquareTerminal, hint: 'The SQL workbench' },
+  { id: 'sql', label: 'SQL', hash: '#/query', icon: SquareTerminal, hint: 'The SQL workbench and notebooks' },
   { id: 'dashboards', label: 'Dashboards', hash: '#/dashboards', icon: LayoutDashboard, hint: 'Dashboards, alerts and scheduled snapshots' },
   { id: 'apps', label: 'Apps', hash: '#/apps', icon: AppWindow, hint: 'Data apps (Streamlit, Dash, Gradio)' },
   { id: 'ai', label: 'AI', hash: '#/mcp', icon: Sparkles, hint: 'Agents, MCP, activity and approvals' },
@@ -30,6 +30,10 @@ export const SUBPAGES: Partial<Record<Section, { id: string; label: string; hash
     { id: 'catalog', label: 'Catalog', hash: '#/governance/catalog' },
     { id: 'lineage', label: 'Lineage', hash: '#/governance/lineage' },
     { id: 'policies', label: 'Access policies', hash: '#/governance/policies' },
+  ],
+  sql: [
+    { id: 'query', label: 'Workbench', hash: '#/query' },
+    { id: 'notebooks', label: 'Notebooks', hash: '#/notebooks' },
   ],
   dashboards: [
     { id: 'dashboards', label: 'Dashboards', hash: '#/dashboards' },
@@ -58,7 +62,8 @@ export function parseRoute(hash = location.hash): Route {
     return { sub: s?.id ?? null, crumb: s && s.id !== SUBPAGES[section]![0]!.id ? s.label : null };
   };
   if (first === 'data' || first === 'overview') return { section: 'data', page: 'data', ...sub('data', 'explorer') };
-  if (first === 'query') return { section: 'sql', page: 'query', sub: null, crumb: null };
+  if (first === 'query') return { section: 'sql', page: 'query', ...sub('sql', 'query') };
+  if (first === 'notebooks') return { section: 'sql', page: 'notebooks', ...sub('sql', 'notebooks') };
   if (first === 'transform') return { section: 'data', page: 'transform', ...sub('data', second === 'metrics' || second === 'quality' ? second : 'dbt') };
   if (first === 'governance') {
     if (second === 'audit' || second === 'provisioning') return { section: 'settings', page: 'governance', sub: second, crumb: second === 'audit' ? 'Audit log' : 'Provisioning' };
