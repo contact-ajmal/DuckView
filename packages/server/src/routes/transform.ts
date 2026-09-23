@@ -8,6 +8,9 @@
  *   PATCH /api/dbt/projects/:id/files                     {files: {path: content | null}} (null deletes)
  *   POST /api/dbt/projects/:id/models                     {name, sql, folder?, materialized?, unique_key?, description?}
  *   GET  /api/dbt/projects/:id/runs · GET /api/dbt/runs/:id
+ * Semantic layer (metrics) of a workspace:
+ *   GET/PUT /api/workspaces/:id/semantic                   definitions (merged sources) · save the hand-written YAML
+ *   POST .../semantic/validate · .../semantic/query · .../semantic/scaffold · GET .../semantic/dimensions?metrics=
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -15,6 +18,7 @@ import type { AppContext } from '../context.js';
 import { DBT_COMMANDS } from '../db/schema/sqlite.js';
 import { forbidden } from '../services/errors.js';
 import { isPlatformAdmin } from '../services/principal.js';
+import { FILTER_OPS, parseDefinition } from '../services/semantic.js';
 
 const Schedule = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('manual') }),
@@ -78,6 +82,56 @@ export async function transformRoutes(app: FastifyInstance, ctx: AppContext) {
   app.get('/api/dbt/projects/:id/runs', async (req) => {
     const q = z.object({ limit: z.coerce.number().int().min(1).max(200).optional() }).parse(req.query ?? {});
     return { runs: await ctx.dbt.runs(req.principal!, (req.params as { id: string }).id, q.limit) };
+  });
+
+  // ---------------------------------------------------------------- semantic layer (metrics)
+  const MetricQuery = z.object({
+    metrics: z.array(z.string().min(1).max(120)).min(1).max(30),
+    group_by: z.array(z.string().min(1).max(200)).max(10).optional(),
+    where: z.array(z.object({ dimension: z.string().min(1).max(200), op: z.enum(FILTER_OPS), value: z.unknown().optional() })).max(20).optional(),
+    where_sql: z.string().max(4000).nullable().optional(),
+    order_by: z.array(z.object({ name: z.string().min(1).max(200), desc: z.boolean().optional() })).max(10).optional(),
+    limit: z.number().int().min(1).max(1_000_000).optional(),
+  });
+
+  app.get('/api/workspaces/:id/semantic', async (req) => ctx.semantic.get(req.principal!, (req.params as { id: string }).id));
+
+  app.put('/api/workspaces/:id/semantic', async (req) => {
+    const body = z.object({ yaml: z.string().max(2_000_000), force: z.boolean().optional() }).parse(req.body ?? {});
+    return ctx.semantic.save(req.principal!, (req.params as { id: string }).id, body.yaml, { force: body.force });
+  });
+
+  /** Parses and checks YAML against the engine without saving: {ok, problems}. */
+  app.post('/api/workspaces/:id/semantic/validate', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z.object({ yaml: z.string().max(2_000_000) }).parse(req.body ?? {});
+    await ctx.workspaces.get(req.principal!, id);
+    try {
+      const def = parseDefinition(body.yaml);
+      const problems = await ctx.semantic.validate(req.principal!, id, def);
+      return { ok: problems.length === 0, problems, models: def.semantic_models.length, metrics: def.metrics.length };
+    } catch (err) {
+      const e = err as Error & { details?: { problems?: string[] } };
+      return { ok: false, problems: e.details?.problems ?? [e.message], models: 0, metrics: 0 };
+    }
+  });
+
+  app.post('/api/workspaces/:id/semantic/query', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = MetricQuery.extend({ compile_only: z.boolean().optional() }).parse(req.body ?? {});
+    if (body.compile_only) return { sql: (await ctx.semantic.compile(req.principal!, id, body)).sql };
+    const r = await ctx.semantic.query(req.principal!, id, body);
+    return { sql: r.sql, metrics: r.metrics, group_by: r.group_by, columns: r.result.columns, rows: r.result.rows, row_count: r.result.rowCount, truncated: r.result.truncated, duration_ms: r.result.durationMs };
+  });
+
+  app.get('/api/workspaces/:id/semantic/dimensions', async (req) => {
+    const q = z.object({ metrics: z.string().optional() }).parse(req.query ?? {});
+    return { dimensions: await ctx.semantic.dimensions(req.principal!, (req.params as { id: string }).id, (q.metrics ?? '').split(',').map((m) => m.trim()).filter(Boolean)) };
+  });
+
+  app.post('/api/workspaces/:id/semantic/scaffold', async (req) => {
+    const body = z.object({ table: z.string().min(1).max(200) }).parse(req.body ?? {});
+    return { yaml: await ctx.semantic.scaffold(req.principal!, (req.params as { id: string }).id, body.table) };
   });
 
   app.get('/api/dbt/runs/:id', async (req) => ({ run: await ctx.dbt.getRun(req.principal!, (req.params as { id: string }).id) }));

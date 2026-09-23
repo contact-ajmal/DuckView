@@ -31,6 +31,8 @@
  * model in the editor, saves and runs only that model, and checks its compiled SQL and catalog note. The dbt-copilot
  * scenario saves a workbench SELECT as a dbt model (Query → dbt model) and has DuckCopilot (a mock LLM through BYOK)
  * write a model that "Add to dbt project" saves and builds; the prompt must carry the workspace's dbt projects.
+ * The semantic-metrics scenario scaffolds semantic definitions from a table in Transform → Metrics, saves them, and
+ * computes a metric by month in the explorer; the metric must equal the hand-written SQL.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -512,6 +514,43 @@ try {
     report.details.traced = await evaluate(`[...document.querySelectorAll('svg[aria-label="Lineage graph"] g[data-node]')].map(g => g.querySelector('text')?.textContent)`);
     report.details.charts = 1;
   }
+  else if (scenario === 'semantic-metrics') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const before = (await j('GET', `/api/workspaces/${wsId}/semantic`)).yaml ?? '';
+    cleanup = async () => {
+      await j('PUT', `/api/workspaces/${wsId}/semantic`, { yaml: before, force: true });
+      await q('DROP TABLE IF EXISTS sem_orders');
+    };
+    await q(`CREATE OR REPLACE TABLE sem_orders AS SELECT range AS order_id, range % 4 AS customer_id, DATE '2026-01-01' + CAST(range * 3 AS INTEGER) AS order_date, CASE WHEN range % 2 = 0 THEN 'EU' ELSE 'US' END AS region, CAST(range * 10 AS DOUBLE) AS amount FROM range(1, 41)`);
+    // 1. Definitions: scaffold from the table, save.
+    await send('Page.navigate', { url: `${BASE}/#/transform/metrics` });
+    await waitFor(`!!document.querySelector('[data-testid="metrics-define"]')`, 20000, 'metrics tab');
+    await evaluate(`document.querySelector('[data-testid="metrics-define"]').click(); true`);
+    await waitFor(`[...(document.querySelector('[data-testid="metrics-scaffold-table"]')?.options ?? [])].some(o => o.value === 'sem_orders')`, 20000, 'tables listed');
+    await evaluate(`(() => { const sel = document.querySelector('[data-testid="metrics-scaffold-table"]'); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sel), 'value').set.call(sel, 'sem_orders'); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await evaluate(`document.querySelector('[data-testid="metrics-scaffold"]').click(); true`);
+    await waitFor(`document.querySelector('.cm-content')?.innerText.includes('table: sem_orders')`, 10000, 'scaffold in the editor');
+    await evaluate(`document.querySelector('[data-testid="metrics-save"]').click(); true`);
+    await waitFor(`document.querySelector('[data-testid="metrics-save"]').disabled && document.body.innerText.includes('1 semantic model')`, 20000, 'saved');
+    report.details.saved = (await j('GET', `/api/workspaces/${wsId}/semantic`)).metrics.map((m) => m.name);
+    // 2. Explore: total amount by order date per month, EU only.
+    await evaluate(`document.querySelector('[data-testid="metrics-explore"]').click(); true`);
+    await waitFor(`!!document.querySelector('label[data-metric="total_amount"] input')`, 10000, 'metric listed');
+    await evaluate(`(() => { for (const l of document.querySelectorAll('label[data-metric] input')) if (l.checked) l.click(); document.querySelector('label[data-metric="total_amount"] input').click(); return true; })()`);
+    await waitFor(`[...(document.querySelector('[data-testid="metrics-groupby"]')?.options ?? [])].some(o => o.value === 'order_date')`, 10000, 'dimensions loaded');
+    await evaluate(`(() => { const sel = document.querySelector('[data-testid="metrics-groupby"]'); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sel), 'value').set.call(sel, 'order_date'); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(`!!document.querySelector('[data-testid="metrics-grain"]')`, 5000, 'grain picker');
+    await evaluate(`document.querySelector('[data-testid="metrics-run"]').click(); true`);
+    await waitFor(`document.querySelector('[data-testid="metrics-result"]')?.innerText.includes('by order_date__month')`, 30000, 'metric computed');
+    await sleep(800);
+    report.details.ui = { header: await evaluate(`document.querySelector('[data-testid="metrics-result"]').innerText.split('\\n')[0]`), canvas: await evaluate(`!!document.querySelector('canvas')`) };
+    const api = await j('POST', `/api/workspaces/${wsId}/semantic/query`, { metrics: ['total_amount'], group_by: ['order_date__month'] });
+    report.details.api = api.rows?.map((r) => [String(r[0]).slice(0, 7), r[1]]);
+    report.details.expected = ((await q("SELECT strftime(date_trunc('month', order_date), '%Y-%m') AS m, sum(amount) FROM sem_orders GROUP BY 1 ORDER BY 1")).rows ?? []);
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -786,6 +825,11 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'semantic-metrics') {
+    if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
+    if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
+    if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
   if (scenario === 'dbt-copilot') {
     if (d.starter !== 'ok') problems.push(`starter build: ${d.starter}`);
     if (!/\{\{ ref\('region_totals'\) \}\}/.test(d.workbenchModel ?? '')) problems.push(`workbench model not saved with ref(): ${d.workbenchModel}`);

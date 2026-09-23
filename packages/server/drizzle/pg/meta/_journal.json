@@ -176,6 +176,13 @@
       "when": 1790149574731,
       "tag": "0024_dbt_projects",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790158209923,
+      "tag": "0025_semantic_layers",
+      "breakpoints": true
     }
   ]
 }

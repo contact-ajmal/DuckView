@@ -29,6 +29,7 @@ import type { QueryService } from './query.js';
 import type { AuthService } from './auth.js';
 import type { AuditService } from './audit.js';
 import type { LineageService } from './lineage.js';
+import type { SemanticService } from './semantic.js';
 import type { Principal } from './principal.js';
 import { requireWrite } from './principal.js';
 import { badRequest, conflict, notFound } from './errors.js';
@@ -125,6 +126,8 @@ export function starterProject(name: string): Record<string, string> {
 
 export class DbtService {
   private running = new Set<string>();
+  /** Set by the context: dbt semantic models and metrics are imported into the semantic layer. */
+  semantic: SemanticService | null = null;
   /** Runs an agent started with a person's approval (their SQL runs with dry_run=false). */
   private approved = new Set<string>();
   private installing: Promise<void> | null = null;
@@ -337,6 +340,7 @@ export class DbtService {
     const row = await this.get(p, id);
     await this.workspaces.get(p, row.workspace_id, 'EDITOR');
     await this.db.delete(this.s.dbtProjects).where(eq(this.s.dbtProjects.id, id));
+    await this.semantic?.removeSource(row.workspace_id, `dbt:${id}`);
     fs.rmSync(this.workDir(id), { recursive: true, force: true });
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'dbt.project_delete', resource: `dbt:${id}`, ip: p.ip });
   }
@@ -521,6 +525,8 @@ export class DbtService {
       await this.ensureInstalled();
       const compiled = await this.compile(p, project, run);
       log = compiled.log;
+      // The project's semantic models and metrics join the workspace's semantic layer (or leave it when removed).
+      if (this.semantic) await this.semantic.importDbt(project.workspace_id, project.id, compiled.semantic, (r) => this.rebind(r, compiled.catalog), p.userId).catch((err) => logger().warn({ err: (err as Error).message }, 'dbt semantic import failed'));
       results = await this.executeNodes(p, project, run, compiled.nodes, compiled.selected, compiled.catalog);
       if (run.command !== 'compile' && results.some((r) => r.status === 'success' && r.resource_type !== 'test')) await this.importDocs(p, project, compiled.nodes, results);
     } catch (err) {
@@ -543,7 +549,7 @@ export class DbtService {
   }
 
   /** Writes the project, builds the shadow and runs dbt compile; returns the manifest nodes and the selection. */
-  private async compile(p: Principal, project: DbtProject, run: DbtRun): Promise<{ nodes: Map<string, ManifestNode>; selected: string[]; catalog: string; log: string }> {
+  private async compile(p: Principal, project: DbtProject, run: DbtRun): Promise<{ nodes: Map<string, ManifestNode>; selected: string[]; catalog: string; log: string; semantic: Parameters<SemanticService['importDbt']>[2] }> {
     const exec = (sql: string) => this.queries.run(p, project.workspace_id, sql, { cache: false, countTotal: false, maxRows: 100_000 });
     const catalog = String((await exec('SELECT current_database()')).rows[0]?.[0] ?? 'memory');
     const cols = await exec(`SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns WHERE table_catalog = current_database() AND table_schema NOT IN ('information_schema', 'pg_catalog') AND table_schema <> ${lit(this.cfg.mosaic.schema)} ORDER BY table_schema, table_name, ordinal_position`);
@@ -593,7 +599,9 @@ export class DbtService {
     const manifest = JSON.parse(fs.readFileSync(path.join(targetDir, 'manifest.json'), 'utf8')) as { nodes: Record<string, ManifestNode>; sources: Record<string, ManifestNode> };
     const runResults = JSON.parse(fs.readFileSync(path.join(targetDir, 'run_results.json'), 'utf8')) as { results: { unique_id: string }[] };
     const nodes = new Map<string, ManifestNode>([...Object.entries(manifest.nodes), ...Object.entries(manifest.sources ?? {})]);
-    return { nodes, selected: runResults.results.map((x) => x.unique_id), catalog, log };
+    const semanticPath = path.join(targetDir, 'semantic_manifest.json');
+    const semantic = fs.existsSync(semanticPath) ? (JSON.parse(fs.readFileSync(semanticPath, 'utf8')) as Parameters<SemanticService['importDbt']>[2]) : null;
+    return { nodes, selected: runResults.results.map((x) => x.unique_id), catalog, log, semantic };
   }
 
   /** The shadow database name → the workspace's catalog, in compiled SQL and relation names. */
@@ -866,6 +874,8 @@ workspace's own DuckDB engine, as the person (or agent) who started the run, und
   \`data_tests: [unique, not_null]\`, \`accepted_values\` / \`relationships\` with \`arguments: {values: [...]}\` / \`{to: ref('x'), field: id}\`.
   Describe each model once across all YAML files.
 - \`tests/*.sql\`: singular tests — a SELECT returning failing rows; \`{{ config(severity='warn') }}\` to warn instead of fail.
+- \`semantic_models\` and \`metrics\` in YAML (dbt's MetricFlow spec) join the workspace's semantic layer after each run;
+  query them with \`list_metrics\` / \`query_metrics\`.
 - \`seeds/*.csv\`: small reference tables (loaded by seed / build). \`macros/*.sql\`, \`packages.yml\` (dbt_utils etc.) work.
 - SQL is DuckDB SQL. Comments do not stop Jinja: never write \`{{ … }}\` in a comment; use \`{# … #}\`.
 

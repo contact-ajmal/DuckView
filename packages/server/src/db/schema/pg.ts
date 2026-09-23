@@ -678,3 +678,17 @@ export const dbtRuns = pgTable(
   },
   (t) => [index('dbt_runs_project_idx').on(t.project_id, t.started_at)],
 );
+
+export const semanticLayers = pgTable(
+  'semantic_layers',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    yaml: text('yaml'),
+    definition: jsonb('definition').$type<Record<string, unknown>>().notNull(),
+    updated_by: text('updated_by'),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('semantic_layers_source_idx').on(t.workspace_id, t.source)],
+);

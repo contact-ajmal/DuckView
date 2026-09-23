@@ -324,6 +324,8 @@ export interface ChatContextSnapshot {
   notes?: string;
   /** The workspace's dbt projects: models, last run, failures. */
   dbt?: string;
+  /** The semantic layer's metrics: definitions and dimensions. */
+  metrics?: string;
   model?: string;
   provider?: string;
 }
@@ -1031,3 +1033,20 @@ export const dbtRuns = sqliteTable(
 );
 export type DbtProject = typeof dbtProjects.$inferSelect;
 export type DbtRun = typeof dbtRuns.$inferSelect;
+
+/** Semantic layer definitions of a workspace: hand-written YAML ("workspace") or imported from a dbt project ("dbt:<id>"). */
+export const semanticLayers = sqliteTable(
+  'semantic_layers',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    yaml: text('yaml'),
+    /** The normalised definitions (see services/semantic.ts). */
+    definition: text('definition', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    updated_by: text('updated_by'),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [uniqueIndex('semantic_layers_source_idx').on(t.workspace_id, t.source)],
+);
+export type SemanticLayerRow = typeof semanticLayers.$inferSelect;

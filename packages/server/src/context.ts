@@ -28,6 +28,7 @@ import { LineageService } from './services/lineage.js';
 import { AuditExportService } from './services/audit-export.js';
 import { ScimService } from './services/scim.js';
 import { DbtService } from './services/dbt.js';
+import { SemanticService } from './services/semantic.js';
 import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
@@ -70,6 +71,7 @@ export interface AppContext {
   auditExport: AuditExportService;
   scim: ScimService;
   dbt: DbtService;
+  semantic: SemanticService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -154,6 +156,9 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const dbt = new DbtService(store, cfg, workspaces, queries, auth, audit, lineage, engines.jail.baseDir);
   lineage.dbt = dbt;
   copilot.dbt = dbt;
+  const semantic = new SemanticService(store, workspaces, queries, audit, cfg.duckdb.max_result_rows);
+  dbt.semantic = semantic;
+  copilot.semantic = semantic;
   if (cfg.transform.scheduler_enabled) dbt.startScheduler();
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
@@ -196,6 +201,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     auditExport,
     scim,
     dbt,
+    semantic,
     lakehouse,
     agents,
     groups,

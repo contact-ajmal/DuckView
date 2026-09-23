@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (36 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (38 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -383,6 +383,40 @@ Commands: `build` (seeds, models, tests), `run`, `test`, `seed`, `compile` (noth
 
 API: `GET /api/dbt/status` · `POST /api/admin/dbt/install` · `PATCH /api/dbt/projects/:id/files {files: {path: content | null}}` · `POST /api/dbt/projects/:id/models {name, sql, folder?, materialized?, unique_key?, description?, overwrite?}` · `GET/POST /api/workspaces/:id/dbt/projects` · `GET/PATCH/DELETE /api/dbt/projects/:id` (`{name, files, vars, target_schema, schedule, scheduled: {command, select, exclude, full_refresh}, enabled}`) · `POST /api/dbt/projects/:id/runs {command, select?, exclude?, full_refresh?, wait?}` · `GET /api/dbt/projects/:id/runs` · `GET /api/dbt/runs/:id` (log and node results). Audit: `dbt.project_create` · `dbt.project_update` · `dbt.project_delete` · `dbt.run` · `catalog.import`.
 
+## Semantic layer (metrics)
+
+**Metrics defined once** (`#/transform/metrics`, `services/semantic.ts`): the workspace's definitions, from hand-written YAML (editors, Transform → Metrics → Definitions) and from every dbt project that declares `semantic_models` and `metrics` (read from dbt's `target/semantic_manifest.json` after each run, removed with the project; the hand-written YAML wins a name clash). The shape is dbt's MetricFlow spec, so definitions move between the two:
+
+```yaml
+semantic_models:
+  - name: orders
+    table: orders                 # or sql: "select …", or model: ref('orders')
+    default_time_dimension: order_date
+    entities:                     # keys; a foreign entity joins to the model where it is primary / unique / natural
+      - { name: order, type: primary, expr: order_id }
+      - { name: customer, type: foreign, expr: customer_id }
+    dimensions:
+      - { name: order_date, type: time, granularity: day }
+      - { name: region, type: categorical }
+      - { name: size, type: categorical, expr: "case when amount >= 100 then 'large' else 'small' end" }
+    measures:                     # sum · count · count_distinct · avg · min · max · median · sum_boolean
+      - { name: revenue, agg: sum, expr: amount }
+      - { name: order_count, agg: count }
+metrics:
+  - { name: total_revenue, label: Revenue, type: simple, measure: revenue, filter: "{{ Dimension('order__status') }} = 'complete'" }
+  - { name: orders, type: simple, measure: order_count }
+  - { name: aov, type: ratio, numerator: total_revenue, denominator: orders }
+  - { name: revenue_k, type: derived, expr: rev / 1000, metrics: [{ name: total_revenue, alias: rev }] }
+```
+
+**A query** — `metrics`, `group_by`, `where`, `order_by`, `limit` — compiles to one SELECT. Group by a dimension (`region`), a time grain (`order_date__month`, or `metric_time__month` for each metric's own time dimension; hour · day · week · month · quarter · year), or a dimension of another semantic model reached through an entity (`customer__tier`; many-to-one joins only, so nothing fans out). Filters are structured (`{dimension, op, value}` with `=`, `!=`, `>`, `>=`, `<`, `<=`, `in`, `not in`, `between`, `like`, `is null`, `is not null`) or SQL with `{{ Dimension('x') }}` / `{{ TimeDimension('x', 'month') }}` templates. Each semantic model becomes a CTE that aggregates its measures at the requested grain (a metric's filter as `FILTER (WHERE …)`); metrics from several models are full-outer-joined on the dimensions; ratios (`NULLIF` on the denominator) and derived metrics are computed on top. It runs through the QueryService as the caller — SQL guard, **access policies**, result cache and audit apply.
+
+**Saving validates**: the YAML parses, every semantic model binds and every metric compiles and binds against the engine (together with the imported definitions); problems are listed per model and metric. **Scaffold from table** drafts a semantic model — entities from `id` / `*_id` columns, time dimensions from dates and timestamps, categorical dimensions from the rest, a count and a sum per number, with metrics for each.
+
+**Where it is used**: the Metrics explorer (pick metrics, group-by dimensions with a grain, filters → chart, table, the SQL, *Open in Query*); agents over MCP / REST (`list_metrics`, `query_metrics`; dbt semantic YAML through `write_dbt_files`); DuckCopilot, whose context lists each metric with its definition and dimensions ("compute these exactly as defined").
+
+API: `GET/PUT /api/workspaces/:id/semantic {yaml, force?}` · `POST /api/workspaces/:id/semantic/validate {yaml}` · `POST /api/workspaces/:id/semantic/query {metrics, group_by?, where?, where_sql?, order_by?, limit?, compile_only?}` · `GET /api/workspaces/:id/semantic/dimensions?metrics=` · `POST /api/workspaces/:id/semantic/scaffold {table}`. Audit: `semantic.update`.
+
 ## Governance
 
 **Catalog** (`#/governance/catalog`, `services/lineage.ts`): descriptions and tags (lower-case, e.g. `pii`, `finance`) on tables, views and columns, written by editors, read by every member (`GET /api/workspaces/:id/catalog/annotated`, `PUT /api/workspaces/:id/catalog/annotations {object_name, column_name?, description, tags}` — an empty description and no tags removes the note). Copilot's context carries the notes ("trust these over guesses from names"), and `inspect_schema` shows them next to the columns.
@@ -548,6 +582,8 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `create_dbt_model(project_id, name, sql, folder?, materialized?, unique_key?, description?, overwrite?)` | A SELECT as a model: config block, `ref()` for the project's own models and seeds, description in YAML. |
 | `run_dbt(project_id, command, select?, exclude?, full_refresh?, dry_run?)` | build · run · test · seed · compile, waiting for the result: every node's status, rows, failing rows and message (compile: the SQL). build / run / seed return an **approval challenge** listing what would be created or replaced until repeated with `dry_run: false`. |
 | `get_dbt_run(run_id, include_log?)` | A run's nodes, error and dbt's log. |
+| `list_metrics(workspace_id?)` | The semantic layer's metrics: label, description, type, source (workspace or dbt) and the dimensions each can be grouped by. |
+| `query_metrics(metrics, group_by?, where?, order_by?, limit?, workspace_id?)` | Computes metrics exactly as defined — time grains, joined dimensions, filters — and returns the rows and the compiled SQL. Read-only. |
 | `list_alerts` · `create_alert(name, sql, condition, every_minutes \| cron, channel_ids, …)` · `run_alert` | SQL alerts: a read-only query and a condition checked on a schedule; state changes go to Slack, Teams, email, PagerDuty or webhooks — see [Alerts & delivery](#alerts--delivery). |
 | `list_apps` · `create_app(name, source, …)` · `update_app` · `run_app` · `stop_app` · `get_app_logs` · `preview_app` · `publish_app` | Streamlit data apps: generated from a dashboard, saved queries or code (validated first), run, previewed with a screenshot, published after human approval — see [Data apps](#data-apps-streamlit-dash-gradio). |
 
@@ -576,7 +612,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Lakehouse | `GET /api/lakehouse/providers` · `/api/lakehouse-connections…` · `GET /api/lakehouse/browse` · `GET /api/lakehouse/:id/inspect` · `POST /api/lakehouse/:id/query` · `POST /api/lakehouse/:id/materialize` |
 | Connections | `GET /api/connections/types` · `GET/POST/DELETE /api/connections` |
 | Ops | `GET /api/system` · `GET /api/audit` · `GET/POST/PATCH/DELETE /api/admin/users` (`PATCH {role?, disabled?}`) · `GET /api/admin/scim` · `POST/DELETE /api/admin/scim/token` · `/scim/v2/{Users,Groups,ServiceProviderConfig,ResourceTypes,Schemas}` · `GET /api/admin/engines` · `POST /api/admin/engines/:id/evict` · `GET /api/admin/config` |
-| Transform | `GET /api/dbt/status` · `POST /api/admin/dbt/install` · `GET/POST /api/workspaces/:id/dbt/projects` · `GET/PATCH/DELETE /api/dbt/projects/:id` · `POST /api/dbt/projects/:id/runs` · `GET /api/dbt/projects/:id/runs` · `GET /api/dbt/runs/:id` |
+| Transform | `GET /api/dbt/status` · `POST /api/admin/dbt/install` · `GET/POST /api/workspaces/:id/dbt/projects` · `GET/PATCH/DELETE /api/dbt/projects/:id` · `POST /api/dbt/projects/:id/runs` · `GET /api/dbt/projects/:id/runs` · `GET /api/dbt/runs/:id` · `GET/PUT /api/workspaces/:id/semantic` · `POST …/semantic/validate` · `POST …/semantic/query` · `GET …/semantic/dimensions` · `POST …/semantic/scaffold` |
 | Probes | `GET /healthz` · `GET /readyz` · `GET /metrics` |
 
 Errors are uniform JSON: `{ error, message, request_id, challenge? }` — `403 SANDBOX_VIOLATION`, `403 FORBIDDEN` (role or scope too low), `404 NOT_FOUND` (also for workspaces the caller has no grant on), `409 APPROVAL_REQUIRED` (with the HITL challenge), `408 QUERY_TIMEOUT`, `400 SQL_ERROR` (DuckDB parser/binder errors), `429 RATE_LIMITED`.

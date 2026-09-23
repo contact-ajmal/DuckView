@@ -932,7 +932,44 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`dbt ${run.command} (${run.triggered_by}) → **${run.status}**${run.summary ? ` (${run.summary})` : ''}${run.error ? `\nError: ${run.error}` : ''}\n${lines.join('\n')}${include_log && run.log ? `\n\n\`\`\`\n${run.log.slice(-6000)}\n\`\`\`` : ''}`)], structuredContent: { status: 'ok', run: { ...run, log: include_log ? run.log?.slice(-20_000) : undefined } } };
       },
     }),
+    // ---------------------------------------------------------------- semantic layer (metrics)
+    define({
+      name: 'list_metrics',
+      title: 'List metrics',
+      description: 'The metrics defined in the workspace\'s semantic layer (hand-written or from dbt): name, label, description, how each is computed and the dimensions it can be grouped by (metric_time with a grain such as metric_time__month, categorical dimensions, and <entity>__<dimension> across joins). Prefer these definitions over writing the aggregation yourself; query them with query_metrics.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const r = await env.ctx.semantic.get(env.principal, ws);
+        const lines = r.metrics.map((m) => `- **${m.name}**${m.label ? ` (${m.label})` : ''} · ${m.type}${m.description ? ` — ${m.description}` : ''}${m.error ? ` · ERROR ${m.error}` : ''}\n  dimensions: ${m.dimensions.join(', ') || '(none)'}`);
+        return { content: [text(lines.length ? `${lines.length} metric${lines.length === 1 ? '' : 's'}:\n${lines.join('\n')}` : 'No metrics defined yet (Transform → Metrics, or semantic models and metrics in a dbt project).')], structuredContent: { status: 'ok', workspace_id: ws, metrics: r.metrics.map((m) => ({ name: m.name, label: m.label, description: m.description, type: m.type, source: m.source, dimensions: m.dimensions, error: m.error })), semantic_models: r.semantic_models.map((m) => ({ name: m.name, table: m.label, dimensions: m.dimensions.map((d) => d.name), measures: m.measures.map((x) => x.name), entities: m.entities.map((e) => e.name) })) } };
+      },
+    }),
+
+    define({
+      name: 'query_metrics',
+      title: 'Query metrics',
+      description: 'Computes semantic-layer metrics exactly as defined: metrics, group_by (dimensions; time grains as metric_time__day|week|month|quarter|year or <time_dim>__<grain>; joined dimensions as <entity>__<dimension>), where filters ({dimension, op, value} with op =, !=, >, >=, <, <=, in, not in, between, like, is null, is not null), order_by and limit. Returns the rows and the SQL it compiled to. Read-only.',
+      inputSchema: {
+        metrics: z.array(z.string()).min(1).max(30),
+        group_by: z.array(z.string()).max(10).optional(),
+        where: z.array(z.object({ dimension: z.string(), op: z.enum(['=', '!=', '>', '>=', '<', '<=', 'in', 'not in', 'between', 'like', 'is null', 'is not null']), value: z.unknown().optional() })).max(20).optional(),
+        order_by: z.array(z.object({ name: z.string(), desc: z.boolean().optional() })).max(10).optional(),
+        limit: z.number().int().min(1).max(10_000).optional(),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id, ...q }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const r = await env.ctx.semantic.query(env.principal, ws, q);
+        return {
+          content: [text(`${r.result.rowCount} row${r.result.rowCount === 1 ? '' : 's'} — ${r.metrics.map((m) => m.label ?? m.name).join(', ')}${r.group_by.length ? ` by ${r.group_by.join(', ')}` : ''}\n\n${toMarkdownTable(r.result, 60)}\n\nSQL:\n\`\`\`sql\n${r.sql}\n\`\`\``)],
+          structuredContent: { status: 'ok', columns: r.result.columns.map((c) => c.name), rows: r.result.rows, row_count: r.result.rowCount, truncated: r.result.truncated, sql: r.sql },
+        };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics'] as const;
