@@ -316,6 +316,17 @@ export const ConfigSchema = z.object({
         .default({}),
     })
     .default({}),
+  /** Streaming the audit log to SIEMs and buckets (sinks are set up by administrators in the console). */
+  audit_export: z
+    .object({
+      enabled: z.coerce.boolean().default(true),
+      /** How often sinks are fed, and how many events at most per request. */
+      interval_seconds: z.coerce.number().int().min(2).default(10),
+      batch_size: z.coerce.number().int().min(1).max(5000).default(500),
+      /** Datadog intake base URL override (tests, proxies); default https://http-intake.logs.<site>. */
+      datadog_url: z.string().optional(),
+    })
+    .default({}),
   /** Lineage: OpenLineage events for sync runs, sent to Marquez / DataHub / OpenMetadata / any OpenLineage HTTP endpoint. */
   lineage: z
     .object({

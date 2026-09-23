@@ -25,6 +25,7 @@ import { AlertService } from './services/alerts.js';
 import { SnapshotService } from './services/snapshots.js';
 import { PolicyService } from './services/policies.js';
 import { LineageService } from './services/lineage.js';
+import { AuditExportService } from './services/audit-export.js';
 import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
@@ -64,6 +65,7 @@ export interface AppContext {
   snapshots: SnapshotService;
   policies: PolicyService;
   lineage: LineageService;
+  auditExport: AuditExportService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -142,6 +144,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   mosaic.policies = policies;
   const lineage = new LineageService(store, cfg, workspaces, audit);
   copilot.lineage = lineage;
+  const auditExport = new AuditExportService(store, cfg, cipher, audit, cloud);
+  if (cfg.notifications.scheduler_enabled) auditExport.start();
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
   await auth.bootstrapAdmin();
@@ -180,6 +184,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     snapshots,
     policies,
     lineage,
+    auditExport,
     lakehouse,
     agents,
     groups,
@@ -190,6 +195,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       syncs.stop();
       alerts.stop();
       snapshots.stop();
+      auditExport.stop();
       await apps.shutdown().catch(() => undefined);
       await agents.flush();
       await cloudSync.flush().catch(() => undefined);

@@ -5,7 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
-import { MASK_KINDS } from '../db/schema/sqlite.js';
+import { MASK_KINDS, AUDIT_SINK_TYPES } from '../db/schema/sqlite.js';
 import { badRequest } from '../services/errors.js';
 
 const Mask = z.union([z.object({ kind: z.enum(MASK_KINDS.filter((k) => k !== 'expression') as ['null', 'redact', 'hash', 'partial']) }), z.object({ kind: z.literal('expression'), sql: z.string().max(2000) })]);
@@ -55,4 +55,16 @@ export async function governanceRoutes(app: FastifyInstance, ctx: AppContext) {
     return { annotation: await ctx.lineage.annotate(req.principal!, (req.params as { id: string }).id, body) };
   });
   app.get('/api/workspaces/:id/lineage', async (req) => ctx.lineage.graph(req.principal!, (req.params as { id: string }).id));
+
+  // ---------------------------------------------------------------- audit export (administrators)
+  const SinkBody = z.object({ name: z.string().max(120), type: z.enum(AUDIT_SINK_TYPES), enabled: z.boolean().optional(), config: z.record(z.string(), z.unknown()).optional(), secret: z.object({ token: z.string().max(500).optional(), api_key: z.string().max(500).optional(), username: z.string().max(200).optional(), password: z.string().max(500).optional(), signing_secret: z.string().max(200).optional() }).optional(), backfill: z.boolean().optional() });
+  const ax = ctx.auditExport;
+  app.get('/api/admin/audit-sinks', async (req) => ({ sinks: await ax.list(req.principal!) }));
+  app.post('/api/admin/audit-sinks', async (req) => ax.create(req.principal!, SinkBody.parse(req.body ?? {})));
+  app.patch('/api/admin/audit-sinks/:id', async (req) => ({ sink: await ax.update(req.principal!, (req.params as { id: string }).id, SinkBody.partial().parse(req.body ?? {})) }));
+  app.delete('/api/admin/audit-sinks/:id', async (req) => {
+    await ax.remove(req.principal!, (req.params as { id: string }).id);
+    return { ok: true };
+  });
+  app.post('/api/admin/audit-sinks/:id/test', async (req) => ax.test(req.principal!, (req.params as { id: string }).id));
 }

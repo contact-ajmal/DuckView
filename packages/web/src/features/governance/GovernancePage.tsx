@@ -6,13 +6,16 @@ import { cn } from '../../components/ui';
 import { PoliciesPanel } from './PoliciesPanel';
 import { CatalogPanel } from './CatalogPanel';
 import { LineagePanel } from './LineagePanel';
+import { AuditPanel } from './AuditPanel';
+import { useAuth } from '../../store/auth';
 
-type Tab = 'catalog' | 'lineage' | 'policies';
-const TABS: { id: Tab; label: string }[] = [{ id: 'catalog', label: 'Catalog' }, { id: 'lineage', label: 'Lineage' }, { id: 'policies', label: 'Access policies' }];
+type Tab = 'catalog' | 'lineage' | 'policies' | 'audit';
+const TABS: { id: Tab; label: string }[] = [{ id: 'catalog', label: 'Catalog' }, { id: 'lineage', label: 'Lineage' }, { id: 'policies', label: 'Access policies' }, { id: 'audit', label: 'Audit' }];
 
 /** #/governance — who may see what, and (later) where data comes from and who touched it. */
 export function GovernancePage() {
   const ws = useWorkspace();
+  const isAdmin = useAuth((a) => a.user?.role === 'ADMIN');
   const active = ws.workspaces.find((w) => w.id === ws.activeId);
   const parse = (): Tab => (/^#\/governance\/([a-z]+)/.exec(location.hash)?.[1] as Tab | undefined) ?? 'catalog';
   const [tab, setTab] = useState<Tab>(parse);
@@ -34,6 +37,7 @@ export function GovernancePage() {
         </div>
         {ws.activeId && tab === 'catalog' && <CatalogPanel key={ws.activeId} workspaceId={ws.activeId} />}
         {ws.activeId && tab === 'lineage' && <LineagePanel key={ws.activeId} workspaceId={ws.activeId} />}
+        {tab === 'audit' && <AuditPanel isAdmin={isAdmin} />}
         {ws.activeId && tab === 'policies' && <PoliciesPanel key={ws.activeId} workspaceId={ws.activeId} isOwner={active?.role === 'OWNER'} />}
       </div>
     </div>

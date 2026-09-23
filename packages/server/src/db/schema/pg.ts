@@ -155,7 +155,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -599,6 +599,28 @@ export const catalogAnnotations = pgTable(
   },
   (t) => [index('catalog_annotations_workspace_idx').on(t.workspace_id, t.object_name)],
 );
+
+export const auditSinks = pgTable('audit_sinks', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  type: text('type', { enum: AUDIT_SINK_TYPES }).notNull(),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+  encrypted_secret: text('encrypted_secret'),
+  iv: text('iv'),
+  tag: text('tag'),
+  enabled: boolean('enabled').notNull().default(true),
+  cursor_at: ts('cursor_at'),
+  cursor_id: text('cursor_id'),
+  exported: integer('exported').notNull().default(0),
+  last_status: text('last_status', { enum: DELIVERY_STATUSES }),
+  last_error: text('last_error'),
+  last_exported_at: ts('last_exported_at'),
+  retry_after: ts('retry_after'),
+  failures: integer('failures').notNull().default(0),
+  created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+  created_at: ts('created_at').notNull(),
+  updated_at: ts('updated_at').notNull(),
+});
 
 export const appSettings = pgTable('app_settings', {
   key: text('key').primaryKey(),

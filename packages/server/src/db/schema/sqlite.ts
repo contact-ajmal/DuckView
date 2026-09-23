@@ -803,6 +803,35 @@ export const catalogAnnotations = sqliteTable(
   (t) => [index('catalog_annotations_workspace_idx').on(t.workspace_id, t.object_name)],
 );
 
+export const AUDIT_SINK_TYPES = ['splunk', 'datadog', 'elastic', 'webhook', 's3'] as const;
+export type AuditSinkType = (typeof AUDIT_SINK_TYPES)[number];
+
+/** Where the audit log is streamed (administrators): a SIEM or a bucket. Exported in order, at least once. */
+export const auditSinks = sqliteTable('audit_sinks', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  type: text('type', { enum: AUDIT_SINK_TYPES }).notNull(),
+  /** url, index / source / sourcetype, Datadog site and tags, cloud connection + bucket + prefix, include_sql. */
+  config: text('config', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  /** AES-256-GCM JSON: { token } (Splunk HEC), { api_key } (Datadog), { api_key | username + password } (Elastic), { signing_secret } (webhook). */
+  encrypted_secret: text('encrypted_secret'),
+  iv: text('iv'),
+  tag: text('tag'),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  /** The last exported event: (timestamp, id). Null: from the sink's creation on. */
+  cursor_at: integer('cursor_at', { mode: 'timestamp_ms' }),
+  cursor_id: text('cursor_id'),
+  exported: integer('exported').notNull().default(0),
+  last_status: text('last_status', { enum: DELIVERY_STATUSES }),
+  last_error: text('last_error'),
+  last_exported_at: integer('last_exported_at', { mode: 'timestamp_ms' }),
+  retry_after: integer('retry_after', { mode: 'timestamp_ms' }),
+  failures: integer('failures').notNull().default(0),
+  created_by: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+  created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
 /** Platform-wide settings set from the console (e.g. the Google OAuth client), secrets encrypted. */
 export const appSettings = sqliteTable('app_settings', {
   key: text('key').primaryKey(),
@@ -923,3 +952,4 @@ export type Snapshot = typeof snapshots.$inferSelect;
 export type SnapshotRun = typeof snapshotRuns.$inferSelect;
 export type AccessPolicy = typeof accessPolicies.$inferSelect;
 export type CatalogAnnotation = typeof catalogAnnotations.$inferSelect;
+export type AuditSink = typeof auditSinks.$inferSelect;

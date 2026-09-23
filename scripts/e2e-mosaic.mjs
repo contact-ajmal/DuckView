@@ -22,7 +22,9 @@
  * dialog, sends it now, and renders a Mosaic dashboard; both pictures are saved next to the screenshot. The
  * access-policies scenario creates a row filter and a mask in Governance, previews it as a viewer, then signs in as
  * that viewer and opens a Mosaic dashboard over the protected table: only the permitted region may show. The
- * catalog-lineage scenario describes a table in Governance → Catalog and traces it in Governance → Lineage.
+ * catalog-lineage scenario describes a table in Governance → Catalog and traces it in Governance → Lineage. The
+ * audit-export scenario adds a Splunk destination (a receiver the script runs), tests it, and waits for the
+ * server's exporter to deliver a query event.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -504,6 +506,37 @@ try {
     report.details.traced = await evaluate(`[...document.querySelectorAll('svg[aria-label="Lineage graph"] g[data-node]')].map(g => g.querySelector('text')?.textContent)`);
     report.details.charts = 1;
   }
+  else if (scenario === 'audit-export') {
+    const http = await import('node:http');
+    const got = [];
+    const receiver = http.createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => { got.push({ auth: req.headers.authorization, lines: b.split('\n').filter(Boolean).map((l) => JSON.parse(l)) }); res.end('{"text":"Success","code":0}'); }); });
+    await new Promise((r) => receiver.listen(0, '127.0.0.1', r));
+    cleanup = async () => {
+      receiver.close();
+      for (const s of (await (await authed('/api/admin/audit-sinks')).json()).sinks ?? []) if (s.name === 'E2E Splunk') await authed(`/api/admin/audit-sinks/${s.id}`, { method: 'DELETE' });
+    };
+    await send('Page.navigate', { url: `${BASE}/#/governance/audit` });
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Add destination')`, 20000, 'audit tab');
+    await clickButton('Add destination');
+    await setField('input[placeholder="Splunk"]', 'E2E Splunk');
+    await setField('input[placeholder="https://…"]', `http://127.0.0.1:${receiver.address().port}`);
+    await setField('input[type="password"]', 'e2e-hec-token');
+    await clickButton('Start streaming');
+    await waitFor(`[...document.querySelectorAll('div.rounded-lg')].some(d => d.innerText.includes('E2E Splunk'))`, 15000, 'destination listed');
+    await evaluate(`[...document.querySelectorAll('div.rounded-lg')].find(d => d.innerText.includes('E2E Splunk')).querySelector('button').click(); true`);
+    const t0 = Date.now();
+    while (!got.some((g) => g.lines.some((l) => l.event?.action === 'audit_sink.test')) && Date.now() - t0 < 15000) await sleep(300);
+    const wsList = await (await authed('/api/workspaces')).json();
+    const wsId = (wsList.workspaces ?? wsList)[0].id;
+    await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql: "SELECT 'e2e-audit-marker' AS m" }) });
+    const t1 = Date.now();
+    while (!got.some((g) => g.lines.some((l) => l.event?.query_text?.includes('e2e-audit-marker'))) && Date.now() - t1 < 40000) await sleep(500);
+    report.details.exportSeconds = Math.round((Date.now() - t1) / 1000);
+    report.details.audit = { test: got.some((g) => g.lines.some((l) => l.event?.action === 'audit_sink.test')), streamed: got.some((g) => g.lines.some((l) => l.event?.query_text?.includes('e2e-audit-marker'))), auth: got[0]?.auth ?? null };
+    await send('Page.reload');
+    await waitFor(`[...document.querySelectorAll('div.rounded-lg')].find(d => d.innerText.includes('E2E Splunk'))?.innerText.includes('streaming')`, 20000, 'streaming badge');
+    report.details.charts = 1;
+  }
   else if (scenario === 'mosaic-dashboard') {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
@@ -576,6 +609,9 @@ try {
     if (d.reloaded?.editorOpen) problems.push('the editor should be closed in view mode');
   }
   if (scenario === 'overview-explore' && d.brush && !d.brush.secondChartChanged) problems.push('brushing did not update the other charts');
+  if (scenario === 'audit-export') {
+    if (!d.audit?.test || !d.audit?.streamed || d.audit?.auth !== 'Splunk e2e-hec-token') problems.push(`audit export: ${JSON.stringify(d.audit)}`);
+  }
   if (scenario === 'catalog-lineage') {
     if (d.annotation?.description !== 'Orders loaded by the E2E sync' || !d.annotation?.tags?.includes('sales')) problems.push(`annotation not saved: ${JSON.stringify(d.annotation)}`);
     for (const want of ['E2E load', 'e2e_lin_orders', 'e2e_lin_totals', 'E2E lineage board']) if (!d.traced?.includes(want)) problems.push(`the trace misses ${want}: ${JSON.stringify(d.traced)}`);

@@ -518,3 +518,6 @@ export type AnnotatedObject = Omit<CatalogObject, 'columns'> & { description: st
 export type LineageKind = 'source' | 'file' | 'sync' | 'table' | 'view' | 'saved_query' | 'dashboard' | 'app' | 'alert' | 'snapshot';
 export interface LineageNode { id: string; kind: LineageKind; label: string; href?: string; detail?: string; description?: string | null; tags?: string[] }
 export interface LineageEdge { from: string; to: string; kind: 'reads' | 'loads' | 'renders' | 'mentions' }
+// ---- audit export
+export type AuditSinkType = 'splunk' | 'datadog' | 'elastic' | 'webhook' | 's3';
+export interface AuditSink { id: string; name: string; type: AuditSinkType; config: Record<string, unknown>; enabled: boolean; secret_set: boolean; cursor_at: string | null; exported: number; last_status: 'ok' | 'error' | null; last_error: string | null; last_exported_at: string | null; retry_after: string | null; failures: number; created_at: string }

@@ -1,0 +1,22 @@
+CREATE TABLE `audit_sinks` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`type` text NOT NULL,
+	`config` text DEFAULT '{}' NOT NULL,
+	`encrypted_secret` text,
+	`iv` text,
+	`tag` text,
+	`enabled` integer DEFAULT true NOT NULL,
+	`cursor_at` integer,
+	`cursor_id` text,
+	`exported` integer DEFAULT 0 NOT NULL,
+	`last_status` text,
+	`last_error` text,
+	`last_exported_at` integer,
+	`retry_after` integer,
+	`failures` integer DEFAULT 0 NOT NULL,
+	`created_by` text,
+	`created_at` integer NOT NULL,
+	`updated_at` integer NOT NULL,
+	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null
+);
