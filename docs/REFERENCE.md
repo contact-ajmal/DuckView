@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (49 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (51 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -483,6 +483,18 @@ API: `GET/POST /api/workspaces/:id/reverse-syncs` · `GET/PATCH/DELETE /api/reve
 - **DuckView AI** sees the open notebook (cells, names, inputs, output columns) and writes SQL that fits it; *Add as cell* puts its SQL in a new cell below the focused one, *Run & inspect* runs it as a cell. **Agents**: `list_notebooks`, `get_notebook`, `create_notebook` (cells in order; runs them by default), `run_notebook`; cells that write need the usual approval (`dry_run: false`).
 
 API: `GET/POST /api/workspaces/:id/notebooks` · `GET/PATCH/DELETE /api/notebooks/:id` (`PATCH {title?, cells?, version}` → 409 with `details.version` when stale) · `POST /api/notebooks/:id/cells/:cell/run {cells?, dry_run?}` · `POST /api/notebooks/:id/cells/:cell/compile` · `POST /api/notebooks/:id/run` · `GET /api/notebooks/:id/export.md`. Audit: `notebook.create`, `notebook.delete`, `notebook.run`.
+
+
+## Comments & mentions
+
+**Conversations next to the data** (`services/comments.ts`). A thread is a first comment on something in a workspace and its replies: a **notebook** (the whole notebook or one cell — cells show their open-thread count), a **dashboard** (grid or Mosaic), a **table** (from the Data explorer's dataset header), a saved query or a data app (API and agents).
+
+- **Who**: anyone who can see the workspace comments, viewers included. People edit and delete their own comments; the owner deletes any; editors and the thread's author resolve and reopen threads (a new reply reopens a resolved one). Deleting a thread deletes its replies.
+- **Mentions**: type `@` and pick a person — the comment stores `@their@email` and shows their name. Only people with access to the workspace (the owner, members, members of teams it is shared with; not deactivated users) can be mentioned; anything else stays plain text. A mention puts an item in their **inbox** and, when a mail server is set up (Settings → Integrations → SMTP), sends an email with a link to the thread. Everyone already in a thread gets an inbox item for each reply. Editing a comment to mention someone new tells them too.
+- **Inbox**: the bell in the top bar — unread count (live), newest first, *Mark all read*; opening an item switches to its workspace, marks it read and lands on the thread (`?comment=<thread>`). Items from workspaces you no longer have access to disappear.
+- **DuckView AI** sees a notebook's open threads alongside its cells; **agents**: `list_comments`, `add_comment` (mentions work the same way).
+
+API: `GET /api/workspaces/:id/comments?target_type=notebook|dashboard|query|app|table&target_id=&anchor=` (threads with replies, `open`, `by_anchor`) · `POST /api/workspaces/:id/comments {target_type, target_id, anchor?, body}` or `{parent_id, body}` to reply · `PATCH /api/comments/:id {body}` · `POST /api/comments/:id/resolve {resolved}` · `DELETE /api/comments/:id` · `GET /api/workspaces/:id/people` · `GET /api/inbox?unread=` · `POST /api/inbox/read {ids | all}`. Audit: `comment.create`, `comment.delete`. Live events: `comment` (workspace members), `inbox` (the person).
 
 ## Governance
 

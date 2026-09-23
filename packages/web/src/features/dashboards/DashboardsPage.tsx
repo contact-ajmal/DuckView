@@ -14,6 +14,7 @@ import { WidgetBody } from './widgets';
 import { WidgetEditor, type WidgetDraft } from './WidgetEditor';
 import { PageHeader } from '../../components/layout';
 import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, cn } from '../../components/ui';
+import { CommentsControl } from '../comments/CommentsPanel';
 
 const Grid = WidthProvider(GridLayout);
 
@@ -220,6 +221,7 @@ function DashboardCanvas({ id }: { id: string }) {
         </div>
         <div className="flex items-center gap-1.5">
           <Button size="sm" variant="ghost" onClick={() => setTick((t) => t + 1)} title="Refresh all widgets"><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>
+          <CommentsControl workspaceId={dash.workspace_id} targetType="dashboard" targetId={dash.id} targetLabel={dash.name} />
           <Button size="sm" variant="ghost" onClick={() => cp.toggle()} title="Ask AI about this dashboard"><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
           {canWrite && (
             <>

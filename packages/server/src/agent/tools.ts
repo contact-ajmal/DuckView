@@ -1170,7 +1170,35 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`Ran ${r.ran} SQL cell${r.ran === 1 ? '' : 's'} of **${nb.title}**${r.failed ? `, stopped at ${r.failed}` : ''}:\n${lines.join('\n')}`)], structuredContent: { status: r.failed ? 'error' : 'ok', ran: r.ran, failed: r.failed, outputs: Object.fromEntries(Object.entries(r.outputs).map(([k, o]) => [k, { row_count: o.row_count, columns: o.columns.map((x) => x.name), rows: o.rows.slice(0, 5), error: o.error }])) }, isError: !!r.failed };
       },
     }),
+    // ---------------------------------------------------------------- comments
+    define({
+      name: 'list_comments',
+      title: 'List comments',
+      description: 'Comment threads on a notebook (by cell), dashboard, saved query, data app or table: who said what, replies, and whether each thread is resolved. target_type is notebook | dashboard | query | app | table; target_id is its id (a table\'s name for tables).',
+      inputSchema: { target_type: z.enum(['notebook', 'dashboard', 'query', 'app', 'table']), target_id: z.string(), include_resolved: z.boolean().optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { target_type, target_id, include_resolved, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const r = await env.ctx.comments.list(env.principal, ws, target_type, target_id);
+        const threads = r.threads.filter((t) => include_resolved || !t.resolved_at);
+        const lines = threads.map((t) => `- [${t.id}]${t.anchor ? ` on ${t.anchor}` : ''}${t.resolved_at ? ' (resolved)' : ''} **${t.author?.name ?? '?'}**: ${t.body}${(t.replies ?? []).map((x) => `\n  - **${x.author?.name ?? '?'}**: ${x.body}`).join('')}`);
+        return { content: [text(lines.length ? lines.join('\n') : 'No open comments.')], structuredContent: { status: 'ok', open: r.open, threads: threads.map((t) => ({ id: t.id, anchor: t.anchor, author: t.author?.email ?? null, body: t.body, resolved: !!t.resolved_at, replies: (t.replies ?? []).map((x) => ({ author: x.author?.email ?? null, body: x.body })) })) } };
+      },
+    }),
+
+    define({
+      name: 'add_comment',
+      title: 'Comment',
+      description: 'Adds a comment on a notebook (anchor: a cell id), dashboard (anchor: a widget id), saved query, data app or table (anchor: a column), or replies to a thread (parent_id). Mention people with @their@email — they are told in their DuckView inbox and by email.',
+      inputSchema: { target_type: z.enum(['notebook', 'dashboard', 'query', 'app', 'table']).optional(), target_id: z.string().optional(), anchor: z.string().optional(), parent_id: z.string().optional(), body: z.string().min(1).max(10_000), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, { target_type, target_id, anchor, parent_id, body, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const c = await env.ctx.comments.add(env.principal, ws, { target_type, target_id, anchor, parent_id, body });
+        return { content: [text(`Commented (\`${c.id}\`)${c.mentioned.length ? `, mentioning ${c.mentioned.map((m) => m.name).join(', ')}` : ''}.`)], structuredContent: { status: 'ok', comment_id: c.id, thread_id: c.parent_id ?? c.id, mentioned: c.mentioned.map((m) => m.email) } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment'] as const;

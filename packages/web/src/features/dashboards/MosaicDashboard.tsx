@@ -8,6 +8,7 @@ import { analyzeColumns, resolveSource, templateSpec, type DataSource } from '..
 import { parseSpecText, specToText, type Spec } from '../../lib/mosaic/spec';
 import { describeSpec } from '../../lib/mosaic/summary';
 import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { CommentsControl } from '../comments/CommentsPanel';
 import { MosaicSpecView, type SpecRenderStatus } from './MosaicSpecView';
 import { SpecEditor } from './SpecEditor';
 
@@ -167,6 +168,7 @@ export function MosaicDashboard({ id }: { id: string }) {
         </div>
         <div className="flex items-center gap-1.5">
           <Button size="sm" variant="ghost" onClick={() => setNonce((n) => n + 1)} title="Re-render"><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>
+          <CommentsControl workspaceId={dash.workspace_id} targetType="dashboard" targetId={dash.id} targetLabel={dash.name} />
           <Button size="sm" variant="ghost" onClick={() => cp.toggle()} title="Ask AI about this dashboard"><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
           {canWrite && (
             <>

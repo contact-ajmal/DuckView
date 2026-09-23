@@ -32,6 +32,7 @@ import { SemanticService } from './services/semantic.js';
 import { QualityService } from './services/quality.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
+import { CommentService } from './services/comments.js';
 import path from 'node:path';
 import { LakehouseService } from './services/lakehouse.js';
 import { AgentService } from './services/agents.js';
@@ -78,6 +79,7 @@ export interface AppContext {
   quality: QualityService;
   reverse: ReverseEtlService;
   notebooks: NotebookService;
+  comments: CommentService;
   lakehouse: LakehouseService;
   agents: AgentService;
   groups: GroupService;
@@ -172,6 +174,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   copilot.reverse = reverse;
   const notebooks = new NotebookService(store, workspaces, queries, audit);
   copilot.notebooks = notebooks;
+  const comments = new CommentService(store, workspaces, notifications, audit);
+  copilot.comments = comments;
   if (cfg.transform.scheduler_enabled) {
     dbt.startScheduler();
     quality.start();
@@ -222,6 +226,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     quality,
     reverse,
     notebooks,
+    comments,
     lakehouse,
     agents,
     groups,

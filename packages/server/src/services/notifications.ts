@@ -360,6 +360,18 @@ export class NotificationService {
     }
   }
 
+  /** Emails people directly (mentions); false when no mail server is set up or it refused. */
+  async emailPeople(to: string[], msg: Notification): Promise<boolean> {
+    if (!to.length || !(await this.smtp())) return false;
+    try {
+      await this.sendEmail(to, msg);
+      return true;
+    } catch (err) {
+      logger().warn({ err: (err as Error).message }, 'Mention email failed');
+      return false;
+    }
+  }
+
   private async sendEmail(to: string[], msg: Notification): Promise<void> {
     const s = await this.smtp();
     if (!s) throw new PermanentError('No mail server: an administrator sets SMTP under Settings → Integrations (or notifications.smtp)');

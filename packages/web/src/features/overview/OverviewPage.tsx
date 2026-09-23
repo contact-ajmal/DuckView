@@ -18,6 +18,7 @@ import { useLayout } from '../../store/layout';
 import { Button, Empty, Spinner, Stat, Tabs, cn } from '../../components/ui';
 import { quoteIdent } from '../workspace/SchemaTree';
 import { QualityChip } from '../transform/QualityChip';
+import { CommentsControl } from '../comments/CommentsPanel';
 
 
 function Distribution({ col }: { col: OverviewColumn }) {
@@ -87,6 +88,12 @@ export function OverviewPage() {
   // screen, and the profile only changes when a different file is picked (or its data actually changes).
   const target = wsId ? ws.overviewTarget[wsId] ?? null : null;
   const setTarget = (t: string | null) => wsId && ws.setOverviewTarget(wsId, t);
+  // #/data?table=orders (links from comments and the inbox) opens that table.
+  useEffect(() => {
+    const t = new URLSearchParams(location.hash.split('?')[1] ?? '').get('table');
+    if (t && wsId && t !== target) ws.setOverviewTarget(wsId, t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsId]);
 
   // Cached in this browser and on the server; a hit paints instantly and is confirmed with a 304 behind the scenes.
   const ov = useCached<OverviewResult>({ workspaceId: wsId, kind: 'overview', target, url: `/api/workspaces/${wsId}/overview`, body: { target }, version: dataVersion });
@@ -217,6 +224,7 @@ export function OverviewPage() {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {overview.kind === 'table' && ws.activeId && <QualityChip workspaceId={ws.activeId} relation={overview.target} />}
+                  {overview.kind === 'table' && ws.activeId && <CommentsControl key={overview.target} workspaceId={ws.activeId} targetType="table" targetId={overview.target} targetLabel={overview.target} />}
                   <CacheChip state={ov.state} computedAt={ov.computedAt} fromCache={ov.fromCache} serverCached={ov.serverCached} onRefresh={ov.refresh} verb="profiled" />
                   <Button size="sm" variant="ghost" onClick={() => { if (target) cp.setTargets([target]); cp.toggle(true); }}><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
                   <Button size="sm" variant="primary" onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)}>Open in SQL <ArrowRight className="h-3.5 w-3.5" /></Button>

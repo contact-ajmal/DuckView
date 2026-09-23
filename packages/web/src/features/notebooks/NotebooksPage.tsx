@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, BookOpenText, Braces, Download, FileCode2, Loader2, MoreHorizontal, Play, Plus, Sparkles, Table2, Trash2, Type, Variable } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, BookOpenText, Braces, Download, FileCode2, Loader2, MessageSquare, MoreHorizontal, Play, Plus, Sparkles, Table2, Trash2, Type, Variable } from 'lucide-react';
 import { api, getToken, timeAgo, type ChartConfig, type Notebook, type NotebookCell, type NotebookOutput, type NotebookSummary } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
@@ -11,6 +11,7 @@ import { SqlEditor } from '../workspace/SqlEditor';
 import { ResultsGrid } from '../workspace/ResultsGrid';
 import { ChartPanel } from '../workspace/ChartPanel';
 import { registerCopilotHost } from '../copilot/CopilotDrawer';
+import { CommentsButton, CommentsPanel, useCommentCounts } from '../comments/CommentsPanel';
 
 const idOf = () => /^#\/notebooks\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
 
@@ -94,6 +95,12 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
   const [conflict, setConflict] = useState<string | null>(null);
   const [running, setRunning] = useState<Set<string>>(new Set());
   const [focused, setFocused] = useState<string | null>(null);
+  // The comments drawer: all threads (anchor undefined) or one cell's; a ?comment= link opens it on that thread.
+  const [comments, setComments] = useState<{ anchor?: string | null; focus?: string | null } | null>(() => {
+    const t = /[?&]comment=([\w-]+)/.exec(location.hash)?.[1];
+    return t ? { focus: t } : null;
+  });
+  const counts = useCommentCounts(workspaceId, 'notebook', id);
   const ref = useRef<Notebook | null>(null);
   ref.current = nb;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -247,6 +254,7 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
           <a href="#/notebooks" className="text-zinc-500 hover:text-zinc-200" aria-label="All notebooks"><ArrowLeft className="h-4 w-4" /></a>
           <input value={nb.title} readOnly={!canEdit} onChange={(e) => change((n) => ({ ...n, title: e.target.value }))} aria-label="Title" data-testid="notebook-title" className="min-w-0 flex-1 truncate rounded bg-transparent px-1 py-0.5 text-[15px] font-semibold text-zinc-50 outline-none hover:bg-zinc-900 focus:bg-zinc-900" />
           <span className={cn('shrink-0 text-xs', save === 'conflict' || save === 'error' ? 'text-red-300' : 'text-zinc-500')} data-testid="save-state">{!canEdit ? 'View only' : save === 'saved' ? 'Saved' : save === 'saving' ? 'Saving…' : save === 'dirty' ? 'Unsaved' : save === 'conflict' ? 'Not saved — changed elsewhere' : 'Not saved'}</span>
+          <CommentsButton count={counts.open} onClick={() => setComments({})} />
           <Button size="sm" variant="ghost" onClick={() => cp.toggle(true)} title="DuckView AI sees this notebook"><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
           <Button size="sm" variant="primary" onClick={() => void runAll()} disabled={running.size > 0} data-testid="run-all"><Play className="h-3.5 w-3.5" /> Run all</Button>
           <Menu trigger={(_, toggle) => <IconButton label="More notebook actions" onClick={toggle}><MoreHorizontal className="h-4 w-4" /></IconButton>}>
@@ -281,11 +289,14 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
               onRun={() => void runCell(c.id)}
               onMove={(d) => move(c.id, d)}
               onDelete={() => change((n) => ({ ...n, cells: n.cells.filter((x) => x.id !== c.id) }))}
+              comments={counts.by_anchor[c.id] ?? 0}
+              onComments={() => setComments({ anchor: c.id })}
             />
             {canEdit && <AddBar onAdd={(t) => addCell(t, c.id)} />}
           </div>
         ))}
         {nb.cells.length === 0 && canEdit && <AddBar always onAdd={(t) => addCell(t, null)} />}
+        {comments && <CommentsPanel open onClose={() => setComments(null)} workspaceId={workspaceId} targetType="notebook" targetId={id} targetLabel={nb.title} anchor={comments.anchor} focusThread={comments.focus} anchorLabel={(a) => nb.cells.find((x) => x.id === a)?.name ?? (nb.cells.find((x) => x.id === a)?.type === 'markdown' ? 'text cell' : 'a deleted cell')} />}
         <p className="mt-6 text-center text-xs text-zinc-600">{names.size ? `Query a cell above by its name — ${[...names].slice(0, 3).map((n) => `SELECT * FROM ${n}`).join(', ')} · {{ name }} uses an input.` : ''}</p>
       </div>
     </div>
@@ -306,7 +317,7 @@ function AddBar({ onAdd, always }: { onAdd: (t: NotebookCell['type']) => void; a
 
 const MD = 'text-[13.5px] leading-relaxed text-zinc-300 [&_a]:text-accent-300 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-900 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-zinc-50 [&_h2]:mb-1.5 [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_h3]:mt-2 [&_h3]:font-semibold [&_h3]:text-zinc-100 [&_li]:ml-5 [&_ol]:list-decimal [&_p]:my-1.5 [&_strong]:text-zinc-100 [&_table]:my-2 [&_td]:border [&_td]:border-zinc-800 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-zinc-800 [&_th]:px-2 [&_th]:py-1 [&_ul]:list-disc';
 
-function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFocus, onChange, onRun, onMove, onDelete }: { cell: NotebookCell; focused: boolean; canEdit: boolean; running: boolean; schema: Record<string, string[]>; duplicateName: boolean; onFocus: () => void; onChange: (p: Partial<NotebookCell>) => void; onRun: () => void; onMove: (d: -1 | 1) => void; onDelete: () => void }) {
+function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFocus, onChange, onRun, onMove, onDelete, comments, onComments }: { cell: NotebookCell; focused: boolean; canEdit: boolean; running: boolean; schema: Record<string, string[]>; duplicateName: boolean; onFocus: () => void; onChange: (p: Partial<NotebookCell>) => void; onRun: () => void; onMove: (d: -1 | 1) => void; onDelete: () => void; comments: number; onComments: () => void }) {
   const [editing, setEditing] = useState(false);
   const icon = cell.type === 'sql' ? <FileCode2 className="h-3.5 w-3.5" /> : cell.type === 'input' ? <Braces className="h-3.5 w-3.5" /> : <Type className="h-3.5 w-3.5" />;
   const onRunRef = useRef(onRun);
@@ -323,7 +334,9 @@ function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFo
           <input value={cell.name ?? ''} readOnly={!canEdit} onChange={(e) => onChange({ name: e.target.value.replace(/[^\w]/g, '_') })} aria-label="Cell name" className={cn('w-40 rounded bg-transparent px-1 font-mono text-[12px] outline-none hover:bg-zinc-900 focus:bg-zinc-900', duplicateName ? 'text-red-300' : 'text-zinc-300')} title={cell.type === 'sql' ? 'Later cells query this result by its name' : 'Use it in SQL as {{ name }}'} />
         ) : <span>Text</span>}
         {cell.type === 'sql' && cell.output && !cell.output.error && <span className="truncate">{cell.output.rows_changed != null && !cell.output.columns.length ? `${cell.output.rows_changed} rows changed` : `${cell.output.row_count.toLocaleString()} row${cell.output.row_count === 1 ? '' : 's'}`} · {cell.output.duration_ms} ms{cell.output.ran_by ? ` · ${cell.output.ran_by}` : ''} · {timeAgo(cell.output.ran_at)}</span>}
-        <span className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/cell:opacity-100 group-focus-within/cell:opacity-100">
+        {comments > 0 && <button onClick={onComments} className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-accent-300 hover:bg-zinc-900" title="Open comments on this cell" data-testid="cell-comments"><MessageSquare className="h-3.5 w-3.5" /> {comments}</button>}
+        <span className={cn('flex items-center gap-0.5 opacity-0 transition-opacity group-hover/cell:opacity-100 group-focus-within/cell:opacity-100', comments === 0 && 'ml-auto')}>
+          {comments === 0 && <IconButton label="Comment on this cell" onClick={onComments} data-testid="cell-comment"><MessageSquare className="h-3.5 w-3.5" /></IconButton>}
           {canEdit && <IconButton label="Move up" onClick={() => onMove(-1)}><ArrowUp className="h-3.5 w-3.5" /></IconButton>}
           {canEdit && <IconButton label="Move down" onClick={() => onMove(1)}><ArrowDown className="h-3.5 w-3.5" /></IconButton>}
           {canEdit && <IconButton label="Delete cell" onClick={onDelete}><Trash2 className="h-3.5 w-3.5" /></IconButton>}

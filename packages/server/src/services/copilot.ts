@@ -294,6 +294,15 @@ export class CopilotService {
   reverse: { promptSummary(workspaceId: string): Promise<string> } | null = null;
   /** The notebook open in the UI, for prompts (set by the context). */
   notebooks: { promptSummary(p: Principal, id: string): Promise<string> } | null = null;
+  /** Open comment threads, for prompts (set by the context). */
+  comments: { promptSummary(workspaceId: string, targetType: 'notebook', targetId: string): Promise<string> } | null = null;
+
+  private async notebookContext(p: Principal, workspaceId: string, id: string): Promise<string> {
+    const nb = await this.notebooks?.promptSummary(p, id).catch(() => '');
+    if (!nb) return '';
+    const threads = await this.comments?.promptSummary(workspaceId, 'notebook', id).catch(() => '');
+    return threads ? `${nb}\nOpen comments on it (answer or address them when asked):\n${threads}` : nb;
+  }
 
   async buildContext(p: Principal, workspaceId: string, opts: { activeSql?: string | null; targets?: string[]; notebookId?: string | null } = {}): Promise<ChatContextSnapshot> {
     const { objects, files } = await this.queries.catalog(p, workspaceId);
@@ -309,7 +318,7 @@ export class CopilotService {
       metrics: (await this.semantic?.promptSummary(workspaceId).catch(() => '')) || undefined,
       quality: (await this.quality?.promptSummary(workspaceId).catch(() => '')) || undefined,
       reverse: (await this.reverse?.promptSummary(workspaceId).catch(() => '')) || undefined,
-      notebook: (opts.notebookId && (await this.notebooks?.promptSummary(p, opts.notebookId).catch(() => ''))) || undefined,
+      notebook: (opts.notebookId && (await this.notebookContext(p, workspaceId, opts.notebookId))) || undefined,
     };
     const targets = (opts.targets ?? []).filter(Boolean).slice(0, 3);
     if (targets.length) {

@@ -157,7 +157,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -793,4 +793,39 @@ export const notebooks = pgTable(
     updated_at: ts('updated_at').notNull(),
   },
   (t) => [index('notebooks_workspace_idx').on(t.workspace_id)],
+);
+
+export const comments = pgTable(
+  'comments',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    target_type: text('target_type', { enum: COMMENT_TARGETS }).notNull(),
+    target_id: text('target_id').notNull(),
+    anchor: text('anchor'),
+    parent_id: text('parent_id'),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    mentions: jsonb('mentions').$type<string[]>().notNull().default([]),
+    resolved_at: ts('resolved_at'),
+    resolved_by: text('resolved_by'),
+    edited_at: ts('edited_at'),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('comments_target_idx').on(t.workspace_id, t.target_type, t.target_id), index('comments_parent_idx').on(t.parent_id)],
+);
+
+export const inbox = pgTable(
+  'inbox',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: INBOX_KINDS }).notNull(),
+    comment_id: text('comment_id').notNull().references(() => comments.id, { onDelete: 'cascade' }),
+    actor_id: text('actor_id'),
+    read_at: ts('read_at'),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('inbox_user_idx').on(t.user_id, t.created_at)],
 );

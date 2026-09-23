@@ -42,6 +42,9 @@
  * The notebooks scenario creates a notebook from SQL → Notebooks, runs the starter cell, adds a SQL cell that reads
  * the first cell by name, an input and a cell that uses it, runs everything, reloads (outputs and title were saved),
  * and exports it as Markdown.
+ * The comments scenario comments on a notebook cell, @mentions a colleague picked from the suggestions, checks their
+ * inbox; the colleague replies (API), the reply arrives in the bell live, opening it lands on the thread, and
+ * resolving it clears the cell's count.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -737,6 +740,60 @@ try {
     report.details.markdown = await (await authed(`/api/notebooks/${nb.id}/export.md`)).text();
     report.details.charts = 1;
   }
+  else if (scenario === 'comments') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const email = 'e2e-colleague@example.com';
+    let colleague = null;
+    cleanup = async () => {
+      for (const n of (await j('GET', `/api/workspaces/${wsId}/notebooks`)).notebooks ?? []) if (n.title.startsWith('E2E')) await j('DELETE', `/api/notebooks/${n.id}`);
+      const users = (await j('GET', '/api/admin/users')).users ?? [];
+      for (const u of users) if (u.email === email) await j('DELETE', `/api/admin/users/${u.id}`);
+    };
+    await cleanup();
+    colleague = (await j('POST', '/api/admin/users', { email, password: 'colleague-secret-pw', role: 'USER', display_name: 'E2E Colleague' })).user;
+    await j('PUT', `/api/workspaces/${wsId}/members`, { subject_type: 'user', subject_id: colleague.id, role: 'EDITOR' });
+    const nb = (await j('POST', `/api/workspaces/${wsId}/notebooks`, { title: 'E2E comments', cells: [{ id: 'c1', type: 'sql', name: 'totals', source: 'SELECT 42 AS total' }] })).notebook;
+    const colleagueToken = (await (await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'colleague-secret-pw' }) })).json()).token;
+    const asColleague = async (method, url, body) => (await fetch(`${BASE}${url}`, { method, headers: { authorization: `Bearer ${colleagueToken}`, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined })).json();
+    // 1. Comment on the cell, mentioning the colleague from the suggestions.
+    await send('Page.navigate', { url: `${BASE}/#/notebooks/${nb.id}` });
+    await waitFor(`!!document.querySelector('[data-cell="totals"] [data-testid="cell-comment"]')`, 20000, 'notebook with a cell');
+    await evaluate(`document.querySelector('[data-cell="totals"] [data-testid="cell-comment"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="comments-panel"] [data-testid="comment-input"]')`, 5000, 'comments panel');
+    await evaluate(`document.querySelector('[data-testid="comments-panel"] [data-testid="comment-input"]').focus(); true`);
+    await send('Input.insertText', { text: 'Is 42 right? @e2e-coll' });
+    await waitFor(`[...document.querySelectorAll('[data-testid="mention-list"] [role=option]')].some(o => o.innerText.includes('${email}'))`, 5000, 'mention suggestions');
+    await evaluate(`[...document.querySelectorAll('[data-testid="mention-list"] [role=option]')].find(o => o.innerText.includes('${email}')).dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`);
+    await send('Input.insertText', { text: 'can you check?' });
+    report.details.draft = await evaluate(`document.querySelector('[data-testid="comments-panel"] [data-testid="comment-input"]').value`);
+    await evaluate(`document.querySelector('[data-testid="comments-panel"] [data-testid="comment-submit"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="comments-panel"] [data-thread]')`, 10000, 'thread posted');
+    report.details.rendered = await evaluate(`document.querySelector('[data-testid="comments-panel"] [data-thread]').innerText`);
+    await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`);
+    await waitFor(`document.querySelector('[data-cell="totals"] [data-testid="cell-comments"]')?.innerText.trim() === '1'`, 10000, 'cell comment count');
+    const inbox = await asColleague('GET', '/api/inbox');
+    report.details.colleagueInbox = inbox.items?.map((i) => `${i.kind}:${i.target_label}:${i.comment.anchor}`);
+    // 2. The colleague replies; the bell shows it live; opening it lands on the thread.
+    const thread = inbox.items?.[0]?.comment?.thread_id;
+    await asColleague('POST', `/api/workspaces/${wsId}/comments`, { parent_id: thread, body: 'Yes — it is the answer.' });
+    await waitFor(`document.querySelector('[data-testid="inbox-unread"]')?.innerText === '1'`, 15000, 'unread reply in the bell');
+    await send('Page.navigate', { url: `${BASE}/#/notebooks` });
+    await waitFor(`!!document.querySelector('[data-testid="notebook-list"]')`, 10000, 'away from the notebook');
+    await evaluate(`document.querySelector('[data-testid="inbox-bell"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="inbox"] [data-inbox="reply"]')`, 5000, 'inbox open');
+    report.details.inboxRow = await evaluate(`document.querySelector('[data-testid="inbox"] [data-inbox="reply"]').innerText.replace(/\\s+/g, ' ')`);
+    await evaluate(`document.querySelector('[data-testid="inbox"] [data-inbox="reply"]').click(); true`);
+    await waitFor(`location.hash.startsWith('#/notebooks/${nb.id}') && !!document.querySelector('[data-testid="comments-panel"] [data-thread="${thread}"]')`, 15000, 'landed on the thread');
+    await sleep(400);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_comments.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.threadText = await evaluate(`document.querySelector('[data-thread="${thread}"]').innerText.replace(/\\s+/g, ' ')`);
+    report.details.unreadAfter = await evaluate(`document.querySelector('[data-testid="inbox-unread"]')?.innerText ?? '0'`);
+    // 3. Resolve: the count on the cell goes away.
+    await evaluate(`document.querySelector('[data-thread="${thread}"] [data-testid="resolve"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-cell="totals"] [data-testid="cell-comments"]')`, 10000, 'count cleared after resolving');
+    report.details.charts = 1;
+  }
   else if (scenario === 'dbt-copilot') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -1019,6 +1076,14 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'comments') {
+    if (!/^Is 42 right\? @e2e-colleague@example\.com can you check\?$/.test(d.draft ?? '')) problems.push(`mention not inserted: ${d.draft}`);
+    if (!/@E2E Colleague/.test(d.rendered ?? '')) problems.push(`mention not rendered as a name: ${d.rendered}`);
+    if (JSON.stringify(d.colleagueInbox) !== JSON.stringify(['mention:E2E comments:c1'])) problems.push(`colleague inbox: ${JSON.stringify(d.colleagueInbox)}`);
+    if (!/E2E Colleague replied on E2E comments/.test(d.inboxRow ?? '')) problems.push(`inbox row: ${d.inboxRow}`);
+    if (!/Yes — it is the answer\./.test(d.threadText ?? '')) problems.push(`thread: ${d.threadText}`);
+    if (d.unreadAfter !== '0') problems.push(`still unread: ${d.unreadAfter}`);
   }
   if (scenario === 'notebooks') {
     if (JSON.stringify(d.cells) !== JSON.stringify(['df1:sql', 'df2:sql', 'param1:input', 'df3:sql']) && !(d.cells ?? []).join(',').endsWith('df1:sql,df2:sql,param1:input,df3:sql')) problems.push(`cells: ${JSON.stringify(d.cells)}`);

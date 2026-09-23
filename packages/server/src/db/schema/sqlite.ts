@@ -1267,3 +1267,49 @@ export const notebooks = sqliteTable(
   (t) => [index('notebooks_workspace_idx').on(t.workspace_id)],
 );
 export type Notebook = typeof notebooks.$inferSelect;
+
+/** Comments: threads on a notebook (cell), dashboard (widget), saved query, data app or table (column), with @mentions. */
+export const COMMENT_TARGETS = ['notebook', 'dashboard', 'query', 'app', 'table'] as const;
+export type CommentTarget = (typeof COMMENT_TARGETS)[number];
+export const comments = sqliteTable(
+  'comments',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    target_type: text('target_type', { enum: COMMENT_TARGETS }).notNull(),
+    /** The object's id (a table's name for tables). */
+    target_id: text('target_id').notNull(),
+    /** A part of it: a notebook cell, a dashboard widget, a column. */
+    anchor: text('anchor'),
+    /** Replies point at the thread's first comment. */
+    parent_id: text('parent_id'),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    mentions: text('mentions', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** Threads (first comments) only. */
+    resolved_at: integer('resolved_at', { mode: 'timestamp_ms' }),
+    resolved_by: text('resolved_by'),
+    edited_at: integer('edited_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('comments_target_idx').on(t.workspace_id, t.target_type, t.target_id), index('comments_parent_idx').on(t.parent_id)],
+);
+
+/** A person's inbox: they were mentioned, or someone replied in a thread they are in. */
+export const INBOX_KINDS = ['mention', 'reply'] as const;
+export const inbox = sqliteTable(
+  'inbox',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: INBOX_KINDS }).notNull(),
+    comment_id: text('comment_id').notNull().references(() => comments.id, { onDelete: 'cascade' }),
+    actor_id: text('actor_id'),
+    read_at: integer('read_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('inbox_user_idx').on(t.user_id, t.created_at)],
+);
+export type Comment = typeof comments.$inferSelect;
+export type InboxItem = typeof inbox.$inferSelect;

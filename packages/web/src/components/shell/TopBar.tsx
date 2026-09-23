@@ -8,6 +8,7 @@ import { useTheme } from '../../store/theme';
 import { storageKindOf, type Workspace } from '../../api/client';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { usePalette } from './palette';
+import { InboxBell } from './InboxBell';
 import { Kbd, Menu, MenuDivider, MenuItem, StatusDot, cn } from '../ui';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -125,6 +126,7 @@ export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNew
             <span className="hidden xl:inline">{live === 'live' ? 'Live' : live === 'connecting' ? 'Connecting' : 'Offline'}</span>
           </StatusDot>
         </span>
+        <InboxBell />
         <button
           onClick={() => cp.toggle()}
           aria-pressed={cp.open}
