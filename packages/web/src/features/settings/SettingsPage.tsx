@@ -3,7 +3,7 @@ import { Code2, GitBranch, Workflow, Users, Trash2, Plug, KeyRound, Activity, Pa
 import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type CloudConnection, type CopilotConfig, type LakehouseConnection } from '../../api/client';
 import { Gauge } from '../../components/Gauge';
 import { PageHeader, SideCard, Panel, KvRows, Tag } from '../../components/layout';
-import { Button, Badge, Card, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Button, Badge, Card, Input, Label, Modal, Select, cn, confirmAction, toast } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
 import { useLayout } from '../../store/layout';
@@ -137,9 +137,9 @@ export function SettingsPage() {
           if (!items.length) return null;
           return (
             <div key={g} className="mb-3">
-              <div className="px-2 pb-1 text-[11px] font-medium text-zinc-500">{g}</div>
+              <div className="px-2 pb-1 text-2xs font-medium text-zinc-500">{g}</div>
               {items.map((c) => (
-                <button key={c.id} onClick={() => setCat(c.id)} aria-current={cat === c.id ? 'page' : undefined} className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]', cat === c.id ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100')}>
+                <button key={c.id} onClick={() => setCat(c.id)} aria-current={cat === c.id ? 'page' : undefined} className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body', cat === c.id ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100')}>
                   <span className={cn('shrink-0', cat === c.id ? 'text-zinc-200' : 'text-zinc-500')}>{c.icon}</span>
                   <span className="truncate">{c.label}</span>
                 </button>
@@ -148,7 +148,7 @@ export function SettingsPage() {
           );
         })}
         {sys && (
-          <div className="mt-auto px-2 pt-3 text-[11px] leading-relaxed text-zinc-600">
+          <div className="mt-auto px-2 pt-3 text-2xs leading-relaxed text-zinc-600">
             DuckDB {sys.duckdb.version} · {sys.server.metadata_dialect}
             <br />
             DuckView {sys.server.version} · up {Math.round(sys.server.uptime_s / 60)} min
@@ -217,18 +217,18 @@ export function SettingsPage() {
                 <Panel title="Capacity" meta="host vs engine ceiling" bodyClassName="p-0" hideId="settings.machine">
                   <div className="grid gap-px bg-zinc-800 md:grid-cols-3">
                     <div className="bg-zinc-900/60 p-4">
-                      <div className="text-[10px] font-semibold text-zinc-500">This machine</div>
-                      <div className="mt-1 text-lg font-semibold text-zinc-50">{sys ? `${formatBytes(sys.host.total_memory_bytes)} RAM · ${sys.host.cpus} cores` : '…'}</div>
-                      <p className="mt-1 text-[11px] text-zinc-500">Native DuckDB addresses all host memory and cores; per-workspace limits keep tenants from starving each other.</p>
+                      <div className="text-2xs font-semibold text-zinc-500">This machine</div>
+                      <div className="mt-1 text-title font-semibold text-zinc-50">{sys ? `${formatBytes(sys.host.total_memory_bytes)} RAM · ${sys.host.cpus} cores` : '…'}</div>
+                      <p className="mt-1 text-2xs text-zinc-500">Native DuckDB addresses all host memory and cores; per-workspace limits keep tenants from starving each other.</p>
                     </div>
                     <div className="bg-zinc-900/60 p-4">
-                      <div className="text-[10px] font-semibold text-zinc-500">Engine ceiling</div>
-                      <div className="mt-1 text-lg font-semibold text-zinc-50">{live ? `${formatBytes(live.duckdb.memory_limit_bytes)} · ${live.duckdb.threads} threads` : '…'}</div>
-                      <p className="mt-1 text-[11px] text-zinc-500">The largest working set one query can hold before spilling to <span className="font-mono">{sys?.duckdb.temp_directory ?? 'scratch'}</span>.</p>
+                      <div className="text-2xs font-semibold text-zinc-500">Engine ceiling</div>
+                      <div className="mt-1 text-title font-semibold text-zinc-50">{live ? `${formatBytes(live.duckdb.memory_limit_bytes)} · ${live.duckdb.threads} threads` : '…'}</div>
+                      <p className="mt-1 text-2xs text-zinc-500">The largest working set one query can hold before spilling to <span className="font-mono">{sys?.duckdb.temp_directory ?? 'scratch'}</span>.</p>
                     </div>
                     <div className="bg-zinc-900/60 p-4">
-                      <div className="text-[10px] font-semibold text-zinc-500">Bigger than RAM?</div>
-                      <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">Parquet is read column-by-column with predicate push-down, so files far larger than RAM still query fine — the limit is the <em>working set</em> of one query, not the file. Filter early, aggregate, avoid <Tag>SELECT *</Tag>.</p>
+                      <div className="text-2xs font-semibold text-zinc-500">Bigger than RAM?</div>
+                      <p className="mt-1 text-2xs leading-relaxed text-zinc-400">Parquet is read column-by-column with predicate push-down, so files far larger than RAM still query fine — the limit is the <em>working set</em> of one query, not the file. Filter early, aggregate, avoid <Tag>SELECT *</Tag>.</p>
                     </div>
                   </div>
                 </Panel>
@@ -236,7 +236,7 @@ export function SettingsPage() {
               {live && live.duckdb.engines.length > 0 && !hidden['settings.engines'] && (
                 <Panel hideId="settings.engines" title="Warm engines" meta={`${live.duckdb.engines.length} cached`} bodyClassName="p-0">
                   <table className="w-full font-mono text-xs">
-                    <thead className="text-left text-[10px] text-zinc-500">
+                    <thead className="text-left text-2xs text-zinc-500">
                       <tr className="border-b border-zinc-800">
                         <th className="px-4 py-2 font-normal">workspace</th>
                         <th className="px-2 py-2 font-normal">database</th>
@@ -298,27 +298,27 @@ export function SettingsPage() {
                   <div className="grid gap-2 md:grid-cols-2">
                     {lakehouses.map((c) => (
                       <div key={c.id} className="flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
-                        <Badge tone="violet">{c.provider === 'AWS_GLUE' ? 'GLUE' : c.provider === 'AWS_S3_TABLES' ? 'S3 TABLES' : c.provider === 'DATABRICKS' ? 'DATABRICKS' : 'ICEBERG REST'}</Badge>
+                        <Badge tone="accent">{c.provider === 'AWS_GLUE' ? 'GLUE' : c.provider === 'AWS_S3_TABLES' ? 'S3 TABLES' : c.provider === 'DATABRICKS' ? 'DATABRICKS' : 'ICEBERG REST'}</Badge>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 text-zinc-200">
                             {c.name}
                             <span className={cn('h-1.5 w-1.5 rounded-full', c.status === 'ok' ? 'bg-emerald-400' : c.status === 'error' ? 'bg-red-400' : 'bg-zinc-600')} title={c.status === 'error' ? c.last_error ?? 'error' : c.status} />
                           </div>
-                          <div className="truncate font-mono text-[10px] text-zinc-500">
+                          <div className="truncate font-mono text-2xs text-zinc-500">
                             {c.attached ? `attached as ${c.alias}` : 'remote SQL only'}
                             {c.remote_sql ? ' · SQL warehouse' : ''}
                             {c.config.region ? ` · ${c.config.region}` : ''}
                             {c.config.host ? ` · ${c.config.host.replace(/^https?:\/\//, '')}` : ''}
                             {c.config.endpoint ? ` · ${c.config.endpoint.replace(/^https?:\/\//, '')}` : ''}
                           </div>
-                          {c.status === 'error' && c.last_error && !testing[c.id] && <div className="truncate font-mono text-[10px] text-red-300" title={c.last_error}>{c.last_error}</div>}
-                          {testing[c.id] && <div className="truncate font-mono text-[10px] text-amber-200">{testing[c.id]}</div>}
+                          {c.status === 'error' && c.last_error && !testing[c.id] && <div className="truncate font-mono text-2xs text-red-300" title={c.last_error}>{c.last_error}</div>}
+                          {testing[c.id] && <div className="truncate font-mono text-2xs text-amber-200">{testing[c.id]}</div>}
                         </div>
                         <Button size="sm" variant="ghost" onClick={async () => { setTesting({ ...testing, [c.id]: 'testing…' }); try { const r = await api.post<{ message: string }>(`/api/lakehouse-connections/${c.id}/test`); setTesting({ ...testing, [c.id]: r.message }); } catch (e) { setTesting({ ...testing, [c.id]: (e as Error).message }); } await refresh(); }}>Test</Button>
                         <button className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200" title="Edit" onClick={() => setLakeWizard({ open: true, edit: c })}>
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
-                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" title="Delete" onClick={async () => { if (confirm(`Delete lakehouse connection "${c.name}"? The catalog is detached from your engines.`)) { await api.del(`/api/lakehouse-connections/${c.id}`); await refresh(); } }}>
+                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" title="Delete" onClick={async () => { if ((await confirmAction(`Delete lakehouse connection "${c.name}"? The catalog is detached from your engines.`))) { await api.del(`/api/lakehouse-connections/${c.id}`); await refresh(); } }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -337,14 +337,14 @@ export function SettingsPage() {
                   <div className="grid gap-2 md:grid-cols-2">
                     {cloud.map((c) => (
                       <div key={c.id} className="flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
-                        <Badge tone="blue">{c.provider}</Badge>
+                        <Badge tone="info">{c.provider}</Badge>
                         <div className="min-w-0 flex-1">
                           <div className="text-zinc-200">{c.name}</div>
-                          <div className="truncate font-mono text-[10px] text-zinc-500">{c.uri_scheme}://{c.bucket ?? '<any bucket>'}{c.endpoint_url ? ` · ${c.endpoint_url}` : ''}{c.region ? ` · ${c.region}` : ''}</div>
-                          {testing[c.id] && <div className="truncate font-mono text-[10px] text-amber-200">{testing[c.id]}</div>}
+                          <div className="truncate font-mono text-2xs text-zinc-500">{c.uri_scheme}://{c.bucket ?? '<any bucket>'}{c.endpoint_url ? ` · ${c.endpoint_url}` : ''}{c.region ? ` · ${c.region}` : ''}</div>
+                          {testing[c.id] && <div className="truncate font-mono text-2xs text-amber-200">{testing[c.id]}</div>}
                         </div>
                         <Button size="sm" variant="ghost" onClick={async () => { setTesting({ ...testing, [c.id]: 'testing…' }); try { const r = await api.post<{ message: string }>(`/api/cloud-connections/${c.id}/test`); setTesting({ ...testing, [c.id]: r.message }); } catch (e) { setTesting({ ...testing, [c.id]: (e as Error).message }); } }}>Test</Button>
-                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if (confirm(`Delete cloud connection "${c.name}"?`)) { await api.del(`/api/cloud-connections/${c.id}`); await refresh(); } }}>
+                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete cloud connection "${c.name}"?`))) { await api.del(`/api/cloud-connections/${c.id}`); await refresh(); } }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -357,19 +357,19 @@ export function SettingsPage() {
                 title="Data connections"
                 actions={<Button size="sm" onClick={() => setNewConn({ open: true, name: '', type: 'S3', creds: {} })}><Plug className="h-3.5 w-3.5" /> Add</Button>}
               >
-                {!externalAccess && <div className="mb-3 rounded-md border border-amber-900 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">External access is disabled (security.enable_external_access=false). Credentials are stored encrypted but remote sources stay unreachable until it is enabled.</div>}
+                {!externalAccess && <div className="mb-3 rounded-md border border-amber-900 bg-amber-950/40 px-3 py-2 text-2xs text-amber-200">External access is disabled (security.enable_external_access=false). Credentials are stored encrypted but remote sources stay unreachable until it is enabled.</div>}
                 {connections.length === 0 ? (
                   <p className="text-xs text-zinc-500">MotherDuck tokens, Postgres and HTTP secrets applied to a workspace engine at start. Credentials are AES-256-GCM encrypted at rest and never returned by the API.</p>
                 ) : (
                   <div className="space-y-2">
                     {connections.map((c) => (
                       <div key={c.id} className="flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
-                        <Badge tone="violet">{c.type}</Badge>
+                        <Badge tone="accent">{c.type}</Badge>
                         <div className="min-w-0 flex-1">
                           <div className="text-zinc-200">{c.name}</div>
-                          <div className="font-mono text-[10px] text-zinc-500">{c.fields.join(', ')}</div>
+                          <div className="font-mono text-2xs text-zinc-500">{c.fields.join(', ')}</div>
                         </div>
-                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if (confirm(`Delete connection "${c.name}"?`)) { await api.del(`/api/connections/${c.id}`); await refresh(); } }}>
+                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete connection "${c.name}"?`))) { await api.del(`/api/connections/${c.id}`); await refresh(); } }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -387,7 +387,7 @@ export function SettingsPage() {
           {cat === 'account' && (
             <Card title="Account">
               <div className="mb-3 text-xs text-zinc-400">
-                Signed in as <span className="text-zinc-200">{auth.user?.email}</span> · role <Badge tone="violet">{auth.user?.role}</Badge> · provider {auth.user?.auth_provider}
+                Signed in as <span className="text-zinc-200">{auth.user?.email}</span> · role <Badge tone="accent">{auth.user?.role}</Badge> · provider {auth.user?.auth_provider}
               </div>
               {auth.user?.auth_provider === 'local' && (
                 <form
@@ -406,7 +406,7 @@ export function SettingsPage() {
                   <Input type="password" placeholder="Current password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" />
                   <Input type="password" placeholder="New password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" />
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-zinc-500">{pw.msg}</span>
+                    <span className="text-2xs text-zinc-500">{pw.msg}</span>
                     <Button size="sm" type="submit"><KeyRound className="h-3.5 w-3.5" /> Update</Button>
                   </div>
                 </form>
@@ -425,13 +425,13 @@ export function SettingsPage() {
           {cat === 'users' && isAdmin && (
             <Card title="Users" actions={<Button size="sm" onClick={() => setNewUser({ open: true, email: '', password: '', role: 'USER' })}><Users className="h-3.5 w-3.5" /> Add</Button>}>
               <table className="w-full text-xs">
-                <thead className="text-left text-[10px] text-zinc-500">
+                <thead className="text-left text-2xs text-zinc-500">
                   <tr><th className="pb-2">User</th><th className="pb-2">Provider</th><th className="pb-2">Created</th><th className="pb-2">Role</th><th className="pb-2">Status</th><th /></tr>
                 </thead>
                 <tbody>
                   {users.map((u) => (
                     <tr key={u.id} className={cn('border-t border-zinc-800', u.disabled && 'opacity-60')} data-user={u.email}>
-                      <td className="py-2"><div className="text-zinc-200">{u.display_name ?? u.email}</div><div className="text-[10px] text-zinc-500">{u.email}</div></td>
+                      <td className="py-2"><div className="text-zinc-200">{u.display_name ?? u.email}</div><div className="text-2xs text-zinc-500">{u.email}</div></td>
                       <td className="py-2 text-zinc-400">{u.auth_provider}</td>
                       <td className="py-2 text-zinc-400">{timeAgo(u.created_at)}</td>
                       <td className="py-2">
@@ -441,16 +441,16 @@ export function SettingsPage() {
                       </td>
                       <td className="py-2">
                         {u.id === auth.user?.id ? (
-                          <Badge tone="green">Active</Badge>
+                          <Badge tone="ok">Active</Badge>
                         ) : (
                           <button
-                            className={cn('rounded px-2 py-0.5 text-[11px]', u.disabled ? 'bg-amber-950/60 text-amber-200 hover:bg-amber-900/60' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100')}
+                            className={cn('rounded px-2 py-0.5 text-2xs', u.disabled ? 'bg-amber-950/60 text-amber-200 hover:bg-amber-900/60' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100')}
                             title={u.disabled ? 'Deactivated: cannot sign in; sessions, API tokens and scheduled work stop. Click to reactivate.' : 'Deactivate: blocks sign-in and stops their sessions, tokens and scheduled work, keeping their workspaces'}
                             onClick={async () => {
                               try {
                                 await api.patch(`/api/admin/users/${u.id}`, { disabled: !u.disabled });
                               } catch (e) {
-                                alert((e as Error).message);
+                                toast.error(e);
                               }
                               await refresh();
                             }}
@@ -461,7 +461,7 @@ export function SettingsPage() {
                       </td>
                       <td className="py-2 text-right">
                         {u.id !== auth.user?.id && (
-                          <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if (confirm(`Delete ${u.email}? Their workspaces and tokens are removed.`)) { await api.del(`/api/admin/users/${u.id}`); await refresh(); } }}>
+                          <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete ${u.email}? Their workspaces and tokens are removed.`))) { await api.del(`/api/admin/users/${u.id}`); await refresh(); } }}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         )}
@@ -507,7 +507,7 @@ export function SettingsPage() {
                   setNewUser({ ...newUser, open: false });
                   await refresh();
                 } catch (e) {
-                  alert((e as Error).message);
+                  toast.error(e);
                 }
               }}
             >
@@ -555,7 +555,7 @@ export function SettingsPage() {
                   setNewConn({ ...newConn, open: false });
                   await refresh();
                 } catch (e) {
-                  alert((e as Error).message);
+                  toast.error(e);
                 }
               }}
             >

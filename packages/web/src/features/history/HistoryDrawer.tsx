@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bookmark, History, RotateCcw } from 'lucide-react';
 import { api, timeAgo } from '../../api/client';
 import { useWorkspaceAccess } from '../../store/workspace';
-import { Button, Drawer, Empty, Input, Spinner, cn } from '../../components/ui';
+import { Button, Drawer, Empty, Input, Spinner, cn, confirmAction } from '../../components/ui';
 
 export type RevisionType = 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt';
 interface RevisionRow { id: string; number: number; message: string | null; named: boolean; author: string | null; created_at: string; updated_at: string }
@@ -48,7 +48,7 @@ function Diff({ from, to }: { from: string; to: string }) {
     }
   }
   return (
-    <pre className="overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950 py-1 font-mono text-[11.5px] leading-[1.55]" data-testid="revision-diff">
+    <pre className="overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950 py-1 font-mono text-xs leading-[1.55]" data-testid="revision-diff">
       {rows.map((r, i) => r.kind === 'fold' ? (
         <div key={i} className="px-2 text-zinc-600">⋯ {r.n} unchanged line{r.n === 1 ? '' : 's'}</div>
       ) : (
@@ -110,7 +110,7 @@ export function HistoryDrawer({ open, onClose, workspaceId, objectType, objectId
                 {r.named && <Bookmark className="h-3 w-3 shrink-0 text-accent-400" />}
                 <span className="truncate">{r.message ?? (i === 0 ? 'Current version' : `Version ${r.number}`)}</span>
               </span>
-              <span className="text-[11px] text-zinc-500" title={new Date(r.updated_at).toLocaleString()}>{r.author ?? 'someone'} · {timeAgo(r.updated_at)}</span>
+              <span className="text-2xs text-zinc-500" title={new Date(r.updated_at).toLocaleString()}>{r.author ?? 'someone'} · {timeAgo(r.updated_at)}</span>
             </button>
           ))}
         </div>
@@ -120,14 +120,14 @@ export function HistoryDrawer({ open, onClose, workspaceId, objectType, objectId
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-semibold text-zinc-100">Version {pickedRow.number}{pickedRow.message ? ` — ${pickedRow.message}` : ''}</div>
-                  <div className="text-[11px] text-zinc-500">{pickedRow.author ?? 'someone'} · {new Date(pickedRow.updated_at).toLocaleString()}</div>
+                  <div className="truncate text-body font-semibold text-zinc-100">Version {pickedRow.number}{pickedRow.message ? ` — ${pickedRow.message}` : ''}</div>
+                  <div className="text-2xs text-zinc-500">{pickedRow.author ?? 'someone'} · {new Date(pickedRow.updated_at).toLocaleString()}</div>
                 </div>
                 {canEdit && rows![0]?.id !== pickedRow.id && (
-                  <Button size="sm" variant="primary" loading={busy} data-testid="restore-revision" onClick={() => { if (confirm(`Restore version ${pickedRow.number}? The current state stays in the history.`)) void act(async () => { await api.post(`/api/revisions/${pickedRow.id}/restore`, {}); setPicked(null); await load(); onRestored?.(); }); }}><RotateCcw className="h-3.5 w-3.5" /> Restore</Button>
+                  <Button size="sm" variant="primary" loading={busy} data-testid="restore-revision" onClick={async () => { if ((await confirmAction(`Restore version ${pickedRow.number}? The current state stays in the history.`))) void act(async () => { await api.post(`/api/revisions/${pickedRow.id}/restore`, {}); setPicked(null); await load(); onRestored?.(); }); }}><RotateCcw className="h-3.5 w-3.5" /> Restore</Button>
                 )}
               </div>
-              <p className="text-[11px] text-zinc-500">Restoring would change: <span className="text-red-300">− now</span> <span className="text-emerald-300">+ this version</span></p>
+              <p className="text-2xs text-zinc-500">Restoring would change: <span className="text-red-300">− now</span> <span className="text-emerald-300">+ this version</span></p>
               {detail ? <Diff from={detail.current ?? ''} to={detail.text} /> : <Spinner />}
             </div>
           )}

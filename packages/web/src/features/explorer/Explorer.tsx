@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, ChevronDown, Folder, FolderOpen, FileSpreadsheet, FileJson, Database, Box, File, Cloud, Plus, RefreshCw, Search, HardDrive, Loader2, Layers, FolderPlus, Table2 } from 'lucide-react';
 import { api, formatBytes, getToken, type TreeEntry, type CloudEntry, type CloudConnection, type LocalListing, type LakehouseConnection, type LakehouseBrowse } from '../../api/client';
-import { cn } from '../../components/ui';
+import { cn, confirmAction, toast } from '../../components/ui';
 
 export interface ExplorerNode {
   id: string;
@@ -181,14 +181,14 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
 
   const download = async (node: ExplorerNode) => {
     const res = await fetch(`/api/workspaces/${workspaceId}/files/download?path=${encodeURIComponent(node.localPath!)}`, { headers: { authorization: `Bearer ${getToken()}` } });
-    if (!res.ok) return alert(await res.text());
+    if (!res.ok) return void toast.error(await res.text());
     const a = document.createElement('a');
     a.href = URL.createObjectURL(await res.blob());
     a.download = node.name;
     a.click();
   };
   const remove = async (node: ExplorerNode) => {
-    if (!confirm(`Delete ${node.localPath} from the data directory?`)) return;
+    if (!(await confirmAction(`Delete ${node.localPath} from the data directory?`))) return;
     await api.del(`/api/workspaces/${workspaceId}/files?path=${encodeURIComponent(node.localPath!)}`);
     const parentId = node.localPath!.includes('/') ? `local:${node.localPath!.split('/').slice(0, -1).join('/')}` : 'local-root';
     const parent = find(roots, parentId);
@@ -233,12 +233,12 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
             <span className="w-3.5" />
           )}
           {icon}
-          <span className={cn('min-w-0 flex-1 truncate', node.kind === 'local-root' || node.kind === 'cloud-root' || node.kind === 'folder-root' || node.kind === 'lakehouse-root' ? 'text-[12px] font-medium text-zinc-400' : 'text-zinc-200')} title={node.localPath ?? node.name}>{node.name}</span>
-          {node.kind === 'connection' && <span className="font-mono text-[10px] text-zinc-500">{node.provider}</span>}
-          {node.kind === 'lakehouse' && <span className="rounded border border-fuchsia-900 bg-fuchsia-950/40 px-1 font-mono text-[9px] text-fuchsia-300" title={node.lakehouse?.attached ? `attached as ${node.lakehouse.alias}` : 'remote SQL'}>{node.provider === 'AWS_GLUE' ? 'GLUE' : node.provider === 'AWS_S3_TABLES' ? 'S3T' : node.provider === 'DATABRICKS' ? 'DBX' : 'IRC'}</span>}
-          {node.kind === 'lh-table' && node.lakehouse?.engine === 'remote' && <span className="rounded border border-amber-900 bg-amber-950/40 px-1 font-mono text-[9px] text-amber-300" title="Runs on the SQL warehouse">remote</span>}
-          {node.kind === 'lh-table' && node.lakehouse?.format && node.lakehouse.engine !== 'remote' && <span className="font-mono text-[9px] text-zinc-600">{node.lakehouse.format.toLowerCase()}</span>}
-          {node.size != null && <span className="font-mono text-[10px] text-zinc-500">{formatBytes(node.size)}</span>}
+          <span className={cn('min-w-0 flex-1 truncate', node.kind === 'local-root' || node.kind === 'cloud-root' || node.kind === 'folder-root' || node.kind === 'lakehouse-root' ? 'text-xs font-medium text-zinc-400' : 'text-zinc-200')} title={node.localPath ?? node.name}>{node.name}</span>
+          {node.kind === 'connection' && <span className="font-mono text-2xs text-zinc-500">{node.provider}</span>}
+          {node.kind === 'lakehouse' && <span className="rounded border border-fuchsia-900 bg-fuchsia-950/40 px-1 font-mono text-2xs text-fuchsia-300" title={node.lakehouse?.attached ? `attached as ${node.lakehouse.alias}` : 'remote SQL'}>{node.provider === 'AWS_GLUE' ? 'GLUE' : node.provider === 'AWS_S3_TABLES' ? 'S3T' : node.provider === 'DATABRICKS' ? 'DBX' : 'IRC'}</span>}
+          {node.kind === 'lh-table' && node.lakehouse?.engine === 'remote' && <span className="rounded border border-amber-900 bg-amber-950/40 px-1 font-mono text-2xs text-amber-300" title="Runs on the SQL warehouse">remote</span>}
+          {node.kind === 'lh-table' && node.lakehouse?.format && node.lakehouse.engine !== 'remote' && <span className="font-mono text-2xs text-zinc-600">{node.lakehouse.format.toLowerCase()}</span>}
+          {node.size != null && <span className="font-mono text-2xs text-zinc-500">{formatBytes(node.size)}</span>}
           {node.kind === 'cloud-root' && (
             <button
               className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-accent-300 group-hover:opacity-100"
@@ -278,9 +278,9 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
         </div>
         {isBranch && open && (
           <div>
-            {node.error && <div className="truncate px-2 py-1 text-[10px] text-red-300" style={{ paddingLeft: 22 + depth * 14 }} title={node.error}>{node.error}</div>}
+            {node.error && <div className="truncate px-2 py-1 text-2xs text-red-300" style={{ paddingLeft: 22 + depth * 14 }} title={node.error}>{node.error}</div>}
             {node.loaded && node.children!.length === 0 && !node.error && (
-              <div className="px-2 py-1 text-[10px] text-zinc-600" style={{ paddingLeft: 22 + depth * 14 }}>
+              <div className="px-2 py-1 text-2xs text-zinc-600" style={{ paddingLeft: 22 + depth * 14 }}>
                 {node.kind === 'cloud-root' ? (
                   <button className="text-zinc-500 hover:text-zinc-200" onClick={actions.onAddConnection}>
                     + connect S3 / R2 / GCS / Azure
@@ -297,7 +297,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
             {node.children!.map((c) => (
               <Row key={c.id} node={c} depth={depth + 1} />
             ))}
-            {node.truncated && <div className="px-2 py-1 text-[10px] text-zinc-500" style={{ paddingLeft: 22 + depth * 14 }}>… more objects not shown (first 1000)</div>}
+            {node.truncated && <div className="px-2 py-1 text-2xs text-zinc-500" style={{ paddingLeft: 22 + depth * 14 }}>… more objects not shown (first 1000)</div>}
           </div>
         )}
       </div>

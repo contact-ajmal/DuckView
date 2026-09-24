@@ -126,29 +126,29 @@ export function CommandPalette() {
             }}
             placeholder="Search data, queries, dashboards, commands…"
             aria-label="Search"
-            className="h-11 min-w-0 flex-1 bg-transparent text-[14px] text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
+            className="h-11 min-w-0 flex-1 bg-transparent text-body text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
           />
           <Kbd>Esc</Kbd>
         </div>
         <div ref={listRef} role="listbox" className="max-h-[52vh] overflow-y-auto p-1.5">
-          {filtered.length === 0 && <div className="px-3 py-6 text-center text-[13px] text-zinc-500">Nothing matches “{q}”.</div>}
+          {filtered.length === 0 && <div className="px-3 py-6 text-center text-body text-zinc-500">Nothing matches “{q}”.</div>}
           {filtered.map((c, i) => {
             const header = c.group !== lastGroup ? c.group : null;
             lastGroup = c.group;
             return (
               <div key={c.id}>
-                {header && <div className="px-2 pb-1 pt-2 text-[11px] font-medium text-zinc-500">{header}</div>}
+                {header && <div className="px-2 pb-1 pt-2 text-2xs font-medium text-zinc-500">{header}</div>}
                 <button
                   data-index={i}
                   role="option"
                   aria-selected={i === sel}
                   onMouseMove={() => setSel(i)}
                   onClick={c.run}
-                  className={cn('flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px]', i === sel ? 'bg-zinc-900 text-zinc-50' : 'text-zinc-300')}
+                  className={cn('flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-body', i === sel ? 'bg-zinc-900 text-zinc-50' : 'text-zinc-300')}
                 >
                   <span className="shrink-0 text-zinc-500">{c.icon}</span>
                   <span className="min-w-0 flex-1 truncate">{c.label}</span>
-                  {c.hint && <span className="max-w-[40%] shrink-0 truncate text-[11px] text-zinc-600">{c.hint}</span>}
+                  {c.hint && <span className="max-w-[40%] shrink-0 truncate text-2xs text-zinc-600">{c.hint}</span>}
                   {i === sel && <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
                 </button>
               </div>

@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "tsc -p tsconfig.json --noEmit && node scripts/ui-lint.mjs && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint:ui": "node scripts/ui-lint.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

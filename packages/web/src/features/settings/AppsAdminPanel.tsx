@@ -62,20 +62,20 @@ export function AppsAdminPanel() {
         ) : <p className="text-xs text-zinc-500">Loading…</p>}
       </Card>
 
-      <Card title={<span className="flex items-center gap-2">Publish requests {pending.length > 0 && <Badge tone="amber">{pending.length}</Badge>}</span>}>
+      <Card title={<span className="flex items-center gap-2">Publish requests {pending.length > 0 && <Badge tone="warn">{pending.length}</Badge>}</span>}>
         {pending.length === 0 ? <p className="text-xs text-zinc-500">Nothing waiting. When an editor (or an agent through publish_app) asks to make an app visible to everyone signed in, it shows up here.</p> : (
           <div className="space-y-3">
             {pending.map((a) => (
               <div key={a.id} className="rounded-lg border border-zinc-800 p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <AppWindow className="h-4 w-4 text-accent-300" />
-                  <span className="text-sm font-semibold text-zinc-100">{a.name}</span>
-                  <span className="text-[11px] text-zinc-500">{a.workspace_name ?? a.workspace_id} · by {a.requested_by_email ?? 'unknown'}{a.publish_requested_at ? ` · ${timeAgo(a.publish_requested_at)}` : ''}</span>
+                  <span className="text-body font-semibold text-zinc-100">{a.name}</span>
+                  <span className="text-2xs text-zinc-500">{a.workspace_name ?? a.workspace_id} · by {a.requested_by_email ?? 'unknown'}{a.publish_requested_at ? ` · ${timeAgo(a.publish_requested_at)}` : ''}</span>
                   <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void open(a)} title="Open the app to review it"><ExternalLink className="h-3.5 w-3.5" /> Open</Button>
-                  <a href={`#/apps/${a.id}`} className="text-[11px] text-accent-300 hover:underline">Code</a>
+                  <a href={`#/apps/${a.id}`} className="text-2xs text-accent-300 hover:underline">Code</a>
                 </div>
-                {a.description && <p className="mt-1 text-[11px] text-zinc-400">{a.description}</p>}
-                {a.publish_note && <p className="mt-1 text-[11px] text-zinc-300">“{a.publish_note}”</p>}
+                {a.description && <p className="mt-1 text-2xs text-zinc-400">{a.description}</p>}
+                {a.publish_note && <p className="mt-1 text-2xs text-zinc-300">“{a.publish_note}”</p>}
                 <div className="mt-2 flex items-center gap-2">
                   <Input className="h-7 flex-1 text-xs" placeholder="Note for the requester (optional; shown if you reject)" value={notes[a.id] ?? ''} onChange={(e) => setNotes({ ...notes, [a.id]: e.target.value })} />
                   <Button size="sm" variant="ghost" className="text-red-300" loading={busy === `reject:${a.id}`} onClick={() => void review(a, 'reject')}><X className="h-3.5 w-3.5" /> Reject</Button>
@@ -91,7 +91,7 @@ export function AppsAdminPanel() {
         {apps.length === 0 ? <p className="text-xs text-zinc-500">No data apps on this server yet.</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="text-[10.5px] text-zinc-500">
+              <thead className="text-2xs text-zinc-500">
                 <tr><th className="py-1.5 pr-3 font-medium">App</th><th className="pr-3 font-medium">Workspace · owner</th><th className="pr-3 font-medium">Status</th><th className="pr-3 font-medium">Audience</th><th className="pr-3 font-medium">Instance</th><th className="font-medium" /></tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/70">
@@ -99,9 +99,9 @@ export function AppsAdminPanel() {
                   <tr key={a.id} className="align-middle">
                     <td className="py-2 pr-3"><a href={`#/apps/${a.id}`} className="font-medium text-zinc-100 hover:underline">{a.name}</a></td>
                     <td className="pr-3 text-zinc-400">{a.workspace_name ?? '—'} · {a.owner_email ?? '—'}</td>
-                    <td className="pr-3"><Badge tone={a.status === 'running' ? 'green' : a.status === 'error' ? 'red' : a.status === 'stopped' ? 'zinc' : 'amber'}>{a.status}</Badge>{a.last_used_ms !== null && <span className="ml-1.5 text-[10.5px] text-zinc-500">used {Math.round(a.last_used_ms / 60_000)} min ago</span>}</td>
-                    <td className="pr-3">{a.visibility === 'org' ? <Badge tone="blue" className="gap-1"><Globe className="h-3 w-3" /> everyone</Badge> : <span className="text-zinc-500">workspace{a.publish_status === 'pending' ? ' · pending' : a.publish_status === 'rejected' ? ' · rejected' : ''}</span>}</td>
-                    <td className="pr-3 font-mono text-[10.5px] text-zinc-500">{a.runtime_ref ?? (a.runtime ? `${a.runtime}` : '—')}</td>
+                    <td className="pr-3"><Badge tone={a.status === 'running' ? 'green' : a.status === 'error' ? 'red' : a.status === 'stopped' ? 'zinc' : 'amber'}>{a.status}</Badge>{a.last_used_ms !== null && <span className="ml-1.5 text-2xs text-zinc-500">used {Math.round(a.last_used_ms / 60_000)} min ago</span>}</td>
+                    <td className="pr-3">{a.visibility === 'org' ? <Badge tone="info" className="gap-1"><Globe className="h-3 w-3" /> everyone</Badge> : <span className="text-zinc-500">workspace{a.publish_status === 'pending' ? ' · pending' : a.publish_status === 'rejected' ? ' · rejected' : ''}</span>}</td>
+                    <td className="pr-3 font-mono text-2xs text-zinc-500">{a.runtime_ref ?? (a.runtime ? `${a.runtime}` : '—')}</td>
                     <td className="whitespace-nowrap text-right">
                       <Button size="sm" variant="ghost" className={cn(a.always_on && 'text-accent-300')} loading={busy === `pin:${a.id}`} onClick={() => void act(`pin:${a.id}`, () => api.post<{ app: DataApp }>(`/api/apps/${a.id}/always-on`, { on: !a.always_on }))} title={a.always_on ? 'Always on — click to let it scale to zero' : 'Keep always on'}><Pin className="h-3.5 w-3.5" /></Button>
                       <Button size="sm" variant="ghost" disabled={a.status === 'stopped' || a.status === 'error'} loading={busy === `stop:${a.id}`} onClick={() => void act(`stop:${a.id}`, () => api.post(`/api/admin/apps/${a.id}/stop`, {}))} title="Stop"><Square className="h-3.5 w-3.5" /></Button>

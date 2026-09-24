@@ -34,7 +34,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
         <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>Cancel</Button>
       </div>
     ) : (
-      <button disabled={!canEdit} onClick={() => setEdit({ object, column, description: description ?? '', tags: tags.join(', ') })} className={cn('text-left text-[11px]', description ? 'text-zinc-300' : 'italic text-zinc-600', canEdit && 'hover:text-zinc-100')}>
+      <button disabled={!canEdit} onClick={() => setEdit({ object, column, description: description ?? '', tags: tags.join(', ') })} className={cn('text-left text-2xs', description ? 'text-zinc-300' : 'italic text-zinc-600', canEdit && 'hover:text-zinc-100')}>
         {description || (canEdit ? 'Add a description…' : 'No description')}
         {tags.map((t) => <Badge key={t} tone={t === 'pii' ? 'red' : 'blue'} className="ml-1.5">{t}</Badge>)}
       </button>
@@ -58,7 +58,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
                 <div className="flex items-start gap-2">
                   <button onClick={() => setOpen(expanded ? null : name)} className="mt-0.5 text-zinc-500 hover:text-zinc-200">{expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2"><span className="font-mono text-zinc-100">{name}</span><span className="text-[10.5px] text-zinc-600">{o.type.toLowerCase()} · {o.column_count} columns{o.estimated_rows !== null ? ` · ${o.estimated_rows.toLocaleString()} rows` : ''}{described ? ` · ${described} described` : ''}</span></div>
+                    <div className="flex items-center gap-2"><span className="font-mono text-zinc-100">{name}</span><span className="text-2xs text-zinc-600">{o.type.toLowerCase()} · {o.column_count} columns{o.estimated_rows !== null ? ` · ${o.estimated_rows.toLocaleString()} rows` : ''}{described ? ` · ${described} described` : ''}</span></div>
                     {editor(name, null, o.description, o.tags)}
                   </div>
                 </div>

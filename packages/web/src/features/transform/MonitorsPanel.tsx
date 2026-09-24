@@ -58,20 +58,20 @@ export function InsightCard({ workspaceId, item, onDismiss }: { workspaceId: str
     <div className="rounded-md border border-zinc-800 bg-zinc-950" data-testid="insight-card">
       <div className="flex items-start gap-2 px-3 pt-2.5">
         {item.direction === 'up' ? <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /> : <TrendingDown className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />}
-        <p className="min-w-0 flex-1 text-[13px] leading-snug text-zinc-200" data-testid="insight-summary">{item.summary}</p>
+        <p className="min-w-0 flex-1 text-body leading-snug text-zinc-200" data-testid="insight-summary">{item.summary}</p>
       </div>
       {d && <div className="mt-1 px-3"><InsightChart detail={d} /></div>}
       {d && d.drivers.length > 0 && (
-        <ul className="mx-3 mt-1 space-y-0.5 text-[11px] text-zinc-400" data-testid="insight-drivers">
+        <ul className="mx-3 mt-1 space-y-0.5 text-2xs text-zinc-400" data-testid="insight-drivers">
           {d.drivers.slice(0, 4).map((x) => (
             <li key={x.segment} className="flex gap-2"><span className="min-w-0 flex-1 truncate">{x.segment}</span><span className="font-mono tabular-nums">{fmt(x.expected)} → {fmt(x.value)}</span>{x.share !== null && <span className="w-10 text-right tabular-nums text-zinc-500">{Math.round(x.share * 100)}%</span>}</li>
           ))}
         </ul>
       )}
       <div className="mt-2 flex items-center gap-1 border-t border-zinc-800/80 px-2 py-1">
-        <a href={metricsLink(q)} className="rounded px-1.5 py-0.5 text-[11px] text-accent-200 hover:bg-accent-600/20">Open in Metrics</a>
-        <button onClick={() => askWhy(workspaceId, item)} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800" data-testid="insight-ask"><Sparkles className="h-3 w-3" /> Ask AI why</button>
-        {onDismiss && <button onClick={onDismiss} className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300" data-testid="insight-dismiss"><X className="h-3 w-3" /> Dismiss</button>}
+        <a href={metricsLink(q)} className="rounded px-1.5 py-0.5 text-2xs text-accent-200 hover:bg-accent-600/20">Open in Metrics</a>
+        <button onClick={() => askWhy(workspaceId, item)} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-300 hover:bg-zinc-800" data-testid="insight-ask"><Sparkles className="h-3 w-3" /> Ask AI why</button>
+        {onDismiss && <button onClick={onDismiss} className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300" data-testid="insight-dismiss"><X className="h-3 w-3" /> Dismiss</button>}
       </div>
     </div>
   );
@@ -141,7 +141,7 @@ export function MonitorsPanel({ workspaceId, layer }: { workspaceId: string; lay
 
       <section className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-[13px] font-medium text-zinc-200">What changed</h3>
+          <h3 className="text-body font-medium text-zinc-200">What changed</h3>
           <span className="text-zinc-500">Each metric's latest complete</span>
           <Select uiSize="sm" value={scanGrain} onChange={(e) => setScanGrain(e.target.value as MonitorGrain)} aria-label="Period">{GRAINS.map((g) => <option key={g} value={g}>{g}</option>)}</Select>
           <span className="text-zinc-500">against its usual range</span>
@@ -163,7 +163,7 @@ export function MonitorsPanel({ workspaceId, layer }: { workspaceId: string; lay
 
       <section className="space-y-2">
         <div className="flex items-center gap-2">
-          <h3 className="text-[13px] font-medium text-zinc-200">Monitors</h3>
+          <h3 className="text-body font-medium text-zinc-200">Monitors</h3>
           <span className="text-zinc-500">check on a schedule, keep what they find, and tell a channel</span>
           {canEdit && !draft && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setDraft({ name: '', metric: timed[0]!.name, grain: 'day', segment_by: '', sensitivity: 3, schedule: 'daily', channel_ids: [] })} data-testid="monitor-new"><Plus className="h-3.5 w-3.5" /> New monitor</Button>}
         </div>
@@ -218,7 +218,7 @@ export function MonitorsPanel({ workspaceId, layer }: { workspaceId: string; lay
 
       {insights.length > 0 && (
         <section className="space-y-2">
-          <h3 className="text-[13px] font-medium text-zinc-200">Found by monitors</h3>
+          <h3 className="text-body font-medium text-zinc-200">Found by monitors</h3>
           <div className="grid gap-2 lg:grid-cols-2" data-testid="insights-feed">
             {insights.map((i) => (
               <div key={i.id} data-insight={i.id}>

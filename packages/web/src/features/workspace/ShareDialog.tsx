@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Users, UserRound, Trash2, ShieldCheck, Link2, LogOut, ArrowRightLeft } from 'lucide-react';
 import { api, type Workspace, type WorkspaceMember, type WorkspaceRole, type Group, type DirectoryUser } from '../../api/client';
-import { Button, Badge, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Button, Badge, Input, Label, Modal, Select, cn, confirmAction } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
 import { resultCache } from '../../lib/resultCache';
@@ -90,7 +90,7 @@ export function ShareDialog({ open, onClose, workspace }: { open: boolean; onClo
 
   const leave = () =>
     run(async () => {
-      if (!workspace || !confirm(`Leave "${workspace.name}"? Your tabs in it are discarded.`)) return;
+      if (!workspace || !(await confirmAction(`Leave "${workspace.name}"? Your tabs in it are discarded.`))) return;
       await api.post(`/api/workspaces/${workspace.id}/leave`);
       void resultCache.clearWorkspace(workspace.id);
       onClose();
@@ -101,7 +101,7 @@ export function ShareDialog({ open, onClose, workspace }: { open: boolean; onClo
     run(async () => {
       if (!workspace || !transferTo) return;
       const target = users.find((u) => u.id === transferTo);
-      if (!confirm(`Transfer "${workspace.name}" to ${target?.email ?? 'this user'}? They become the owner; you keep owner access as a member, and the engine restarts with their connections.`)) return;
+      if (!(await confirmAction(`Transfer "${workspace.name}" to ${target?.email ?? 'this user'}? They become the owner; you keep owner access as a member, and the engine restarts with their connections.`))) return;
       await api.post(`/api/workspaces/${workspace.id}/transfer`, { user_id: transferTo });
       onClose();
       await ws.loadWorkspaces();
@@ -160,7 +160,7 @@ export function ShareDialog({ open, onClose, workspace }: { open: boolean; onClo
                 <Link2 className="h-3.5 w-3.5" /> Share
               </Button>
             </div>
-            <div className="mt-2 text-[11px] text-zinc-500">{ROLE_HELP[role]}</div>
+            <div className="mt-2 text-2xs text-zinc-500">{ROLE_HELP[role]}</div>
           </div>
         )}
 
@@ -181,7 +181,7 @@ export function ShareDialog({ open, onClose, workspace }: { open: boolean; onClo
                       {m.subject_type === 'group' && <Badge tone={m.external ? 'amber' : 'zinc'}>{m.external ? 'SSO team' : 'team'}</Badge>}
                       {m.subject_type === 'user' && m.subject_id === auth.user?.id && <span className="text-zinc-500">(you)</span>}
                     </div>
-                    {m.email && <div className="truncate text-[11px] text-zinc-500">{m.email}</div>}
+                    {m.email && <div className="truncate text-2xs text-zinc-500">{m.email}</div>}
                   </div>
                   {canManage ? (
                     <Select value={m.role} disabled={busy} className="h-7 text-xs" onChange={(e) => void changeRole(m, e.target.value as WorkspaceRole)}>
@@ -230,7 +230,7 @@ export function ShareDialog({ open, onClose, workspace }: { open: boolean; onClo
               <LogOut className="h-3.5 w-3.5" /> Leave workspace
             </Button>
           ) : workspace.shared ? (
-            <span className="text-[11px] text-zinc-500">Your access comes from a team — leave the team to lose it.</span>
+            <span className="text-2xs text-zinc-500">Your access comes from a team — leave the team to lose it.</span>
           ) : (
             <span />
           )}

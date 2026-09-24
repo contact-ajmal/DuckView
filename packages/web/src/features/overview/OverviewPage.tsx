@@ -28,7 +28,7 @@ function Distribution({ col }: { col: OverviewColumn }) {
   const d = col.distribution;
   if (!d) {
     const highCard = col.approx_unique != null && col.approx_unique > 100;
-    return <div className="flex h-28 items-center justify-center px-3 text-center font-mono text-[11px] text-zinc-600">{highCard ? `≈${col.approx_unique!.toLocaleString()} distinct · too many values to bucket` : 'no distribution'}</div>;
+    return <div className="flex h-28 items-center justify-center px-3 text-center font-mono text-2xs text-zinc-600">{highCard ? `≈${col.approx_unique!.toLocaleString()} distinct · too many values to bucket` : 'no distribution'}</div>;
   }
   const labels = d.kind === 'categories' ? [...d.bins.map((b) => b.label), ...(d.other > 0 ? ['Other'] : [])] : d.bins.map((b) => b.label);
   const data = d.kind === 'categories' ? [...d.bins.map((b) => b.count), ...(d.other > 0 ? [d.other] : [])] : d.bins.map((b) => b.count);
@@ -203,7 +203,7 @@ export function OverviewPage() {
         {!target ? (
           <Empty icon={<UploadCloud />} title="Add a dataset to get started" hint="Drop a Parquet, CSV or JSON file on Sources, or connect a database or bucket. DuckView profiles it on the spot: size, types, nulls, distributions and a sample." action={<a href="#/connections" className="text-xs text-accent-300 hover:underline">Connect a source</a>} />
         ) : loading && !overview ? (
-          <div className="flex h-full items-center justify-center gap-2 text-[13px] text-zinc-400">
+          <div className="flex h-full items-center justify-center gap-2 text-body text-zinc-400">
             <Spinner /> Profiling {target}…
           </div>
         ) : error ? (
@@ -213,12 +213,12 @@ export function OverviewPage() {
             <div className="shrink-0 px-5 pt-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h1 className="truncate font-mono text-[15px] font-semibold text-zinc-50" title={overview.target} data-testid="dataset-name">{displayName}</h1>
+                  <h1 className="truncate font-mono text-title font-semibold text-zinc-50" title={overview.target} data-testid="dataset-name">{displayName}</h1>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
                     <span>{selectedFile ? selectedFile.kind : overview.kind === 'table' ? 'table' : overview.kind}</span>
                     {overview.size_bytes != null && <span>{formatBytes(overview.size_bytes)}</span>}
                     <span>{overview.row_count.toLocaleString()} rows · {overview.column_count} columns</span>
-                    <span className="inline-flex items-center gap-1">query as <code className="rounded bg-zinc-900 px-1 font-mono text-[11px] text-zinc-300">{relation}</code></span>
+                    <span className="inline-flex items-center gap-1">query as <code className="rounded bg-zinc-900 px-1 font-mono text-2xs text-zinc-300">{relation}</code></span>
                     {loading && <Spinner className="h-3 w-3" />}
                   </div>
                 </div>
@@ -259,7 +259,7 @@ export function OverviewPage() {
                   )}
                   <div className="grid gap-8 @4xl:grid-cols-2">
                     <section>
-                      <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Columns with missing values</h2>
+                      <h2 className="mb-2 text-body font-semibold text-zinc-100">Columns with missing values</h2>
                       {attention.length === 0 ? (
                         <p className="text-xs text-zinc-500">Every column is complete.</p>
                       ) : (
@@ -276,7 +276,7 @@ export function OverviewPage() {
                       )}
                     </section>
                     <section>
-                      <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Columns</h2>
+                      <h2 className="mb-2 text-body font-semibold text-zinc-100">Columns</h2>
                       <ul className="grid grid-cols-2 gap-x-6 border-y border-zinc-800 py-1 text-xs @5xl:grid-cols-3">
                         {overview.columns.slice(0, 18).map((c) => (
                           <li key={c.name} className="flex min-w-0 items-center justify-between gap-2 py-1">
@@ -291,7 +291,7 @@ export function OverviewPage() {
                   {!hidden['overview.sample'] && (
                     <section>
                       <div className="mb-2 flex items-center justify-between">
-                        <h2 className="text-[13px] font-semibold text-zinc-100">Sample</h2>
+                        <h2 className="text-body font-semibold text-zinc-100">Sample</h2>
                         <button className="text-xs text-zinc-500 hover:text-zinc-200" onClick={() => setDtab('preview')}>Open preview</button>
                       </div>
                       <div className="h-64 overflow-hidden rounded-md border border-zinc-800">
@@ -377,8 +377,8 @@ export function OverviewPage() {
                   {snippets.map((sn) => (
                     <li key={sn.label} className="flex items-center gap-4 py-2">
                       <div className="min-w-0 flex-1">
-                        <div className="text-[13px] text-zinc-100">{sn.label}</div>
-                        <code className="block truncate font-mono text-[11.5px] text-zinc-500">{sn.sql}</code>
+                        <div className="text-body text-zinc-100">{sn.label}</div>
+                        <code className="block truncate font-mono text-xs text-zinc-500">{sn.sql}</code>
                       </div>
                       <Button size="sm" variant="ghost" onClick={() => openInQuery(sn.sql)}>Open in SQL <ArrowUpRight className="h-3 w-3" /></Button>
                     </li>

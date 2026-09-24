@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, Send, Trash2, Radio, Copy } from 'lucide-react';
 import { api, timeAgo, type AuditEvent, type AuditSink, type AuditSinkType, type CloudConnection } from '../../api/client';
-import { Badge, Button, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Badge, Button, Input, Label, Modal, Select, cn, confirmAction } from '../../components/ui';
 
 const TYPES: Record<AuditSinkType, { label: string; hint: string }> = {
   splunk: { label: 'Splunk', hint: 'HTTP Event Collector: the Splunk URL (https://splunk.example.com:8088) and a HEC token.' },
@@ -68,12 +68,12 @@ export function AuditPanel({ isAdmin }: { isAdmin: boolean }) {
               {sinks.map((s) => (
                 <div key={s.id} className={cn('rounded-lg border border-zinc-800 p-3', !s.enabled && 'opacity-60')}>
                   <div className="flex items-center gap-2"><Radio className="h-4 w-4 text-accent-300" /><span className="font-semibold text-zinc-100">{s.name}</span><Badge>{TYPES[s.type].label}</Badge>{s.last_status && <Badge tone={s.last_status === 'ok' ? 'green' : 'red'} className="ml-auto">{s.last_status === 'ok' ? 'streaming' : 'failing'}</Badge>}</div>
-                  <div className="mt-1 text-[10.5px] text-zinc-500">{s.exported.toLocaleString()} events sent{s.last_exported_at ? ` · last ${timeAgo(s.last_exported_at)}` : ''}{s.cursor_at ? ` · up to ${new Date(s.cursor_at).toLocaleString()}` : ''}{s.retry_after && s.last_status === 'error' ? ` · retrying ${timeAgo(s.retry_after)}` : ''}</div>
-                  {s.last_error && <div className="mt-1 font-mono text-[10.5px] text-red-300">{s.last_error}</div>}
+                  <div className="mt-1 text-2xs text-zinc-500">{s.exported.toLocaleString()} events sent{s.last_exported_at ? ` · last ${timeAgo(s.last_exported_at)}` : ''}{s.cursor_at ? ` · up to ${new Date(s.cursor_at).toLocaleString()}` : ''}{s.retry_after && s.last_status === 'error' ? ` · retrying ${timeAgo(s.retry_after)}` : ''}</div>
+                  {s.last_error && <div className="mt-1 font-mono text-2xs text-red-300">{s.last_error}</div>}
                   <div className="mt-2 flex gap-1">
                     <Button size="sm" variant="secondary" loading={busy === `t:${s.id}`} onClick={() => void act(`t:${s.id}`, async () => { const r = await api.post<{ ok: boolean; error: string | null }>(`/api/admin/audit-sinks/${s.id}/test`, {}); if (!r.ok) throw new Error(`${s.name}: ${r.error}`); })}><Send className="h-3.5 w-3.5" /> Test</Button>
                     <Button size="sm" variant="ghost" onClick={() => void act(`e:${s.id}`, () => api.patch(`/api/admin/audit-sinks/${s.id}`, { enabled: !s.enabled }))}>{s.enabled ? 'Pause' : 'Resume'}</Button>
-                    <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={() => { if (confirm(`Stop streaming to "${s.name}"?`)) void act(`d:${s.id}`, () => api.del(`/api/admin/audit-sinks/${s.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={async () => { if ((await confirmAction(`Stop streaming to "${s.name}"?`))) void act(`d:${s.id}`, () => api.del(`/api/admin/audit-sinks/${s.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
                   </div>
                 </div>
               ))}
@@ -82,9 +82,9 @@ export function AuditPanel({ isAdmin }: { isAdmin: boolean }) {
         </section>
       )}
       <section>
-        <h3 className="mb-1.5 text-[11px] font-semibold text-zinc-500">{isAdmin ? 'Recent events' : 'Your recent activity'}</h3>
+        <h3 className="mb-1.5 text-2xs font-semibold text-zinc-500">{isAdmin ? 'Recent events' : 'Your recent activity'}</h3>
         <div className="max-h-[28rem] overflow-auto rounded-lg border border-zinc-800">
-          <table className="w-full text-left text-[11px]">
+          <table className="w-full text-left text-2xs">
             <thead className="sticky top-0 bg-zinc-900 text-zinc-500"><tr><th className="px-2 py-1">When</th><th className="px-2 py-1">Action</th><th className="px-2 py-1">Actor</th><th className="px-2 py-1">Resource</th><th className="px-2 py-1">Status</th></tr></thead>
             <tbody>{events.map((e) => <tr key={e.id} className="border-t border-zinc-800/60"><td className="whitespace-nowrap px-2 py-1 text-zinc-500">{timeAgo(e.timestamp)}</td><td className="px-2 py-1 font-mono text-zinc-200">{e.action}</td><td className="px-2 py-1 text-zinc-400">{e.actor_type.toLowerCase()}</td><td className="max-w-xs truncate px-2 py-1 font-mono text-zinc-500" title={e.query_text ?? e.resource ?? ''}>{e.resource}</td><td className="px-2 py-1"><Badge tone={e.status === 'ok' ? 'zinc' : 'red'}>{e.status}</Badge></td></tr>)}</tbody>
           </table>
@@ -94,8 +94,8 @@ export function AuditPanel({ isAdmin }: { isAdmin: boolean }) {
       <Modal open={!!draft} onClose={() => setDraft(null)} title="Stream the audit log to…" width="max-w-lg">
         {draft && (
           <div className="space-y-3">
-            <div className="grid grid-cols-5 gap-1">{(Object.keys(TYPES) as AuditSinkType[]).map((t) => <button key={t} type="button" onClick={() => setDraft({ ...draft, type: t })} className={cn('rounded-md border px-1.5 py-1.5 text-[10.5px]', draft.type === t ? 'border-accent-500 bg-accent-600/10 text-zinc-100' : 'border-zinc-800 text-zinc-400')}>{TYPES[t].label}</button>)}</div>
-            <p className="text-[11px] text-zinc-500">{TYPES[draft.type].hint}</p>
+            <div className="grid grid-cols-5 gap-1">{(Object.keys(TYPES) as AuditSinkType[]).map((t) => <button key={t} type="button" onClick={() => setDraft({ ...draft, type: t })} className={cn('rounded-md border px-1.5 py-1.5 text-2xs', draft.type === t ? 'border-accent-500 bg-accent-600/10 text-zinc-100' : 'border-zinc-800 text-zinc-400')}>{TYPES[t].label}</button>)}</div>
+            <p className="text-2xs text-zinc-500">{TYPES[draft.type].hint}</p>
             <div><Label>Name</Label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={TYPES[draft.type].label} /></div>
             {(draft.type === 'splunk' || draft.type === 'elastic' || draft.type === 'webhook') && <div><Label>URL</Label><Input className="font-mono" value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} placeholder="https://…" /></div>}
             {draft.type === 'datadog' && <div className="grid grid-cols-2 gap-2"><div><Label>Site</Label><Input value={draft.site} onChange={(e) => setDraft({ ...draft, site: e.target.value })} /></div><div><Label>Tags</Label><Input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="env:prod" /></div></div>}

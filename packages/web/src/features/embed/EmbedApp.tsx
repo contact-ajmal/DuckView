@@ -38,12 +38,12 @@ export function EmbedApp() {
       setView(v);
     }).catch((e) => setError((e as Error).message));
   }, []);
-  if (error) return <div className="flex h-screen items-center justify-center bg-zinc-950 p-6 text-center text-sm text-zinc-400" data-testid="embed-error">This view is not available: {error}</div>;
+  if (error) return <div className="flex h-screen items-center justify-center bg-zinc-950 p-6 text-center text-body text-zinc-400" data-testid="embed-error">This view is not available: {error}</div>;
   if (!view) return <div className="flex h-screen items-center justify-center bg-zinc-950"><Loader2 className="h-5 w-5 animate-spin text-zinc-500" /></div>;
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200" data-testid="embed">
       {view.type === 'dashboard' ? <EmbedDashboard d={view.dashboard} /> : <EmbedNotebook nb={view.notebook} />}
-      <div className="px-4 pb-3 text-right text-[10px] text-zinc-600">Made with DuckView</div>
+      <div className="px-4 pb-3 text-right text-2xs text-zinc-600">Made with DuckView</div>
     </div>
   );
 }
@@ -79,7 +79,7 @@ function EmbedDashboard({ d }: { d: Extract<View, { type: 'dashboard' }>['dashbo
   }), [d]);
   return (
     <div className="p-3">
-      <h1 className="px-1 pb-1 text-base font-semibold text-zinc-50">{d.name}</h1>
+      <h1 className="px-1 pb-1 text-title font-semibold text-zinc-50">{d.name}</h1>
       {d.description && <p className="px-1 pb-2 text-xs text-zinc-500">{d.description}</p>}
       <Grid className="layout" layout={layout} cols={12} rowHeight={60} margin={[12, 12]} isDraggable={false} isResizable={false}>
         {d.widgets.map((w) => <div key={w.id}><EmbedWidget w={w} /></div>)}
@@ -107,7 +107,7 @@ function EmbedNotebook({ nb }: { nb: Extract<View, { type: 'notebook' }>['notebo
   return (
     <div className="mx-auto max-w-[960px] space-y-4 px-5 py-5">
       {nb.cells.map((c) => {
-        if (c.type === 'markdown') return <div key={c.id} className="text-[13.5px] leading-relaxed text-zinc-300 [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-zinc-50 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_li]:ml-5 [&_p]:my-1.5 [&_ul]:list-disc"><ReactMarkdown remarkPlugins={[remarkGfm]}>{c.source}</ReactMarkdown></div>;
+        if (c.type === 'markdown') return <div key={c.id} className="text-body leading-relaxed text-zinc-300 [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-zinc-50 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_li]:ml-5 [&_p]:my-1.5 [&_ul]:list-disc"><ReactMarkdown remarkPlugins={[remarkGfm]}>{c.source}</ReactMarkdown></div>;
         if (c.type === 'input') return <div key={c.id} className="text-xs text-zinc-500">{c.input?.label || c.name}: <span className="font-medium text-zinc-200">{c.input?.value}</span></div>;
         const o = outputs[c.id];
         if (!o || o === 'running') return <div key={c.id} className="flex h-16 items-center justify-center" data-cell={c.name}><Loader2 className="h-4 w-4 animate-spin text-zinc-500" /></div>;

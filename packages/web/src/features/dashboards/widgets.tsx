@@ -88,14 +88,14 @@ export function KpiWidget({ data, config }: { data: WidgetData; config: WidgetCh
   const diff = compare != null && Number.isFinite(compare) && compare !== 0 && typeof value === 'number' ? ((value - compare) / Math.abs(compare)) * 100 : null;
   return (
     <div className="flex h-full flex-col justify-center px-4">
-      <div className="truncate text-3xl font-semibold tracking-tight text-zinc-50">{fmt(value, config.format)}</div>
+      <div className="truncate text-display font-semibold tracking-tight text-zinc-50">{fmt(value, config.format)}</div>
       {diff != null && (
         <div className={cn('mt-1 flex items-center gap-1 text-xs', diff >= 0 ? 'text-emerald-300' : 'text-red-300')}>
           {diff >= 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
           {Math.abs(diff).toFixed(1)}% vs {fmt(compare, config.format)}
         </div>
       )}
-      {diff == null && ci < 0 && data.columns.length > 1 && <div className="mt-1 font-mono text-[10px] text-zinc-500">{data.columns[vi]?.name}</div>}
+      {diff == null && ci < 0 && data.columns.length > 1 && <div className="mt-1 font-mono text-2xs text-zinc-500">{data.columns[vi]?.name}</div>}
     </div>
   );
 }
@@ -207,8 +207,8 @@ export function TableWidget({ data, config }: { data: WidgetData; config: Widget
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full font-mono text-[11px]">
-          <thead className="sticky top-0 bg-zinc-900 text-left text-[10px] text-zinc-500">
+        <table className="w-full font-mono text-2xs">
+          <thead className="sticky top-0 bg-zinc-900 text-left text-2xs text-zinc-500">
             <tr>
               {data.columns.map((c, i) => (
                 <th key={c.name} className="cursor-pointer select-none whitespace-nowrap px-2 py-1 font-normal hover:text-zinc-200" onClick={() => setSort(sort?.col === i ? (sort.dir === 1 ? { col: i, dir: -1 } : null) : { col: i, dir: 1 })}>
@@ -231,7 +231,7 @@ export function TableWidget({ data, config }: { data: WidgetData; config: Widget
         </table>
       </div>
       {pages > 1 && (
-        <div className="flex items-center justify-end gap-2 border-t border-zinc-800 px-2 py-1 font-mono text-[10px] text-zinc-500">
+        <div className="flex items-center justify-end gap-2 border-t border-zinc-800 px-2 py-1 font-mono text-2xs text-zinc-500">
           <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className="disabled:opacity-30"><ChevronLeft className="h-3 w-3" /></button>
           {page + 1} / {pages}
           <button onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1} className="disabled:opacity-30"><ChevronRight className="h-3 w-3" /></button>
@@ -243,7 +243,7 @@ export function TableWidget({ data, config }: { data: WidgetData; config: Widget
 
 export function MarkdownWidget({ config }: { config: WidgetChartConfig }) {
   return (
-    <div className="h-full overflow-auto px-4 py-2 text-[13px] leading-relaxed text-zinc-300 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:text-zinc-50 [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_li]:ml-4 [&_li]:list-disc [&_p]:my-1.5 [&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[11px] [&_a]:text-accent-300 [&_a]:underline [&_table]:my-2 [&_td]:border [&_td]:border-zinc-800 [&_td]:px-2 [&_th]:border [&_th]:border-zinc-800 [&_th]:px-2">
+    <div className="h-full overflow-auto px-4 py-2 text-body leading-relaxed text-zinc-300 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:text-zinc-50 [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_li]:ml-4 [&_li]:list-disc [&_p]:my-1.5 [&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-2xs [&_a]:text-accent-300 [&_a]:underline [&_table]:my-2 [&_td]:border [&_td]:border-zinc-800 [&_td]:px-2 [&_th]:border [&_th]:border-zinc-800 [&_th]:px-2">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{config.markdown ?? '_Empty note — edit this widget to add commentary._'}</ReactMarkdown>
     </div>
   );
@@ -252,7 +252,7 @@ export function MarkdownWidget({ config }: { config: WidgetChartConfig }) {
 export function WidgetBody({ dashboardId, widget, tick, workspaceId, version }: { dashboardId: string; widget: DashboardWidget; tick: number; workspaceId: string; version?: number }) {
   const { data, error, loading, at, fromCache } = useWidgetData(dashboardId, widget, tick, workspaceId, version);
   if (widget.widget_type === 'MARKDOWN') return <MarkdownWidget config={widget.chart_config} />;
-  if (error) return <div className="m-3 rounded-md border border-red-900 bg-red-950/40 p-2 font-mono text-[11px] text-red-200">{error}</div>;
+  if (error) return <div className="m-3 rounded-md border border-red-900 bg-red-950/40 p-2 font-mono text-2xs text-red-200">{error}</div>;
   if (!data) return <div className="flex h-full items-center justify-center text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /></div>;
   return (
     <div className="relative h-full">
@@ -260,7 +260,7 @@ export function WidgetBody({ dashboardId, widget, tick, workspaceId, version }: 
       {widget.widget_type === 'KPI' && <KpiWidget data={data} config={widget.chart_config} />}
       {widget.widget_type === 'CHART' && <div className="h-full p-2"><ChartWidget data={data} config={widget.chart_config} /></div>}
       {widget.widget_type === 'TABLE' && <TableWidget data={data} config={widget.chart_config} />}
-      {at && (widget.refresh_interval_sec > 0 || fromCache) && <div className="absolute bottom-1 right-2 font-mono text-[9px] text-zinc-600">{fromCache ? 'cached · ' : ''}computed {new Date(at).toLocaleTimeString()}</div>}
+      {at && (widget.refresh_interval_sec > 0 || fromCache) && <div className="absolute bottom-1 right-2 font-mono text-2xs text-zinc-600">{fromCache ? 'cached · ' : ''}computed {new Date(at).toLocaleTimeString()}</div>}
     </div>
   );
 }

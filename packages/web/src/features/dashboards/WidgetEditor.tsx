@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Play, Loader2 } from 'lucide-react';
 import { api, type DashboardWidget, type SavedQuery, type WidgetChartConfig, type ColumnSchema } from '../../api/client';
-import { Button, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Button, Input, Label, Modal, Select, cn, toast } from '../../components/ui';
 
 type WidgetType = DashboardWidget['widget_type'];
 export interface WidgetDraft { title: string; widget_type: WidgetType; saved_query_id: string | null; custom_sql: string; chart_config: WidgetChartConfig; refresh_interval_sec: number }
@@ -87,7 +87,7 @@ export function WidgetEditor({ open, onClose, onSave, workspaceId, initial, save
               <div>
                 <div className="flex items-center justify-between">
                   <Label>Data source</Label>
-                  <div className="flex rounded-md border border-zinc-800 p-0.5 text-[11px]">
+                  <div className="flex rounded-md border border-zinc-800 p-0.5 text-2xs">
                     {(['saved', 'sql'] as const).map((s) => <button key={s} onClick={() => setSource(s)} className={cn('rounded px-2 py-0.5', source === s ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500')}>{s === 'saved' ? 'Saved query' : 'SQL'}</button>)}
                   </div>
                 </div>
@@ -102,15 +102,15 @@ export function WidgetEditor({ open, onClose, onSave, workspaceId, initial, save
               </div>
               <div className="flex items-center gap-2">
                 <Button size="sm" onClick={runPreview} loading={busy} disabled={!sql.trim()}><Play className="h-3.5 w-3.5" /> Preview columns</Button>
-                {preview && !preview.error && <span className="font-mono text-[11px] text-zinc-500">{preview.rows} rows · {columns.map((c) => c.name).join(', ')}</span>}
-                {preview?.error && <span className="truncate font-mono text-[11px] text-red-300" title={preview.error}>{preview.error}</span>}
+                {preview && !preview.error && <span className="font-mono text-2xs text-zinc-500">{preview.rows} rows · {columns.map((c) => c.name).join(', ')}</span>}
+                {preview?.error && <span className="truncate font-mono text-2xs text-red-300" title={preview.error}>{preview.error}</span>}
               </div>
             </>
           )}
         </div>
 
         <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-          <div className="text-[10px] font-semibold text-zinc-500">Configuration</div>
+          <div className="text-2xs font-semibold text-zinc-500">Configuration</div>
           {d.widget_type === 'CHART' && (
             <>
               <div><Label>Chart</Label><Select value={cfg.chart ?? 'bar'} onChange={(e) => setCfg({ chart: e.target.value as WidgetChartConfig['chart'] })} className="w-full">{['bar', 'line', 'area', 'scatter', 'pie'].map((c) => <option key={c} value={c}>{c}</option>)}</Select></div>
@@ -118,10 +118,10 @@ export function WidgetEditor({ open, onClose, onSave, workspaceId, initial, save
               <div>
                 <Label>Y series</Label>
                 <div className="flex flex-wrap gap-1">
-                  {numeric.length === 0 && <span className="text-[11px] text-zinc-500">preview to detect numeric columns</span>}
+                  {numeric.length === 0 && <span className="text-2xs text-zinc-500">preview to detect numeric columns</span>}
                   {numeric.map((n) => {
                     const on = (cfg.y ?? []).includes(n);
-                    return <button key={n} onClick={() => setCfg({ y: on ? (cfg.y ?? []).filter((y) => y !== n) : [...(cfg.y ?? []), n] })} className={cn('rounded border px-2 py-0.5 text-[11px]', on ? 'border-accent-500 bg-accent-600/20 text-accent-100' : 'border-zinc-700 text-zinc-400')}>{n}</button>;
+                    return <button key={n} onClick={() => setCfg({ y: on ? (cfg.y ?? []).filter((y) => y !== n) : [...(cfg.y ?? []), n] })} className={cn('rounded border px-2 py-0.5 text-2xs', on ? 'border-accent-500 bg-accent-600/20 text-accent-100' : 'border-zinc-700 text-zinc-400')}>{n}</button>;
                   })}
                 </div>
               </div>
@@ -137,7 +137,7 @@ export function WidgetEditor({ open, onClose, onSave, workspaceId, initial, save
               <div><Label>Value column</Label><Select value={cfg.value ?? ''} onChange={(e) => setCfg({ value: e.target.value || undefined })} className="w-full"><option value="">auto (first numeric)</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select></div>
               <div><Label>Compare to (for % diff)</Label><Select value={cfg.compare ?? ''} onChange={(e) => setCfg({ compare: e.target.value || undefined })} className="w-full"><option value="">none</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select></div>
               <div><Label>Format</Label><Select value={cfg.format ?? 'number'} onChange={(e) => setCfg({ format: e.target.value as WidgetChartConfig['format'] })} className="w-full">{['number', 'compact', 'currency', 'percent'].map((f) => <option key={f} value={f}>{f}</option>)}</Select></div>
-              <p className="text-[11px] text-zinc-500">The query should return one row, e.g. <code className="font-mono">SELECT sum(x) AS total, lag_value AS previous …</code></p>
+              <p className="text-2xs text-zinc-500">The query should return one row, e.g. <code className="font-mono">SELECT sum(x) AS total, lag_value AS previous …</code></p>
             </>
           )}
           {d.widget_type === 'TABLE' && <div><Label>Rows per page</Label><Input type="number" min={1} max={500} value={cfg.page_size ?? 10} onChange={(e) => setCfg({ page_size: Number(e.target.value) })} /></div>}
@@ -148,7 +148,7 @@ export function WidgetEditor({ open, onClose, onSave, workspaceId, initial, save
       </div>
       <div className="mt-4 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" loading={saving} disabled={!valid} onClick={async () => { setSaving(true); try { await onSave({ ...d, saved_query_id: source === 'saved' ? d.saved_query_id : null, custom_sql: source === 'sql' ? d.custom_sql : '' }); onClose(); } catch (e) { alert((e as Error).message); } finally { setSaving(false); } }}>
+        <Button variant="primary" loading={saving} disabled={!valid} onClick={async () => { setSaving(true); try { await onSave({ ...d, saved_query_id: source === 'saved' ? d.saved_query_id : null, custom_sql: source === 'sql' ? d.custom_sql : '' }); onClose(); } catch (e) { toast.error(e); } finally { setSaving(false); } }}>
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} {initial ? 'Save' : 'Add widget'}
         </Button>
       </div>

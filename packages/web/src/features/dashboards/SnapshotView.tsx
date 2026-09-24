@@ -39,10 +39,10 @@ export function SnapshotView() {
     <div className="min-h-full bg-zinc-950 p-6">
       <header className="mb-4 flex items-end justify-between gap-4 border-b border-zinc-800 pb-3">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-50">{dash.name}</h1>
+          <h1 className="text-page font-semibold text-zinc-50">{dash.name}</h1>
           {dash.description && <p className="mt-0.5 text-xs text-zinc-400">{dash.description}</p>}
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-zinc-500"><Logo className="h-5 w-5" /> DuckView · {new Date().toLocaleString()}</div>
+        <div className="flex items-center gap-2 text-2xs text-zinc-500"><Logo className="h-5 w-5" /> DuckView · {new Date().toLocaleString()}</div>
       </header>
       {dash.kind === 'mosaic' ? (
         <MosaicSpecView workspaceId={dash.workspace_id} spec={dash.spec && Object.keys(dash.spec).length ? dash.spec : null} className="mosaic-dashboard" onStatus={(s) => { if (s.state === 'ready') mark(s.error ? 'error' : 'ready', s.error ?? undefined); else if (s.state === 'error') mark('error', s.error ?? 'The spec did not render'); }} />

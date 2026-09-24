@@ -3,7 +3,7 @@ import { HardDrive, Zap, CheckCircle2, Cloud, FolderOpen, RefreshCw, AlertTriang
 import { StorageChooser, toDbPath, loadStorageOptions, type StorageChoice } from '../workspace/StorageChooser';
 import { api, formatBytes, timeAgo, storageKindOf, type LiveStats, type SystemInfo, type PublicConnection, type Workspace, type EngineSettings, type CloudSyncState } from '../../api/client';
 import { Panel, Tag } from '../../components/layout';
-import { Button, Input, Label, Select } from '../../components/ui';
+import { Button, Input, Label, Select, confirmAction } from '../../components/ui';
 import { useWorkspace } from '../../store/workspace';
 
 export function EngineSettingsForm({ workspace, sys, live, connections, onSaved }: { workspace: Workspace; sys: SystemInfo | null; live: LiveStats | null; connections: PublicConnection[]; onSaved: () => void }) {
@@ -31,7 +31,7 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
   const sync: CloudSyncState | null = workspace.cloud_sync ?? null;
   const makePersistent = async () => {
     const target = toDbPath(persistTarget, await loadStorageOptions().catch(() => null));
-    if (!confirm(`Store this workspace in ${target.active_db_path || 'a .duckdb file in the data directory'}? Every table, view and macro is copied there, then the engine restarts on it. Members keep working; open queries finish first.`)) return;
+    if (!(await confirmAction(`Store this workspace in ${target.active_db_path || 'a .duckdb file in the data directory'}? Every table, view and macro is copied there, then the engine restarts on it. Members keep working; open queries finish first.`))) return;
     setPersisting(true);
     setMsg(null);
     try {
@@ -107,13 +107,13 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
     <div className="space-y-4">
       <Panel title="Engine memory" meta={`${memMode === 'percent' ? `${memPct}%` : memAbs} · ${formatBytes(limitBytes)}`}>
         <div className="flex items-center justify-between">
-          <div className="text-sm text-zinc-100">
+          <div className="text-body text-zinc-100">
             DuckDB memory limit <Tag>memory_limit</Tag>
           </div>
-          <div className="font-mono text-2xl font-semibold text-zinc-50">{formatBytes(limitBytes)}</div>
+          <div className="font-mono text-page font-semibold text-zinc-50">{formatBytes(limitBytes)}</div>
         </div>
         <input type="range" min={5} max={95} step={5} value={memMode === 'percent' ? memPct : Math.min(95, Math.max(5, Math.round((limitBytes / (total || 1)) * 100)))} onChange={(e) => { setMemMode('percent'); setMemPct(Number(e.target.value)); }} className="mt-3 w-full accent-accent-500" />
-        <div className="mt-1 flex justify-between font-mono text-[10px] text-zinc-500">
+        <div className="mt-1 flex justify-between font-mono text-2xs text-zinc-500">
           <span>5%</span>
           <span>{total ? `safe up to ${formatBytes(total * 0.8)} · above 90% starves the OS page cache` : ''}</span>
           <span>{total ? formatBytes(total) : '100%'}</span>
@@ -123,52 +123,52 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
             const active = memMode === 'percent' && memPct === p.pct;
             return (
               <button key={p.label} onClick={() => { setMemMode('percent'); setMemPct(p.pct); }} className={`rounded-md border px-3 py-1.5 text-xs ${active ? 'border-accent-500 bg-accent-600/20 text-accent-100' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}>
-                {p.label} <span className="font-mono text-[10px] text-zinc-500">{total ? formatBytes((total * p.pct) / 100) : `${p.pct}%`}</span>
+                {p.label} <span className="font-mono text-2xs text-zinc-500">{total ? formatBytes((total * p.pct) / 100) : `${p.pct}%`}</span>
               </button>
             );
           })}
           <div className="ml-auto flex items-center gap-2">
-            <span className="font-mono text-[10px] text-zinc-500">or absolute</span>
+            <span className="font-mono text-2xs text-zinc-500">or absolute</span>
             <Input value={memAbs} onChange={(e) => { setMemMode('absolute'); setMemAbs(e.target.value); }} className="h-7 w-24 font-mono text-xs" placeholder="8GB" />
           </div>
         </div>
-        <div className="mt-4 font-mono text-[11px] text-zinc-500">in use now {formatBytes(inUse)}</div>
+        <div className="mt-4 font-mono text-2xs text-zinc-500">in use now {formatBytes(inUse)}</div>
         <div className="mt-1 h-1 w-full overflow-hidden rounded bg-zinc-800">
           <div className="h-full bg-accent-500" style={{ width: `${limitBytes ? Math.min(100, (inUse / limitBytes) * 100) : 0}%` }} />
         </div>
-        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">The limit is the most this workspace's engine holds in RAM before it spills to the scratch directory or fails a query with out-of-memory. Larger lets big aggregations and sorts finish in one pass; smaller leaves room for other workspaces on the same host. Changes restart the engine on the next query.</p>
+        <p className="mt-3 text-2xs leading-relaxed text-zinc-500">The limit is the most this workspace's engine holds in RAM before it spills to the scratch directory or fails a query with out-of-memory. Larger lets big aggregations and sorts finish in one pass; smaller leaves room for other workspaces on the same host. Changes restart the engine on the next query.</p>
       </Panel>
 
       <Panel title="Compute">
         <div className="grid gap-6 md:grid-cols-2">
           <div>
             <div className="flex items-center justify-between">
-              <div className="text-sm text-zinc-100">
+              <div className="text-body text-zinc-100">
                 DuckDB threads <Tag>threads</Tag>
               </div>
-              <div className="font-mono text-2xl font-semibold text-zinc-50">{threads === 'auto' ? cpus : threads}</div>
+              <div className="font-mono text-page font-semibold text-zinc-50">{threads === 'auto' ? cpus : threads}</div>
             </div>
             <input type="range" min={0} max={cpus} step={1} value={threads === 'auto' ? 0 : threads} onChange={(e) => setThreads(Number(e.target.value) === 0 ? 'auto' : Number(e.target.value))} className="mt-3 w-full accent-accent-500" />
-            <div className="mt-1 flex justify-between font-mono text-[10px] text-zinc-500">
+            <div className="mt-1 flex justify-between font-mono text-2xs text-zinc-500">
               <span>auto</span>
               <span>{cpus} cores detected</span>
             </div>
-            <p className="mt-2 text-[11px] text-zinc-500">{threads === 'auto' ? `Auto uses every logical core (${cpus}). Lower it to keep headroom for other workspaces or the web UI.` : `Fixed at ${threads}. Tabs still run concurrently — each query gets its own connection.`}</p>
+            <p className="mt-2 text-2xs text-zinc-500">{threads === 'auto' ? `Auto uses every logical core (${cpus}). Lower it to keep headroom for other workspaces or the web UI.` : `Fixed at ${threads}. Tabs still run concurrently — each query gets its own connection.`}</p>
           </div>
           <div className="space-y-4">
             <div>
-              <div className="text-sm text-zinc-100">
+              <div className="text-body text-zinc-100">
                 Query timeout <Tag>seconds</Tag>
               </div>
               <Input type="number" min={1} max={86400} value={timeout} onChange={(e) => setTimeoutS(Number(e.target.value))} className="mt-2 w-40 font-mono" />
-              <p className="mt-1 text-[11px] text-zinc-500">Queries past this are interrupted server-side; the tab shows QUERY_TIMEOUT.</p>
+              <p className="mt-1 text-2xs text-zinc-500">Queries past this are interrupted server-side; the tab shows QUERY_TIMEOUT.</p>
             </div>
             <div>
-              <div className="text-sm text-zinc-100">
+              <div className="text-body text-zinc-100">
                 Extensions to preload <Tag>LOAD</Tag>
               </div>
               <Input value={extensions} onChange={(e) => setExtensions(e.target.value)} className="mt-2 font-mono" placeholder="httpfs, iceberg, delta" />
-              <p className="mt-1 text-[11px] text-zinc-500">Only allow-listed extensions load before the configuration is locked.</p>
+              <p className="mt-1 text-2xs text-zinc-500">Only allow-listed extensions load before the configuration is locked.</p>
             </div>
           </div>
         </div>
@@ -182,19 +182,19 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
           </div>
         ) : inMemory ? (
           <div className="space-y-3">
-            <div className="flex items-start gap-2 text-sm text-zinc-200">
+            <div className="flex items-start gap-2 text-body text-zinc-200">
               <Zap className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
               <span>This workspace is an <b>in-memory scratch database</b>: every table is lost when the engine restarts (idle eviction, settings changes, server restarts). Make it persistent to keep the analysts' work — in the data directory, in any folder on the server, or in cloud storage.</span>
             </div>
             <StorageChooser value={persistTarget} onChange={setPersistTarget} suggestedName={workspace.name} allowMemory={false} allowMotherduck={false} />
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="primary" onClick={() => void makePersistent()} loading={persisting} disabled={workspace.role !== 'OWNER'}><HardDrive className="h-4 w-4" /> Make persistent</Button>
-              <span className="text-[11px] text-zinc-500">Copies every schema, table, view, sequence and macro while the engine is running, then restarts the engine on the new location. Owners only.</span>
+              <span className="text-2xs text-zinc-500">Copies every schema, table, view, sequence and macro while the engine is running, then restarts the engine on the new location. Owners only.</span>
             </div>
           </div>
         ) : kind === 'cloud' ? (
           <div className="space-y-3">
-            <div className="flex items-start gap-2 text-sm text-zinc-200">
+            <div className="flex items-start gap-2 text-body text-zinc-200">
               <Cloud className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" />
               <span>Stored as <code className="font-mono">{workspace.active_db_path}</code>. DuckDB works on a local copy; changes are pushed to the object after a quiet minute, on <i>Sync now</i>, and at shutdown. A new instance pulls the object before its first query.</span>
             </div>
@@ -205,7 +205,7 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
             </div>
           </div>
         ) : (
-          <div className="flex items-start gap-2 text-sm text-zinc-200">
+          <div className="flex items-start gap-2 text-body text-zinc-200">
             {kind === 'folder' ? <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" /> : <HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />}
             <span>Stored in <code className="font-mono">{workspace.active_db_path}</code>{kind === 'data' ? ' inside the data directory' : ' on the server'} — tables, views and macros survive restarts. Back up that {kind === 'data' ? 'directory' : 'folder'} to back up the workspace.</span>
           </div>
@@ -243,7 +243,7 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
             variant="danger"
             size="sm"
             onClick={async () => {
-              if (confirm(`Delete workspace "${workspace.name}" and all its tabs?`)) await ws.deleteWorkspace(workspace.id);
+              if ((await confirmAction(`Delete workspace "${workspace.name}" and all its tabs?`))) await ws.deleteWorkspace(workspace.id);
             }}
           >
             Delete workspace

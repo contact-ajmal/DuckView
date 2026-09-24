@@ -23,7 +23,7 @@ export function CachePanel({ live }: { live: LiveStats | null }) {
   const hitRate = server && server.hits + server.misses > 0 ? Math.round((server.hits / (server.hits + server.misses)) * 100) : null;
   const active = ws.workspaces.find((w) => w.id === ws.activeId);
   return (
-    <Card title="Result cache" actions={<span className="text-[11px] text-zinc-500">profiles · schemas · plans · widgets · read-only SQL</span>}>
+    <Card title="Result cache" actions={<span className="text-2xs text-zinc-500">profiles · schemas · plans · widgets · read-only SQL</span>}>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
           <div className="flex items-center gap-2 text-xs font-medium text-zinc-200">
@@ -34,7 +34,7 @@ export function CachePanel({ live }: { live: LiveStats | null }) {
             <Stat label="in memory" value={server ? `${formatBytes(server.bytes)} / ${formatBytes(server.max_bytes)}` : '—'} />
             <Stat label="hit rate" value={hitRate == null ? '—' : `${hitRate}%`} sub={server ? `${server.hits.toLocaleString()} hits · ${server.misses.toLocaleString()} misses` : undefined} />
           </div>
-          <p className="mt-2 text-[11px] text-zinc-500">
+          <p className="mt-2 text-2xs text-zinc-500">
             Keys embed each file's size and modification time plus the workspace data epoch, so a hit is exact: any mutation, upload or folder change invalidates. Remote and lakehouse sources use a short TTL instead.
             {server && !server.enabled && <span className="text-amber-300"> Disabled by configuration (cache.enabled).</span>}
           </p>
@@ -45,7 +45,7 @@ export function CachePanel({ live }: { live: LiveStats | null }) {
             <Stat label="entries" value={local ? local.entries.toLocaleString() : '—'} />
             <Stat label="stored" value={local ? `${formatBytes(local.bytes)} / ${formatBytes(BUDGET_BYTES)}` : '—'} />
           </div>
-          <p className="mt-2 text-[11px] text-zinc-500">Restored instantly on the next visit, then confirmed with the server (a 304 costs no DuckDB work). Wiped on sign-out.</p>
+          <p className="mt-2 text-2xs text-zinc-500">Restored instantly on the next visit, then confirmed with the server (a 304 costs no DuckDB work). Wiped on sign-out.</p>
         </div>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -90,7 +90,7 @@ export function CachePanel({ live }: { live: LiveStats | null }) {
             Clear server cache (all workspaces)
           </Button>
         )}
-        {msg && <span className="text-[11px] text-zinc-400">{msg}</span>}
+        {msg && <span className="text-2xs text-zinc-400">{msg}</span>}
       </div>
     </Card>
   );
@@ -99,9 +99,9 @@ export function CachePanel({ live }: { live: LiveStats | null }) {
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div>
-      <div className="font-mono text-sm text-zinc-100">{value}</div>
-      <div className="text-[10px] text-zinc-500">{label}</div>
-      {sub && <div className="text-[10px] text-zinc-600">{sub}</div>}
+      <div className="font-mono text-body text-zinc-100">{value}</div>
+      <div className="text-2xs text-zinc-500">{label}</div>
+      {sub && <div className="text-2xs text-zinc-600">{sub}</div>}
     </div>
   );
 }

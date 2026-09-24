@@ -3,7 +3,7 @@ import { ArrowUpRight, Eye, MoreHorizontal, Pause, Pencil, Play, Plus, Send, Tra
 import { api, timeAgo, type CloudConnection, type DatabaseConnection, type LakehouseConnection, type NotificationChannel, type ReverseDestination, type ReverseMode, type ReversePlan, type ReverseRun, type ReverseSync, type SyncSchedule } from '../../api/client';
 import { useWorkspaceAccess } from '../../store/workspace';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
-import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, StatusDot, cn } from '../../components/ui';
+import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, StatusDot, cn, confirmAction } from '../../components/ui';
 import { CHANNEL_META } from '../alerts/ChannelsPanel';
 
 /** Set by the SQL workbench ("Send results to…") and picked up here. */
@@ -129,8 +129,8 @@ export function ReversePanel({ workspaceId, databases, clouds, lakes }: { worksp
           {(syncs ?? []).map((s) => (
             <div key={s.id} className="border-b border-zinc-800/70 last:border-0" data-reverse={s.name}>
               <div className={cn('grid cursor-pointer grid-cols-[minmax(0,1.2fr)_minmax(0,1.6fr)_90px_minmax(0,1.4fr)_104px] items-center gap-3 px-1 py-2 hover:bg-zinc-900/60 @max-3xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_104px]', !s.enabled && 'opacity-60')} onClick={() => setOpen(open === s.id ? null : s.id)}>
-                <span className="flex min-w-0 items-center gap-2"><StatusDot tone={runTone(s.last_run?.status)} /><span className="truncate text-[13px] text-zinc-100">{s.name}</span></span>
-                <span className="truncate font-mono text-[11.5px] text-zinc-400" title={describe(s.destination)}>{describe(s.destination)}</span>
+                <span className="flex min-w-0 items-center gap-2"><StatusDot tone={runTone(s.last_run?.status)} /><span className="truncate text-body text-zinc-100">{s.name}</span></span>
+                <span className="truncate font-mono text-xs text-zinc-400" title={describe(s.destination)}>{describe(s.destination)}</span>
                 <span className="text-xs text-zinc-400 @max-3xl:hidden">{s.mode}{s.key_columns.length ? <span className="text-zinc-600"> · {s.key_columns.join(', ')}</span> : null}</span>
                 <span className={cn('truncate text-xs @max-3xl:hidden', s.last_run?.status === 'error' ? 'text-red-300' : 'text-zinc-500')} title={s.last_run?.error ?? s.last_run?.summary ?? ''} data-testid="reverse-last-run">{s.last_run ? `${s.last_run.status === 'error' ? s.last_run.error : s.last_run.summary ?? s.last_run.status} · ${timeAgo(s.last_run.finished_at ?? s.last_run.started_at)}` : `never run · ${every(s.schedule)}`}</span>
                 <span className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
@@ -142,7 +142,7 @@ export function ReversePanel({ workspaceId, databases, clouds, lakes }: { worksp
                         <MenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => { close(); setDraft(fromSync(s)); }}>Edit</MenuItem>
                         <MenuItem icon={<Pause className="h-3.5 w-3.5" />} onClick={() => { close(); void act('toggle', () => api.patch(`/api/reverse-syncs/${s.id}`, { enabled: !s.enabled })); }}>{s.enabled ? 'Pause schedule' : 'Resume schedule'}</MenuItem>
                         <MenuDivider />
-                        <MenuItem danger icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => { close(); if (confirm(`Delete "${s.name}"? What was already sent stays where it is.`)) void act('del', () => api.del(`/api/reverse-syncs/${s.id}`)); }}>Delete</MenuItem>
+                        <MenuItem danger icon={<Trash2 className="h-3.5 w-3.5" />} onClick={async () => { close(); if ((await confirmAction(`Delete "${s.name}"? What was already sent stays where it is.`))) void act('del', () => api.del(`/api/reverse-syncs/${s.id}`)); }}>Delete</MenuItem>
                       </>
                     )}
                   </Menu>
@@ -150,7 +150,7 @@ export function ReversePanel({ workspaceId, databases, clouds, lakes }: { worksp
               </div>
               {open === s.id && (
                 <div className="space-y-2 px-1 pb-3 pl-6 text-xs">
-                  <pre className="max-h-24 overflow-auto whitespace-pre-wrap rounded-md bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-400">{s.sql}</pre>
+                  <pre className="max-h-24 overflow-auto whitespace-pre-wrap rounded-md bg-zinc-950 px-2 py-1.5 font-mono text-2xs text-zinc-400">{s.sql}</pre>
                   <p className="text-zinc-500">{MODES.find((m) => m.id === s.mode)?.hint}{s.key_columns.length ? ` (key: ${s.key_columns.join(', ')})` : ''} · {every(s.schedule)}{s.next_run_at && s.enabled ? `, next ${new Date(s.next_run_at).toLocaleString()}` : ''}{s.header_names.length ? ` · headers ${s.header_names.join(', ')}` : ''}</p>
                   {runs.length > 0 && (
                     <div className="divide-y divide-zinc-800/70 border-y border-zinc-800/70" data-testid="reverse-runs">
@@ -177,7 +177,7 @@ export function ReversePanel({ workspaceId, databases, clouds, lakes }: { worksp
             <p className="text-zinc-300">Would send <b>{plan.plan.to_send.toLocaleString()}</b> of {plan.plan.rows_read.toLocaleString()} rows{plan.plan.to_delete ? <> and <b>{plan.plan.to_delete.toLocaleString()}</b> deletions</> : null} to <span className="font-mono">{plan.plan.destination}</span>{plan.plan.incremental ? ' — the changes since the last run.' : '.'}</p>
             {plan.plan.sample.length > 0 && (
               <div className="overflow-x-auto rounded-md border border-zinc-800">
-                <table className="w-full font-mono text-[11px]">
+                <table className="w-full font-mono text-2xs">
                   <thead className="bg-zinc-900/60 text-left text-zinc-500"><tr>{plan.plan.columns.map((c) => <th key={c} className="whitespace-nowrap px-2 py-1 font-normal">{c}</th>)}</tr></thead>
                   <tbody>{plan.plan.sample.map((row, i) => <tr key={i} className="border-t border-zinc-800/70">{plan.plan.columns.map((c) => <td key={c} className="max-w-[220px] truncate whitespace-nowrap px-2 py-1 text-zinc-300">{row[c] == null ? <span className="text-zinc-600">null</span> : String(row[c])}</td>)}</tr>)}</tbody>
                 </table>
@@ -220,7 +220,7 @@ function ReverseEditor({ workspaceId, draft, setDraft, databases, clouds, lakes,
     <Modal open onClose={() => setDraft(null)} title={draft.id ? 'Edit reverse sync' : 'New reverse sync'} width="max-w-2xl">
       <div className="space-y-4 text-xs" data-testid="reverse-editor">
         <div><Label>Name</Label><Input autoFocus={!draft.name} value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder="Customer scores to CRM" data-testid="reverse-name" /></div>
-        <div><Label>Rows to send <span className="text-zinc-600">(one read-only SELECT; your access policies apply)</span></Label><textarea value={draft.sql} onChange={(e) => set({ sql: e.target.value })} spellCheck={false} rows={4} data-testid="reverse-sql" className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[12px] text-zinc-200 focus:border-accent-500 focus:outline-none" /></div>
+        <div><Label>Rows to send <span className="text-zinc-600">(one read-only SELECT; your access policies apply)</span></Label><textarea value={draft.sql} onChange={(e) => set({ sql: e.target.value })} spellCheck={false} rows={4} data-testid="reverse-sql" className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" /></div>
 
         <div>
           <Label>Send to</Label>

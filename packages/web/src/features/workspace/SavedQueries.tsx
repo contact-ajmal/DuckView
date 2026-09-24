@@ -14,7 +14,7 @@ export function SavedQueriesTree({ queries, onOpen, onRun, onDelete, onHistory }
     }
     return [...map.entries()].sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)));
   }, [queries]);
-  if (queries.length === 0) return <p className="px-2 py-2 text-[11px] text-zinc-500">Save the current tab to build a library. Folders come from the folder field (e.g. finance/daily).</p>;
+  if (queries.length === 0) return <p className="px-2 py-2 text-2xs text-zinc-500">Save the current tab to build a library. Folders come from the folder field (e.g. finance/daily).</p>;
   return (
     <div className="text-xs">
       {folders.map(([folder, items]) => {
@@ -34,7 +34,7 @@ export function SavedQueriesTree({ queries, onOpen, onRun, onDelete, onHistory }
                 {open ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
                 {open ? <FolderOpen className="h-3.5 w-3.5 text-amber-300/80" /> : <Folder className="h-3.5 w-3.5 text-amber-300/80" />}
                 <span className="truncate font-mono">{folder}</span>
-                <span className="ml-auto font-mono text-[10px] text-zinc-600">{items.length}</span>
+                <span className="ml-auto font-mono text-2xs text-zinc-600">{items.length}</span>
               </button>
             )}
             {open &&
@@ -45,7 +45,7 @@ export function SavedQueriesTree({ queries, onOpen, onRun, onDelete, onHistory }
                     {q.name}
                   </button>
                   {q.tags.length > 0 && (
-                    <span className="hidden items-center gap-0.5 font-mono text-[9px] text-zinc-500 group-hover:hidden xl:flex">
+                    <span className="hidden items-center gap-0.5 font-mono text-2xs text-zinc-500 group-hover:hidden xl:flex">
                       <Tag className="h-2.5 w-2.5" /> {q.tags.slice(0, 2).join(',')}
                     </span>
                   )}

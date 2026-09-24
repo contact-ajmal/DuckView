@@ -14,5 +14,5 @@ export function SpecEditor({ value, format, onChange, onSave }: { value: string;
     () => [format === 'json' ? json() : yaml(), EditorView.lineWrapping, Prec.highest(keymap.of([{ key: 'Mod-s', run: () => (onSave(), true) }]))],
     [format, onSave],
   );
-  return <CodeMirror value={value} height="100%" theme={kind === 'dark' ? oneDark : 'light'} extensions={extensions} onChange={onChange} basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, autocompletion: false }} className="h-full text-[12.5px]" />;
+  return <CodeMirror value={value} height="100%" theme={kind === 'dark' ? oneDark : 'light'} extensions={extensions} onChange={onChange} basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, autocompletion: false }} className="h-full text-xs" />;
 }

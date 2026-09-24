@@ -24,7 +24,7 @@ export function ProfilePanel({ profile, loading, onProfile, defaultTarget, prove
       </form>
       {profile && (
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
-          <Badge tone="violet">{profile.rowCount?.toLocaleString() ?? '?'} rows</Badge>
+          <Badge tone="accent">{profile.rowCount?.toLocaleString() ?? '?'} rows</Badge>
           <Badge>{profile.columnCount} columns</Badge>
           {profile.sizeBytes != null && <Badge>{formatBytes(profile.sizeBytes)} on disk</Badge>}
           {provenance && <span className="ml-auto">{provenance}</span>}
@@ -38,7 +38,7 @@ export function ProfilePanel({ profile, loading, onProfile, defaultTarget, prove
         ) : !profile ? (
           <Empty icon={<ScanSearch className="h-8 w-8" />} title="Profile a dataset" hint="Runs DuckDB SUMMARIZE: types, min/max, approx distinct, null %, quartiles — for any table, file or query." />
         ) : (
-          <table className="w-full border-collapse font-mono text-[11px]">
+          <table className="w-full border-collapse font-mono text-2xs">
             <thead className="sticky top-0 bg-zinc-900 text-zinc-400">
               <tr>
                 {['column', 'type', 'nulls', 'distinct', 'min', 'q25', 'q50', 'q75', 'max', 'avg', 'std'].map((h) => (

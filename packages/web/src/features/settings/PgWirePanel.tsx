@@ -29,7 +29,7 @@ export function PgWirePanel() {
       <div className="flex items-start gap-3 rounded-md border border-zinc-800 p-3">
         <Database className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="text-[13px] text-zinc-100">
+          <p className="text-body text-zinc-100">
             {info.enabled ? <>Tools that speak PostgreSQL connect to <b>{info.localhost_only ? 'this machine only' : host}</b>, port <b className="font-mono">{info.port}</b>.</> : 'The Postgres protocol listener is off.'}
           </p>
           <p className="text-zinc-400">Every query runs as the person who connects, through the same checks as the SQL workbench: their workspaces and access policies apply, and an API token's scopes too, so a read-only token can only read. Each workspace is a database.</p>
@@ -50,7 +50,7 @@ export function PgWirePanel() {
           <div>
             <Tabs size="sm" value={tool} onChange={setTool} tabs={[{ id: 'bi', label: 'Tableau · Power BI · Metabase' }, { id: 'psql', label: 'psql' }, { id: 'jdbc', label: 'JDBC / DBeaver' }, { id: 'python', label: 'Python' }]} />
             <div className="relative mt-2">
-              <pre className="overflow-auto rounded-md bg-zinc-900 p-3 pr-20 font-mono text-[11.5px] text-zinc-200" data-testid="pgwire-snippet">{snippets[tool]}</pre>
+              <pre className="overflow-auto rounded-md bg-zinc-900 p-3 pr-20 font-mono text-xs text-zinc-200" data-testid="pgwire-snippet">{snippets[tool]}</pre>
               <div className="absolute right-2 top-2"><CopyButton text={snippets[tool]} /></div>
             </div>
           </div>

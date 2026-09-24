@@ -217,7 +217,7 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
                 <div><Label>Remote SQL <span className="normal-case text-zinc-600">(runs on {conn?.connector_label})</span></Label><textarea value={remoteSql} onChange={(e) => setRemoteSql(e.target.value)} rows={4} spellCheck={false} className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-100 focus:border-accent-500 focus:outline-none" placeholder="SELECT * FROM ANALYTICS.PUBLIC.ORDERS WHERE order_date >= dateadd(day, -30, current_date)" /></div>
               ) : (
                 <div className="rounded-md border border-zinc-800">
-                  <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800 px-2 py-1 text-[11px]">
+                  <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800 px-2 py-1 text-2xs">
                     <button className={cn('hover:text-zinc-100', connPath.length ? 'text-accent-300' : 'text-zinc-400')} onClick={() => { setConnPath([]); }}>{conn?.connector_label ?? 'root'}</button>
                     {connPath.map((p, i) => <span key={i} className="flex items-center gap-1"><ChevronRight className="h-3 w-3 text-zinc-600" /><button className={cn('hover:text-zinc-100', i < connPath.length - 1 ? 'text-accent-300' : 'text-zinc-300')} onClick={() => setConnPath(connPath.slice(0, i + 1))}>{p}</button></span>)}
                     {connBusy && <Loader2 className="ml-auto h-3 w-3 animate-spin text-zinc-500" />}
@@ -230,8 +230,8 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
                         <button type="button" onClick={() => { if (e.path) { setConnPath(e.path); } else if (e.resource) { setResource(e.resource); setPreview(null); } }} className={cn('flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-zinc-800/60', resource && e.resource && JSON.stringify(resource) === JSON.stringify(e.resource) ? 'bg-accent-500/10 text-accent-200' : 'text-zinc-300')}>
                           {e.path ? <Folder className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : /file|sheet|report/.test(e.type) ? <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Table2 className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
                           <span className="truncate">{e.name}</span>
-                          <span className="text-[10px] text-zinc-600">{e.type}</span>
-                          {e.hint && <span className="ml-auto truncate text-[10px] text-zinc-500">{e.hint}</span>}
+                          <span className="text-2xs text-zinc-600">{e.type}</span>
+                          {e.hint && <span className="ml-auto truncate text-2xs text-zinc-500">{e.hint}</span>}
                           {e.path && <ChevronRight className="h-3 w-3 shrink-0 text-zinc-600" />}
                         </button>
                       </li>
@@ -239,22 +239,22 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
                   </ul>
                 </div>
               )}
-              {conn && conn.connector === 'ga4' && resource && <p className="text-[11px] text-zinc-500">Edit the preset's dimensions, metrics and dates by hand in the resource JSON below.</p>}
-              {conn && resource && connMode === 'browse' && <details className="text-[11px] text-zinc-500"><summary className="cursor-pointer">Resource JSON</summary><textarea value={JSON.stringify(resource, null, 1)} onChange={(e) => { try { setResource(JSON.parse(e.target.value)); } catch { /* keep typing */ } }} rows={4} spellCheck={false} className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-[10.5px] text-zinc-300" /></details>}
+              {conn && conn.connector === 'ga4' && resource && <p className="text-2xs text-zinc-500">Edit the preset's dimensions, metrics and dates by hand in the resource JSON below.</p>}
+              {conn && resource && connMode === 'browse' && <details className="text-2xs text-zinc-500"><summary className="cursor-pointer">Resource JSON</summary><textarea value={JSON.stringify(resource, null, 1)} onChange={(e) => { try { setResource(JSON.parse(e.target.value)); } catch { /* keep typing */ } }} rows={4} spellCheck={false} className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-2xs text-zinc-300" /></details>}
             </div>
           )}
           {kind === 'url' && (
             <div className="grid grid-cols-[1fr_120px] gap-2">
               <div><Label>URL</Label><Input value={url} onChange={(e) => setUrl(e.target.value)} className="font-mono" placeholder="https://api.example.com/export.csv" spellCheck={false} /></div>
               <div><Label>Format</Label><Select value={format} onChange={(e) => setFormat(e.target.value as typeof format)} className="w-full"><option value="auto">auto</option><option value="csv">CSV</option><option value="json">JSON</option><option value="parquet">Parquet</option><option value="excel">Excel</option></Select></div>
-              <p className="col-span-2 text-[11px] text-zinc-500">Needs external access on the server. A bearer token or header can be stored as an HTTP connection under Settings → Storage → Data connections.</p>
+              <p className="col-span-2 text-2xs text-zinc-500">Needs external access on the server. A bearer token or header can be stored as an HTTP connection under Settings → Storage → Data connections.</p>
             </div>
           )}
           {kind === 'sheet' && (
             <div className="grid grid-cols-[1fr_120px] gap-2">
               <div><Label>Spreadsheet id</Label><Input value={sheetId} onChange={(e) => setSheetId(e.target.value)} className="font-mono" placeholder="1AbC…xYz" spellCheck={false} /></div>
               <div><Label>Sheet gid</Label><Input value={gid} onChange={(e) => setGid(e.target.value)} className="font-mono" placeholder="0" /></div>
-              <p className="col-span-2 text-[11px] text-zinc-500">The sheet must be shared with "anyone with the link" (or published to the web). The id is the long part of the sheet's URL; the gid is the tab's id from the URL.</p>
+              <p className="col-span-2 text-2xs text-zinc-500">The sheet must be shared with "anyone with the link" (or published to the web). The id is the long part of the sheet's URL; the gid is the tab's id from the URL.</p>
             </div>
           )}
           {kind === 'sql' && (
@@ -271,7 +271,7 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
               <Label>{schedKind === 'interval' ? 'Minutes' : schedKind === 'cron' ? 'Cron expression (UTC)' : ' '}</Label>
               {schedKind === 'interval' && <Input type="number" min={1} value={minutes} onChange={(e) => setMinutes(Math.max(1, Number(e.target.value)))} />}
               {schedKind === 'cron' && <Input value={cron} onChange={(e) => setCron(e.target.value)} className="font-mono" placeholder="0 6 * * 1-5" />}
-              {schedKind === 'manual' && <p className="pt-2 text-[11px] text-zinc-500">Run from the list, the API or an agent.</p>}
+              {schedKind === 'manual' && <p className="pt-2 text-2xs text-zinc-500">Run from the list, the API or an agent.</p>}
             </div>
           </div>
         </div>
@@ -279,21 +279,21 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
           <div>
             <div className="flex items-center justify-between">
               <Label>Transformation <span className="normal-case text-zinc-600">(optional · SELECT over {'{{raw}}'})</span></Label>
-              <button onClick={() => void draft()} disabled={!source || busy !== null || !cp.config?.can_use} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-accent-300 hover:underline disabled:opacity-40" title={cp.config?.can_use ? 'Let Copilot draft the transformation from the previewed columns' : 'Configure Copilot under Settings → Copilot first'}>
+              <button onClick={() => void draft()} disabled={!source || busy !== null || !cp.config?.can_use} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-2xs text-accent-300 hover:underline disabled:opacity-40" title={cp.config?.can_use ? 'Let Copilot draft the transformation from the previewed columns' : 'Configure Copilot under Settings → Copilot first'}>
                 {busy === 'draft' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />} Draft with Copilot
               </button>
             </div>
             <textarea value={transform} onChange={(e) => setTransform(e.target.value)} rows={8} spellCheck={false} className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-100 focus:border-accent-500 focus:outline-none" placeholder={'SELECT\n  lower(email) AS email,\n  amount::DECIMAL(12,2) AS amount,\n  day::DATE AS day\nFROM {{raw}}\nWHERE amount > 0'} />
-            <p className="mt-1 text-[11px] text-zinc-500">The loaded rows are {'{{raw}}'}; the SELECT's result becomes the target table. Leave empty to load as is. Validated before saving; agents can set it through <code className="font-mono">update_data_sync</code>.</p>
+            <p className="mt-1 text-2xs text-zinc-500">The loaded rows are {'{{raw}}'}; the SELECT's result becomes the target table. Leave empty to load as is. Validated before saving; agents can set it through <code className="font-mono">update_data_sync</code>.</p>
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => void doPreview()} loading={busy === 'preview'} disabled={!source}><Eye className="h-3.5 w-3.5" /> Preview</Button>
-            {preview && <span className="text-[11px] text-zinc-500">{preview.columns.length} column{preview.columns.length === 1 ? '' : 's'} · first {preview.rows.length} row{preview.rows.length === 1 ? '' : 's'}</span>}
+            {preview && <span className="text-2xs text-zinc-500">{preview.columns.length} column{preview.columns.length === 1 ? '' : 's'} · first {preview.rows.length} row{preview.rows.length === 1 ? '' : 's'}</span>}
           </div>
           {preview && (
             <div className="max-h-56 overflow-auto rounded-md border border-zinc-800">
-              <table className="w-full text-[11px]">
-                <thead className="sticky top-0 bg-zinc-900 text-left text-[10px] uppercase text-zinc-500"><tr>{preview.columns.map((c) => <th key={c.name} className="px-2 py-1 font-mono">{c.name}<span className="ml-1 text-zinc-600">{c.type}</span></th>)}</tr></thead>
+              <table className="w-full text-2xs">
+                <thead className="sticky top-0 bg-zinc-900 text-left text-2xs uppercase text-zinc-500"><tr>{preview.columns.map((c) => <th key={c.name} className="px-2 py-1 font-mono">{c.name}<span className="ml-1 text-zinc-600">{c.type}</span></th>)}</tr></thead>
                 <tbody>{preview.rows.map((r, i) => <tr key={i} className="border-t border-zinc-800/60">{r.map((v, j) => <td key={j} className="px-2 py-0.5 font-mono text-zinc-300">{v == null ? <span className="text-zinc-600">null</span> : String(v)}</td>)}</tr>)}</tbody>
               </table>
             </div>

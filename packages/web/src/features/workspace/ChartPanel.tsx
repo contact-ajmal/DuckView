@@ -119,7 +119,7 @@ export function ChartPanel({ columns, rows, config, onChange }: { columns: Colum
         )}
       </div>
       <div className="relative min-h-0 flex-1 p-3">{render()}</div>
-      {rows.length > MAX_POINTS && <div className="border-t border-zinc-800 px-3 py-1 text-[11px] text-zinc-500">Charting the first {MAX_POINTS.toLocaleString()} of {rows.length.toLocaleString()} rows — aggregate in SQL for a complete picture.</div>}
+      {rows.length > MAX_POINTS && <div className="border-t border-zinc-800 px-3 py-1 text-2xs text-zinc-500">Charting the first {MAX_POINTS.toLocaleString()} of {rows.length.toLocaleString()} rows — aggregate in SQL for a complete picture.</div>}
     </div>
   );
 }

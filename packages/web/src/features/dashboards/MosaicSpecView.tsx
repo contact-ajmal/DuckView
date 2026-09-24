@@ -91,10 +91,10 @@ export function MosaicSpecView({ workspaceId, spec, onStatus, className, nonce =
 
   return (
     <div className={cn('mosaic-dashboard relative min-h-0', className)}>
-      {state === 'loading' && <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/90 px-2 py-1 text-[11px] text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin text-accent-300" /> Rendering…</div>}
+      {state === 'loading' && <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/90 px-2 py-1 text-2xs text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin text-accent-300" /> Rendering…</div>}
       {state === 'error' && <div className="m-3 whitespace-pre-wrap rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
-      {state === 'ready' && warnings.length > 0 && <div className="mx-3 mt-3 whitespace-pre-wrap rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 font-mono text-[11px] text-amber-200">{warnings.map((w) => `⚠ ${w}`).join('\n')}</div>}
-      {problems.length > 0 && <div className="mosaic-problems mx-3 mt-3 whitespace-pre-wrap rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-[11px] text-red-200">{`${problems.length} chart quer${problems.length === 1 ? 'y' : 'ies'} failed:\n`}{problems.map((p) => `✗ ${p}`).join('\n')}</div>}
+      {state === 'ready' && warnings.length > 0 && <div className="mx-3 mt-3 whitespace-pre-wrap rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 font-mono text-2xs text-amber-200">{warnings.map((w) => `⚠ ${w}`).join('\n')}</div>}
+      {problems.length > 0 && <div className="mosaic-problems mx-3 mt-3 whitespace-pre-wrap rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-2xs text-red-200">{`${problems.length} chart quer${problems.length === 1 ? 'y' : 'ies'} failed:\n`}{problems.map((p) => `✗ ${p}`).join('\n')}</div>}
       <div ref={host} className="mosaic-explore p-3" />
     </div>
   );

@@ -11,7 +11,7 @@ export function Eyebrow(_props: { children: ReactNode }) {
 }
 
 export function PageTitle({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
-  return <h1 className={cn('text-[18px] font-semibold tracking-tight text-zinc-50', className)} title={title}>{children}</h1>;
+  return <h1 className={cn('text-page font-semibold tracking-tight text-zinc-50', className)} title={title}>{children}</h1>;
 }
 
 /** The compact header of a workspace page: title (and a one-line description), actions on the right. */
@@ -35,7 +35,7 @@ export function SideCard({ title, meta, children, className, bodyClassName, hide
       <header className="group/hdr flex h-9 items-center justify-between gap-2 px-3">
         <h3 className="text-xs font-semibold text-zinc-300">{title}</h3>
         <div className="flex items-center gap-1.5">
-          {meta && <div className="text-[11px] text-zinc-500">{meta}</div>}
+          {meta && <div className="text-2xs text-zinc-500">{meta}</div>}
           {hideId && <HideButton id={hideId} className="opacity-0 group-hover/hdr:opacity-100" />}
         </div>
       </header>
@@ -51,8 +51,8 @@ export function Panel({ title, meta, actions, children, className, bodyClassName
       {(title || actions || hideId) && (
         <header className="group/hdr flex min-h-10 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-zinc-800 px-4 py-1.5">
           <div className="flex min-w-0 flex-wrap items-baseline gap-2">
-            {title && <h3 className="text-[13px] font-semibold text-zinc-100">{title}</h3>}
-            {meta && <span className="text-[11px] text-zinc-500">{meta}</span>}
+            {title && <h3 className="text-body font-semibold text-zinc-100">{title}</h3>}
+            {meta && <span className="text-2xs text-zinc-500">{meta}</span>}
           </div>
           <div className="flex items-center gap-2">
             {actions}
@@ -68,7 +68,7 @@ export function Panel({ title, meta, actions, children, className, bodyClassName
 /** Key/value rows in monospace, as in the reference "SYSTEM" / "LIVE RESOURCES" cards. */
 export function KvRows({ rows }: { rows: { k: string; v: ReactNode; sub?: ReactNode }[] }) {
   return (
-    <dl className="space-y-1.5 font-mono text-[11px]">
+    <dl className="space-y-1.5 font-mono text-2xs">
       {rows.map((r) => (
         <div key={r.k} className="grid grid-cols-[88px_1fr] gap-2">
           <dt className="truncate text-zinc-500">{r.k}</dt>
@@ -93,7 +93,7 @@ export function typeTone(type: string): string {
 }
 
 export function TypePill({ type, className }: { type: string; className?: string }) {
-  return <span className={cn('inline-flex font-mono text-[11px] leading-none', typeTone(type), className)}>{type.toLowerCase()}</span>;
+  return <span className={cn('inline-flex font-mono text-2xs leading-none', typeTone(type), className)}>{type.toLowerCase()}</span>;
 }
 
 /** Pill row for the header: DuckDB version · cores · headroom · Safe. */
@@ -101,7 +101,7 @@ export function StatusPill({ dot, children, tone = 'zinc', title }: { dot?: bool
   const dotColor = tone === 'green' ? 'bg-emerald-500' : tone === 'amber' ? 'bg-amber-500' : 'bg-zinc-500';
   const text = 'text-zinc-400';
   return (
-    <span title={title} className={cn('inline-flex items-center gap-1.5 text-[11px]', text)}>
+    <span title={title} className={cn('inline-flex items-center gap-1.5 text-2xs', text)}>
       {dot && <span className={cn('h-1.5 w-1.5 rounded-full', dotColor)} />}
       {children}
     </span>
@@ -109,5 +109,5 @@ export function StatusPill({ dot, children, tone = 'zinc', title }: { dot?: bool
 }
 
 export function Tag({ children, className }: { children: ReactNode; className?: string }) {
-  return <span className={cn('inline-flex items-center rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[11px] text-zinc-400', className)}>{children}</span>;
+  return <span className={cn('inline-flex items-center rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-2xs text-zinc-400', className)}>{children}</span>;
 }

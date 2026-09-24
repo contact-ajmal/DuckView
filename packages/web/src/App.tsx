@@ -24,7 +24,7 @@ import { TopBar } from './components/shell/TopBar';
 import { SectionNav } from './components/shell/SectionNav';
 import { CommandPalette } from './components/shell/CommandPalette';
 import { parseRoute, type Route } from './app/routes';
-import { Button, Input, Label, Modal, Spinner } from './components/ui';
+import { Button, Input, Label, Modal, Spinner, toast } from './components/ui';
 
 export default function App() {
   const auth = useAuth();
@@ -124,7 +124,7 @@ export default function App() {
                   setNewName('');
                   setNewStorage({ kind: 'data', path: '' });
                 } catch (e) {
-                  alert((e as Error).message);
+                  toast.error(e, 'Could not create the workspace');
                 }
               }}
             >

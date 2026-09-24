@@ -109,10 +109,10 @@ export function ResultsGrid({ columns, rows, filter = '', onVisibleRows }: { col
               onClick={() => setSort((s) => (s?.col !== i ? { col: i, dir: 1 } : s.dir === 1 ? { col: i, dir: -1 } : null))}
             >
               <div className="flex items-center gap-1">
-                <span className="min-w-0 flex-1 truncate font-sans text-[12px] font-semibold text-zinc-100">{c.name}</span>
+                <span className="min-w-0 flex-1 truncate font-sans text-xs font-semibold text-zinc-100">{c.name}</span>
                 {sort?.col === i && (sort.dir === 1 ? <ArrowUp className="h-3 w-3 shrink-0 text-accent-400" /> : <ArrowDown className="h-3 w-3 shrink-0 text-accent-400" />)}
               </div>
-              <div className="truncate text-[10px] leading-3 text-zinc-500">{c.type.toLowerCase()}</div>
+              <div className="truncate text-2xs leading-3 text-zinc-500">{c.type.toLowerCase()}</div>
               <span onMouseDown={(e) => startResize(i, e)} onClick={(e) => e.stopPropagation()} className="absolute -right-1 top-0 z-10 h-full w-2 cursor-col-resize" aria-hidden />
             </div>
           ))}

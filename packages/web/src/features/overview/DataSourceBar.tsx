@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { UploadCloud, Folder, FolderOpen, FolderPlus, Database, Table2, Eye, Trash2, X, ChevronDown, ChevronRight, Cloud, Layers, Boxes, Globe, Warehouse, HardDrive, Plug, Loader2, RefreshCw, CheckCircle2, AlertTriangle, ArrowDownToLine, FileText, Sheet, Settings2 } from 'lucide-react';
 import { api, formatBytes, type JailEntry, type CloudConnection, type CloudEntry, type LakehouseConnection, type LakehouseBrowse, type DatabaseConnection, type DatabaseEntry, type ConnectorConnection, type BrowseEntry } from '../../api/client';
 import { useWorkspace } from '../../store/workspace';
-import { cn } from '../../components/ui';
+import { cn, confirmAction } from '../../components/ui';
 import { FolderPicker } from '../explorer/FolderPicker';
 
 /**
@@ -90,13 +90,13 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
     if (first) onSelect(first.path);
   };
   const removeFolder = async (root: string) => {
-    if (!confirm(`Remove ${root} from this workspace? Files are not deleted.`)) return;
+    if (!(await confirmAction(`Remove ${root} from this workspace? Files are not deleted.`))) return;
     await api.del(`/api/workspaces/${workspaceId}/folders?path=${encodeURIComponent(root)}`);
     await ws.loadCatalog(true);
     await loadFolders();
   };
   const removeFile = async (f: JailEntry) => {
-    if (!confirm(`Delete ${f.path} from the data directory?`)) return;
+    if (!(await confirmAction(`Delete ${f.path} from the data directory?`))) return;
     await api.del(`/api/workspaces/${workspaceId}/files?path=${encodeURIComponent(f.path)}`);
     await ws.loadCatalog(true);
   };
@@ -178,15 +178,15 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
           <input ref={fileInput} type="file" multiple className="hidden" onChange={(e) => onFiles([...(e.target.files ?? [])])} />
         </div>
         {canWrite && folders && (
-          <div className="relative mt-2 flex items-center gap-1 text-[11px]">
+          <div className="relative mt-2 flex items-center gap-1 text-2xs">
             <span className="text-zinc-500">Uploads go to</span>
             <button onClick={() => setLocationMenu((v) => !v)} className="inline-flex min-w-0 items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-zinc-200 hover:border-zinc-600" title={folders.upload_dir}>
               <Settings2 className="h-3 w-3 text-accent-300" /> <span className="truncate">{uploadLabel}</span> <ChevronDown className="h-3 w-3 text-zinc-500" />
             </button>
             {locationMenu && (
               <div className="absolute left-0 top-6 z-20 w-full rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
-                <button onClick={() => void setUploadDir(null)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800', folders.upload_dir === folders.data_directory && 'text-accent-200')}><Database className="h-3 w-3" /> <span className="min-w-0 flex-1 truncate">Data directory</span><span className="truncate font-mono text-[9px] text-zinc-600">{folders.data_directory}</span></button>
-                {folders.folders.map((f) => <button key={f.path} onClick={() => void setUploadDir(f.path)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800', folders.upload_dir === f.path && 'text-accent-200')}><Folder className="h-3 w-3" /> <span className="min-w-0 flex-1 truncate">{f.name}</span><span className="truncate font-mono text-[9px] text-zinc-600">{f.path}</span></button>)}
+                <button onClick={() => void setUploadDir(null)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800', folders.upload_dir === folders.data_directory && 'text-accent-200')}><Database className="h-3 w-3" /> <span className="min-w-0 flex-1 truncate">Data directory</span><span className="truncate font-mono text-2xs text-zinc-600">{folders.data_directory}</span></button>
+                {folders.folders.map((f) => <button key={f.path} onClick={() => void setUploadDir(f.path)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800', folders.upload_dir === f.path && 'text-accent-200')}><Folder className="h-3 w-3" /> <span className="min-w-0 flex-1 truncate">{f.name}</span><span className="truncate font-mono text-2xs text-zinc-600">{f.path}</span></button>)}
                 <button onClick={() => { setLocationMenu(false); setPicker(true); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-accent-300 hover:bg-zinc-800"><FolderPlus className="h-3 w-3" /> Choose another folder on this computer…</button>
               </div>
             )}
@@ -195,7 +195,7 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
         {uploads.length > 0 && (
           <div className="mt-2 space-y-1">
             {uploads.map((u) => (
-              <div key={u.name} className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[11px]">
+              <div key={u.name} className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-2xs">
                 <div className="flex justify-between text-zinc-300"><span className="truncate">{u.name}</span><span className={u.error ? 'text-red-300' : 'text-zinc-500'}>{u.error ? 'failed' : `${u.pct}%`}</span></div>
                 {u.error ? <div className="mt-0.5 text-red-300">{u.error}</div> : <div className="mt-1 h-1 overflow-hidden rounded bg-zinc-800"><div className="h-full bg-accent-500 transition-all" style={{ width: `${u.pct}%` }} /></div>}
               </div>
@@ -216,13 +216,13 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
                     {open ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
                     {isFolder ? (open ? <FolderOpen className="h-3.5 w-3.5 text-zinc-500" /> : <Folder className="h-3.5 w-3.5 text-zinc-500" />) : <Database className="h-3.5 w-3.5 text-zinc-500" />}
                     <span className="truncate text-xs font-medium text-zinc-300">{label}</span>
-                    {isUploadDir && <span className="text-[10px] text-zinc-500" title="Uploads land here">· uploads</span>}
-                    <span className="ml-auto font-mono text-[10px] text-zinc-600">{items.length}{ws.catalog?.truncated_folders?.includes(root) ? '+' : ''}</span>
+                    {isUploadDir && <span className="text-2xs text-zinc-500" title="Uploads land here">· uploads</span>}
+                    <span className="ml-auto font-mono text-2xs text-zinc-600">{items.length}{ws.catalog?.truncated_folders?.includes(root) ? '+' : ''}</span>
                   </button>
                   {isFolder && canWrite && <button onClick={() => void removeFolder(root)} className="rounded p-0.5 text-zinc-600 opacity-0 hover:text-red-300 group-hover/root:opacity-100" title="Remove folder from workspace"><X className="h-3 w-3" /></button>}
                 </div>
-                {open && isFolder && <div className="ml-5 truncate font-mono text-[9.5px] text-zinc-600" title={root}>{root}</div>}
-                {open && items.length === 0 && <div className="ml-5 py-1 text-[10.5px] text-zinc-600">No data files here yet{isFolder ? '' : ' — drop one above'}.</div>}
+                {open && isFolder && <div className="ml-5 truncate font-mono text-2xs text-zinc-600" title={root}>{root}</div>}
+                {open && items.length === 0 && <div className="ml-5 py-1 text-2xs text-zinc-600">No data files here yet{isFolder ? '' : ' — drop one above'}.</div>}
                 {open && items.map((f) => {
                   const display = f.root ? f.path.slice(f.root.length + 1) : f.path;
                   return (
@@ -230,7 +230,7 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
                       {KIND_ICON(f.kind)}
                       <button className="flex min-w-0 flex-1 items-baseline gap-2 text-left" onClick={() => onSelect(f.path)} title={`${f.path} · ${f.kind} · ${formatBytes(f.size_bytes)}`}>
                         <span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-100">{display}</span>
-                        <span className="shrink-0 font-mono text-[10.5px] text-zinc-600 group-hover:hidden">{formatBytes(f.size_bytes)}</span>
+                        <span className="shrink-0 font-mono text-2xs text-zinc-600 group-hover:hidden">{formatBytes(f.size_bytes)}</span>
                       </button>
                       {canWrite && !f.root && <button className="rounded p-0.5 text-zinc-600 opacity-0 hover:text-red-300 group-hover:opacity-100" onClick={() => void removeFile(f)} title="Delete file"><Trash2 className="h-3 w-3" /></button>}
                     </div>
@@ -240,7 +240,7 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
             );
           })}
           {canWrite && (
-            <button onClick={() => setPicker(true)} className="ml-1 mt-1 inline-flex items-center gap-1.5 rounded px-1 py-1 text-[11px] text-accent-300 hover:underline" title="Read a folder from this computer in place — nothing is copied">
+            <button onClick={() => setPicker(true)} className="ml-1 mt-1 inline-flex items-center gap-1.5 rounded px-1 py-1 text-2xs text-accent-300 hover:underline" title="Read a folder from this computer in place — nothing is copied">
               <FolderPlus className="h-3.5 w-3.5" /> Add a folder from this computer
             </button>
           )}
@@ -250,7 +250,7 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
                 {!collapsed.has('__tables') ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
                 <Table2 className="h-3.5 w-3.5 text-zinc-500" />
                 <span className="truncate text-xs font-medium text-zinc-300">Workspace tables</span>
-                <span className="ml-auto font-mono text-[10px] text-zinc-600">{objects.length}</span>
+                <span className="ml-auto font-mono text-2xs text-zinc-600">{objects.length}</span>
               </button>
               {!collapsed.has('__tables') && objects.map((o) => {
                 const name = o.schema === 'main' ? o.name : `${o.schema}.${o.name}`;
@@ -258,7 +258,7 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
                   <button key={name} onClick={() => onSelect(name)} title={`${o.type.toLowerCase()} · ${o.column_count} columns${o.estimated_rows != null ? ` · ~${o.estimated_rows.toLocaleString()} rows` : ''}`} className={cn('ml-3 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-[5px] text-left', target === name ? 'bg-zinc-800 text-zinc-50' : 'hover:bg-zinc-800/50')}>
                     {o.type === 'VIEW' ? <Eye className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Table2 className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
                     <span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-100">{name}</span>
-                    {o.estimated_rows != null && <span className="shrink-0 font-mono text-[10.5px] text-zinc-600">{o.estimated_rows.toLocaleString()}</span>}
+                    {o.estimated_rows != null && <span className="shrink-0 font-mono text-2xs text-zinc-600">{o.estimated_rows.toLocaleString()}</span>}
                   </button>
                 );
               })}
@@ -268,15 +268,15 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
       </div>
 
       {/* ---------------------------------------------------------------- REMOTE */}
-      <SectionHeader icon={<Plug className="h-3.5 w-3.5" />} label="Remote" count={remoteRoots.length} open={showRemote} onToggle={() => setShowRemote((v) => !v)} action={<a href="#/connections/catalog" className="text-[11px] text-zinc-500 hover:text-zinc-200">Connect</a>} />
+      <SectionHeader icon={<Plug className="h-3.5 w-3.5" />} label="Remote" count={remoteRoots.length} open={showRemote} onToggle={() => setShowRemote((v) => !v)} action={<a href="#/connections/catalog" className="text-2xs text-zinc-500 hover:text-zinc-200">Connect</a>} />
       <div className={cn('px-3 pb-3', !showRemote && 'hidden')}>
-        {!sources && <div className="py-2 text-[11px] text-zinc-500"><Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> Loading connections…</div>}
+        {!sources && <div className="py-2 text-2xs text-zinc-500"><Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> Loading connections…</div>}
         {sources && remoteRoots.length === 0 && (
-          <div className="py-1 text-[11px] leading-relaxed text-zinc-500">
+          <div className="py-1 text-2xs leading-relaxed text-zinc-500">
             No remote sources. <a href="#/connections/catalog" className="text-accent-300 hover:underline">Connect</a> a bucket, database, warehouse or SaaS app to browse it here.
           </div>
         )}
-        {sources && !sources.external_access && remoteRoots.length > 0 && <div className="mb-2 rounded-md border border-amber-900/60 bg-amber-950/30 px-2 py-1 text-[10.5px] text-amber-200">External access is off on this server: remote files can be browsed but not profiled.</div>}
+        {sources && !sources.external_access && remoteRoots.length > 0 && <div className="mb-2 rounded-md border border-amber-900/60 bg-amber-950/30 px-2 py-1 text-2xs text-amber-200">External access is off on this server: remote files can be browsed but not profiled.</div>}
         <div className="space-y-px">
           {remoteRoots.map((root) => <RemoteTree key={root.id} node={root} depth={0} target={target} onSelect={onSelect} onImport={onImport} onQuery={onQuery} />)}
         </div>
@@ -294,7 +294,7 @@ function SectionHeader({ icon, label, count, action, open, onToggle, hint }: { i
         {open ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
         <span className="text-zinc-500">{icon}</span>
         <span className="text-xs font-semibold text-zinc-300">{label}</span>
-        <span className="text-[11px] tabular-nums text-zinc-600">{count}</span>
+        <span className="text-2xs tabular-nums text-zinc-600">{count}</span>
       </button>
       {action}
     </div>
@@ -346,15 +346,15 @@ function RemoteTree({ node, depth, target, onSelect, onImport, onQuery }: { node
         <span className="shrink-0">{node.icon}</span>
         <button onClick={() => (node.select ? act() : void expand())} className="min-w-0 flex-1 text-left" title={node.error ?? node.hint ?? node.name}>
           <div className={cn('truncate text-xs', depth === 0 ? 'font-medium text-zinc-100' : 'font-mono text-zinc-200')}>{node.name}</div>
-          {node.hint && <div className="truncate font-mono text-[10px] text-zinc-500">{node.hint}</div>}
+          {node.hint && <div className="truncate font-mono text-2xs text-zinc-500">{node.hint}</div>}
         </button>
         {depth === 0 && <StatusDot status={node.status} />}
-        {node.select && 'import' in node.select && <button onClick={act} className="rounded px-1 py-0.5 text-[10px] text-accent-300 opacity-0 hover:underline group-hover:opacity-100" title="Load into the workspace with a sync"><ArrowDownToLine className="mr-0.5 inline h-3 w-3" />import</button>}
+        {node.select && 'import' in node.select && <button onClick={act} className="rounded px-1 py-0.5 text-2xs text-accent-300 opacity-0 hover:underline group-hover:opacity-100" title="Load into the workspace with a sync"><ArrowDownToLine className="mr-0.5 inline h-3 w-3" />import</button>}
       </div>
       {open && (
         <div>
-          {error && <div className="ml-6 rounded-md border border-red-900/60 bg-red-950/30 px-2 py-1 font-mono text-[10px] text-red-200" style={{ marginLeft: 16 + depth * 12 }}>{error}</div>}
-          {!loading && !error && children?.length === 0 && <div className="py-1 text-[10.5px] text-zinc-600" style={{ paddingLeft: 22 + depth * 12 }}>Nothing here.</div>}
+          {error && <div className="ml-6 rounded-md border border-red-900/60 bg-red-950/30 px-2 py-1 font-mono text-2xs text-red-200" style={{ marginLeft: 16 + depth * 12 }}>{error}</div>}
+          {!loading && !error && children?.length === 0 && <div className="py-1 text-2xs text-zinc-600" style={{ paddingLeft: 22 + depth * 12 }}>Nothing here.</div>}
           {children?.map((c) => <RemoteTree key={c.id} node={c} depth={depth + 1} target={target} onSelect={onSelect} onImport={onImport} onQuery={onQuery} />)}
         </div>
       )}

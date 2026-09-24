@@ -862,7 +862,10 @@ try {
     report.details.diff = await evaluate(`[...document.querySelectorAll('[data-testid="revision-diff"] div')].map(d => d.innerText).filter(t => /^[+-] /.test(t))`);
     await sleep(300);
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_history.png'), Buffer.from(shot.result.data, 'base64')); }
-    await evaluate(`window.confirm = () => true; document.querySelector('[data-testid="restore-revision"]').click(); true`);
+    await evaluate(`document.querySelector('[data-testid="restore-revision"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="confirm-ok"]')`, 5000, 'restore confirmation');
+    report.details.confirmTitle = await evaluate(`document.querySelector('#dv-confirm-title').textContent`);
+    await evaluate(`document.querySelector('[data-testid="confirm-ok"]').click(); true`);
     await waitFor(`[...document.querySelectorAll('[data-testid="history"] [data-revision]')].some(b => b.innerText.includes('Restored version'))`, 10000, 'restore recorded');
     report.details.after = await evaluate(`[...document.querySelectorAll('[data-testid="history"] [data-revision]')].map(b => b.innerText.split('\\n')[0])`);
     await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`);
@@ -1120,6 +1123,49 @@ try {
     report.details.installs = (inst.installs ?? []).map((i) => [i.template_name, i.objects.queries.length, i.objects.tables]);
     await send('Page.navigate', { url: `${BASE}/#/templates` });
     await waitFor(`!!document.querySelector('[data-testid="template-installs"]')`, 15000, 'installed list');
+    report.details.charts = 1;
+  }
+  else if (scenario === 'ui-foundation') {
+    // Menus, the confirmation dialog and toasts: by keyboard and by mouse.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const dash = (await (await authed(`/api/workspaces/${wsId}/dashboards`, { method: 'POST', body: JSON.stringify({ name: `E2E confirm ${Date.now()}` }) })).json()).dashboard;
+    cleanup = async () => { await authed(`/api/dashboards/${dash.id}`, { method: 'DELETE' }); };
+    const key = async (k, code = k) => { await send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code, windowsVirtualKeyCode: { Enter: 13, Escape: 27, ArrowDown: 40, Tab: 9 }[k], ...(k === 'Enter' ? { text: '\r' } : {}) }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code }); await sleep(150); };
+    await evaluate(`location.hash = '#/dashboards/${dash.id}'; 'ok'`);
+    await waitFor(`!!document.querySelector('[aria-label="More dashboard actions"]')`, 20000, 'dashboard header');
+    // Keyboard: open the menu from its button, move with the arrows, Escape returns to the button.
+    await evaluate(`document.querySelector('[aria-label="More dashboard actions"]').focus(); 'ok'`);
+    await key('Enter');
+    report.details.menuOpened = await evaluate(`document.querySelectorAll('[role=menu]').length`);
+    await waitFor(`document.activeElement?.getAttribute('role') === 'menuitem'`, 3000, 'first menu item focused');
+    report.details.menuFirst = await evaluate(`document.activeElement.textContent.trim()`);
+    await key('ArrowDown');
+    report.details.menuSecond = await evaluate(`document.activeElement.textContent.trim()`);
+    await key('Escape');
+    report.details.focusBack = await evaluate(`document.activeElement?.getAttribute('aria-label')`);
+    // The confirmation: Cancel has focus for a destructive action; Escape keeps the dashboard.
+    await evaluate(`document.querySelector('[aria-label="More dashboard actions"]').click(); 'ok'`);
+    await waitFor(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Delete dashboard'))`, 3000, 'menu open');
+    await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.includes('Delete dashboard')).click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="confirm-dialog"]')`, 3000, 'confirm dialog');
+    await sleep(300);
+    report.details.dialog = await evaluate(`({ title: document.querySelector('#dv-confirm-title').textContent, focused: document.activeElement?.textContent.trim(), ok: document.querySelector('[data-testid="confirm-ok"]').textContent.trim(), role: document.querySelector('[data-testid="confirm-dialog"]').getAttribute('role') })`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_confirm.png'), Buffer.from(shot.result.data, 'base64')); }
+    // Tab stays inside the dialog.
+    await key('Tab'); await key('Tab'); await key('Tab');
+    report.details.trapped = await evaluate(`!!document.activeElement?.closest('[data-testid="confirm-dialog"]')`);
+    await key('Escape');
+    await waitFor(`!document.querySelector('[data-testid="confirm-dialog"]')`, 3000, 'dialog closed');
+    report.details.afterCancel = (await authed(`/api/dashboards/${dash.id}`)).status;
+    // Confirm: deleted, and a toast says so.
+    await evaluate(`document.querySelector('[aria-label="More dashboard actions"]').click(); 'ok'`);
+    await waitFor(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Delete dashboard'))`, 3000, 'menu open again');
+    await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.includes('Delete dashboard')).click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="confirm-ok"]')`, 3000, 'confirm again');
+    await evaluate(`document.querySelector('[data-testid="confirm-ok"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-toast="success"]')`, 5000, 'success toast');
+    report.details.toast = await evaluate(`document.querySelector('[data-toast="success"]').innerText.split('\\n')[0]`);
+    report.details.afterDelete = (await authed(`/api/dashboards/${dash.id}`)).status;
     report.details.charts = 1;
   }
   else if (scenario === 'orchestration') {
@@ -1941,6 +1987,14 @@ try {
     if ((d.drawer ?? []).length !== 2) problems.push(`drawer: ${JSON.stringify(d.drawer)}`);
     if (JSON.stringify(d.widgets) !== JSON.stringify(['Revenue (30 days)', 'Orders (30 days)', 'Average order value', 'Revenue by month', 'Revenue by region', 'Top customers', 'Refund rate'])) problems.push(`widgets: ${JSON.stringify(d.widgets)}`);
     if (JSON.stringify(d.installs) !== JSON.stringify([['E-commerce sales', 5, ['orders', 'customers']]])) problems.push(`installs: ${JSON.stringify(d.installs)}`);
+  }
+  if (scenario === 'ui-foundation') {
+    if (d.menuFirst !== 'Rename' || d.menuSecond !== 'Schedule a snapshot…') problems.push(`menu keys: ${d.menuFirst} / ${d.menuSecond}`);
+    if (d.focusBack !== 'More dashboard actions') problems.push(`focus after Escape: ${d.focusBack}`);
+    if (!/^Delete dashboard "E2E confirm \d+"\?$/.test(d.dialog?.title ?? '') || d.dialog?.focused !== 'Cancel' || d.dialog?.ok !== 'Delete' || d.dialog?.role !== 'alertdialog') problems.push(`dialog: ${JSON.stringify(d.dialog)}`);
+    if (!d.trapped) problems.push('focus left the dialog');
+    if (d.afterCancel !== 200) problems.push(`cancel deleted it (${d.afterCancel})`);
+    if (!/^Deleted E2E confirm \d+$/.test(d.toast ?? '') || d.afterDelete !== 404) problems.push(`delete: ${d.toast} ${d.afterDelete}`);
   }
   if (scenario === 'orchestration') {
     if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);

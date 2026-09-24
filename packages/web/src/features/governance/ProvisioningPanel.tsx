@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Copy, KeyRound, RefreshCw, Trash2, Users } from 'lucide-react';
 import { api, timeAgo, type Group, type ScimStatus } from '../../api/client';
-import { Badge, Button } from '../../components/ui';
+import { Badge, Button, confirmAction } from '../../components/ui';
 
 /** Governance → Provisioning (administrators): the SCIM 2.0 endpoint and token, and the teams linked to IdP groups. */
 export function ProvisioningPanel() {
@@ -34,8 +34,8 @@ export function ProvisioningPanel() {
       {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}
       <section className="space-y-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-zinc-100">SCIM provisioning</h2>
-          {status && (status.enabled ? status.source ? <Badge tone="green">Active</Badge> : <Badge>No token</Badge> : <Badge tone="amber">Disabled in config</Badge>)}
+          <h2 className="text-body font-semibold text-zinc-100">SCIM provisioning</h2>
+          {status && (status.enabled ? status.source ? <Badge tone="ok">Active</Badge> : <Badge>No token</Badge> : <Badge tone="warn">Disabled in config</Badge>)}
         </div>
         <p className="max-w-3xl text-zinc-500">
           Let Okta, Entra ID, OneLogin or JumpCloud create, update and deactivate DuckView users and keep teams in step with IdP groups. Provisioned users sign in with SSO. Deactivating a user blocks sign-in and stops their sessions, API tokens and scheduled work at once;
@@ -59,11 +59,11 @@ export function ProvisioningPanel() {
               )}
               {status.source !== 'config' && (
                 <>
-                  <Button size="sm" disabled={busy || !status.enabled} onClick={() => void act(async () => { if (status.source && !confirm('Generate a new token? The current one stops working immediately.')) return; setToken((await api.post<{ token: string }>('/api/admin/scim/token', {})).token); })}>
+                  <Button size="sm" disabled={busy || !status.enabled} onClick={async () => void act(async () => { if (status.source && !(await confirmAction('Generate a new token? The current one stops working immediately.'))) return; setToken((await api.post<{ token: string }>('/api/admin/scim/token', {})).token); })}>
                     {status.source ? <RefreshCw className="h-3.5 w-3.5" /> : <KeyRound className="h-3.5 w-3.5" />} {status.source ? 'Rotate' : 'Generate token'}
                   </Button>
                   {status.source && (
-                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => void act(async () => { if (!confirm('Revoke the SCIM token? Provisioning stops until you generate a new one.')) return; await api.del('/api/admin/scim/token'); setToken(null); })}>
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={async () => void act(async () => { if (!(await confirmAction('Revoke the SCIM token? Provisioning stops until you generate a new one.'))) return; await api.del('/api/admin/scim/token'); setToken(null); })}>
                       <Trash2 className="h-3.5 w-3.5" /> Revoke
                     </Button>
                   )}
@@ -88,7 +88,7 @@ export function ProvisioningPanel() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><Users className="h-4 w-4 text-zinc-400" /> Teams linked to IdP groups</h2>
+        <h2 className="flex items-center gap-2 text-body font-semibold text-zinc-100"><Users className="h-4 w-4 text-zinc-400" /> Teams linked to IdP groups</h2>
         <p className="max-w-3xl text-zinc-500">
           A team linked to an IdP group takes its members from SSO sign-in and SCIM. Link one in <a className="text-accent-300 hover:underline" href="#/settings/teams">Settings → Teams</a> before anyone signs in, share workspaces with it, and access follows the IdP from then on.
         </p>
@@ -96,7 +96,7 @@ export function ProvisioningPanel() {
           <div className="border-y border-zinc-800 p-4 text-center text-zinc-500">No linked teams yet.</div>
         ) : (
           <table className="w-full max-w-3xl">
-            <thead className="text-left text-[10px] text-zinc-500">
+            <thead className="text-left text-2xs text-zinc-500">
               <tr><th className="pb-1.5">Team</th><th className="pb-1.5">IdP group</th><th className="pb-1.5">Members</th><th className="pb-1.5">Updated</th></tr>
             </thead>
             <tbody>

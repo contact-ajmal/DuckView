@@ -7,7 +7,7 @@ import { useCopilot } from '../../store/copilot';
 import { useWorkspace } from '../../store/workspace';
 import { api, type AgentRecord, type CopilotBuildBlock, type CopilotMetricBlock, type CopilotSpecBlock, type Dashboard } from '../../api/client';
 import { ChartWidget, type WidgetData } from '../dashboards/widgets';
-import { Button, Input, Label, Select, cn } from '../../components/ui';
+import { Button, Input, Label, Select, cn, toast } from '../../components/ui';
 
 export interface CopilotHost {
   /** What "insert" means here (the workbench: into the tab; a notebook: a new cell). */
@@ -38,8 +38,8 @@ function MetricCard({ block, workspaceId }: { block: CopilotMetricBlock | undefi
   const [sql, setSql] = useState(false);
   const [dashboards, setDashboards] = useState<Dashboard[] | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
-  if (!block) return <div className="my-2 rounded-md border border-zinc-800 px-2 py-1.5 text-[11px] text-zinc-500"><Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> computing from the metrics…</div>;
-  if (!block.ok) return <div className="my-2 rounded-md border border-amber-900/60 bg-amber-950/20 px-2 py-1.5 text-[11px] text-amber-200" data-testid="metric-card">Could not compute this from the metrics: {block.error}</div>;
+  if (!block) return <div className="my-2 rounded-md border border-zinc-800 px-2 py-1.5 text-2xs text-zinc-500"><Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> computing from the metrics…</div>;
+  if (!block.ok) return <div className="my-2 rounded-md border border-amber-900/60 bg-amber-950/20 px-2 py-1.5 text-2xs text-amber-200" data-testid="metric-card">Could not compute this from the metrics: {block.error}</div>;
   const q = block.query!;
   const dims = q.group_by ?? [];
   const numeric = (t: string) => /INT|DOUBLE|DECIMAL|FLOAT|REAL|NUMERIC/i.test(t);
@@ -53,34 +53,34 @@ function MetricCard({ block, workspaceId }: { block: CopilotMetricBlock | undefi
   };
   return (
     <div className="my-2 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950" data-testid="metric-card">
-      <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-400">
+      <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1 text-2xs text-zinc-400">
         <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-400" /> <span className="truncate text-zinc-200">{block.title ?? q.metrics.join(', ')}</span>
         <span className="ml-auto shrink-0">from metrics · {block.row_count} row{block.row_count === 1 ? '' : 's'}</span>
       </div>
       {dims.length === 0 && block.rows[0] ? (
-        <div className="flex flex-wrap gap-x-6 gap-y-1 px-3 py-2">{block.columns.map((c, i) => <div key={c.name}><div className="text-[10.5px] text-zinc-500">{c.name}</div><div className="text-lg font-semibold text-zinc-50" data-metric-value={c.name}>{fmt(block.rows[0]![i])}</div></div>)}</div>
+        <div className="flex flex-wrap gap-x-6 gap-y-1 px-3 py-2">{block.columns.map((c, i) => <div key={c.name}><div className="text-2xs text-zinc-500">{c.name}</div><div className="text-title font-semibold text-zinc-50" data-metric-value={c.name}>{fmt(block.rows[0]![i])}</div></div>)}</div>
       ) : (
         <>
           {block.rows.length > 1 && <div className="h-40 px-1 pt-1"><ChartWidget data={data} config={{ chart: time ? 'line' : 'bar', x: dims[0], y: q.metrics.slice(0, 3) }} /></div>}
           <div className="max-h-48 overflow-auto">
-            <table className="w-full font-mono text-[11px]">
+            <table className="w-full font-mono text-2xs">
               <thead className="sticky top-0 bg-zinc-900 text-left text-zinc-500"><tr>{block.columns.map((c) => <th key={c.name} className="px-2 py-1 font-normal">{c.name}</th>)}</tr></thead>
               <tbody>{block.rows.slice(0, 50).map((r, i) => <tr key={i} className="border-t border-zinc-800/60">{r.map((v, j) => <td key={j} className={cn('px-2 py-0.5 text-zinc-300', typeof v === 'number' && 'text-right')}>{fmt(v)}</td>)}</tr>)}</tbody>
             </table>
           </div>
         </>
       )}
-      {sql && <pre className="max-h-48 overflow-auto border-t border-zinc-800 p-2 font-mono text-[10.5px] text-zinc-400">{block.sql}</pre>}
-      {pinned && <div className="border-t border-zinc-800 px-2 py-1 text-[11px] text-emerald-300">Added to “{pinned}”.</div>}
+      {sql && <pre className="max-h-48 overflow-auto border-t border-zinc-800 p-2 font-mono text-2xs text-zinc-400">{block.sql}</pre>}
+      {pinned && <div className="border-t border-zinc-800 px-2 py-1 text-2xs text-emerald-300">Added to “{pinned}”.</div>}
       {dashboards && (
         <div className="max-h-40 overflow-auto border-t border-zinc-800 py-1">
-          {dashboards.length === 0 ? <p className="px-2 py-1 text-[11px] text-zinc-500">No grid dashboards yet.</p> : dashboards.map((d) => <button key={d.id} onClick={() => void pin(d)} className="block w-full truncate px-2 py-1 text-left text-[11px] text-zinc-300 hover:bg-zinc-800">{d.name}</button>)}
+          {dashboards.length === 0 ? <p className="px-2 py-1 text-2xs text-zinc-500">No grid dashboards yet.</p> : dashboards.map((d) => <button key={d.id} onClick={() => void pin(d)} className="block w-full truncate px-2 py-1 text-left text-2xs text-zinc-300 hover:bg-zinc-800">{d.name}</button>)}
         </div>
       )}
       <div className="flex flex-wrap gap-1 border-t border-zinc-800 bg-zinc-900/60 px-1.5 py-1">
-        <a href={metricsLink(q)} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-accent-200 hover:bg-accent-600/20" data-testid="metric-open">Open in Metrics</a>
-        <button disabled={!workspaceId} onClick={() => void (dashboards ? setDashboards(null) : api.get<{ dashboards: Dashboard[] }>(`/api/workspaces/${workspaceId}/dashboards`).then((r) => setDashboards(r.dashboards.filter((d) => d.kind !== 'mosaic'))))} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"><LayoutDashboard className="h-3 w-3" /> Add to dashboard</button>
-        <button onClick={() => setSql((v) => !v)} className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">{sql ? 'Hide SQL' : 'SQL'}</button>
+        <a href={metricsLink(q)} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-accent-200 hover:bg-accent-600/20" data-testid="metric-open">Open in Metrics</a>
+        <button disabled={!workspaceId} onClick={() => void (dashboards ? setDashboards(null) : api.get<{ dashboards: Dashboard[] }>(`/api/workspaces/${workspaceId}/dashboards`).then((r) => setDashboards(r.dashboards.filter((d) => d.kind !== 'mosaic'))))} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-300 hover:bg-zinc-800"><LayoutDashboard className="h-3 w-3" /> Add to dashboard</button>
+        <button onClick={() => setSql((v) => !v)} className="ml-auto rounded px-1.5 py-0.5 text-2xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">{sql ? 'Hide SQL' : 'SQL'}</button>
       </div>
     </div>
   );
@@ -111,30 +111,30 @@ function BuildCard({ text, block, workspaceId, onFix }: { text: string; block: C
   const kind = check?.build === 'app' ? 'data app' : 'dashboard';
   return (
     <div className="my-2 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950" data-testid="build-card">
-      <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-400">
+      <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1 text-2xs text-zinc-400">
         <LayoutDashboard className="h-3 w-3 shrink-0 text-accent-300" /> {kind}{check ? <span className="truncate text-zinc-200">· {check.name}</span> : null}
         <span className="ml-auto shrink-0">{check ? (failed.length ? <span className="text-amber-300">{check.items.length - failed.length} of {check.items.length} work</span> : <span className="inline-flex items-center gap-1 text-emerald-300"><CheckCircle2 className="h-3 w-3" /> all {check.items.length} work</span>) : block?.error ? <span className="text-red-300">not a valid plan</span> : <span>checking…</span>}</span>
       </div>
       {check && (
-        <ul className="divide-y divide-zinc-800/60 text-[11.5px]">
+        <ul className="divide-y divide-zinc-800/60 text-xs">
           {check.items.map((i) => (
             <li key={i.title} className="flex items-start gap-2 px-2 py-1" data-build-item={i.title}>
               {i.ok ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" /> : <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-300" />}
-              <span className="min-w-0 flex-1"><span className="text-zinc-200">{i.title}</span> <span className="text-zinc-500">{i.kind}{i.ok && i.row_count != null ? ` · ${i.row_count} row${i.row_count === 1 ? '' : 's'}` : ''}</span>{!i.ok && <span className="block break-words font-mono text-[10.5px] text-amber-200">{i.error}</span>}</span>
+              <span className="min-w-0 flex-1"><span className="text-zinc-200">{i.title}</span> <span className="text-zinc-500">{i.kind}{i.ok && i.row_count != null ? ` · ${i.row_count} row${i.row_count === 1 ? '' : 's'}` : ''}</span>{!i.ok && <span className="block break-words font-mono text-2xs text-amber-200">{i.error}</span>}</span>
             </li>
           ))}
         </ul>
       )}
-      {block?.error && <div className="px-2 py-1.5 font-mono text-[10.5px] text-red-200">{block.error}</div>}
-      {showPlan && <pre className="max-h-60 overflow-auto border-t border-zinc-800 p-2 font-mono text-[10.5px] text-zinc-300">{text}</pre>}
-      {error && <div className="border-t border-zinc-800 px-2 py-1.5 font-mono text-[10.5px] text-red-200">{error}</div>}
-      {made && <div className="border-t border-zinc-800 px-2 py-1.5 text-[11px] text-emerald-300">Created “{made.name}”{made.skipped.length ? ` without ${made.skipped.length} item${made.skipped.length === 1 ? '' : 's'} that did not work` : ''}. <a className="underline" href={made.url.replace(/^#?/, '#')}>Open it</a></div>}
+      {block?.error && <div className="px-2 py-1.5 font-mono text-2xs text-red-200">{block.error}</div>}
+      {showPlan && <pre className="max-h-60 overflow-auto border-t border-zinc-800 p-2 font-mono text-2xs text-zinc-300">{text}</pre>}
+      {error && <div className="border-t border-zinc-800 px-2 py-1.5 font-mono text-2xs text-red-200">{error}</div>}
+      {made && <div className="border-t border-zinc-800 px-2 py-1.5 text-2xs text-emerald-300">Created “{made.name}”{made.skipped.length ? ` without ${made.skipped.length} item${made.skipped.length === 1 ? '' : 's'} that did not work` : ''}. <a className="underline" href={made.url.replace(/^#?/, '#')}>Open it</a></div>}
       <div className="flex flex-wrap gap-1 border-t border-zinc-800 bg-zinc-900/60 px-1.5 py-1">
-        <button onClick={() => void create()} disabled={busy || !workspaceId || !check || check.items.every((i) => !i.ok || i.kind === 'text')} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" data-testid="build-create">
+        <button onClick={() => void create()} disabled={busy || !workspaceId || !check || check.items.every((i) => !i.ok || i.kind === 'text')} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-medium text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" data-testid="build-create">
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <LayoutDashboard className="h-3 w-3" />} Create {kind}{failed.length ? ` (${check!.items.length - failed.length} items)` : ''}
         </button>
-        {failed.length > 0 && <button onClick={() => onFix(failed.map((f) => `${f.title}: ${f.error}`))} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" data-testid="build-fix"><Wrench className="h-3 w-3 text-amber-300" /> Fix with AI</button>}
-        <button onClick={() => setShowPlan((v) => !v)} className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">{showPlan ? 'Hide plan' : 'Show plan'}</button>
+        {failed.length > 0 && <button onClick={() => onFix(failed.map((f) => `${f.title}: ${f.error}`))} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" data-testid="build-fix"><Wrench className="h-3 w-3 text-amber-300" /> Fix with AI</button>}
+        <button onClick={() => setShowPlan((v) => !v)} className="ml-auto rounded px-1.5 py-0.5 text-2xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">{showPlan ? 'Hide plan' : 'Show plan'}</button>
       </div>
     </div>
   );
@@ -165,22 +165,22 @@ function SpecBlock({ text, verdict, workspaceId, onFix }: { text: string; verdic
   const errors = verdict?.errors ?? [];
   return (
     <div className="my-2 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-400">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1 text-2xs text-zinc-400">
         <Sparkles className="h-3 w-3 shrink-0 text-accent-300" /> Mosaic dashboard spec{verdict?.title ? <span className="truncate text-zinc-200">· {verdict.title}</span> : null}
         <span className="ml-auto shrink-0">
           {verdict?.ok === true && <span className="inline-flex items-center gap-1 text-emerald-300"><CheckCircle2 className="h-3 w-3" /> valid for this workspace</span>}
           {verdict?.ok === false && <span className="inline-flex items-center gap-1 text-amber-300"><AlertTriangle className="h-3 w-3" /> {errors.length} error{errors.length === 1 ? '' : 's'}</span>}
         </span>
       </div>
-      <pre className="max-h-72 overflow-auto p-2.5 font-mono text-[11px] leading-relaxed text-zinc-200">{text}</pre>
-      {errors.length > 0 && <ul className="border-t border-zinc-800 px-3 py-1.5 font-mono text-[10.5px] text-amber-200">{errors.slice(0, 6).map((e) => <li key={e}>• {e}</li>)}</ul>}
-      {error && <div className="border-t border-zinc-800 px-3 py-1.5 font-mono text-[10.5px] text-red-200">{error}</div>}
+      <pre className="max-h-72 overflow-auto p-2.5 font-mono text-2xs leading-relaxed text-zinc-200">{text}</pre>
+      {errors.length > 0 && <ul className="border-t border-zinc-800 px-3 py-1.5 font-mono text-2xs text-amber-200">{errors.slice(0, 6).map((e) => <li key={e}>• {e}</li>)}</ul>}
+      {error && <div className="border-t border-zinc-800 px-3 py-1.5 font-mono text-2xs text-red-200">{error}</div>}
       <div className="flex flex-wrap gap-1 border-t border-zinc-800 bg-zinc-900/60 px-1.5 py-1">
-        <button onClick={() => void create()} disabled={busy || !workspaceId} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" title="Validate the spec, save it as a Mosaic dashboard and open it">
+        <button onClick={() => void create()} disabled={busy || !workspaceId} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" title="Validate the spec, save it as a Mosaic dashboard and open it">
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <LayoutDashboard className="h-3 w-3" />} Create dashboard
         </button>
         {errors.length > 0 && (
-          <button onClick={() => onFix(errors)} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Send the validation errors back to Copilot">
+          <button onClick={() => onFix(errors)} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Send the validation errors back to Copilot">
             <Wrench className="h-3 w-3 text-amber-300" /> Fix with Copilot
           </button>
         )}
@@ -196,18 +196,18 @@ function SqlBlock({ sql, onInsert, onNewTab, onRun, onDbt, busy }: { sql: string
   const dbt = looksLikeDbtModel(sql);
   return (
     <div className="my-2 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950">
-      <pre className="overflow-auto p-2.5 font-mono text-[11px] leading-relaxed text-zinc-200">{sql}</pre>
+      <pre className="overflow-auto p-2.5 font-mono text-2xs leading-relaxed text-zinc-200">{sql}</pre>
       <div className="flex flex-wrap gap-1 border-t border-zinc-800 bg-zinc-900/60 px-1.5 py-1">
-        <button onClick={onInsert} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Insert at cursor in the active tab">
+        <button onClick={onInsert} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Insert at cursor in the active tab">
           <ArrowDownToLine className="h-3 w-3" /> {host?.insertLabel ?? 'Insert into tab'}
         </button>
-        <button onClick={onNewTab} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Open in a fresh tab">
+        <button onClick={onNewTab} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50" title="Open in a fresh tab">
           <FilePlus2 className="h-3 w-3" /> New tab
         </button>
-        <button onClick={onDbt} className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] hover:bg-zinc-800', dbt ? 'text-accent-200' : 'text-zinc-300 hover:text-zinc-50')} title="Add to a dbt project as a model (Transform → dbt)" data-testid="copilot-dbt-model">
+        <button onClick={onDbt} className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs hover:bg-zinc-800', dbt ? 'text-accent-200' : 'text-zinc-300 hover:text-zinc-50')} title="Add to a dbt project as a model (Transform → dbt)" data-testid="copilot-dbt-model">
           <Workflow className="h-3 w-3" /> {dbt ? 'Add to dbt project' : 'dbt model'}
         </button>
-        {!dbt && <button onClick={onRun} disabled={busy} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" title="Run the query, then explain the result">
+        {!dbt && <button onClick={onRun} disabled={busy} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-accent-200 hover:bg-accent-600/20 disabled:opacity-40" title="Run the query, then explain the result">
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <PlayCircle className="h-3 w-3" />} Run & inspect
         </button>}
       </div>
@@ -303,7 +303,7 @@ export function CopilotDrawer() {
       const r = await api.post<{ models: string[] }>('/api/copilot/models', { provider: cp.settings.provider, api_key: cp.settings.apiKey || undefined, base_url: cp.settings.baseUrl || undefined, region: cp.settings.region || undefined, agent_id: cp.settings.agentId || undefined, agent_alias_id: cp.settings.agentAliasId || undefined, runtime_arn: cp.settings.runtimeArn || undefined });
       setModels(r.models);
     } catch (e) {
-      alert((e as Error).message);
+      toast.error(e);
     } finally {
       setModelsBusy(false);
     }
@@ -334,16 +334,16 @@ export function CopilotDrawer() {
       const text = String(children ?? '').replace(/\n$/, '');
       const isSql = lang === 'sql' || (!lang && text.includes('\n') && /^\s*(select|with|from|summarize|describe|pivot)\b/i.test(text));
       if (isSql) return <SqlBlock sql={text} onInsert={() => host?.insertSql(text)} onNewTab={() => host?.newTabWithSql(text, 'Copilot')} onRun={() => void runAndInspect(text)} onDbt={() => setDbtSql(text)} busy={running === text} />;
-      if (props.inline || !text.includes('\n')) return <code className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-[11px] text-accent-200">{text}</code>;
-      return <pre className="my-2 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2.5 font-mono text-[11px] text-zinc-200">{text}</pre>;
+      if (props.inline || !text.includes('\n')) return <code className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-2xs text-accent-200">{text}</code>;
+      return <pre className="my-2 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2.5 font-mono text-2xs text-zinc-200">{text}</pre>;
     },
     p: ({ children }: { children?: ReactNode }) => <p className="my-1.5 leading-relaxed">{children}</p>,
     ul: ({ children }: { children?: ReactNode }) => <ul className="my-1.5 list-disc space-y-0.5 pl-5">{children}</ul>,
     ol: ({ children }: { children?: ReactNode }) => <ol className="my-1.5 list-decimal space-y-0.5 pl-5">{children}</ol>,
-    h1: ({ children }: { children?: ReactNode }) => <h3 className="mt-3 mb-1 text-sm font-semibold text-zinc-50">{children}</h3>,
-    h2: ({ children }: { children?: ReactNode }) => <h3 className="mt-3 mb-1 text-sm font-semibold text-zinc-50">{children}</h3>,
-    h3: ({ children }: { children?: ReactNode }) => <h4 className="mt-2 mb-1 text-[13px] font-semibold text-zinc-100">{children}</h4>,
-    table: ({ children }: { children?: ReactNode }) => <table className="my-2 w-full border-collapse font-mono text-[11px]">{children}</table>,
+    h1: ({ children }: { children?: ReactNode }) => <h3 className="mt-3 mb-1 text-body font-semibold text-zinc-50">{children}</h3>,
+    h2: ({ children }: { children?: ReactNode }) => <h3 className="mt-3 mb-1 text-body font-semibold text-zinc-50">{children}</h3>,
+    h3: ({ children }: { children?: ReactNode }) => <h4 className="mt-2 mb-1 text-body font-semibold text-zinc-100">{children}</h4>,
+    table: ({ children }: { children?: ReactNode }) => <table className="my-2 w-full border-collapse font-mono text-2xs">{children}</table>,
     th: ({ children }: { children?: ReactNode }) => <th className="border border-zinc-800 bg-zinc-900 px-2 py-1 text-left">{children}</th>,
     td: ({ children }: { children?: ReactNode }) => <td className="border border-zinc-800 px-2 py-1">{children}</td>,
     a: ({ children, href }: { children?: ReactNode; href?: string }) => <a href={href} className="text-accent-300 underline" target="_blank" rel="noreferrer">{children}</a>,
@@ -378,12 +378,12 @@ export function CopilotDrawer() {
       />
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-zinc-800 px-3">
         <Sparkles className="h-4 w-4 text-accent-500" />
-        <span className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-zinc-50">DuckView AI</span>
-        <span className="min-w-0 truncate text-[11px] text-zinc-500" title={effectiveModel ?? ''}>
+        <span className="shrink-0 whitespace-nowrap text-body font-semibold text-zinc-50">DuckView AI</span>
+        <span className="min-w-0 truncate text-2xs text-zinc-500" title={effectiveModel ?? ''}>
           {effectiveProvider ? `${labelOf(effectiveProvider)} · ${effectiveModel}` : 'not configured'}
         </span>
         {(cp.usage.requests > 0 || cp.streaming) && (
-          <span className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400" title={`This conversation: ${cp.usage.input_tokens.toLocaleString()} input + ${cp.usage.output_tokens.toLocaleString()} output tokens over ${cp.usage.requests} turn${cp.usage.requests === 1 ? '' : 's'}`}>
+          <span className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-2xs text-zinc-400" title={`This conversation: ${cp.usage.input_tokens.toLocaleString()} input + ${cp.usage.output_tokens.toLocaleString()} output tokens over ${cp.usage.requests} turn${cp.usage.requests === 1 ? '' : 's'}`}>
             {cp.streaming && <Loader2 className="mr-1 inline h-3 w-3 animate-spin text-accent-300" />}{fmtTokens(cp.usage.input_tokens + cp.usage.output_tokens)} tok
           </span>
         )}
@@ -404,14 +404,14 @@ export function CopilotDrawer() {
       <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-1.5 border-b border-zinc-800 px-3 py-1.5 text-xs" data-testid="ai-context">
         <span className="text-zinc-500">Context</span>
         {contextChips.map((c) => (
-          <span key={c} className="inline-flex max-w-[14rem] items-center truncate rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[11px] text-zinc-300" title={c}>{c}</span>
+          <span key={c} className="inline-flex max-w-[14rem] items-center truncate rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-2xs text-zinc-300" title={c}>{c}</span>
         ))}
-        {cp.targets.length > 0 && <button className="text-[11px] text-zinc-500 hover:text-zinc-200" onClick={() => cp.setTargets([])}>clear</button>}
+        {cp.targets.length > 0 && <button className="text-2xs text-zinc-500 hover:text-zinc-200" onClick={() => cp.setTargets([])}>clear</button>}
       </div>
 
       {showConvs && (
         <div className="border-b border-zinc-800 bg-zinc-900/60 p-2 text-xs">
-          <div className="mb-1 flex items-center justify-between px-1 text-[10px] font-semibold text-zinc-500">
+          <div className="mb-1 flex items-center justify-between px-1 text-2xs font-semibold text-zinc-500">
             <span>Conversations</span>
             <button className="text-accent-300 hover:underline" onClick={() => wsId && void cp.openConversation(wsId, null)}>
               + new
@@ -422,7 +422,7 @@ export function CopilotDrawer() {
             {cp.conversations.map((c) => (
               <button key={c.id} onClick={() => wsId && void cp.openConversation(wsId, c.id).then(() => setShowConvs(false))} className={cn('flex w-full items-center justify-between rounded px-2 py-1 text-left hover:bg-zinc-800', c.id === cp.conversationId && 'bg-zinc-800')}>
                 <span className="truncate text-zinc-200">{c.title || 'Untitled'}</span>
-                <span className="ml-2 shrink-0 font-mono text-[10px] text-zinc-500">{c.messages}</span>
+                <span className="ml-2 shrink-0 font-mono text-2xs text-zinc-500">{c.messages}</span>
               </button>
             ))}
           </div>
@@ -431,7 +431,7 @@ export function CopilotDrawer() {
 
       {showSettings && cfg && (
         <div className="space-y-2 border-b border-zinc-800 bg-zinc-900/60 p-3 text-xs">
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-500">
+          <div className="flex items-center gap-1.5 text-2xs font-semibold text-zinc-500">
             <KeyRound className="h-3 w-3" /> Provider
           </div>
           <Select value={cp.settings.provider} onChange={(e) => { cp.setSettings({ provider: e.target.value as typeof cp.settings.provider, model: '', apiKey: '', baseUrl: '' }); setModels([]); }} className="h-8 w-full text-xs" disabled={!cfg.allow_byok}>
@@ -442,10 +442,10 @@ export function CopilotDrawer() {
               </option>
             ))}
           </Select>
-          <a href="#/settings/copilot" onClick={() => cp.toggle(false)} className="inline-flex items-center gap-1 text-[11px] text-accent-300 hover:underline"><Settings2 className="h-3 w-3" /> Manage providers, keys and usage in Settings</a>
+          <a href="#/settings/copilot" onClick={() => cp.toggle(false)} className="inline-flex items-center gap-1 text-2xs text-accent-300 hover:underline"><Settings2 className="h-3 w-3" /> Manage providers, keys and usage in Settings</a>
           {cp.settings.provider && AWS.has(cp.settings.provider) && (
             <div className="space-y-2">
-              <p className="text-[11px] text-zinc-500">Uses the DuckView server's AWS credentials (default credential chain). {cp.settings.provider === 'bedrock_agent' && 'Bedrock Agents Classic is closed to new customers — prefer AgentCore for new agents.'}</p>
+              <p className="text-2xs text-zinc-500">Uses the DuckView server's AWS credentials (default credential chain). {cp.settings.provider === 'bedrock_agent' && 'Bedrock Agents Classic is closed to new customers — prefer AgentCore for new agents.'}</p>
               {invokable.length > 0 && (
                 <div>
                   <Label>Registered agents</Label>
@@ -533,11 +533,11 @@ export function CopilotDrawer() {
               </div>
             </>
           )}
-          {!cfg.allow_byok && <p className="text-[11px] text-zinc-500">Keys are managed by the server administrator.</p>}
+          {!cfg.allow_byok && <p className="text-2xs text-zinc-500">Keys are managed by the server administrator.</p>}
         </div>
       )}
 
-      <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-3 py-3 text-[13px] text-zinc-200">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-3 py-3 text-body text-zinc-200">
         {!ready && (
           <div className="rounded-md border border-amber-900 bg-amber-950/40 p-3 text-xs text-amber-200">
             {cfg?.enabled === false ? 'DuckView AI is turned off on this server.' : <>No model is set up yet. <a href="#/settings/copilot" onClick={() => cp.toggle(false)} className="text-accent-300 hover:underline">Open Settings → AI assistant</a> to pick Claude, ChatGPT, Gemini, DeepSeek, OpenRouter, Kimi, Groq, Mistral, Grok, a local Ollama or any OpenAI-compatible endpoint and paste a key{cfg?.can_manage ? ' for everyone' : ' for yourself'}.</>}
@@ -546,7 +546,7 @@ export function CopilotDrawer() {
         {ready && cp.messages.length === 0 && (
           <div className="space-y-3">
             <p className="text-xs text-zinc-500">Ask about your data in plain words. DuckView AI sees this workspace's tables, files, metrics and dbt models, and the SQL you are editing.</p>
-            <div className="text-[11px] font-medium text-zinc-500">Suggested questions</div>
+            <div className="text-2xs font-medium text-zinc-500">Suggested questions</div>
             <div className="grid gap-1">
               {[
                 ['Which regions had the highest revenue growth month over month?', 'Trend + window functions'],
@@ -566,11 +566,11 @@ export function CopilotDrawer() {
         {cp.messages.map((m) => (
           <div key={m.id} className={cn('mb-3', m.role === 'user' ? 'flex justify-end' : '')}>
             {m.role === 'user' ? (
-              <div className="max-w-[90%] whitespace-pre-wrap rounded-lg bg-zinc-800 px-3 py-2 text-[13px] text-zinc-100">{m.content}</div>
+              <div className="max-w-[90%] whitespace-pre-wrap rounded-lg bg-zinc-800 px-3 py-2 text-body text-zinc-100">{m.content}</div>
             ) : (
               <div className="max-w-full">
                 {m.meta && (m.meta.tables != null || m.meta.model) && (
-                  <div className="mb-1 flex flex-wrap gap-x-2 font-mono text-[10px] text-zinc-500">
+                  <div className="mb-1 flex flex-wrap gap-x-2 font-mono text-2xs text-zinc-500">
                     {m.meta.model && <span>{m.meta.model}</span>}
                     {m.meta.tables != null && <span>· {m.meta.tables} tables · {m.meta.files} files{m.meta.targets?.length ? ` · profiled ${m.meta.targets.join(', ')}` : ''}</span>}
                     {m.meta.duration_ms != null && <span>· {(m.meta.duration_ms / 1000).toFixed(1)}s</span>}
@@ -581,7 +581,7 @@ export function CopilotDrawer() {
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponentsFor(m) as never}>{m.content || (m.streaming ? '…' : '')}</ReactMarkdown>
                 </div>
                 {m.streaming && <span className="inline-block h-3 w-1.5 animate-pulse bg-accent-400" />}
-                {m.error && <div className="mt-1 rounded-md border border-red-900 bg-red-950/40 px-2 py-1 text-[11px] text-red-200">{m.error}</div>}
+                {m.error && <div className="mt-1 rounded-md border border-red-900 bg-red-950/40 px-2 py-1 text-2xs text-red-200">{m.error}</div>}
               </div>
             )}
           </div>
@@ -590,17 +590,17 @@ export function CopilotDrawer() {
 
       <div className="shrink-0 border-t border-zinc-800 p-2">
         <div className="mb-1.5 flex flex-wrap gap-1">
-          <button onClick={() => submit('suggest')} disabled={!ready || cp.streaming} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title={cp.targets.length ? `Suggest questions for ${cp.targets.join(', ')}` : 'Suggest questions for this workspace'}>
+          <button onClick={() => submit('suggest')} disabled={!ready || cp.streaming} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-2xs text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title={cp.targets.length ? `Suggest questions for ${cp.targets.join(', ')}` : 'Suggest questions for this workspace'}>
             <Sparkles className="h-3 w-3 text-zinc-500" /> Suggest questions{cp.targets.length ? ` (${cp.targets.length})` : ''}
           </button>
-          <button onClick={() => submit('fix')} disabled={!ready || cp.streaming || !host?.activeSql()} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title="Send the active tab's SQL and its last error">
+          <button onClick={() => submit('fix')} disabled={!ready || cp.streaming || !host?.activeSql()} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-2xs text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title="Send the active tab's SQL and its last error">
             <Wrench className="h-3 w-3 text-zinc-500" /> Fix my query{host?.activeError() ? ' (error)' : ''}
           </button>
-          <button onClick={() => submit('dashboard')} disabled={!ready || cp.streaming} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title={cp.targets.length ? `Draft an interactive Mosaic dashboard for ${cp.targets.join(', ')} (type a goal above to steer it)` : 'Draft an interactive Mosaic dashboard — select a dataset or describe what you want above'}>
+          <button onClick={() => submit('dashboard')} disabled={!ready || cp.streaming} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-2xs text-zinc-300 hover:border-zinc-600 disabled:opacity-40" title={cp.targets.length ? `Draft an interactive Mosaic dashboard for ${cp.targets.join(', ')} (type a goal above to steer it)` : 'Draft an interactive Mosaic dashboard — select a dataset or describe what you want above'}>
             <LayoutDashboard className="h-3 w-3 text-zinc-500" /> Build dashboard{cp.targets.length ? ` (${cp.targets.length})` : ''}
           </button>
           {cp.messages.length > 0 && (
-            <button onClick={() => wsId && void cp.clear(wsId)} className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:text-red-300" title="Delete this conversation">
+            <button onClick={() => wsId && void cp.clear(wsId)} className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-2xs text-zinc-500 hover:text-red-300" title="Delete this conversation">
               <Trash2 className="h-3 w-3" />
             </button>
           )}
@@ -630,7 +630,7 @@ export function CopilotDrawer() {
             </Button>
           )}
         </div>
-        <div className="mt-1 flex items-center gap-1 text-[10px] text-zinc-600">
+        <div className="mt-1 flex items-center gap-1 text-2xs text-zinc-600">
           <ChevronDown className="h-3 w-3" /> context: schema of all tables, data files, buckets{cp.targets.length ? `, SUMMARIZE of ${cp.targets.join(', ')}` : ''}, active SQL
         </div>
       </div>

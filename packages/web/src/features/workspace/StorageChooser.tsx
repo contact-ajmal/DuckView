@@ -68,8 +68,8 @@ export function StorageChooser({ value, onChange, suggestedName, allowMemory = t
       <div className={cn('grid gap-2', compact ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-5')}>
         {cards.map((c) => (
           <button key={c.kind} type="button" disabled={!!c.disabled} title={c.disabled ?? c.hint} onClick={() => pick(c.kind)} className={cn('rounded-lg border p-2.5 text-left', value.kind === c.kind ? 'border-accent-500 bg-accent-500/10' : 'border-zinc-800 hover:border-zinc-600', c.disabled && 'cursor-not-allowed opacity-50')}>
-            <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">{c.icon} {c.label}</div>
-            <div className="mt-1 text-[11px] leading-snug text-zinc-500">{c.hint}</div>
+            <div className="flex items-center gap-1.5 text-body font-semibold text-zinc-100">{c.icon} {c.label}</div>
+            <div className="mt-1 text-2xs leading-snug text-zinc-500">{c.hint}</div>
           </button>
         ))}
       </div>
@@ -77,14 +77,14 @@ export function StorageChooser({ value, onChange, suggestedName, allowMemory = t
         <div>
           <Label>File name</Label>
           <Input value={value.path} onChange={(e) => onChange({ kind: 'data', path: e.target.value })} className="font-mono" placeholder={suggested || 'chosen from the name'} spellCheck={false} />
-          <p className="mt-1 text-[11px] text-zinc-500">Leave empty to use <code className="font-mono">{suggested || '<name>.duckdb'}</code>{options ? ` in ${options.data_directory}` : ''}. Never listed as a data file.</p>
+          <p className="mt-1 text-2xs text-zinc-500">Leave empty to use <code className="font-mono">{suggested || '<name>.duckdb'}</code>{options ? ` in ${options.data_directory}` : ''}. Never listed as a data file.</p>
         </div>
       )}
       {value.kind === 'folder' && (
         <div>
           <Label>Absolute path of the database file</Label>
           <Input value={value.path} onChange={(e) => onChange({ kind: 'folder', path: e.target.value })} className="font-mono" placeholder={`/mnt/analytics/${suggested || 'workspace.duckdb'}`} spellCheck={false} />
-          <p className="mt-1 text-[11px] text-zinc-500">The folder is created if needed and must be writable for the DuckView process. Only one DuckView instance may open the file.</p>
+          <p className="mt-1 text-2xs text-zinc-500">The folder is created if needed and must be writable for the DuckView process. Only one DuckView instance may open the file.</p>
         </div>
       )}
       {value.kind === 'cloud' && (
@@ -99,7 +99,7 @@ export function StorageChooser({ value, onChange, suggestedName, allowMemory = t
             <Label>Object key</Label>
             <Input value={value.key} onChange={(e) => onChange({ ...value, key: e.target.value })} className="font-mono" placeholder={`workspaces/${suggested || 'workspace.duckdb'}`} spellCheck={false} />
           </div>
-          <p className="text-[11px] text-zinc-500 md:col-span-2">
+          <p className="text-2xs text-zinc-500 md:col-span-2">
             Stored as <code className="font-mono">{conn ? `${conn.uri_scheme}://${conn.bucket ?? '<bucket>'}/${value.key.replace(/^\/+/, '') || '…'}` : '…'}</code>. DuckDB works on a local copy; every change is pushed to the object after a quiet minute, on <i>Sync now</i>, and at shutdown, and a new instance pulls it before the first query. One DuckView instance at a time.
             {conn && !conn.bucket && <span className="text-amber-300"> This connection has no default bucket — set one on the connection first.</span>}
           </p>

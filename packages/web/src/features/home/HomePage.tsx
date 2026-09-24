@@ -17,7 +17,7 @@ function Section({ title, action, children, className }: { title: string; action
   return (
     <section className={cn('min-w-0', className)}>
       <div className="mb-1.5 flex h-7 items-center justify-between">
-        <h2 className="text-[13px] font-semibold text-zinc-100">{title}</h2>
+        <h2 className="text-body font-semibold text-zinc-100">{title}</h2>
         {action}
       </div>
       {children}
@@ -98,7 +98,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
-          <div className="text-[15px] font-semibold text-zinc-100">No workspace yet</div>
+          <div className="text-title font-semibold text-zinc-100">No workspace yet</div>
           <p className="mt-1 text-xs text-zinc-500">A workspace holds a DuckDB database, its files, queries and dashboards.</p>
           <Button variant="primary" className="mt-3" onClick={onNewWorkspace}>Create a workspace</Button>
         </div>
@@ -112,7 +112,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
       <div className="mx-auto max-w-[1180px] px-6 pb-12 pt-6">
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-zinc-800 pb-5">
           <div className="min-w-0">
-            <h1 className="text-[18px] font-semibold tracking-tight text-zinc-50">{greeting}{firstName ? `, ${firstName[0]!.toUpperCase()}${firstName.slice(1)}` : ''}</h1>
+            <h1 className="text-page font-semibold tracking-tight text-zinc-50">{greeting}{firstName ? `, ${firstName[0]!.toUpperCase()}${firstName.slice(1)}` : ''}</h1>
             <p className="mt-0.5 text-xs text-zinc-500">
               {active.name} · {(ws.catalog?.files.length ?? 0) + (ws.catalog?.objects.length ?? 0)} datasets · {dashboards?.length ?? 0} dashboards
             </p>
@@ -139,7 +139,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
               {recentQueries.length === 0 ? (
                 <Quiet>Queries you run and save appear here.</Quiet>
               ) : (
-                <table className="w-full table-fixed text-[13px]">
+                <table className="w-full table-fixed text-body">
                   <thead>
                     <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
                       <th className="py-1.5 pr-3 font-normal">Query</th>
@@ -153,7 +153,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
                       <tr key={q.key} onClick={q.open} className="cursor-pointer border-b border-zinc-800/70 hover:bg-zinc-900" title="Open in a SQL tab">
                         <td className="py-2 pr-3">
                           <div className="truncate text-zinc-100">{q.name}</div>
-                          <div className="truncate font-mono text-[11px] text-zinc-500">{q.sql.replace(/\s+/g, ' ').slice(0, 120)}</div>
+                          <div className="truncate font-mono text-2xs text-zinc-500">{q.sql.replace(/\s+/g, ' ').slice(0, 120)}</div>
                         </td>
                         <td className="truncate py-2 pr-3 font-mono text-xs text-zinc-400 @max-3xl:hidden">{q.dataset ?? '—'}</td>
                         <td className="py-2 pr-3 text-xs text-zinc-500">{timeAgo(q.when)}</td>
@@ -171,7 +171,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
                   Drop a CSV, Parquet or JSON file in <a className="text-accent-300 hover:underline" href="#/data">Data</a>, or <a className="text-accent-300 hover:underline" href="#/connections">connect a source</a>.
                 </Quiet>
               ) : (
-                <table className="w-full table-fixed text-[13px]">
+                <table className="w-full table-fixed text-body">
                   <thead>
                     <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
                       <th className="py-1.5 pr-3 font-normal">Dataset</th>
@@ -186,7 +186,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
                         <td className="py-2 pr-3">
                           <span className="flex min-w-0 items-center gap-2">
                             {d.kind === 'file' ? <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Table2 className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
-                            <span className="truncate font-mono text-[12.5px] text-zinc-100">{d.name}</span>
+                            <span className="truncate font-mono text-xs text-zinc-100">{d.name}</span>
                           </span>
                         </td>
                         <td className="truncate py-2 pr-3 text-xs text-zinc-400">{d.source}</td>
@@ -202,7 +202,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
 
           <div className="space-y-8">
             <Section title="Workspace status">
-              <dl className="divide-y divide-zinc-800/70 border-y border-zinc-800 text-[13px]">
+              <dl className="divide-y divide-zinc-800/70 border-y border-zinc-800 text-body">
                 {[
                   { k: 'DuckDB', v: sys ? `v${sys.duckdb.version.replace(/^v/, '')} · ${sys.duckdb.threads} threads` : '…', tone: sys ? 'ok' : 'idle' },
                   { k: 'Storage', v: kind === 'memory' ? 'in memory (not saved)' : kind === 'cloud' ? (active.cloud_sync?.last_error ? 'cloud · sync error' : active.cloud_sync?.dirty ? 'cloud · pending sync' : 'cloud · synced') : active.active_db_path.split('/').pop()!, tone: kind === 'memory' || active.cloud_sync?.dirty ? 'warn' : active.cloud_sync?.last_error ? 'error' : 'ok' },
@@ -211,7 +211,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
                 ].map((r) => (
                   <div key={r.k} className="flex items-center justify-between gap-3 py-2">
                     <dt className="text-zinc-500">{r.k}</dt>
-                    <dd className="min-w-0"><StatusDot tone={r.tone as 'ok'} className="max-w-full truncate text-[13px] text-zinc-200">{r.v}</StatusDot></dd>
+                    <dd className="min-w-0"><StatusDot tone={r.tone as 'ok'} className="max-w-full truncate text-body text-zinc-200">{r.v}</StatusDot></dd>
                   </div>
                 ))}
               </dl>
@@ -226,7 +226,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
                     <li key={d.id}>
                       <a href={`#/dashboards/${d.id}`} className="flex items-center gap-2 py-2 hover:bg-zinc-900">
                         <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-                        <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-100">{d.name.replace(/^\p{Extended_Pictographic}\s*/u, '')}</span>
+                        <span className="min-w-0 flex-1 truncate text-body text-zinc-100">{d.name.replace(/^\p{Extended_Pictographic}\s*/u, '')}</span>
                         <span className="shrink-0 text-xs text-zinc-500">{timeAgo(d.updated_at)}</span>
                       </a>
                     </li>

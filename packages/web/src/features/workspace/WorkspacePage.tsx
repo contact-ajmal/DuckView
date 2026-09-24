@@ -27,7 +27,7 @@ import { TypePill } from '../../components/layout';
 import { SplitPane, StackedPanes, usePersisted } from '../../components/panes';
 import { useLayout } from '../../store/layout';
 import { HideButton } from '../../components/LayoutMenu';
-import { Badge, Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, Tabs, cn } from '../../components/ui';
+import { Badge, Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, Tabs, cn, confirmAction, toast } from '../../components/ui';
 
 type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile' | 'explore';
 
@@ -146,7 +146,7 @@ export function WorkspacePage() {
       }, { refresh });
     } catch (e) {
       setProfile({ summary: [], rowCount: null, columnCount: 0, sizeBytes: null, sql: '' });
-      alert((e as Error).message);
+      toast.error(e);
     } finally {
       setProfileLoading(false);
     }
@@ -189,7 +189,7 @@ export function WorkspacePage() {
     try {
       await exportAndDownload(workspace.id, sql, fmt, tab.title);
     } catch (e) {
-      alert((e as Error).message);
+      toast.error(e);
     } finally {
       setExporting(null);
     }
@@ -209,7 +209,7 @@ export function WorkspacePage() {
       setSaveModal({ ...saveModal, open: false });
       await loadSaved();
     } catch (e) {
-      alert((e as Error).message);
+      toast.error(e);
     }
   };
 
@@ -245,7 +245,7 @@ export function WorkspacePage() {
       onAddLakehouse: () => setLakeWizard(true),
       onAddFolder: () => setPicker(true),
       onRemoveFolder: async (path: string) => {
-        if (!workspace || !confirm(`Remove ${path} from this workspace? Files are not deleted.`)) return;
+        if (!workspace || !(await confirmAction(`Remove ${path} from this workspace? Files are not deleted.`))) return;
         await api.del(`/api/workspaces/${workspace.id}/folders?path=${encodeURIComponent(path)}`);
         setExplorerKey((k) => k + 1);
         void ws.loadCatalog(true);
@@ -330,7 +330,7 @@ export function WorkspacePage() {
             }}
             onHistory={(q) => setQueryHistory(q)}
             onDelete={async (q) => {
-              if (confirm(`Delete saved query "${q.name}"?`)) {
+              if ((await confirmAction(`Delete saved query "${q.name}"?`))) {
                 await api.del(`/api/workspaces/${workspace.id}/queries/${q.id}`);
                 await loadSaved();
               }
@@ -351,13 +351,13 @@ export function WorkspacePage() {
       ),
       content:
         ws.history.length === 0 ? (
-          <p className="px-4 py-3 text-[11px] text-zinc-500">Executed queries appear here.</p>
+          <p className="px-4 py-3 text-2xs text-zinc-500">Executed queries appear here.</p>
         ) : (
           <div>
             {ws.history.map((h) => (
               <button key={h.id} onClick={() => replaceSql(h.sql)} className="block w-full border-b border-zinc-800/70 px-4 py-2 text-left last:border-0 hover:bg-zinc-800/50" title={h.sql}>
-                <div className="truncate font-mono text-[11px] text-zinc-200">{h.sql.replace(/\s+/g, ' ')}</div>
-                <div className="mt-0.5 font-mono text-[10px] text-zinc-500">
+                <div className="truncate font-mono text-2xs text-zinc-200">{h.sql.replace(/\s+/g, ' ')}</div>
+                <div className="mt-0.5 font-mono text-2xs text-zinc-500">
                   {new Date(h.at).toLocaleTimeString()} · {h.status === 'ok' ? `${h.durationMs} ms · ${h.rows.toLocaleString()} rows` : <span className="text-red-300">error</span>}
                 </div>
               </button>
@@ -380,7 +380,7 @@ export function WorkspacePage() {
           <span className="tabular-nums text-zinc-300">{result.columns.length}</span> cols
           {result.truncated && <span className="text-amber-500">· capped at {ws.maxRows.toLocaleString()}</span>}
           {result.restoredAt && <span title="Restored from this browser after a reload — press Run (⌘↵) to re-execute.">· restored, not re-run</span>}
-          {result.engine === 'databricks' && <Badge tone="amber">databricks</Badge>}
+          {result.engine === 'databricks' && <Badge tone="warn">databricks</Badge>}
           {result.statements.filter((st) => st.class !== 'read').map((st, i) => <Badge key={i} tone={st.class === 'destructive' ? 'red' : 'violet'}>{st.verb}</Badge>)}
         </span>
       )}
@@ -398,7 +398,7 @@ export function WorkspacePage() {
             const r = ws.results[t.id];
             const active = t.id === ws.activeTabId;
             return (
-              <div key={t.id} role="tab" aria-selected={active} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && ws.selectTab(t.id)} onClick={() => ws.selectTab(t.id)} onDoubleClick={() => setRenaming(t.id)} className={cn('group relative flex max-w-[220px] shrink-0 cursor-pointer items-center gap-2 border-r border-zinc-800 px-3 text-[13px]', active ? 'bg-zinc-950 text-zinc-50' : 'text-zinc-500 hover:text-zinc-200')}>
+              <div key={t.id} role="tab" aria-selected={active} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && ws.selectTab(t.id)} onClick={() => ws.selectTab(t.id)} onDoubleClick={() => setRenaming(t.id)} className={cn('group relative flex max-w-[220px] shrink-0 cursor-pointer items-center gap-2 border-r border-zinc-800 px-3 text-body', active ? 'bg-zinc-950 text-zinc-50' : 'text-zinc-500 hover:text-zinc-200')}>
                 {active && <span className="absolute inset-x-0 top-0 h-[2px] bg-accent-500" />}
                 {r?.status === 'running' ? (
                   <button className="flex h-4 w-4 items-center justify-center rounded text-red-400 hover:bg-red-500/15" title="Stop this tab's query" onClick={(e) => { e.stopPropagation(); ws.cancelQuery(t.id); }}>
@@ -433,7 +433,7 @@ export function WorkspacePage() {
             </Button>
           ) : (
             <Button size="sm" variant="primary" onClick={() => run(null)} disabled={!sql.trim()} title={tabEngineConn ? `Runs on ${tabEngineConn.name} (Databricks SQL warehouse)` : 'Run the editor, or the selection (⌘↵)'} data-testid="run-query">
-              <Play className="h-3 w-3" /> {tabEngineConn ? `Run on ${tabEngineConn.name}` : 'Run'} <span className="ml-0.5 font-mono text-[10px] opacity-70">⌘↵</span>
+              <Play className="h-3 w-3" /> {tabEngineConn ? `Run on ${tabEngineConn.name}` : 'Run'} <span className="ml-0.5 font-mono text-2xs opacity-70">⌘↵</span>
             </Button>
           )}
           {(ws.remoteEngines.length > 0 || tabEngine) && tab && (
@@ -497,7 +497,7 @@ export function WorkspacePage() {
         onDrop={async (e) => { e.preventDefault(); setDropping(false); await importSqlFiles([...e.dataTransfer.files]); }}
       >
         {tab ? <SqlEditor key={tab.id} ref={editor} value={sql} initialCursor={ws.cursors[tab.id] ?? tab.cursor_position} onChange={(v, cursor) => ws.setDraft(tab.id, v, cursor)} onCursorChange={onCursor} onRun={(sel) => run(sel)} schema={schemaHints} /> : <Empty title="No tab open" action={<Button size="sm" onClick={() => void ws.addTab()}><Plus className="h-3.5 w-3.5" /> New tab</Button>} />}
-        {dropping && <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-accent-500/10 text-[13px] text-zinc-100">Drop .sql files to open them as tabs</div>}
+        {dropping && <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-accent-500/10 text-body text-zinc-100">Drop .sql files to open them as tabs</div>}
       </div>
     </div>
   );
@@ -542,7 +542,7 @@ export function WorkspacePage() {
           >
             {(close) => (
               <>
-                <div className="px-2 pb-1 pt-1 text-[11px] text-zinc-500">The complete result, exported on the server (not capped by the grid)</div>
+                <div className="px-2 pb-1 pt-1 text-2xs text-zinc-500">The complete result, exported on the server (not capped by the grid)</div>
                 {(['csv', 'parquet', 'json', 'arrow'] as const).map((fmt) => (
                   <MenuItem key={fmt} icon={<Download className="h-3.5 w-3.5" />} onClick={() => { close(); void exportRows(fmt); }}>{fmt.toUpperCase()}</MenuItem>
                 ))}
@@ -556,9 +556,9 @@ export function WorkspacePage() {
           <>
             {result?.status === 'approval' && result.challenge && (
               <div className="m-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-                <div className="flex items-center gap-2 text-[13px] font-semibold text-zinc-100"><ShieldAlert className="h-4 w-4 text-amber-500" /> This statement changes data</div>
+                <div className="flex items-center gap-2 text-body font-semibold text-zinc-100"><ShieldAlert className="h-4 w-4 text-amber-500" /> This statement changes data</div>
                 <p className="mt-1 text-xs text-zinc-400">{result.challenge.reason}</p>
-                <ul className="mt-2 space-y-1 font-mono text-[11px] text-zinc-400">{result.challenge.statements.map((st) => <li key={st.index}><Badge tone="red">{st.verb}</Badge> {st.preview}</li>)}</ul>
+                <ul className="mt-2 space-y-1 font-mono text-2xs text-zinc-400">{result.challenge.statements.map((st) => <li key={st.index}><Badge tone="error">{st.verb}</Badge> {st.preview}</li>)}</ul>
                 <Button size="sm" variant="danger" className="mt-3" onClick={() => run(null, false)}>Approve and run</Button>
               </div>
             )}
@@ -600,7 +600,7 @@ export function WorkspacePage() {
         )}
       </div>
       {executed && view === 'table' && result.columns.length > 0 && !isHidden('query.columns') && (
-        <div className="group/cols flex h-7 shrink-0 items-center gap-x-4 overflow-hidden border-t border-zinc-800 px-3 font-mono text-[11px]">
+        <div className="group/cols flex h-7 shrink-0 items-center gap-x-4 overflow-hidden border-t border-zinc-800 px-3 font-mono text-2xs">
           {result.columns.slice(0, 12).map((c) => <span key={c.name} className="flex shrink-0 items-center gap-1.5"><span className="text-zinc-300">{c.name}</span><TypePill type={c.type} /></span>)}
           {result.columns.length > 12 && <span className="shrink-0 text-zinc-500">+{result.columns.length - 12} more</span>}
           <HideButton id="query.columns" className="ml-auto opacity-0 group-hover/cols:opacity-100" />
@@ -624,7 +624,7 @@ export function WorkspacePage() {
         primary={
           <div className="group/sb relative h-full overflow-hidden border-r border-zinc-800 bg-zinc-900" aria-label="Schema explorer">
             <StackedPanes storageKey="workbench.sidebar" sections={sidebarSections} />
-            {sidebarSections.length === 0 && <div className="p-4 text-[11px] text-zinc-500">All side bar sections are hidden — restore them in Settings → Appearance → Layout.</div>}
+            {sidebarSections.length === 0 && <div className="p-4 text-2xs text-zinc-500">All side bar sections are hidden — restore them in Settings → Appearance → Layout.</div>}
           </div>
         }
         secondary={
@@ -682,7 +682,7 @@ export function WorkspacePage() {
             <div><Label>Tags</Label><Input value={saveModal.tags} onChange={(e) => setSaveModal({ ...saveModal, tags: e.target.value })} placeholder="revenue, kpi" /></div>
           </div>
           <div><Label>Description</Label><Input value={saveModal.description} onChange={(e) => setSaveModal({ ...saveModal, description: e.target.value })} placeholder="What this query answers" /></div>
-          <pre className="max-h-32 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[11px] text-zinc-400">{sql}</pre>
+          <pre className="max-h-32 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-2xs text-zinc-400">{sql}</pre>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setSaveModal({ ...saveModal, open: false })}>Cancel</Button>
             <Button variant="primary" onClick={doSave} disabled={!saveModal.name.trim()}>{saveModal.existing ? 'Update' : 'Save'}</Button>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bot, CheckCircle2, ExternalLink, Eye, EyeOff, KeyRound, Loader2, PlugZap, RefreshCw, Save, Trash2, Activity, Gauge, Users, Sparkles, ShieldCheck, AlertTriangle, Lock } from 'lucide-react';
 import { api, type CopilotConfig, type CopilotProvider, type CopilotProviderPreset, type CopilotServerSettings, type CopilotUsageReport, type CopilotUsageTotals } from '../../api/client';
 import { useCopilot } from '../../store/copilot';
-import { Badge, Button, Input, Label, Select, cn } from '../../components/ui';
+import { Badge, Button, Input, Label, Select, cn, confirmAction, InlineError } from '../../components/ui';
 
 /** Compact number for token counts: 1.2k, 3.4M. */
 export const fmtTokens = (n: number | null | undefined) => (n == null ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k` : String(n));
@@ -27,10 +27,10 @@ function ProviderPicker({ presets, value, onPick, compact }: { presets: CopilotP
       {presets.map((p) => (
         <button key={p.id} type="button" onClick={() => onPick(p.id)} className={cn('rounded-lg border p-2.5 text-left transition', value === p.id ? 'border-accent-500 bg-accent-500/10' : 'border-zinc-800 hover:border-zinc-600')} title={p.blurb}>
           <div className="flex items-center justify-between gap-1">
-            <span className="truncate text-[13px] font-semibold text-zinc-100">{p.label}</span>
-            <span className="shrink-0 font-mono text-[9px] text-zinc-500">{p.vendor}</span>
+            <span className="truncate text-body font-semibold text-zinc-100">{p.label}</span>
+            <span className="shrink-0 font-mono text-2xs text-zinc-500">{p.vendor}</span>
           </div>
-          {!compact && <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-zinc-500">{p.blurb}</div>}
+          {!compact && <div className="mt-1 line-clamp-2 text-2xs leading-snug text-zinc-500">{p.blurb}</div>}
         </button>
       ))}
     </div>
@@ -65,7 +65,7 @@ function ProviderForm({ preset, draft, onChange, keyOnFile, fetchModels }: { pre
             <Input type={show ? 'text' : 'password'} value={draft.api_key} onChange={(e) => onChange({ api_key: e.target.value })} autoComplete="off" spellCheck={false} className="h-9 flex-1 font-mono text-xs" placeholder={keyOnFile ? `key on file ····${keyOnFile} — paste a new one to replace it` : preset.keyPrefix ? `${preset.keyPrefix}…` : 'paste your API key'} />
             <Button size="sm" variant="ghost" onClick={() => setShow(!show)} title={show ? 'Hide' : 'Show'}>{show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</Button>
           </div>
-          {preset.keyPrefix && draft.api_key && !draft.api_key.startsWith(preset.keyPrefix) && <p className="mt-1 text-[11px] text-amber-300">A {preset.label} key usually starts with <code className="font-mono">{preset.keyPrefix}</code>.</p>}
+          {preset.keyPrefix && draft.api_key && !draft.api_key.startsWith(preset.keyPrefix) && <p className="mt-1 text-2xs text-amber-300">A {preset.label} key usually starts with <code className="font-mono">{preset.keyPrefix}</code>.</p>}
         </div>
       )}
       {preset.kind === 'openai' && (preset.baseUrl === null || preset.id === 'ollama') && (
@@ -75,7 +75,7 @@ function ProviderForm({ preset, draft, onChange, keyOnFile, fetchModels }: { pre
         </div>
       )}
       {!aws && (preset.kind === 'anthropic' || (preset.baseUrl !== null && preset.id !== 'ollama')) && (
-        <details className="text-[11px] text-zinc-500">
+        <details className="text-2xs text-zinc-500">
           <summary className="cursor-pointer select-none">Advanced: endpoint override</summary>
           <Input value={draft.base_url} onChange={(e) => onChange({ base_url: e.target.value })} className="mt-1 h-8 font-mono text-xs" placeholder={preset.baseUrl ?? 'https://api.anthropic.com'} spellCheck={false} />
         </details>
@@ -102,11 +102,11 @@ function ProviderForm({ preset, draft, onChange, keyOnFile, fetchModels }: { pre
               <RefreshCw className="h-3.5 w-3.5" /> Fetch models
             </Button>
           </div>
-          {models.length > 0 && <p className="mt-1 text-[11px] text-zinc-500">{models.length} model{models.length === 1 ? '' : 's'} available — start typing to filter.</p>}
-          {err && <p className="mt-1 text-[11px] text-red-300">{err}</p>}
+          {models.length > 0 && <p className="mt-1 text-2xs text-zinc-500">{models.length} model{models.length === 1 ? '' : 's'} available — start typing to filter.</p>}
+          <InlineError error={err} className="mt-1" />
         </div>
       )}
-      {preset.note && <p className="text-[11px] text-zinc-500">{preset.note}</p>}
+      {preset.note && <p className="text-2xs text-zinc-500">{preset.note}</p>}
     </div>
   );
 }
@@ -159,7 +159,7 @@ function ServerProviderCard({ cfg, reload }: { cfg: CopilotConfig; reload: () =>
     }
   };
   const remove = async () => {
-    if (!confirm('Remove the server-managed provider? Copilot falls back to duckview.config.yaml, or to each person\'s own key.')) return;
+    if (!(await confirmAction('Remove the server-managed provider? Copilot falls back to duckview.config.yaml, or to each person\'s own key.'))) return;
     await api.del('/api/copilot/settings');
     setTest({ state: 'idle' });
     setSaved(null);
@@ -175,19 +175,19 @@ function ServerProviderCard({ cfg, reload }: { cfg: CopilotConfig; reload: () =>
         {cfg.server_provider ? (
           <Badge tone={cfg.has_server_key ? 'green' : 'amber'}>{cfg.providers.find((p) => p.id === cfg.server_provider)?.label ?? cfg.server_provider} · {cfg.server_model}{cfg.server_key_hint ? ` · key ····${cfg.server_key_hint}` : ''}{source === 'config' ? ' · from config file' : ''}</Badge>
         ) : (
-          <Badge tone="amber">not configured</Badge>
+          <Badge tone="warn">not configured</Badge>
         )}
-        <span className="ml-auto text-[11px] text-zinc-500">{settings?.updated_by_email ? `set by ${settings.updated_by_email}` : source === 'config' ? 'copilot.* in duckview.config.yaml' : 'pick a vendor, paste a key, save'}</span>
+        <span className="ml-auto text-2xs text-zinc-500">{settings?.updated_by_email ? `set by ${settings.updated_by_email}` : source === 'config' ? 'copilot.* in duckview.config.yaml' : 'pick a vendor, paste a key, save'}</span>
       </header>
       <div className="space-y-4 p-4">
         {cfg.ephemeral_encryption_key && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200">
+          <div className="flex items-start gap-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-2xs text-amber-200">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>This server is running without <code className="font-mono">ENCRYPTION_KEY</code>: the key you save here is encrypted with a random key that changes on every restart, so it will have to be pasted again after each restart. Set <code className="font-mono">ENCRYPTION_KEY</code> (and <code className="font-mono">JWT_SECRET</code>) in the environment to keep it.</span>
           </div>
         )}
         {undecryptable && (
-          <div className="flex items-start gap-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-[11px] text-red-200">
+          <div className="flex items-start gap-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-2xs text-red-200">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>The stored key cannot be decrypted any more — the server's encryption key changed since it was saved. Copilot is not working for anyone until you paste the key again.</span>
           </div>
@@ -198,15 +198,15 @@ function ServerProviderCard({ cfg, reload }: { cfg: CopilotConfig; reload: () =>
           <Button size="sm" variant="secondary" onClick={() => void runTest()} loading={test.state === 'busy'} disabled={!canSave}><PlugZap className="h-3.5 w-3.5" /> Test connection</Button>
           <Button size="sm" variant="primary" onClick={() => void save()} loading={saving} disabled={!canSave}><Save className="h-3.5 w-3.5" /> Save for everyone</Button>
           {source === 'settings' && <Button size="sm" variant="danger" onClick={() => void remove()} title="Remove the stored provider and key"><Trash2 className="h-3.5 w-3.5" /></Button>}
-          {test.state === 'ok' && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {test.message}</span>}
-          {test.state === 'error' && <span className="text-[11px] text-red-300">{test.message}</span>}
-          {saved && test.state !== 'error' && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {saved}</span>}
+          {test.state === 'ok' && <span className="inline-flex items-center gap-1 text-2xs text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {test.message}</span>}
+          {test.state === 'error' && <span className="text-2xs text-red-300">{test.message}</span>}
+          {saved && test.state !== 'error' && <span className="inline-flex items-center gap-1 text-2xs text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {saved}</span>}
         </div>
-        <div className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] text-zinc-400">
+        <div className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-2xs text-zinc-400">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
           <span>Once saved, the key is <b className="text-zinc-300">write-only</b>: it is encrypted at rest (AES-256-GCM with the server's encryption key), never returned by any API or page — administrators see only its last four characters — never written to logs or the audit trail, scrubbed from provider error messages, and only ever sent to {preset.vendor === 'Any' ? 'the endpoint you configure' : preset.vendor}. Saving here overrides <code className="font-mono">copilot.*</code> in duckview.config.yaml, so no key needs to live in a file or the environment.</span>
         </div>
-        <label className="flex cursor-pointer items-start gap-2 text-[11px] text-zinc-400">
+        <label className="flex cursor-pointer items-start gap-2 text-2xs text-zinc-400">
           <input type="checkbox" className="mt-0.5 accent-accent-500" checked={cfg.allow_byok} disabled={source !== 'settings'} onChange={async (e) => { await api.put('/api/copilot/settings/byok', { allow: e.target.checked === cfg.allow_byok_config ? null : e.target.checked }); reload(); }} />
           <span><Lock className="mr-1 inline h-3 w-3" />Allow people to use their own keys (bring-your-own). Off = everyone uses this server provider and cannot pick another vendor, key or model.{source !== 'settings' ? ' Save a server provider first to change this.' : cfg.allow_byok !== cfg.allow_byok_config ? ' (overriding the config file)' : ''}</span>
         </label>
@@ -227,8 +227,8 @@ function OwnKeyCard({ cfg }: { cfg: CopilotConfig }) {
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/60">
       <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-2.5">
         <h3 className="text-xs font-semibold text-zinc-400">Your own key · this browser only</h3>
-        {own ? <Badge tone="violet">{preset?.label ?? cp.settings.provider} · {cp.settings.model || preset?.defaultModel}</Badge> : <Badge>using the server provider</Badge>}
-        {own && <button onClick={() => { cp.setSettings({ provider: '', model: '', apiKey: '', baseUrl: '' }); setTest({ state: 'idle' }); }} className="ml-auto text-[11px] text-zinc-400 hover:text-zinc-100">Use the server provider instead</button>}
+        {own ? <Badge tone="accent">{preset?.label ?? cp.settings.provider} · {cp.settings.model || preset?.defaultModel}</Badge> : <Badge>using the server provider</Badge>}
+        {own && <button onClick={() => { cp.setSettings({ provider: '', model: '', apiKey: '', baseUrl: '' }); setTest({ state: 'idle' }); }} className="ml-auto text-2xs text-zinc-400 hover:text-zinc-100">Use the server provider instead</button>}
       </header>
       <div className="space-y-4 p-4">
         <ProviderPicker compact presets={cfg.providers} value={cp.settings.provider} onPick={(id) => { cp.setSettings({ provider: id, model: '', apiKey: '', baseUrl: '' }); setTest({ state: 'idle' }); }} />
@@ -237,9 +237,9 @@ function OwnKeyCard({ cfg }: { cfg: CopilotConfig }) {
             <ProviderForm preset={preset} draft={draft} onChange={(d) => { cp.setSettings({ ...(d.api_key !== undefined ? { apiKey: d.api_key } : {}), ...(d.model !== undefined ? { model: d.model } : {}), ...(d.base_url !== undefined ? { baseUrl: d.base_url } : {}), ...(d.aws_region !== undefined ? { region: d.aws_region } : {}), ...(d.bedrock_agent_id !== undefined ? { agentId: d.bedrock_agent_id } : {}), ...(d.bedrock_agent_alias_id !== undefined ? { agentAliasId: d.bedrock_agent_alias_id } : {}), ...(d.agentcore_runtime_arn !== undefined ? { runtimeArn: d.agentcore_runtime_arn } : {}) }); setTest({ state: 'idle' }); }} keyOnFile={null} fetchModels={fetchModels} />
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="secondary" loading={test.state === 'busy'} onClick={async () => { setTest({ state: 'busy' }); try { const m = await fetchModels(); setTest({ state: 'ok', message: `Connected · ${m.length} model${m.length === 1 ? '' : 's'} visible` }); } catch (e) { setTest({ state: 'error', message: (e as Error).message }); } }}><PlugZap className="h-3.5 w-3.5" /> Test</Button>
-              {test.state === 'ok' && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {test.message}</span>}
-              {test.state === 'error' && <span className="text-[11px] text-red-300">{test.message}</span>}
-              <span className="text-[11px] text-zinc-500">Saved automatically in this browser; sent with each request, never stored on the server.</span>
+              {test.state === 'ok' && <span className="inline-flex items-center gap-1 text-2xs text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {test.message}</span>}
+              {test.state === 'error' && <span className="text-2xs text-red-300">{test.message}</span>}
+              <span className="text-2xs text-zinc-500">Saved automatically in this browser; sent with each request, never stored on the server.</span>
             </div>
           </>
         )}
@@ -251,12 +251,12 @@ function OwnKeyCard({ cfg }: { cfg: CopilotConfig }) {
 function Tile({ label, totals, sub }: { label: string; totals: CopilotUsageTotals | { requests: number; input_tokens: number; output_tokens: number; errors?: number }; sub?: string }) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
-      <div className="text-[10px] font-semibold text-zinc-500">{label}</div>
+      <div className="text-2xs font-semibold text-zinc-500">{label}</div>
       <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-xl font-semibold text-zinc-50">{fmtTokens(totals.input_tokens + totals.output_tokens)}</span>
-        <span className="text-[11px] text-zinc-500">tokens</span>
+        <span className="text-title font-semibold text-zinc-50">{fmtTokens(totals.input_tokens + totals.output_tokens)}</span>
+        <span className="text-2xs text-zinc-500">tokens</span>
       </div>
-      <div className="mt-0.5 font-mono text-[10px] text-zinc-500">{fmtTokens(totals.input_tokens)} in · {fmtTokens(totals.output_tokens)} out · {totals.requests} request{totals.requests === 1 ? '' : 's'}{totals.errors ? ` · ${totals.errors} failed` : ''}{sub ? ` · ${sub}` : ''}</div>
+      <div className="mt-0.5 font-mono text-2xs text-zinc-500">{fmtTokens(totals.input_tokens)} in · {fmtTokens(totals.output_tokens)} out · {totals.requests} request{totals.requests === 1 ? '' : 's'}{totals.errors ? ` · ${totals.errors} failed` : ''}{sub ? ` · ${sub}` : ''}</div>
     </div>
   );
 }
@@ -280,8 +280,8 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/60">
       <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-2.5">
         <h3 className="text-xs font-semibold text-zinc-400">Usage {report.scope === 'all' ? '· everyone' : '· you'}</h3>
-        <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500"><Activity className={cn('h-3 w-3', report.active.length ? 'text-emerald-400' : 'text-zinc-600')} /> {report.active.length} active</span>
-        <Select value={days} onChange={(e) => setDays(Number(e.target.value))} className="ml-auto h-7 text-[11px]">
+        <span className="inline-flex items-center gap-1 text-2xs text-zinc-500"><Activity className={cn('h-3 w-3', report.active.length ? 'text-emerald-400' : 'text-zinc-600')} /> {report.active.length} active</span>
+        <Select value={days} onChange={(e) => setDays(Number(e.target.value))} className="ml-auto h-7 text-2xs">
           <option value={7}>last 7 days</option>
           <option value={30}>last 30 days</option>
           <option value={90}>last 90 days</option>
@@ -289,18 +289,18 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
       </header>
       <div className="space-y-4 p-4">
         <div>
-          <div className="mb-1.5 text-[10px] font-semibold text-zinc-500">Sessions running now</div>
+          <div className="mb-1.5 text-2xs font-semibold text-zinc-500">Sessions running now</div>
           {report.active.length === 0 ? (
-            <p className="text-[11px] text-zinc-600">No Copilot request is in flight.</p>
+            <p className="text-2xs text-zinc-600">No Copilot request is in flight.</p>
           ) : (
             <ul className="divide-y divide-zinc-800 rounded-lg border border-zinc-800">
               {report.active.map((a) => (
-                <li key={a.id} className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-[11px]">
+                <li key={a.id} className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-2xs">
                   <Loader2 className="h-3 w-3 animate-spin text-accent-300" />
                   <span className="font-medium text-zinc-100">{a.user_email}</span>
                   <span className="font-mono text-zinc-400">{label(a.provider)} · {a.model}</span>
                   <Badge>{a.action}</Badge>
-                  {a.byok && <Badge tone="violet">own key</Badge>}
+                  {a.byok && <Badge tone="accent">own key</Badge>}
                   <span className="ml-auto font-mono text-zinc-500">{fmtMs(Date.now() - a.started_at)} · {a.chars.toLocaleString()} chars{tick ? '' : ''}</span>
                 </li>
               ))}
@@ -314,25 +314,25 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
         </div>
         {report.by_day.length > 1 && (
           <div>
-            <div className="mb-1.5 text-[10px] font-semibold text-zinc-500">Tokens per day</div>
+            <div className="mb-1.5 text-2xs font-semibold text-zinc-500">Tokens per day</div>
             <div className="flex h-16 items-end gap-0.5">
               {report.by_day.map((d) => (
                 <div key={d.day} className="flex-1 rounded-t bg-accent-500/70" style={{ height: `${Math.max(4, (100 * (d.input_tokens + d.output_tokens)) / maxDay)}%` }} title={`${d.day}: ${fmtTokens(d.input_tokens + d.output_tokens)} tokens · ${d.requests} requests`} />
               ))}
             </div>
-            <div className="mt-0.5 flex justify-between font-mono text-[9px] text-zinc-600"><span>{report.by_day[0]!.day}</span><span>{report.by_day.at(-1)!.day}</span></div>
+            <div className="mt-0.5 flex justify-between font-mono text-2xs text-zinc-600"><span>{report.by_day[0]!.day}</span><span>{report.by_day.at(-1)!.day}</span></div>
           </div>
         )}
         <div className={cn('grid gap-4', report.scope === 'all' ? 'lg:grid-cols-2' : '')}>
           <div>
-            <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold text-zinc-500"><Gauge className="h-3 w-3" /> By model</div>
-            {report.by_model.length === 0 ? <p className="text-[11px] text-zinc-600">Nothing yet.</p> : (
-              <table className="w-full text-[11px]">
-                <thead className="text-left text-[10px] uppercase text-zinc-500"><tr><th className="py-1">Model</th><th className="py-1 text-right">Requests</th><th className="py-1 text-right">In</th><th className="py-1 text-right">Out</th></tr></thead>
+            <div className="mb-1.5 flex items-center gap-1 text-2xs font-semibold text-zinc-500"><Gauge className="h-3 w-3" /> By model</div>
+            {report.by_model.length === 0 ? <p className="text-2xs text-zinc-600">Nothing yet.</p> : (
+              <table className="w-full text-2xs">
+                <thead className="text-left text-2xs uppercase text-zinc-500"><tr><th className="py-1">Model</th><th className="py-1 text-right">Requests</th><th className="py-1 text-right">In</th><th className="py-1 text-right">Out</th></tr></thead>
                 <tbody>
                   {report.by_model.map((m) => (
                     <tr key={`${m.provider}/${m.model}`} className="border-t border-zinc-800/60">
-                      <td className="py-1 font-mono text-zinc-200">{label(m.provider)} · {m.model}{m.byok ? <span className="ml-1 text-[9px] text-accent-300">own key</span> : null}</td>
+                      <td className="py-1 font-mono text-zinc-200">{label(m.provider)} · {m.model}{m.byok ? <span className="ml-1 text-2xs text-accent-300">own key</span> : null}</td>
                       <td className="py-1 text-right font-mono text-zinc-400">{m.requests}{m.errors ? <span className="text-red-300"> ({m.errors}✗)</span> : null}</td>
                       <td className="py-1 text-right font-mono text-zinc-400">{fmtTokens(m.input_tokens)}</td>
                       <td className="py-1 text-right font-mono text-zinc-400">{fmtTokens(m.output_tokens)}</td>
@@ -344,10 +344,10 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
           </div>
           {report.scope === 'all' && (
             <div>
-              <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold text-zinc-500"><Users className="h-3 w-3" /> By person</div>
-              {report.by_user.length === 0 ? <p className="text-[11px] text-zinc-600">Nothing yet.</p> : (
-                <table className="w-full text-[11px]">
-                  <thead className="text-left text-[10px] uppercase text-zinc-500"><tr><th className="py-1">Person</th><th className="py-1 text-right">Requests</th><th className="py-1 text-right">In</th><th className="py-1 text-right">Out</th></tr></thead>
+              <div className="mb-1.5 flex items-center gap-1 text-2xs font-semibold text-zinc-500"><Users className="h-3 w-3" /> By person</div>
+              {report.by_user.length === 0 ? <p className="text-2xs text-zinc-600">Nothing yet.</p> : (
+                <table className="w-full text-2xs">
+                  <thead className="text-left text-2xs uppercase text-zinc-500"><tr><th className="py-1">Person</th><th className="py-1 text-right">Requests</th><th className="py-1 text-right">In</th><th className="py-1 text-right">Out</th></tr></thead>
                   <tbody>
                     {report.by_user.map((u) => (
                       <tr key={u.user_id} className="border-t border-zinc-800/60">
@@ -364,11 +364,11 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
           )}
         </div>
         {report.recent.length > 0 && (
-          <details className="text-[11px]">
-            <summary className="cursor-pointer select-none text-[10px] font-semibold text-zinc-500">Recent turns ({report.recent.length})</summary>
+          <details className="text-2xs">
+            <summary className="cursor-pointer select-none text-2xs font-semibold text-zinc-500">Recent turns ({report.recent.length})</summary>
             <ul className="mt-1.5 max-h-64 divide-y divide-zinc-800/60 overflow-auto rounded-lg border border-zinc-800">
               {report.recent.map((r) => (
-                <li key={r.id} className="flex flex-wrap items-center gap-2 px-2.5 py-1 font-mono text-[10.5px]">
+                <li key={r.id} className="flex flex-wrap items-center gap-2 px-2.5 py-1 font-mono text-2xs">
                   <span className="text-zinc-500">{new Date(r.created_at).toLocaleString()}</span>
                   <span className="text-zinc-300">{label(r.provider)} · {r.model}</span>
                   <Badge>{r.action}</Badge>

@@ -45,7 +45,7 @@ export function ClusterPanel() {
       <div className="space-y-3 text-xs" data-testid="cluster-panel" data-cluster="off">
         <p className="text-zinc-400">This DuckView runs as a single node. To serve more users, run several nodes behind one load balancer: they share the metadata database and the data volume, each workspace's engine runs on one node at a time, and the others forward its queries there. Scheduled jobs run once, on whichever node claims them first.</p>
         <div className="relative">
-          <pre className="overflow-auto rounded-md bg-zinc-900 p-3 pr-20 font-mono text-[11.5px] text-zinc-200">{SETUP}</pre>
+          <pre className="overflow-auto rounded-md bg-zinc-900 p-3 pr-20 font-mono text-xs text-zinc-200">{SETUP}</pre>
           <div className="absolute right-2 top-2"><CopyButton text={SETUP} /></div>
         </div>
         <p className="text-zinc-500">Data apps and MCP sessions keep state on the node they started on: route them with sticky sessions (a cookie or client-IP affinity on the load balancer).</p>

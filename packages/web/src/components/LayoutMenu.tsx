@@ -38,7 +38,7 @@ export function LayoutMenu({ currentPage }: { currentPage: LayoutPage | null }) 
   return (
     <div ref={ref} className="relative">
       <button onClick={() => setOpen(!open)} className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs', hiddenItems.length ? 'border-amber-800/60 bg-amber-950/30 text-amber-200' : 'border-zinc-800 bg-zinc-900/70 text-zinc-300 hover:text-zinc-100')} title="Layout — show hidden components">
-        <LayoutTemplate className="h-3.5 w-3.5" /> Layout{hiddenItems.length ? <span className="rounded-full bg-amber-500/20 px-1.5 font-mono text-[10px]">{hiddenItems.length}</span> : null}
+        <LayoutTemplate className="h-3.5 w-3.5" /> Layout{hiddenItems.length ? <span className="rounded-full bg-amber-500/20 px-1.5 font-mono text-2xs">{hiddenItems.length}</span> : null}
       </button>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 w-80 rounded-lg border border-zinc-800 bg-zinc-900 p-2 shadow-xl">
@@ -48,7 +48,7 @@ export function LayoutMenu({ currentPage }: { currentPage: LayoutPage | null }) 
             <>
               {pages.map((page) => (
                 <div key={page} className="mb-2">
-                  <div className="flex items-center justify-between px-2 pb-1 text-[10px] font-semibold text-zinc-500">
+                  <div className="flex items-center justify-between px-2 pb-1 text-2xs font-semibold text-zinc-500">
                     <span>{PAGE_LABELS[page]}</span>
                     <button onClick={() => reset(page)} className="inline-flex items-center gap-1 normal-case tracking-normal text-accent-300 hover:underline">
                       <RotateCcw className="h-3 w-3" /> show all
@@ -61,7 +61,7 @@ export function LayoutMenu({ currentPage }: { currentPage: LayoutPage | null }) 
                         <Eye className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
                         <span>
                           <span className="text-zinc-100">{c.label}</span>
-                          <span className="block text-[10px] text-zinc-500">{c.description}</span>
+                          <span className="block text-2xs text-zinc-500">{c.description}</span>
                         </span>
                       </button>
                     ))}
@@ -72,7 +72,7 @@ export function LayoutMenu({ currentPage }: { currentPage: LayoutPage | null }) 
               </button>
             </>
           )}
-          <p className="mt-2 border-t border-zinc-800 px-2 pt-2 text-[10px] text-zinc-600">Full list under Settings → Layout.</p>
+          <p className="mt-2 border-t border-zinc-800 px-2 pt-2 text-2xs text-zinc-600">Full list under Settings → Layout.</p>
         </div>
       )}
     </div>
@@ -93,8 +93,8 @@ export function LayoutSettings() {
         {pages.map((page) => (
           <div key={page} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-zinc-400">{PAGE_LABELS[page]}</span>
-              <button onClick={() => reset(page)} className="text-[10px] text-accent-300 hover:underline">show all</button>
+              <span className="text-2xs font-semibold text-zinc-400">{PAGE_LABELS[page]}</span>
+              <button onClick={() => reset(page)} className="text-2xs text-accent-300 hover:underline">show all</button>
             </div>
             <div className="space-y-1">
               {LAYOUT_COMPONENTS.filter((c) => c.page === page).map((c) => (
@@ -102,7 +102,7 @@ export function LayoutSettings() {
                   <input type="checkbox" checked={!hidden[c.id]} onChange={() => toggle(c.id)} className="mt-0.5 accent-accent-500" />
                   <span>
                     <span className={cn(hidden[c.id] ? 'text-zinc-500 line-through' : 'text-zinc-100')}>{c.label}</span>
-                    <span className="block text-[10px] text-zinc-500">{c.description}</span>
+                    <span className="block text-2xs text-zinc-500">{c.description}</span>
                   </span>
                 </label>
               ))}

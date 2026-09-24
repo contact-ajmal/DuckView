@@ -41,7 +41,7 @@ export function AppearanceSettings() {
     <div className="space-y-6">
       {groups.map((g) => (
         <section key={g.kind}>
-          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500">
+          <div className="mb-2 flex items-center gap-1.5 text-2xs font-semibold text-zinc-500">
             {g.icon} {g.label}
           </div>
           <div className="grid gap-3 md:grid-cols-3">
@@ -53,11 +53,11 @@ export function AppearanceSettings() {
                   <button key={t.id} onClick={() => th.setTheme(t.id)} className={cn('rounded-xl border p-3 text-left transition-colors', active ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
                     <ThemePreview t={t} />
                     <div className="mt-2 flex items-center justify-between">
-                      <span className="text-sm font-semibold text-zinc-100">{t.name}</span>
-                      {active && <span className="inline-flex items-center gap-1 rounded-full bg-accent-600/20 px-1.5 py-0.5 text-[10px] text-accent-100"><Check className="h-3 w-3" /> active</span>}
+                      <span className="text-body font-semibold text-zinc-100">{t.name}</span>
+                      {active && <span className="inline-flex items-center gap-1 rounded-full bg-accent-600/20 px-1.5 py-0.5 text-2xs text-accent-100"><Check className="h-3 w-3" /> active</span>}
                     </div>
-                    <p className="mt-0.5 text-[11px] text-zinc-500">{t.description}</p>
-                    <p className="mt-1 font-mono text-[10px] text-zinc-600">{t.fonts.sans.split(',')[0]!.replace(/"/g, '')} · {t.fonts.mono.split(',')[0]!.replace(/"/g, '')}</p>
+                    <p className="mt-0.5 text-2xs text-zinc-500">{t.description}</p>
+                    <p className="mt-1 font-mono text-2xs text-zinc-600">{t.fonts.sans.split(',')[0]!.replace(/"/g, '')} · {t.fonts.mono.split(',')[0]!.replace(/"/g, '')}</p>
                   </button>
                 );
               })}
@@ -74,7 +74,7 @@ export function AppearanceSettings() {
               <option key={f.id} value={f.id}>{f.label}</option>
             ))}
           </Select>
-          <p className="mt-1 text-[11px] text-zinc-500" style={{ fontFamily: th.sans ? FONT_STACKS[th.sans] : th.theme.fonts.sans }}>The quick brown fox jumps over the lazy dog.</p>
+          <p className="mt-1 text-2xs text-zinc-500" style={{ fontFamily: th.sans ? FONT_STACKS[th.sans] : th.theme.fonts.sans }}>The quick brown fox jumps over the lazy dog.</p>
         </div>
         <div>
           <Label>Code font</Label>
@@ -84,16 +84,16 @@ export function AppearanceSettings() {
               <option key={f.id} value={f.id}>{f.label}</option>
             ))}
           </Select>
-          <p className="mt-1 text-[11px] text-zinc-500" style={{ fontFamily: th.mono ? FONT_STACKS[th.mono] : th.theme.fonts.mono }}>SELECT region, sum(revenue) FROM 'sales.parquet';</p>
+          <p className="mt-1 text-2xs text-zinc-500" style={{ fontFamily: th.mono ? FONT_STACKS[th.mono] : th.theme.fonts.mono }}>SELECT region, sum(revenue) FROM 'sales.parquet';</p>
         </div>
         <div>
           <Label>Interface size · {th.scale}%</Label>
           <input type="range" min={80} max={130} step={5} value={th.scale} onChange={(e) => th.setScale(Number(e.target.value))} className="mt-2 w-full accent-accent-500" />
-          <div className="flex justify-between font-mono text-[10px] text-zinc-500"><span>80%</span><span>100%</span><span>130%</span></div>
+          <div className="flex justify-between font-mono text-2xs text-zinc-500"><span>80%</span><span>100%</span><span>130%</span></div>
         </div>
       </section>
       <div className="flex items-center justify-between border-t border-zinc-800 pt-3">
-        <p className="text-[11px] text-zinc-500">Theme, fonts and size are stored in this browser. Charts use a colour-blind-checked palette per theme.</p>
+        <p className="text-2xs text-zinc-500">Theme, fonts and size are stored in this browser. Charts use a colour-blind-checked palette per theme.</p>
         <button onClick={th.reset} className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"><RotateCcw className="h-3 w-3" /> Reset appearance</button>
       </div>
     </div>

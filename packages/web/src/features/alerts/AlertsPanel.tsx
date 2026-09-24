@@ -3,7 +3,7 @@ import { BellRing, Pencil, Play, Plus, Trash2, History, FlaskConical } from 'luc
 import { api, timeAgo, type AlertCondition, type AlertEvaluation, type AlertEventRow, type NotificationChannel, type SqlAlert, type SyncSchedule } from '../../api/client';
 import { useWorkspaceAccess } from '../../store/workspace';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
-import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Badge, Button, Empty, Input, Label, Modal, Select, cn, confirmAction } from '../../components/ui';
 import { CHANNEL_META } from './ChannelsPanel';
 
 const STATE_TONE = { unknown: 'zinc', ok: 'green', triggered: 'red', error: 'amber' } as const;
@@ -75,15 +75,15 @@ export function AlertsPanel({ workspaceId }: { workspaceId: string }) {
             <div key={a.id} className={cn('rounded-lg border p-3', a.id === focus ? 'border-accent-500' : 'border-zinc-800', !a.enabled && 'opacity-60')}>
               <div className="flex flex-wrap items-center gap-2">
                 <BellRing className={cn('h-4 w-4', a.state === 'triggered' ? 'text-red-400' : 'text-accent-300')} />
-                <span className="text-sm font-semibold text-zinc-100">{a.name}</span>
+                <span className="text-body font-semibold text-zinc-100">{a.name}</span>
                 <Badge tone={STATE_TONE[a.state]}>{a.state}{a.last_value !== null ? ` · ${a.last_value}` : ''}</Badge>
                 <Badge>{a.severity}</Badge>
                 {!a.enabled && <Badge>disabled</Badge>}
-                <span className="ml-auto text-[11px] text-zinc-500">{describe(a.condition)} · {every(a.schedule)}</span>
+                <span className="ml-auto text-2xs text-zinc-500">{describe(a.condition)} · {every(a.schedule)}</span>
               </div>
-              {a.description && <p className="mt-1 text-[11px] text-zinc-400">{a.description}</p>}
-              <pre className="mt-1.5 max-h-16 overflow-hidden whitespace-pre-wrap rounded bg-zinc-950 px-2 py-1 font-mono text-[10.5px] text-zinc-400">{a.sql}</pre>
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10.5px] text-zinc-500">
+              {a.description && <p className="mt-1 text-2xs text-zinc-400">{a.description}</p>}
+              <pre className="mt-1.5 max-h-16 overflow-hidden whitespace-pre-wrap rounded bg-zinc-950 px-2 py-1 font-mono text-2xs text-zinc-400">{a.sql}</pre>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-2xs text-zinc-500">
                 {a.channel_ids.length ? a.channel_ids.map((id) => byId.get(id)).filter(Boolean).map((c) => <span key={c!.id} className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-zinc-300">{CHANNEL_META[c!.type].icon}{c!.name}</span>) : <span className="text-amber-300">no channels — nobody is told</span>}
                 <span>· {a.last_checked_at ? `checked ${timeAgo(a.last_checked_at)}` : 'never checked'}{a.next_run_at ? ` · next ${new Date(a.next_run_at).toLocaleString()}` : ''}</span>
                 {a.last_error && <span className="font-mono text-red-300">· {a.last_error}</span>}
@@ -93,7 +93,7 @@ export function AlertsPanel({ workspaceId }: { workspaceId: string }) {
                 <Button size="sm" variant="ghost" onClick={() => void api.get<{ events: AlertEventRow[] }>(`/api/alerts/${a.id}/events`).then((r) => setHistory({ alert: a, rows: r.events }))} title="History"><History className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => { setPreview(null); setDraft(fromAlert(a)); }} title="Edit"><Pencil className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => void act(`toggle:${a.id}`, () => api.patch(`/api/alerts/${a.id}`, { enabled: !a.enabled }))}>{a.enabled ? 'Pause' : 'Resume'}</Button>
-                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!canEdit} onClick={() => { if (confirm(`Delete the alert "${a.name}"?`)) void act(`del:${a.id}`, () => api.del(`/api/alerts/${a.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!canEdit} onClick={async () => { if ((await confirmAction(`Delete the alert "${a.name}"?`))) void act(`del:${a.id}`, () => api.del(`/api/alerts/${a.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           ))}
@@ -107,7 +107,7 @@ export function AlertsPanel({ workspaceId }: { workspaceId: string }) {
               <div><Label>Name</Label><Input autoFocus value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Orders below plan" /></div>
               <div><Label>Description <span className="normal-case text-zinc-600">(in the message)</span></Label><Input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="What to do when it fires" /></div>
             </div>
-            <div><Label>Query <span className="normal-case text-zinc-600">(read-only, one statement)</span></Label><textarea value={draft.sql} onChange={(e) => setDraft({ ...draft, sql: e.target.value })} spellCheck={false} rows={5} className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[12px] text-zinc-200 focus:border-accent-500 focus:outline-none" /></div>
+            <div><Label>Query <span className="normal-case text-zinc-600">(read-only, one statement)</span></Label><textarea value={draft.sql} onChange={(e) => setDraft({ ...draft, sql: e.target.value })} spellCheck={false} rows={5} className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" /></div>
             <div className="flex flex-wrap items-end gap-2">
               <div><Label>Alert when</Label><Select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as Draft['kind'] })}><option value="threshold">a value crosses a threshold</option><option value="rows">the query returns rows</option><option value="no_rows">the query returns no rows</option></Select></div>
               {draft.kind === 'threshold' && (
@@ -152,7 +152,7 @@ export function AlertsPanel({ workspaceId }: { workspaceId: string }) {
           {history?.rows.map((e) => (
             <div key={e.id} className="flex items-start gap-2 border-b border-zinc-800/60 py-1.5">
               <Badge tone={STATE_TONE[e.state]}>{e.state}</Badge>
-              <div className="min-w-0 flex-1"><div className="text-zinc-200">{e.message}</div><div className="text-[10.5px] text-zinc-500">{timeAgo(e.created_at)} · {e.triggered_by}{e.notified ? ` · ${e.notified} channel${e.notified === 1 ? '' : 's'} told` : ''}</div></div>
+              <div className="min-w-0 flex-1"><div className="text-zinc-200">{e.message}</div><div className="text-2xs text-zinc-500">{timeAgo(e.created_at)} · {e.triggered_by}{e.notified ? ` · ${e.notified} channel${e.notified === 1 ? '' : 's'} told` : ''}</div></div>
             </div>
           ))}
         </div>

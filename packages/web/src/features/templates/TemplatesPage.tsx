@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Download, PackagePlus, Search, Trash2, Upload, X } from 'lucide-react';
 import { api, authedBlobUrl, timeAgo } from '../../api/client';
-import { Badge, Button, Drawer, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Badge, Button, Drawer, Input, Label, Modal, Select, cn, InlineError } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 
@@ -62,7 +62,7 @@ export function TemplatesPage() {
       <div className="mx-auto max-w-6xl space-y-5 px-6 py-5">
         <div className="flex flex-wrap items-end gap-3">
           <div className="mr-auto">
-            <h1 className="text-lg font-semibold text-zinc-50">Templates</h1>
+            <h1 className="text-page font-semibold text-zinc-50">Templates</h1>
             <p className="text-xs text-zinc-500">Dashboards, queries, notebooks, metrics and quality checks for a subject, installed into {ws.workspaces.find((w) => w.id === ws.activeId)?.name ?? 'this workspace'} in one step.</p>
           </div>
           <div className="relative">
@@ -87,14 +87,14 @@ export function TemplatesPage() {
           {shown.map((t) => (
             <button key={t.id} data-template={t.name} onClick={() => setOpen(t.id)} className="flex flex-col rounded-lg border border-zinc-800 p-4 text-left transition-colors hover:border-zinc-600 hover:bg-zinc-900/60">
               <div className="flex items-start gap-2">
-                <span className="text-sm font-medium text-zinc-100">{t.name}</span>
+                <span className="text-body font-medium text-zinc-100">{t.name}</span>
                 {t.status !== 'published' && <Badge tone={t.status === 'pending' ? 'amber' : 'zinc'} className="ml-auto">{t.status === 'pending' ? 'In review' : 'Private'}</Badge>}
               </div>
-              <div className="mt-0.5 text-[11px] text-zinc-500">{t.category} · {t.source === 'builtin' ? 'DuckView' : t.author ?? 'someone'}{t.installs ? ` · ${plural(t.installs, 'install')}` : ''}</div>
+              <div className="mt-0.5 text-2xs text-zinc-500">{t.category} · {t.source === 'builtin' ? 'DuckView' : t.author ?? 'someone'}{t.installs ? ` · ${plural(t.installs, 'install')}` : ''}</div>
               <p className="mt-2 line-clamp-3 flex-1 text-xs text-zinc-400">{t.description}</p>
-              <div className="mt-3 text-[11px] text-zinc-500">{summary(t.contents)}</div>
+              <div className="mt-3 text-2xs text-zinc-500">{summary(t.contents)}</div>
               <div className="mt-1 flex flex-wrap gap-1">
-                {t.contents.tables.map((x) => <code key={x} className="rounded bg-zinc-900 px-1 py-px font-mono text-[10.5px] text-zinc-400">{x}</code>)}
+                {t.contents.tables.map((x) => <code key={x} className="rounded bg-zinc-900 px-1 py-px font-mono text-2xs text-zinc-400">{x}</code>)}
               </div>
             </button>
           ))}
@@ -103,7 +103,7 @@ export function TemplatesPage() {
 
         {installs.length > 0 && (
           <section data-testid="template-installs">
-            <h2 className="mb-1.5 text-[13px] font-semibold text-zinc-100">Installed in this workspace</h2>
+            <h2 className="mb-1.5 text-body font-semibold text-zinc-100">Installed in this workspace</h2>
             <ul className="divide-y divide-zinc-800/70 border-y border-zinc-800 text-xs">
               {installs.map((i) => (
                 <li key={i.id} className="flex items-center gap-3 py-2">
@@ -221,13 +221,13 @@ function TemplateDrawer({ id, onClose, onChanged }: { id: string; onClose: () =>
                       <div className={cn('mt-0.5 pl-[7.5rem]', !c ? 'text-zinc-600' : c.exists && !c.missing_columns.length ? 'text-emerald-300' : c.exists ? 'text-red-300' : sample && c.has_sample ? 'text-zinc-400' : 'text-red-300')}>
                         {!c ? 'Checking…' : c.exists ? (c.missing_columns.length ? `Missing ${c.missing_columns.join(', ')}` : 'Has every column it uses') : c.has_sample ? (sample ? `Will be created with sample data` : 'Not in this workspace') : 'Not in this workspace'}
                       </div>
-                      <div className="pl-[7.5rem] text-[11px] text-zinc-600">{tbl.columns.map((x) => x.name).join(', ')}</div>
+                      <div className="pl-[7.5rem] text-2xs text-zinc-600">{tbl.columns.map((x) => x.name).join(', ')}</div>
                     </div>
                   );
                 })}
               </div>
               {t.contents.sample_data && <label className="mt-3 flex items-center gap-2 text-zinc-300"><input type="checkbox" checked={sample} onChange={(e) => setSample(e.target.checked)} /> Create sample data for tables that aren't there</label>}
-              {error && <p className="mt-2 text-red-300">{error}</p>}
+              <InlineError error={error} className="mt-2" />
               <div className="mt-3">
                 <Button variant="primary" loading={busy} disabled={!access.canEdit || blocked || !checks.length} onClick={() => void install()}>Install into {ws.workspaces.find((w) => w.id === ws.activeId)?.name ?? 'this workspace'}</Button>
                 {!access.canEdit && <p className="mt-1 text-zinc-500">Viewers can't install templates.</p>}
@@ -332,7 +332,7 @@ function PublishModal({ workspaceId, onClose, onDone }: { workspaceId: string; o
             </Select>
           </div>
         </div>
-        {error && <p className="text-red-300">{error}</p>}
+        <InlineError error={error} />
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={busy} disabled={!name.trim() || count === 0} onClick={() => void publish()}>Publish</Button>

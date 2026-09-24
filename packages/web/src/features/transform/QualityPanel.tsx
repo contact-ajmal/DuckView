@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, FileCode2, FlaskConical, MoreHorizontal, Pen
 import { api, timeAgo, type DbtTestSummary, type NotificationChannel, type QualityCheck, type QualityCheckResult, type QualityCheckType, type QualityOutcome, type QualityRun, type QualityStatus, type QualitySuite, type SyncSchedule } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
-import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, StatusDot, cn } from '../../components/ui';
+import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, StatusDot, cn, confirmAction } from '../../components/ui';
 import { PageHeader } from '../../components/layout';
 import { CHANNEL_META } from '../alerts/ChannelsPanel';
 
@@ -133,16 +133,16 @@ export function QualityPanel({ workspaceId }: { workspaceId: string }) {
           <nav aria-label="Quality suites" className="border-zinc-800 py-2 @3xl:border-r @3xl:pr-2" data-testid="quality-suites">
             {(suites ?? []).map((s) => (
               <button key={s.id} onClick={() => select(s.id)} data-suite={s.name} className={cn('flex w-full flex-col items-start gap-0.5 rounded-md px-2.5 py-2 text-left transition-colors', s.id === selected ? 'bg-zinc-900' : 'hover:bg-zinc-900/60', !s.enabled && 'opacity-60')}>
-                <span className="flex w-full items-center gap-2"><StatusDot tone={TONE[s.status]} /><span className="min-w-0 flex-1 truncate text-[13px] text-zinc-100">{s.name}</span><span className="text-[11px] text-zinc-500">{s.checks.length}</span></span>
-                <span className="w-full truncate pl-4 font-mono text-[11px] text-zinc-500">{s.relation}</span>
+                <span className="flex w-full items-center gap-2"><StatusDot tone={TONE[s.status]} /><span className="min-w-0 flex-1 truncate text-body text-zinc-100">{s.name}</span><span className="text-2xs text-zinc-500">{s.checks.length}</span></span>
+                <span className="w-full truncate pl-4 font-mono text-2xs text-zinc-500">{s.relation}</span>
               </button>
             ))}
-            {dbtTests.length > 0 && <div className="mt-3 px-2.5 pb-1 text-[11px] text-zinc-500">dbt tests</div>}
+            {dbtTests.length > 0 && <div className="mt-3 px-2.5 pb-1 text-2xs text-zinc-500">dbt tests</div>}
             {dbtTests.map((d) => {
               const bad = d.tests.filter((t) => t.status !== 'pass').length;
               return (
                 <button key={d.project_id} onClick={() => select(`dbt:${d.project_id}`)} className={cn('flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors', `dbt:${d.project_id}` === selected ? 'bg-zinc-900' : 'hover:bg-zinc-900/60')}>
-                  <StatusDot tone={bad ? 'error' : 'ok'} /><span className="min-w-0 flex-1 truncate text-[13px] text-zinc-100">{d.project_name}</span><span className="text-[11px] text-zinc-500">{d.tests.length - bad}/{d.tests.length}</span>
+                  <StatusDot tone={bad ? 'error' : 'ok'} /><span className="min-w-0 flex-1 truncate text-body text-zinc-100">{d.project_name}</span><span className="text-2xs text-zinc-500">{d.tests.length - bad}/{d.tests.length}</span>
                 </button>
               );
             })}
@@ -153,7 +153,7 @@ export function QualityPanel({ workspaceId }: { workspaceId: string }) {
               <div className="space-y-4" data-testid="quality-suite">
                 <div className="flex flex-wrap items-start gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2"><h2 className="truncate text-[15px] font-semibold text-zinc-50">{suite.name}</h2><StatusDot tone={TONE[suite.status]}><span data-testid="quality-status">{STATUS_TEXT[suite.status]}</span></StatusDot></div>
+                    <div className="flex items-center gap-2"><h2 className="truncate text-title font-semibold text-zinc-50">{suite.name}</h2><StatusDot tone={TONE[suite.status]}><span data-testid="quality-status">{STATUS_TEXT[suite.status]}</span></StatusDot></div>
                     <p className="mt-0.5 text-xs text-zinc-500"><span className="font-mono text-zinc-400">{suite.relation}</span> · {suite.checks.length} checks · {every(suite.schedule)}{suite.enabled ? '' : ' (paused)'}{suite.last_run ? ` · ran ${timeAgo(suite.last_run.finished_at)}` : ''}{suite.channel_ids.length ? ` · notifies ${suite.channel_ids.length} channel${suite.channel_ids.length === 1 ? '' : 's'}` : ''}</p>
                     {suite.description && <p className="mt-1 text-xs text-zinc-400">{suite.description}</p>}
                   </div>
@@ -164,7 +164,7 @@ export function QualityPanel({ workspaceId }: { workspaceId: string }) {
                       <>
                         <MenuItem onClick={() => { close(); void act('toggle', () => api.patch(`/api/quality/suites/${suite.id}`, { enabled: !suite.enabled })); }}>{suite.enabled ? 'Pause schedule' : 'Resume schedule'}</MenuItem>
                         <MenuDivider />
-                        <MenuItem danger icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => { close(); if (confirm(`Delete "${suite.name}" and its history?`)) void act('delete', async () => { await api.del(`/api/quality/suites/${suite.id}`); setSelected(null); }); }}>Delete</MenuItem>
+                        <MenuItem danger icon={<Trash2 className="h-3.5 w-3.5" />} onClick={async () => { close(); if ((await confirmAction(`Delete "${suite.name}" and its history?`))) void act('delete', async () => { await api.del(`/api/quality/suites/${suite.id}`); setSelected(null); }); }}>Delete</MenuItem>
                       </>
                     )}
                   </Menu>
@@ -182,7 +182,7 @@ export function QualityPanel({ workspaceId }: { workspaceId: string }) {
             )}
             {dbtSelected && (
               <div className="space-y-3">
-                <div><h2 className="text-[15px] font-semibold text-zinc-50">{dbtSelected.project_name}</h2><p className="mt-0.5 text-xs text-zinc-500">dbt tests from the run {timeAgo(dbtSelected.started_at)} · <a className="text-accent-300 hover:underline" href="#/transform/dbt">Open project</a></p></div>
+                <div><h2 className="text-title font-semibold text-zinc-50">{dbtSelected.project_name}</h2><p className="mt-0.5 text-xs text-zinc-500">dbt tests from the run {timeAgo(dbtSelected.started_at)} · <a className="text-accent-300 hover:underline" href="#/transform/dbt">Open project</a></p></div>
                 <div className="divide-y divide-zinc-800 border-y border-zinc-800 text-xs">
                   {dbtSelected.tests.map((t) => (
                     <div key={t.name} className="flex items-center gap-3 py-2"><StatusDot tone={DBT_TONE(t.status)} /><span className="min-w-0 flex-1 truncate font-mono text-zinc-200">{t.name}</span><span className="text-zinc-500">{t.failures ? `${t.failures} failing` : t.status}</span></div>
@@ -222,13 +222,13 @@ function Results({ results, summary, onOpen }: { results: QualityCheckResult[]; 
                 <div className="space-y-2 pb-3 pl-7">
                   {r.sample && r.sample.rows.length > 0 && (
                     <div className="overflow-x-auto rounded-md border border-zinc-800">
-                      <table className="w-full font-mono text-[11px]">
+                      <table className="w-full font-mono text-2xs">
                         <thead className="bg-zinc-900/60 text-left text-zinc-500"><tr>{r.sample.columns.map((c) => <th key={c} className="whitespace-nowrap px-2 py-1 font-normal">{c}</th>)}</tr></thead>
                         <tbody>{r.sample.rows.map((row, i) => <tr key={i} className="border-t border-zinc-800/70">{row.map((v, j) => <td key={j} className="max-w-[240px] truncate whitespace-nowrap px-2 py-1 text-zinc-300">{v === null ? <span className="text-zinc-600">null</span> : typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>)}</tr>)}</tbody>
                       </table>
                     </div>
                   )}
-                  {r.sql && <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-400">{r.sql}</pre>}
+                  {r.sql && <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-zinc-950 px-2 py-1.5 font-mono text-2xs text-zinc-400">{r.sql}</pre>}
                   {onOpen && r.sql && <Button size="sm" variant="ghost" onClick={() => onOpen(r)}><FileCode2 className="h-3.5 w-3.5" /> Open failing rows in SQL</Button>}
                 </div>
               )}
@@ -315,7 +315,7 @@ function SuiteEditor({ workspaceId, draft, setDraft, channels, tables, onSaved }
                         <IconButton label="Remove check" onClick={() => setDraft({ ...draft, checks: draft.checks.filter((_, j) => j !== i) })}><X className="h-3.5 w-3.5" /></IconButton>
                       </span>
                     </div>
-                    {c.type === 'custom_sql' && <textarea value={c.sql} onChange={(e) => patch(i, { sql: e.target.value })} spellCheck={false} rows={3} placeholder={'SELECT * FROM {{ table }} WHERE …  -- the failing rows'} aria-label="Custom SQL" className="mt-2 w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[12px] text-zinc-200 focus:border-accent-500 focus:outline-none" />}
+                    {c.type === 'custom_sql' && <textarea value={c.sql} onChange={(e) => patch(i, { sql: e.target.value })} spellCheck={false} rows={3} placeholder={'SELECT * FROM {{ table }} WHERE …  -- the failing rows'} aria-label="Custom SQL" className="mt-2 w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" />}
                     {c.open && (
                       <div className="mt-2 grid gap-2 pl-1 md:grid-cols-[minmax(0,2fr)_90px_minmax(0,2fr)]">
                         <div><Label>Only rows where</Label><Input uiSize="sm" className="font-mono" value={c.where} onChange={(e) => patch(i, { where: e.target.value })} placeholder="status = 'complete'" /></div>

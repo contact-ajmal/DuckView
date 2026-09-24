@@ -13,7 +13,7 @@ export function CacheChip({ state, computedAt, fromCache, serverCached, onRefres
   const label = state === 'stale' ? `offline · ${verb} ${timeAgo(computedAt!)}` : fromCache ? `cached · ${verb} ${timeAgo(computedAt!)}` : serverCached ? `${verb} ${timeAgo(computedAt!)} · shared cache` : `${verb} ${timeAgo(computedAt!)}`;
   const title = state === 'stale' ? 'Could not reach the server; showing the last cached copy.' : fromCache ? 'Restored from this browser; checking with the server…' : serverCached ? 'Served from the server cache — computed once for everyone with access to this workspace.' : 'Computed just now.';
   return (
-    <span className={cn('inline-flex items-center gap-1.5 text-[11px]', state === 'stale' ? 'text-amber-500' : 'text-zinc-500', className)} title={title}>
+    <span className={cn('inline-flex items-center gap-1.5 text-2xs', state === 'stale' ? 'text-amber-500' : 'text-zinc-500', className)} title={title}>
       {fromCache || serverCached ? <Zap className="h-3 w-3" /> : <Database className="h-3 w-3" />}
       {label}
       {onRefresh && (

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { api, authedBlobUrl, formatBytes } from '../../api/client';
-import { Button, Input, Label, Menu, MenuItem, Modal, Select, Tabs, cn } from '../../components/ui';
+import { Button, Input, Label, Menu, MenuItem, Modal, Select, Tabs, cn, InlineError } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
 
@@ -24,9 +24,9 @@ interface Channel { id: string; name: string; type: string }
 
 /** The three parts of a cost, in the order and colours used everywhere on this page. */
 const PARTS = [
-  { key: 'compute', label: 'Compute', color: 'bg-sky-500', fill: 'fill-sky-500' },
-  { key: 'ai', label: 'AI', color: 'bg-violet-500', fill: 'fill-violet-500' },
-  { key: 'storage', label: 'Storage', color: 'bg-zinc-500', fill: 'fill-zinc-500' },
+  { key: 'compute', label: 'Compute', color: 'bg-[color:var(--series-1)]', fill: 'fill-[color:var(--series-1)]' },
+  { key: 'ai', label: 'AI', color: 'bg-[color:var(--series-2)]', fill: 'fill-[color:var(--series-2)]' },
+  { key: 'storage', label: 'Storage', color: 'bg-[color:var(--series-3)]', fill: 'fill-[color:var(--series-3)]' },
 ] as const;
 
 const hours = (s: number) => (s >= 3600 ? `${(s / 3600).toFixed(1)} h` : s >= 60 ? `${(s / 60).toFixed(1)} min` : `${s.toFixed(1)} s`);
@@ -88,14 +88,14 @@ export function UsagePanel() {
       <div className="grid grid-cols-2 gap-x-8 gap-y-4 border-y border-zinc-800 py-4 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
         <div>
           <div className="text-zinc-500">{report.scope === 'org' ? 'Organisation' : 'Your'} cost, last {days} days</div>
-          <div className="mt-1 text-2xl font-semibold tabular-nums text-zinc-50" data-testid="usage-total">{money(t.cost.total)}</div>
+          <div className="mt-1 text-page font-semibold tabular-nums text-zinc-50" data-testid="usage-total">{money(t.cost.total)}</div>
           <div className="mt-1 flex h-1.5 w-full max-w-60 overflow-hidden rounded-full bg-zinc-800">
             {PARTS.map((p) => <div key={p.key} className={p.color} style={{ width: `${t.cost.total ? (t.cost[p.key] / t.cost.total) * 100 : 0}%` }} />)}
           </div>
         </div>
-        <Figure label="Compute" swatch="bg-sky-500" value={money(t.cost.compute)} sub={`${compact(t.queries)} queries · ${hours(t.query_seconds + t.pipeline_seconds)}`} />
-        <Figure label="AI" swatch="bg-violet-500" value={money(t.cost.ai)} sub={`${compact(t.ai_turns)} turns · ${compact(t.ai_input_tokens + t.ai_output_tokens)} tokens`} />
-        <Figure label="Storage" swatch="bg-zinc-500" value={money(t.cost.storage)} sub={formatBytes(t.storage_bytes)} />
+        <Figure label="Compute" swatch={PARTS[0].color} value={money(t.cost.compute)} sub={`${compact(t.queries)} queries · ${hours(t.query_seconds + t.pipeline_seconds)}`} />
+        <Figure label="AI" swatch={PARTS[1].color} value={money(t.cost.ai)} sub={`${compact(t.ai_turns)} turns · ${compact(t.ai_input_tokens + t.ai_output_tokens)} tokens`} />
+        <Figure label="Storage" swatch={PARTS[2].color} value={money(t.cost.storage)} sub={formatBytes(t.storage_bytes)} />
       </div>
 
       <DailyChart daily={report.daily} money={money} />
@@ -116,7 +116,7 @@ export function UsagePanel() {
         <Table title="AI models" head={['Model', 'Turns', 'Input', 'Output', 'Cost']} rows={report.models.map((m) => [`${m.model}${m.byok_turns ? ` (${m.byok_turns} on own key)` : ''}`, compact(m.turns), compact(m.input_tokens), compact(m.output_tokens), m.priced ? money(m.cost) : 'no price'])} />
       </div>
 
-      <Table title="Most expensive queries" head={['Query', 'Runs', 'Total time', 'Average', 'Cost']} wide rows={report.top_queries.map((q) => [<code key="q" className="block truncate font-mono text-[11px] text-zinc-300" title={q.sql}>{q.sql.replace(/\s+/g, ' ')}</code>, compact(q.runs), hours(q.total_seconds), `${q.avg_ms} ms`, money(q.cost)])} />
+      <Table title="Most expensive queries" head={['Query', 'Runs', 'Total time', 'Average', 'Cost']} wide rows={report.top_queries.map((q) => [<code key="q" className="block truncate font-mono text-2xs text-zinc-300" title={q.sql}>{q.sql.replace(/\s+/g, ' ')}</code>, compact(q.runs), hours(q.total_seconds), `${q.avg_ms} ms`, money(q.cost)])} />
 
       <p className="text-zinc-500">
         Priced at {money(report.rates.compute_per_hour)} per hour of query time and {money(report.rates.storage_per_gb_month)} per GB-month of storage, with list prices for AI models. Administrators set the rates in the <code className="font-mono">usage</code> section of the configuration.
@@ -131,7 +131,7 @@ function Figure({ label, swatch, value, sub }: { label: string; swatch: string; 
   return (
     <div>
       <div className="flex items-center gap-1.5 text-zinc-500"><span className={cn('h-2 w-2 rounded-sm', swatch)} />{label}</div>
-      <div className="mt-1 text-base font-medium tabular-nums text-zinc-100">{value}</div>
+      <div className="mt-1 text-title font-medium tabular-nums text-zinc-100">{value}</div>
       <div className="text-zinc-500">{sub}</div>
     </div>
   );
@@ -170,7 +170,7 @@ function DailyChart({ daily, money }: { daily: UsageReport['daily']; money: (n: 
         })}
         <line x1="0" x2="100" y1={h - 0.25} y2={h - 0.25} className="stroke-zinc-700" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
       </svg>
-      <div className="mt-1 flex justify-between text-[11px] text-zinc-600">
+      <div className="mt-1 flex justify-between text-2xs text-zinc-600">
         <span>{daily[0]!.date}</span>
         <span>highest day {money(max)}</span>
         <span>{daily.at(-1)!.date}</span>
@@ -183,7 +183,7 @@ function Budgets({ budgets, money, isAdmin, onAdd, onRemove, workspaceName }: { 
   return (
     <section data-testid="usage-budgets">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[13px] font-medium text-zinc-100">Monthly budgets</h3>
+        <h3 className="text-body font-medium text-zinc-100">Monthly budgets</h3>
         <Button size="sm" onClick={onAdd}><Plus className="h-3.5 w-3.5" /> Add budget</Button>
       </div>
       {budgets.length === 0 ? (
@@ -284,7 +284,7 @@ function BudgetForm({ isAdmin, onClose, onSaved, currency }: { isAdmin: boolean;
             </div>
           )}
         </div>
-        {error && <p className="text-red-300">{error}</p>}
+        <InlineError error={error} />
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={saving} onClick={() => void save()}>Add budget</Button>
@@ -297,7 +297,7 @@ function BudgetForm({ isAdmin, onClose, onSaved, currency }: { isAdmin: boolean;
 function Table({ title, head, rows, wide, testid }: { title: string; head: string[]; rows: React.ReactNode[][]; wide?: boolean; testid?: string }) {
   return (
     <section className="min-w-0" data-testid={testid}>
-      <h3 className="mb-1.5 text-[13px] font-medium text-zinc-100">{title}</h3>
+      <h3 className="mb-1.5 text-body font-medium text-zinc-100">{title}</h3>
       {rows.length === 0 ? <p className="text-zinc-500">Nothing in this period.</p> : (
         <table className={cn('w-full text-left', wide && 'table-fixed')}>
           <thead className="text-zinc-500">

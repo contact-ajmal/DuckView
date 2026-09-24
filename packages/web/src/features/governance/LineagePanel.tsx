@@ -72,9 +72,9 @@ export function LineagePanel({ workspaceId }: { workspaceId: string }) {
     <div className="space-y-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-zinc-500">Built from the SQL of syncs, views, queries, dashboards and alerts (DuckDB's parser), and table names in app code.</p>
-        <Select className="ml-auto h-7 text-[11px]" value={focus ?? ''} onChange={(e) => setFocus(e.target.value || null)}><option value="">{focus ? 'Show everything' : 'Trace a table…'}</option>{graph.nodes.filter((n) => n.kind === 'table' || n.kind === 'view').map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}</Select>
+        <Select className="ml-auto h-7 text-2xs" value={focus ?? ''} onChange={(e) => setFocus(e.target.value || null)}><option value="">{focus ? 'Show everything' : 'Trace a table…'}</option>{graph.nodes.filter((n) => n.kind === 'table' || n.kind === 'view').map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}</Select>
       </div>
-      <div className="flex flex-wrap gap-1.5">{(Object.keys(KIND) as LineageKind[]).filter((k) => graph.nodes.some((n) => n.kind === k)).map((k) => <span key={k} className="inline-flex items-center gap-1 text-[10.5px] text-zinc-400"><span className="h-2 w-2 rounded-sm" style={{ background: KIND[k].color }} />{KIND[k].label}</span>)}</div>
+      <div className="flex flex-wrap gap-1.5">{(Object.keys(KIND) as LineageKind[]).filter((k) => graph.nodes.some((n) => n.kind === k)).map((k) => <span key={k} className="inline-flex items-center gap-1 text-2xs text-zinc-400"><span className="h-2 w-2 rounded-sm" style={{ background: KIND[k].color }} />{KIND[k].label}</span>)}</div>
       {graph.nodes.length === 0 ? <p className="text-zinc-500">Nothing to trace yet.</p> : (
         <div className="overflow-auto rounded-lg border border-zinc-800 bg-zinc-950/40">
           <svg width={layout.width} height={layout.height} role="img" aria-label="Lineage graph">

@@ -160,7 +160,7 @@ export function StackedPanes({ storageKey, sections, className }: { storageKey: 
                 {isCollapsed ? <ChevronRight className="h-3 w-3 text-zinc-500" /> : <ChevronDown className="h-3 w-3 text-zinc-500" />}
                 <span className="truncate">{s.title}</span>
               </span>
-              <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-500" onClick={(e) => e.stopPropagation()}>
+              <span className="flex shrink-0 items-center gap-1.5 text-2xs text-zinc-500" onClick={(e) => e.stopPropagation()}>
                 {s.meta}
                 {s.hideId && <HideButton id={s.hideId} className="opacity-0 group-hover/sec:opacity-100" />}
               </span>

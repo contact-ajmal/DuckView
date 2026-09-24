@@ -22,7 +22,7 @@ export function Sidebar({ active }: { active: Section }) {
         <span className={cn('flex h-8 w-9 items-center justify-center rounded-md transition-colors', on ? 'bg-zinc-800/80' : 'group-hover:bg-zinc-900')}>
           <Icon className="h-[18px] w-[18px]" strokeWidth={on ? 2 : 1.75} />
         </span>
-        <span className="whitespace-nowrap text-[10.5px] font-medium leading-none tracking-[-0.01em]">{s.label}</span>
+        <span className="whitespace-nowrap text-2xs font-medium leading-none tracking-[-0.01em]">{s.label}</span>
       </a>
     );
   };

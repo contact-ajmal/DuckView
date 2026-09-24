@@ -90,9 +90,32 @@
   --shadow-lg: 0 8px 24px -6px rgb(0 0 0 / 0.18);
   --shadow-xl: 0 12px 32px -8px rgb(0 0 0 / 0.24);
   --shadow-2xl: 0 24px 56px -12px rgb(0 0 0 / 0.32);
-  /* Type scale (px): meta 11 · dense UI 12 · body 13 · section 15 · page 18. */
+  /* Type scale — the only five sizes: text-2xs 11 (meta) · text-xs 12 (dense UI) · text-body 13 (body) ·
+     text-title 15 (dialogs, panel leads) · text-page 18 (page titles). */
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
+  --text-body: 0.8125rem;
+  --text-body--line-height: 1.25rem;
+  --text-title: 0.9375rem;
+  --text-title--line-height: 1.375rem;
+  --text-page: 1.125rem;
+  --text-page--line-height: 1.625rem;
+  /* The one exception: a KPI value on a dashboard. */
+  --text-display: 1.75rem;
+  --text-display--line-height: 2.125rem;
+
+  /* Semantic colours — what a colour is for, on top of the theme's neutral ramp (light themes mirror it). */
+  --color-canvas: var(--t-zinc-950);       /* page and editor background */
+  --color-surface: var(--t-zinc-900);      /* raised: hover rows, table headers, side panels */
+  --color-selected: var(--t-zinc-800);     /* the selected row or item */
+  --color-line: var(--t-zinc-800);         /* default hairline */
+  --color-line-strong: var(--t-zinc-700);  /* hovered control, focused panel */
+  --color-fg-strong: var(--t-zinc-50);     /* titles, key values */
+  --color-fg: var(--t-zinc-100);           /* primary text */
+  --color-fg-body: var(--t-zinc-300);      /* body text */
+  --color-fg-secondary: var(--t-zinc-400); /* labels, descriptions */
+  --color-fg-muted: var(--t-zinc-500);     /* metadata */
+  --color-fg-faint: var(--t-zinc-600);     /* placeholders, disabled, NULL */
 }
 
 :root {

@@ -7,7 +7,7 @@ import { createMosaic } from '../../lib/mosaic';
 import { analyzeColumns, resolveSource, templateSpec, type DataSource } from '../../lib/mosaic/analyze';
 import { parseSpecText, specToText, type Spec } from '../../lib/mosaic/spec';
 import { describeSpec } from '../../lib/mosaic/summary';
-import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, cn, confirmAction } from '../../components/ui';
 import { CommentsControl } from '../comments/CommentsPanel';
 import { MosaicSpecView, type SpecRenderStatus } from './MosaicSpecView';
 import { SpecEditor } from './SpecEditor';
@@ -157,7 +157,7 @@ export function MosaicDashboard({ id }: { id: string }) {
             </form>
           ) : (
             <div className="min-w-0">
-              <h1 className="flex items-center gap-2 truncate text-[15px] font-semibold text-zinc-50">
+              <h1 className="flex items-center gap-2 truncate text-title font-semibold text-zinc-50">
                 {dash.name}
                 {canWrite && <button onClick={() => setRenaming(true)} className="text-zinc-600 hover:text-zinc-200" title="Rename" aria-label="Rename dashboard"><Pencil className="h-3.5 w-3.5" /></button>}
               </h1>
@@ -177,7 +177,7 @@ export function MosaicDashboard({ id }: { id: string }) {
               <Button size="sm" variant="secondary" onClick={() => setGenerator(true)} title="Draft a spec from a table or file"><Wand2 className="h-3.5 w-3.5" /> Generate</Button>
               <Button size="sm" variant={edit ? 'primary' : 'secondary'} onClick={() => setEdit(!edit)} title={edit ? 'Hide the editor' : 'Edit the spec'}>{edit ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />} {edit ? 'Editing' : 'Edit'}</Button>
               <Button size="sm" variant="primary" disabled={!dirty || saving} loading={saving} onClick={() => void save()} title="Save the spec (⌘S)"><Save className="h-3.5 w-3.5" /> Save</Button>
-              <IconButton label="Delete dashboard" className="hover:text-red-400" onClick={async () => { if (confirm(`Delete dashboard "${dash.name}"?`)) { await api.del(`/api/dashboards/${id}`); location.hash = '#/dashboards'; } }}><Trash2 className="h-3.5 w-3.5" /></IconButton>
+              <IconButton label="Delete dashboard" className="hover:text-red-400" onClick={async () => { if ((await confirmAction(`Delete dashboard "${dash.name}"?`))) { await api.del(`/api/dashboards/${id}`); location.hash = '#/dashboards'; } }}><Trash2 className="h-3.5 w-3.5" /></IconButton>
             </>
           )}
         </div>
@@ -186,7 +186,7 @@ export function MosaicDashboard({ id }: { id: string }) {
       <div className="flex min-h-0 flex-1 gap-0 border-t border-zinc-800">
         {edit && canWrite && (
           <div className="flex w-[42%] min-w-[320px] max-w-[720px] shrink-0 flex-col border-r border-zinc-800">
-            <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800 px-2 text-[11px] text-zinc-400">
+            <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800 px-2 text-2xs text-zinc-400">
               <span className="font-semibold text-zinc-300">Spec</span>
               <div className="ml-1 flex overflow-hidden rounded border border-zinc-800">
                 {(['yaml', 'json'] as const).map((f) => (

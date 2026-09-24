@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Users, Plus, Trash2, Pencil, UserPlus, Crown, KeyRound } from 'lucide-react';
 import { api, timeAgo, type Group, type GroupMember, type DirectoryUser } from '../../api/client';
-import { Button, Badge, Card, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Button, Badge, Card, Input, Label, Modal, Select, cn, confirmAction } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 
 /**
@@ -80,13 +80,13 @@ export function TeamsPanel() {
                     <Users className="h-3.5 w-3.5" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5 text-sm text-zinc-100">
+                    <span className="flex items-center gap-1.5 text-body text-zinc-100">
                       <span className="truncate">{g.name}</span>
-                      {g.external_id && <Badge tone="amber">SSO</Badge>}
-                      {g.my_role === 'MANAGER' && <Badge tone="violet">manager</Badge>}
-                      {g.my_role === 'MEMBER' && <Badge tone="zinc">member</Badge>}
+                      {g.external_id && <Badge tone="warn">SSO</Badge>}
+                      {g.my_role === 'MANAGER' && <Badge tone="accent">manager</Badge>}
+                      {g.my_role === 'MEMBER' && <Badge tone="neutral">member</Badge>}
                     </span>
-                    <span className="block truncate text-[11px] text-zinc-500">
+                    <span className="block truncate text-2xs text-zinc-500">
                       {g.member_count} member{g.member_count === 1 ? '' : 's'}
                       {g.description ? ` · ${g.description}` : ''}
                     </span>
@@ -112,7 +112,7 @@ export function TeamsPanel() {
                 title="Delete team"
                 onClick={() =>
                   void run(async () => {
-                    if (!confirm(`Delete team "${group.name}"? Workspaces shared with it lose that access.`)) return;
+                    if (!(await confirmAction(`Delete team "${group.name}"? Workspaces shared with it lose that access.`))) return;
                     await api.del(`/api/groups/${group.id}`);
                     setSelected(null);
                     await refresh();
@@ -132,7 +132,7 @@ export function TeamsPanel() {
         ) : (
           <div className="space-y-3">
             {group.external_id && (
-              <div className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/30 p-2.5 text-[11px] text-amber-200">
+              <div className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/30 p-2.5 text-2xs text-amber-200">
                 <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
                   Linked to the identity-provider group <span className="font-mono">{group.external_id}</span>. SSO sign-in and SCIM provisioning decide its membership; manual changes last until the IdP next syncs the member.
@@ -177,7 +177,7 @@ export function TeamsPanel() {
               <div className="border-y border-zinc-800 px-3 py-4 text-center text-xs text-zinc-500">No members yet.</div>
             ) : (
               <table className="w-full text-xs">
-                <thead className="text-left text-[10px] text-zinc-500">
+                <thead className="text-left text-2xs text-zinc-500">
                   <tr>
                     <th className="pb-2">Member</th>
                     <th className="pb-2">Role</th>
@@ -190,7 +190,7 @@ export function TeamsPanel() {
                     <tr key={m.user_id} className="border-t border-zinc-800">
                       <td className="py-2">
                         <div className="text-zinc-200">{m.display_name ?? m.email}</div>
-                        <div className="text-[10px] text-zinc-500">{m.email}</div>
+                        <div className="text-2xs text-zinc-500">{m.email}</div>
                       </td>
                       <td className="py-2">
                         {canManageMembers ? (
@@ -257,7 +257,7 @@ export function TeamsPanel() {
             <div>
               <Label>Identity-provider group</Label>
               <Input value={creating.external_id} onChange={(e) => setCreating({ ...creating, external_id: e.target.value })} placeholder="Optional — e.g. finance-analysts or an Entra group object id" className="font-mono" />
-              <p className="mt-1 text-[11px] text-zinc-500">The value your IdP sends in the groups claim or as the SCIM group's externalId. Share workspaces with the team now; members arrive when they sign in with SSO or are provisioned.</p>
+              <p className="mt-1 text-2xs text-zinc-500">The value your IdP sends in the groups claim or as the SCIM group's externalId. Share workspaces with the team now; members arrive when they sign in with SSO or are provisioned.</p>
             </div>
           )}
           <div className="flex justify-end gap-2">
@@ -296,7 +296,7 @@ export function TeamsPanel() {
             <div>
               <Label>Identity-provider group</Label>
               <Input value={renaming.external_id} onChange={(e) => setRenaming({ ...renaming, external_id: e.target.value })} placeholder="Not linked" className="font-mono" />
-              <p className="mt-1 text-[11px] text-zinc-500">Linked teams take their membership from SSO sign-in and SCIM. Clear it to manage members by hand.</p>
+              <p className="mt-1 text-2xs text-zinc-500">Linked teams take their membership from SSO sign-in and SCIM. Clear it to manage members by hand.</p>
             </div>
           )}
           <div className="flex justify-end gap-2">

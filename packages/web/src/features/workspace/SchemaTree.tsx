@@ -48,8 +48,8 @@ function ObjectNode({ o, defaultOpen, onInsert, onSnippet }: { o: CatalogObject;
         <button className="min-w-0 flex-1 truncate text-left font-mono text-xs text-zinc-100 hover:text-accent-300" onClick={() => onInsert(fq)} title={`Insert ${fq} at cursor`}>
           {fq}
         </button>
-        <span className="font-mono text-[10px] text-zinc-500">{o.type === 'VIEW' ? 'view' : 'table'}</span>
-        <span className="font-mono text-[10px] text-zinc-500">{o.column_count} cols</span>
+        <span className="font-mono text-2xs text-zinc-500">{o.type === 'VIEW' ? 'view' : 'table'}</span>
+        <span className="font-mono text-2xs text-zinc-500">{o.column_count} cols</span>
         <button className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-accent-300 group-hover:opacity-100" onClick={() => onSnippet(`SELECT * FROM ${fq} LIMIT 100;`)} title="Insert SELECT snippet">
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -57,7 +57,7 @@ function ObjectNode({ o, defaultOpen, onInsert, onSnippet }: { o: CatalogObject;
       {open && (
         <div className="ml-4 border-l border-zinc-800 pl-2">
           {o.columns.map((c) => (
-            <button key={c.name} onClick={() => onInsert(quoteIdent(c.name))} className="flex w-full items-center justify-between rounded px-2 py-[3px] font-mono text-[11px] hover:bg-zinc-800/60" title={`Insert ${c.name}`}>
+            <button key={c.name} onClick={() => onInsert(quoteIdent(c.name))} className="flex w-full items-center justify-between rounded px-2 py-[3px] font-mono text-2xs hover:bg-zinc-800/60" title={`Insert ${c.name}`}>
               <span className="truncate text-zinc-300">{c.name}</span>
               <span className={cn('ml-2 shrink-0', typeText(c.type))}>{c.type}</span>
             </button>
@@ -92,20 +92,20 @@ export function SchemaTree({ catalog, loading, onInsert, onSnippet }: { catalog:
       {objects.map((o) => (
         <ObjectNode key={`${o.database}.${o.schema}.${o.name}`} o={o} defaultOpen={objects.length <= 4} onInsert={onInsert} onSnippet={onSnippet} />
       ))}
-      {files.length > 0 && <div className={cn('mb-1 px-1 font-mono text-[10px] text-zinc-500', objects.length > 0 && 'mt-2')}>files</div>}
+      {files.length > 0 && <div className={cn('mb-1 px-1 font-mono text-2xs text-zinc-500', objects.length > 0 && 'mt-2')}>files</div>}
       {files.map((f) => (
         <div key={f.path} className="group flex items-center gap-2 rounded px-1 py-1 hover:bg-zinc-800/60">
           {fileIcon(f.kind)}
           <button className="min-w-0 flex-1 truncate text-left font-mono text-xs text-zinc-100 hover:text-accent-300" onClick={() => onInsert(`'${f.path}'`)} title={`Insert '${f.path}' · ${formatBytes(f.size_bytes)}`}>
             {f.path}
           </button>
-          <span className="font-mono text-[10px] text-zinc-500">{formatBytes(f.size_bytes)}</span>
+          <span className="font-mono text-2xs text-zinc-500">{formatBytes(f.size_bytes)}</span>
           <button className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-accent-300 group-hover:opacity-100" onClick={() => onSnippet(fileSelectSql(f))} title="Insert SELECT snippet">
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
       ))}
-      {objects.length === 0 && files.length === 0 && <div className="px-1 py-2 text-[11px] text-zinc-600">Nothing yet — drop a file on the Overview page or CREATE TABLE here.</div>}
+      {objects.length === 0 && files.length === 0 && <div className="px-1 py-2 text-2xs text-zinc-600">Nothing yet — drop a file on the Overview page or CREATE TABLE here.</div>}
     </div>
   );
 }

@@ -112,23 +112,23 @@ export function LakehouseWizard({ open, onClose, onCreated, initial, initialProv
     <div>
       <Label>{label}</Label>
       {node}
-      {hint && <p className="mt-1 text-[10px] text-zinc-500">{hint}</p>}
+      {hint && <p className="mt-1 text-2xs text-zinc-500">{hint}</p>}
     </div>
   );
 
   return (
     <Modal open={open} onClose={onClose} title={initial ? `Edit ${initial.name}` : initialProvider ? `Connect ${meta?.[initialProvider]?.title ?? initialProvider}` : 'Connect a lakehouse'} width="max-w-2xl">
-      <div className="mb-4 flex items-center gap-2 text-[11px] text-zinc-500">
+      <div className="mb-4 flex items-center gap-2 text-2xs text-zinc-500">
         {(initial || initialProvider ? [2, 3] : [1, 2, 3]).map((s) => (
           <span key={s} className={cn('flex items-center gap-1', step === s && 'text-accent-300')}>
-            <span className={cn('flex h-4 w-4 items-center justify-center rounded-full border text-[9px]', step >= s ? 'border-accent-500 bg-accent-600/30 text-accent-100' : 'border-zinc-700')}>{s}</span>
+            <span className={cn('flex h-4 w-4 items-center justify-center rounded-full border text-2xs', step >= s ? 'border-accent-500 bg-accent-600/30 text-accent-100' : 'border-zinc-700')}>{s}</span>
             {s === 1 ? 'Platform' : s === 2 ? 'Connection' : 'Verify'}
             {s < 3 && <span className="mx-1 h-px w-6 bg-zinc-800" />}
           </span>
         ))}
       </div>
       {!externalAccess && (
-        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-900 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-900 bg-amber-950/40 px-3 py-2 text-2xs text-amber-200">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>External access is disabled on this server (sandboxed mode), so catalogs can be configured but DuckDB cannot attach them. Databricks SQL warehouses still work through the Statement Execution API.</span>
         </div>
@@ -138,14 +138,14 @@ export function LakehouseWizard({ open, onClose, onCreated, initial, initialProv
         <div className="grid grid-cols-2 gap-2">
           {ORDER.map((p) => (
             <button key={p} onClick={() => setProvider(p)} className={cn('rounded-lg border p-3 text-left', provider === p ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
-              <div className="flex items-center gap-2 text-sm text-zinc-100">
-                <span className="flex h-6 w-9 items-center justify-center rounded border border-fuchsia-900 bg-fuchsia-950/40 font-mono text-[10px] font-semibold text-fuchsia-300">{GLYPH[p]}</span>
+              <div className="flex items-center gap-2 text-body text-zinc-100">
+                <span className="flex h-6 w-9 items-center justify-center rounded border border-fuchsia-900 bg-fuchsia-950/40 font-mono text-2xs font-semibold text-fuchsia-300">{GLYPH[p]}</span>
                 {meta?.[p].title ?? p}
               </div>
-              <div className="mt-1 text-[11px] text-zinc-500">{meta?.[p].blurb ?? ''}</div>
+              <div className="mt-1 text-2xs text-zinc-500">{meta?.[p].blurb ?? ''}</div>
               <div className="mt-1 flex gap-1">
-                {meta?.[p].attachable && <span className="rounded border border-zinc-700 px-1 font-mono text-[9px] text-zinc-400">DuckDB ATTACH</span>}
-                {meta?.[p].remote_sql && <span className="rounded border border-zinc-700 px-1 font-mono text-[9px] text-zinc-400">remote SQL</span>}
+                {meta?.[p].attachable && <span className="rounded border border-zinc-700 px-1 font-mono text-2xs text-zinc-400">DuckDB ATTACH</span>}
+                {meta?.[p].remote_sql && <span className="rounded border border-zinc-700 px-1 font-mono text-2xs text-zinc-400">remote SQL</span>}
               </div>
             </button>
           ))}
@@ -283,7 +283,7 @@ export function LakehouseWizard({ open, onClose, onCreated, initial, initialProv
               ))}
             </div>
           )}
-          <p className="text-[11px] text-zinc-500">
+          <p className="text-2xs text-zinc-500">
             Credentials are encrypted with AES-256-GCM and never returned by the API. {meta?.[provider].attachable && 'Attached catalogs are applied to your running engines without a restart.'}{' '}
             {meta?.[provider].docs && (
               <a href={meta[provider].docs} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-accent-300 hover:underline">
@@ -309,11 +309,11 @@ export function LakehouseWizard({ open, onClose, onCreated, initial, initialProv
             {test ? test.ok ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5" /> : <AlertTriangle className="mt-0.5 h-3.5 w-3.5" /> : <Loader2 className="mt-0.5 h-3.5 w-3.5 animate-spin" />}
             <div>
               <div>{test ? test.message : 'Attaching the catalog and listing schemas…'}</div>
-              {test && !test.ok && <div className="mt-1 text-[10px] opacity-80">The connection is saved; fix it from Settings → Storage → Lakehouse connections.</div>}
+              {test && !test.ok && <div className="mt-1 text-2xs opacity-80">The connection is saved; fix it from Settings → Storage → Lakehouse connections.</div>}
             </div>
           </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-900 p-3 font-mono text-[11px] text-zinc-300 whitespace-pre-wrap">{test?.example_sql ?? created.example_sql}</div>
-          <div className="flex items-center justify-between text-[11px] text-zinc-500">
+          <div className="rounded-md border border-zinc-800 bg-zinc-900 p-3 font-mono text-2xs text-zinc-300 whitespace-pre-wrap">{test?.example_sql ?? created.example_sql}</div>
+          <div className="flex items-center justify-between text-2xs text-zinc-500">
             <span className="flex items-center gap-1">
               <Layers className="h-3.5 w-3.5 text-fuchsia-300" /> The catalog appears under <b className="text-zinc-300">Lakehouse</b> in the explorer.
             </span>

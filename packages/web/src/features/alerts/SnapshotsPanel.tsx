@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Camera, History, Pencil, Send, Trash2, Plus, LayoutDashboard, AppWindow, FileDown } from 'lucide-react';
 import { api, authedBlobUrl, timeAgo, type DataApp, type Dashboard, type NotificationChannel, type ScheduledSnapshot, type SnapshotRun, type SnapshotTarget, type SyncSchedule } from '../../api/client';
 import { useWorkspaceAccess } from '../../store/workspace';
-import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Badge, Button, Empty, Input, Label, Modal, Select, cn, confirmAction } from '../../components/ui';
 import { CHANNEL_META } from './ChannelsPanel';
 
 const every = (s: SyncSchedule) => (s.kind === 'interval' ? (s.minutes % 60 === 0 ? `every ${s.minutes / 60} h` : `every ${s.minutes} min`) : s.kind === 'cron' ? `cron ${s.expression}${s.timezone ? ` (${s.timezone})` : ''}` : 'manual');
@@ -82,19 +82,19 @@ export function SnapshotsPanel({ workspaceId }: { workspaceId: string }) {
             <div key={s.id} className={cn('rounded-lg border border-zinc-800 p-3', !s.enabled && 'opacity-60')}>
               <div className="flex items-center gap-2">
                 {s.target.kind === 'dashboard' ? <LayoutDashboard className="h-4 w-4 text-accent-300" /> : <AppWindow className="h-4 w-4 text-accent-300" />}
-                <span className="truncate text-sm font-semibold text-zinc-100">{s.name}</span>
+                <span className="truncate text-body font-semibold text-zinc-100">{s.name}</span>
                 <Badge>{s.format.toUpperCase()}</Badge>
                 {s.last_status && <Badge tone={s.last_status === 'ok' ? 'green' : 'red'} className="ml-auto">{s.last_status === 'ok' ? 'sent' : 'failed'}</Badge>}
               </div>
-              <div className="mt-1 text-[11px] text-zinc-500">{s.target.kind} “{names.get(targetId(s.target)) ?? '?'}” · {every(s.schedule)} · {s.width}px</div>
-              <div className="mt-1 flex flex-wrap gap-1 text-[10.5px]">{s.channel_ids.length ? s.channel_ids.map((id) => byId.get(id)).filter(Boolean).map((c) => <span key={c!.id} className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-zinc-300">{CHANNEL_META[c!.type].icon}{c!.name}</span>) : <span className="text-amber-300">no channels</span>}</div>
-              <div className="mt-1 text-[10.5px] text-zinc-600">{s.last_run_at ? `last ${timeAgo(s.last_run_at)}` : 'never sent'}{s.next_run_at ? ` · next ${new Date(s.next_run_at).toLocaleString()}` : ''}{s.last_error ? <span className="text-red-300"> · {s.last_error}</span> : null}</div>
+              <div className="mt-1 text-2xs text-zinc-500">{s.target.kind} “{names.get(targetId(s.target)) ?? '?'}” · {every(s.schedule)} · {s.width}px</div>
+              <div className="mt-1 flex flex-wrap gap-1 text-2xs">{s.channel_ids.length ? s.channel_ids.map((id) => byId.get(id)).filter(Boolean).map((c) => <span key={c!.id} className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-zinc-300">{CHANNEL_META[c!.type].icon}{c!.name}</span>) : <span className="text-amber-300">no channels</span>}</div>
+              <div className="mt-1 text-2xs text-zinc-600">{s.last_run_at ? `last ${timeAgo(s.last_run_at)}` : 'never sent'}{s.next_run_at ? ` · next ${new Date(s.next_run_at).toLocaleString()}` : ''}{s.last_error ? <span className="text-red-300"> · {s.last_error}</span> : null}</div>
               <div className="mt-2 flex items-center gap-1">
                 <Button size="sm" variant="secondary" disabled={!canEdit} loading={busy === `run:${s.id}`} onClick={() => void sendNow(s)} title="Render and send now"><Send className="h-3.5 w-3.5" /> Send now</Button>
                 <Button size="sm" variant="ghost" onClick={() => void openRuns(s)} title="Recent renders"><History className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => setDraft({ ...blank(), id: s.id, name: s.name, kind: s.target.kind, target: targetId(s.target), format: s.format, width: String(s.width), scheduleKind: s.schedule.kind, ...(s.schedule.kind === 'cron' ? { cron: s.schedule.expression, timezone: s.schedule.timezone ?? '' } : s.schedule.kind === 'interval' ? { minutes: String(s.schedule.minutes) } : {}), channel_ids: s.channel_ids })}><Pencil className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => void act(`t:${s.id}`, () => api.patch(`/api/snapshots/${s.id}`, { enabled: !s.enabled }))}>{s.enabled ? 'Pause' : 'Resume'}</Button>
-                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!canEdit} onClick={() => { if (confirm(`Delete the snapshot "${s.name}"?`)) void act(`d:${s.id}`, () => api.del(`/api/snapshots/${s.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!canEdit} onClick={async () => { if ((await confirmAction(`Delete the snapshot "${s.name}"?`))) void act(`d:${s.id}`, () => api.del(`/api/snapshots/${s.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           ))}
@@ -130,7 +130,7 @@ export function SnapshotsPanel({ workspaceId }: { workspaceId: string }) {
                 </div>
               )}
             </div>
-            <p className="text-[11px] text-zinc-500">Rendered as you — what you can see. Slack, Teams and PagerDuty show the image through a signed link that expires, so the server's public URL must be reachable from them.</p>
+            <p className="text-2xs text-zinc-500">Rendered as you — what you can see. Slack, Teams and PagerDuty show the image through a signed link that expires, so the server's public URL must be reachable from them.</p>
             {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}
             <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setDraft(null)}>Cancel</Button><Button variant="primary" loading={busy === 'save'} disabled={!draft.target} onClick={() => void save()}>{draft.id ? 'Save' : 'Create snapshot'}</Button></div>
           </div>
@@ -144,7 +144,7 @@ export function SnapshotsPanel({ workspaceId }: { workspaceId: string }) {
           {runs?.rows.map((r) => (
             <div key={r.id} className="flex items-start gap-2 border-b border-zinc-800/60 py-1.5">
               <Badge tone={r.status === 'ok' ? 'green' : 'red'}>{r.status}</Badge>
-              <div className="min-w-0 flex-1"><div className="text-zinc-300">{timeAgo(r.created_at)} · {r.triggered_by}{r.bytes ? ` · ${Math.round(r.bytes / 1024)} KB` : ''}{r.duration_ms !== null ? ` · ${(r.duration_ms / 1000).toFixed(1)} s` : ''} · {r.delivered} channel{r.delivered === 1 ? '' : 's'}</div>{r.error && <div className="font-mono text-[10.5px] text-red-300">{r.error}</div>}</div>
+              <div className="min-w-0 flex-1"><div className="text-zinc-300">{timeAgo(r.created_at)} · {r.triggered_by}{r.bytes ? ` · ${Math.round(r.bytes / 1024)} KB` : ''}{r.duration_ms !== null ? ` · ${(r.duration_ms / 1000).toFixed(1)} s` : ''} · {r.delivered} channel{r.delivered === 1 ? '' : 's'}</div>{r.error && <div className="font-mono text-2xs text-red-300">{r.error}</div>}</div>
               {r.file && <Button size="sm" variant="ghost" onClick={() => void authedBlobUrl(`/api/snapshots/${r.snapshot_id}/runs/${r.id}/file`).then((u) => window.open(u, '_blank'))} title="Open the file"><FileDown className="h-3.5 w-3.5" /></Button>}
             </div>
           ))}

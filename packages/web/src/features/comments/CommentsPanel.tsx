@@ -4,7 +4,7 @@ import { api, timeAgo, type CommentTarget, type CommentView, type Person } from 
 import { useAuth } from '../../store/auth';
 import { useWorkspaceAccess } from '../../store/workspace';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
-import { Button, Drawer, Empty, IconButton, Menu, MenuItem, cn } from '../../components/ui';
+import { Button, Drawer, Empty, IconButton, Menu, MenuItem, cn, confirmAction, InlineError } from '../../components/ui';
 
 /** Open-thread counts for a target, per anchor ('' = the whole thing), kept live. */
 export function useCommentCounts(workspaceId: string | null, targetType: CommentTarget, targetId: string | null) {
@@ -26,7 +26,7 @@ export function useCommentCounts(workspaceId: string | null, targetType: Comment
 export function CommentsButton({ count, onClick }: { count: number; onClick: () => void }) {
   return (
     <Button size="sm" variant="ghost" onClick={onClick} data-testid="comments-button" title="Comments">
-      <MessageSquare className="h-3.5 w-3.5" /> Comments{count ? <span className="rounded bg-accent-500 px-1 text-[10.5px] font-semibold text-[var(--accent-ink)]">{count}</span> : null}
+      <MessageSquare className="h-3.5 w-3.5" /> Comments{count ? <span className="rounded bg-accent-500 px-1 text-2xs font-semibold text-[var(--accent-ink)]">{count}</span> : null}
     </Button>
   );
 }
@@ -43,7 +43,7 @@ function Body({ text, people }: { text: string; people: Person[] }) {
     last = m.index! + m[0].length;
   }
   parts.push(text.slice(last));
-  return <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-zinc-200">{parts}</p>;
+  return <p className="whitespace-pre-wrap break-words text-body leading-relaxed text-zinc-200">{parts}</p>;
 }
 
 /** A textarea that suggests people after "@" and inserts @their@email. */
@@ -112,7 +112,7 @@ function Composer({ people, placeholder, onSubmit, autoFocus, initial = '', subm
             void submit();
           }
         }}
-        className="w-full resize-none rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[13px] text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none"
+        className="w-full resize-none rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-body text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none"
       />
       {matches.length > 0 && (
         <div role="listbox" className="absolute left-0 right-0 top-full z-10 mt-1 rounded-md border border-zinc-800 bg-zinc-950 p-1 shadow-lg" data-testid="mention-list">
@@ -123,9 +123,9 @@ function Composer({ people, placeholder, onSubmit, autoFocus, initial = '', subm
           ))}
         </div>
       )}
-      {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
+      <InlineError error={error} className="mt-1" />
       <div className="mt-1.5 flex items-center justify-end gap-2">
-        <span className="mr-auto text-[11px] text-zinc-600">@ to mention · ⌘/Ctrl+Enter to send</span>
+        <span className="mr-auto text-2xs text-zinc-600">@ to mention · ⌘/Ctrl+Enter to send</span>
         {onCancel && <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>}
         <Button size="sm" variant="primary" loading={busy} disabled={!text.trim()} onClick={() => void submit()} data-testid="comment-submit">{submitLabel}</Button>
       </div>
@@ -182,7 +182,7 @@ export function CommentsPanel({ open, onClose, workspaceId, targetType, targetId
               {(close) => (
                 <>
                   {c.user_id === me?.id && <MenuItem onClick={() => { close(); setEditing(c.id); }}>Edit</MenuItem>}
-                  <MenuItem danger onClick={() => { close(); if (confirm(root ? 'Delete this reply?' : 'Delete this thread and its replies?')) void api.del(`/api/comments/${c.id}`).then(load); }}>Delete</MenuItem>
+                  <MenuItem danger onClick={async () => { close(); if ((await confirmAction(root ? 'Delete this reply?' : 'Delete this thread and its replies?'))) void api.del(`/api/comments/${c.id}`).then(load); }}>Delete</MenuItem>
                 </>
               )}
             </Menu>
@@ -205,7 +205,7 @@ export function CommentsPanel({ open, onClose, workspaceId, targetType, targetId
           <div className="space-y-3">
             {visible.map((t) => (
               <article key={t.id} data-thread={t.id} className={cn('space-y-3 rounded-lg border p-3', t.id === focusThread ? 'border-accent-500' : 'border-zinc-800', t.resolved_at && 'opacity-60')}>
-                {!anchor && t.anchor && <div className="text-[11px] text-zinc-500">on <span className="font-mono text-zinc-400">{anchorLabel ? anchorLabel(t.anchor) : t.anchor}</span></div>}
+                {!anchor && t.anchor && <div className="text-2xs text-zinc-500">on <span className="font-mono text-zinc-400">{anchorLabel ? anchorLabel(t.anchor) : t.anchor}</span></div>}
                 {item(t)}
                 {(t.replies ?? []).map((r) => <div key={r.id} className="border-l border-zinc-800 pl-3">{item(r, t)}</div>)}
                 {replying === t.id ? (

@@ -63,7 +63,7 @@ export function DatabaseWizard({ open, source, initial, onClose, onSaved }: { op
                     <>
                       <Label>{f.label}{f.required ? '' : <span className="normal-case text-zinc-600"> (optional)</span>}</Label>
                       <Input type={f.kind === 'secret' ? 'password' : f.kind === 'number' ? 'number' : 'text'} value={String(values[f.key] ?? '')} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} placeholder={f.kind === 'secret' && initial?.has_password ? 'unchanged' : f.placeholder} className={f.kind === 'path' || f.kind === 'url' ? 'font-mono' : ''} autoComplete="off" />
-                      {f.hint && <p className="mt-0.5 text-[11px] text-zinc-500">{f.hint}</p>}
+                      {f.hint && <p className="mt-0.5 text-2xs text-zinc-500">{f.hint}</p>}
                     </>
                   )}
                 </div>

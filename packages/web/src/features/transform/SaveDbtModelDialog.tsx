@@ -90,7 +90,7 @@ export function SaveDbtModelDialog({ workspaceId, sql: rawSql, suggestedName, on
           {materialized === 'incremental' && !hasConfig && <div><Label>Unique key</Label><Input value={uniqueKey} onChange={(e) => setUniqueKey(e.target.value)} placeholder="id" className="font-mono" /></div>}
         </div>
         <div><Label>Description</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What one row is — becomes a catalog note" /></div>
-        <pre className="max-h-40 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[11px] text-zinc-300">{parsed.sql.trim()}</pre>
+        <pre className="max-h-40 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-2xs text-zinc-300">{parsed.sql.trim()}</pre>
         <p className="text-zinc-500">References to the project's own models and seeds become <span className="font-mono">{"{{ ref('…') }}"}</span>; other tables stay as they are.</p>
         <label className="flex items-center gap-1.5 text-zinc-400"><input type="checkbox" checked={build} onChange={(e) => setBuild(e.target.checked)} /> Build it now (dbt build --select {name || 'model'})</label>
         {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}

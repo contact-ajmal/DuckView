@@ -3,7 +3,7 @@ import { Database, KeyRound, Pause, Play, Plus, Radio, Trash2, Webhook, Waves, F
 import { api, timeAgo, type CloudConnection, type DatabaseConnection, type Stream, type StreamConfig } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
-import { Badge, Button, CopyButton, Input, Label, Select, cn } from '../../components/ui';
+import { Badge, Button, CopyButton, Input, Label, Select, cn, confirmAction } from '../../components/ui';
 
 type Kind = Stream['kind'];
 type Draft = { name: string; kind: Kind; brokers: string; topic: string; group_id: string; from_beginning: boolean; ssl: boolean; sasl_mechanism: '' | 'plain' | 'scram-sha-256' | 'scram-sha-512'; sasl_username: string; sasl_password: string; stream: string; region: string; cloud_connection_id: string; start: 'LATEST' | 'TRIM_HORIZON'; connection_id: string; pg_table: string; snapshot: boolean; format: 'json' | 'text' | 'debezium'; mirror: boolean; key_columns: string; keep_history: boolean; target_table: string; include_metadata: boolean; batch_rows: number; batch_seconds: number };
@@ -97,7 +97,7 @@ export function StreamsPanel({ workspaceId, clouds, databases }: { workspaceId: 
             {KINDS.map((k) => (
               <button key={k.id} onClick={() => { setDraft({ ...draft, kind: k.id }); setTested(null); }} className={cn('flex items-center gap-2 rounded-md border px-3 py-2 text-left', draft.kind === k.id ? 'border-accent-500 bg-accent-500/10' : 'border-zinc-800 hover:border-zinc-700')} data-testid={`stream-kind-${k.id}`}>
                 <k.icon className="h-4 w-4 text-zinc-400" />
-                <span><span className="block text-[13px] text-zinc-100">{k.label}</span><span className="text-[11px] text-zinc-500">{k.hint}</span></span>
+                <span><span className="block text-body text-zinc-100">{k.label}</span><span className="text-2xs text-zinc-500">{k.hint}</span></span>
               </button>
             ))}
           </div>
@@ -163,13 +163,13 @@ export function StreamsPanel({ workspaceId, clouds, databases }: { workspaceId: 
                 <div className="flex flex-wrap items-center gap-2 px-3 py-2">
                   <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setOpen(open === s.id ? null : s.id)}>
                     <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-                    <span className="text-[13px] text-zinc-100">{s.name}</span>
+                    <span className="text-body text-zinc-100">{s.name}</span>
                     <span className="truncate text-zinc-500">{describe(s.config)} → {s.target_schema !== 'main' ? `${s.target_schema}.` : ''}{s.target_table}</span>
                   </button>
                   <span className={cn('flex items-center gap-1.5', s.status === 'running' ? 'text-emerald-300' : s.status === 'error' ? 'text-red-300' : 'text-zinc-400')} data-testid="stream-status"><span className={cn('h-1.5 w-1.5 rounded-full', s.status === 'running' ? 'bg-emerald-400' : s.status === 'error' ? 'bg-red-400' : s.status === 'starting' ? 'bg-amber-400' : 'bg-zinc-600')} />{s.enabled ? s.status : 'paused'}</span>
                   <span className="w-40 text-right tabular-nums text-zinc-400" data-testid="stream-rows">{s.stats.rows_total.toLocaleString()} {s.mode === 'mirror' ? 'changes' : 'rows'}{s.stats.last_batch_at ? ` · ${timeAgo(s.stats.last_batch_at)}` : ''}</span>
                   {canEdit && <Button size="sm" variant="ghost" onClick={() => void act(`toggle:${s.id}`, async () => { await api.patch(`/api/streams/${s.id}`, { enabled: !s.enabled }); await load(); })} title={s.enabled ? 'Pause' : 'Resume'}>{s.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}</Button>}
-                  {canEdit && <Button size="sm" variant="ghost" onClick={() => void act(`del:${s.id}`, async () => { if (confirm(`Stop and remove "${s.name}"? The table ${s.target_table} is kept.`)) { await api.del(`/api/streams/${s.id}`); await load(); } })} title="Remove (the table is kept)"><Trash2 className="h-3.5 w-3.5" /></Button>}
+                  {canEdit && <Button size="sm" variant="ghost" onClick={async () => void act(`del:${s.id}`, async () => { if ((await confirmAction(`Stop and remove "${s.name}"? The table ${s.target_table} is kept.`))) { await api.del(`/api/streams/${s.id}`); await load(); } })} title="Remove (the table is kept)"><Trash2 className="h-3.5 w-3.5" /></Button>}
                 </div>
                 {s.stats.last_error && s.status === 'error' && <p className="px-3 pb-2 font-mono text-red-300">{s.stats.last_error}</p>}
                 {open === s.id && (
@@ -181,7 +181,7 @@ export function StreamsPanel({ workspaceId, clouds, databases }: { workspaceId: 
                           <>
                             <div className="flex items-center gap-2"><span className="w-12 text-zinc-500">Key</span><code className="min-w-0 flex-1 truncate font-mono text-amber-200" data-testid="stream-key">{key.key}</code><CopyButton text={key.key} /></div>
                             <p className="text-amber-300">Copy the key now — it is not shown again.</p>
-                            <pre className="overflow-auto rounded bg-zinc-900 p-2 font-mono text-[11px] text-zinc-300">{`curl -X POST '${pushUrl(s)}' \\\n  -H 'Authorization: Bearer ${key.key}' \\\n  -H 'Content-Type: application/json' \\\n  -d '[{"event": "signup", "plan": "pro"}]'`}</pre>
+                            <pre className="overflow-auto rounded bg-zinc-900 p-2 font-mono text-2xs text-zinc-300">{`curl -X POST '${pushUrl(s)}' \\\n  -H 'Authorization: Bearer ${key.key}' \\\n  -H 'Content-Type: application/json' \\\n  -d '[{"event": "signup", "plan": "pro"}]'`}</pre>
                           </>
                         ) : canEdit && <Button size="sm" variant="ghost" onClick={() => void act('rotate', async () => setKey({ id: s.id, key: (await api.post<{ push_key: string }>(`/api/streams/${s.id}/rotate-key`, {})).push_key }))}><KeyRound className="h-3.5 w-3.5" /> New key (the old one stops working)</Button>}
                       </div>
@@ -191,7 +191,7 @@ export function StreamsPanel({ workspaceId, clouds, databases }: { workspaceId: 
                     <p className="text-zinc-500">{s.mode === 'mirror' ? `Latest state per ${s.key_columns.join(', ') || 'key'}${s.keep_history ? ` · every change in ${s.target_table}__changes` : ''} · ` : ''}{s.stats.batches.toLocaleString()} batch{s.stats.batches === 1 ? '' : 'es'} · last {s.stats.last_batch_rows.toLocaleString()} row{s.stats.last_batch_rows === 1 ? '' : 's'} · {s.format === 'json' ? 'JSON' : s.format === 'debezium' ? 'Debezium' : 'text'}{s.include_metadata ? ' · with key, partition, offset and time' : ''}</p>
                     {latest && latest.rows.length > 0 ? (
                       <div className="max-h-64 overflow-auto rounded border border-zinc-800" data-testid="stream-latest">
-                        <table className="w-full text-[11px]">
+                        <table className="w-full text-2xs">
                           <thead className="sticky top-0 bg-zinc-900"><tr>{latest.columns.map((c) => <th key={c.name} className="px-2 py-1 text-left font-medium text-zinc-400">{c.name}</th>)}</tr></thead>
                           <tbody>{latest.rows.map((r, i) => <tr key={i} className="border-t border-zinc-800/60">{r.map((v, j) => <td key={j} className="max-w-[16rem] truncate px-2 py-1 font-mono text-zinc-300">{v === null ? <span className="text-zinc-600">null</span> : typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>)}</tr>)}</tbody>
                         </table>

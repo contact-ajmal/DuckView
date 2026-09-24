@@ -76,7 +76,7 @@ export function MetricsPanel({ workspaceId }: { workspaceId: string }) {
 }
 
 function sourceBadge(source: string) {
-  return source === 'workspace' ? null : <Badge tone="violet"><Workflow className="mr-0.5 inline h-2.5 w-2.5" />dbt</Badge>;
+  return source === 'workspace' ? null : <Badge tone="accent"><Workflow className="mr-0.5 inline h-2.5 w-2.5" />dbt</Badge>;
 }
 
 function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer: SemanticLayer; onDefine: () => void }) {
@@ -186,24 +186,24 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
     <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
       <div className="space-y-3">
         <div>
-          <div className="mb-1 flex items-center justify-between text-[10px] text-zinc-500">Metrics <button className="normal-case text-accent-300 hover:underline" onClick={onDefine}>edit definitions</button></div>
+          <div className="mb-1 flex items-center justify-between text-2xs text-zinc-500">Metrics <button className="normal-case text-accent-300 hover:underline" onClick={onDefine}>edit definitions</button></div>
           <div className="space-y-0.5">
             {layer.metrics.map((m) => (
               <label key={m.name} className={cn('flex cursor-pointer items-start gap-2 rounded px-1.5 py-1', picked.includes(m.name) ? 'bg-zinc-800/80' : 'hover:bg-zinc-800/40')} title={m.error ?? m.description ?? ''} data-metric={m.name}>
                 <input type="checkbox" className="mt-0.5" checked={picked.includes(m.name)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, m.name] : p.filter((x) => x !== m.name)))} />
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1 text-zinc-200">{m.label ?? m.name} {sourceBadge(m.source)}{m.error && <Badge tone="red">error</Badge>}</span>
-                  <span className="block truncate font-mono text-[10px] text-zinc-500">{m.name} · {m.type === 'simple' ? m.measure : m.type === 'ratio' ? `${m.numerator} / ${m.denominator}` : m.expr}</span>
+                  <span className="flex items-center gap-1 text-zinc-200">{m.label ?? m.name} {sourceBadge(m.source)}{m.error && <Badge tone="error">error</Badge>}</span>
+                  <span className="block truncate font-mono text-2xs text-zinc-500">{m.name} · {m.type === 'simple' ? m.measure : m.type === 'ratio' ? `${m.numerator} / ${m.denominator}` : m.expr}</span>
                 </span>
               </label>
             ))}
           </div>
         </div>
         <div>
-          <div className="mb-1 text-[10px] text-zinc-500">Group by</div>
+          <div className="mb-1 text-2xs text-zinc-500">Group by</div>
           <div className="flex flex-wrap gap-1">
             {groupBy.map((g) => (
-              <span key={g} className="inline-flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-zinc-200">
+              <span key={g} className="inline-flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-2xs text-zinc-200">
                 {g}
                 <button onClick={() => setGroupBy((x) => x.filter((y) => y !== g))}><X className="h-3 w-3" /></button>
               </span>
@@ -223,7 +223,7 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
           )}
         </div>
         <div>
-          <div className="mb-1 flex items-center justify-between text-[10px] text-zinc-500">
+          <div className="mb-1 flex items-center justify-between text-2xs text-zinc-500">
             Filters
             <button className="rounded p-0.5 hover:bg-zinc-800 hover:text-zinc-200" onClick={() => setFilters((f) => [...f, { dimension: dims[0]?.name ?? '', op: '=', value: '' }])} title="Add a filter"><Plus className="h-3.5 w-3.5" /></button>
           </div>
@@ -257,7 +257,7 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
             </div>
             {showSql && (
               <div className="relative">
-                <pre className="max-h-64 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[11px] text-zinc-300">{result.sql}</pre>
+                <pre className="max-h-64 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-2xs text-zinc-300">{result.sql}</pre>
                 <button className="absolute right-2 top-2 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200" onClick={() => void navigator.clipboard?.writeText(result.sql)} title="Copy"><Copy className="h-3.5 w-3.5" /></button>
               </div>
             )}
@@ -309,7 +309,7 @@ function Definitions({ workspaceId, layer, onSaved }: { workspaceId: string; lay
       <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-zinc-300">semantic layer · this workspace</span>
-          {check && (check.ok ? <Badge tone="green"><CheckCircle2 className="mr-0.5 inline h-3 w-3" />valid</Badge> : <Badge tone="red">{check.problems.length} problem{check.problems.length === 1 ? '' : 's'}</Badge>)}
+          {check && (check.ok ? <Badge tone="ok"><CheckCircle2 className="mr-0.5 inline h-3 w-3" />valid</Badge> : <Badge tone="error">{check.problems.length} problem{check.problems.length === 1 ? '' : 's'}</Badge>)}
           <div className="ml-auto flex gap-2">
             <HistoryButton label workspaceId={workspaceId} objectType="semantic" objectId="workspace" title="Semantic layer" onRestored={() => void api.get<SemanticLayer>(`/api/workspaces/${workspaceId}/semantic`).then((l) => { onSaved(l); setText(l.yaml); })} />
             <Button size="sm" variant="ghost" onClick={() => void validate()} data-testid="metrics-validate">Validate</Button>
@@ -317,9 +317,9 @@ function Definitions({ workspaceId, layer, onSaved }: { workspaceId: string; lay
           </div>
         </div>
         <div className="h-[460px] overflow-hidden rounded-lg border border-zinc-800">
-          <CodeMirror value={text} height="460px" theme={theme === 'dark' ? oneDark : 'light'} extensions={[yamlLang(), EditorView.lineWrapping]} editable={canEdit} onChange={setText} basicSetup={{ lineNumbers: true, foldGutter: true, autocompletion: false }} className="h-full text-[12.5px]" />
+          <CodeMirror value={text} height="460px" theme={theme === 'dark' ? oneDark : 'light'} extensions={[yamlLang(), EditorView.lineWrapping]} editable={canEdit} onChange={setText} basicSetup={{ lineNumbers: true, foldGutter: true, autocompletion: false }} className="h-full text-xs" />
         </div>
-        {(error || (check && !check.ok)) && <div className="whitespace-pre-wrap rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-[11px] text-red-200">{error ?? check!.problems.join('\n')}</div>}
+        {(error || (check && !check.ok)) && <div className="whitespace-pre-wrap rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-2xs text-red-200">{error ?? check!.problems.join('\n')}</div>}
       </div>
       <div className="space-y-3">
         {canEdit && (
@@ -332,18 +332,18 @@ function Definitions({ workspaceId, layer, onSaved }: { workspaceId: string; lay
               </Select>
               <Button size="sm" disabled={!table} onClick={() => void scaffold()} data-testid="metrics-scaffold"><Wand2 className="h-3.5 w-3.5" /></Button>
             </div>
-            <p className="text-[11px] text-zinc-500">Entities from id columns, time and categorical dimensions, a count and a sum per number. Review, then Save.</p>
+            <p className="text-2xs text-zinc-500">Entities from id columns, time and categorical dimensions, a count and a sum per number. Review, then Save.</p>
           </div>
         )}
-        <div className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[11px] text-zinc-400">
-          <div className="text-[10px] text-zinc-500">How it reads</div>
+        <div className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-2xs text-zinc-400">
+          <div className="text-2xs text-zinc-500">How it reads</div>
           <p><b className="text-zinc-300">semantic_models</b>: a table (or sql), <span className="font-mono">entities</span> (keys; a foreign entity joins to the model where it is primary), <span className="font-mono">dimensions</span> (categorical or time) and <span className="font-mono">measures</span> (sum · count · count_distinct · avg · min · max · median).</p>
           <p><b className="text-zinc-300">metrics</b>: <span className="font-mono">simple</span> (a measure, optional filter), <span className="font-mono">ratio</span> (numerator / denominator), <span className="font-mono">derived</span> (an expression over metrics).</p>
           <p>Group by <span className="font-mono">metric_time__month</span>, a dimension, or <span className="font-mono">customer__tier</span> across a join. Filters may use <span className="font-mono">{"{{ Dimension('order__status') }}"}</span>.</p>
         </div>
         {imported.length > 0 && (
-          <div className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[11px] text-zinc-400">
-            <div className="text-[10px] text-zinc-500">From dbt projects</div>
+          <div className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-2xs text-zinc-400">
+            <div className="text-2xs text-zinc-500">From dbt projects</div>
             {imported.map((s) => (
               <div key={s.source} className="flex items-center justify-between">
                 <a className="text-accent-300 hover:underline" href={`#/transform/dbt/${s.source.slice(4)}`}>{s.source}</a>

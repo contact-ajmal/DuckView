@@ -6,7 +6,7 @@ import { useAuth } from '../../store/auth';
 import { useCopilot } from '../../store/copilot';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { PageHeader } from '../../components/layout';
-import { Badge, Button, Empty, Input, Tabs, cn } from '../../components/ui';
+import { Badge, Button, Empty, Input, Tabs, cn, confirmAction } from '../../components/ui';
 import { CloudWizard } from '../explorer/CloudWizard';
 import { LakehouseWizard } from '../explorer/LakehouseWizard';
 import { DatabaseWizard } from './DatabaseWizard';
@@ -167,7 +167,7 @@ export function ConnectionsPage() {
                     <Button size="sm" variant="ghost" onClick={() => void testDb(c)} title="Test the connection"><RefreshCw className="h-3.5 w-3.5" /> Test</Button>
                     <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'sync', edit: null })} disabled={!wsId || !canEdit} title="Schedule a load from this database"><Clock className="h-3.5 w-3.5" /> Sync</Button>
                     <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'database', source: sources.find((s) => s.backend.family === 'database' && s.backend.engine === c.engine) ?? null, edit: c })} title="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Remove "${c.name}"? Syncs reading from it will fail.`)) { await api.del(`/api/database-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"? Syncs reading from it will fail.`))) { await api.del(`/api/database-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </>} />
               ))}
             </Section>
@@ -180,7 +180,7 @@ export function ConnectionsPage() {
                     <Button size="sm" variant="ghost" onClick={() => void testConnector(c)} title="Test the connection"><RefreshCw className="h-3.5 w-3.5" /> Test</Button>
                     <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'sync', edit: null, connectorId: c.id })} disabled={!wsId || !canEdit} title="Schedule a load from this connection"><Clock className="h-3.5 w-3.5" /> Sync</Button>
                     <Button size="sm" variant="ghost" onClick={() => { const k = connectorCatalog.find((x) => x.id === c.connector); if (k) setWizard({ kind: 'connector', source: sources.find((s) => s.backend.family === 'connector' && s.backend.connector === c.connector) ?? null, connector: k, edit: c }); }} title="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Remove "${c.name}"? Syncs reading from it will fail.`)) { await api.del(`/api/connector-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"? Syncs reading from it will fail.`))) { await api.del(`/api/connector-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </>} />
               ))}
             </Section>
@@ -192,7 +192,7 @@ export function ConnectionsPage() {
                   actions={<>
                     <Button size="sm" variant="ghost" onClick={() => void testLake(c)}><RefreshCw className="h-3.5 w-3.5" /> Test</Button>
                     <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'lakehouse', provider: c.provider, edit: c })} title="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Remove "${c.name}"?`)) { await api.del(`/api/lakehouse/${c.id}`); await load(); } }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"?`))) { await api.del(`/api/lakehouse/${c.id}`); await load(); } }}><Trash2 className="h-3.5 w-3.5" /></Button>
                   </>} />
               ))}
             </Section>
@@ -203,14 +203,14 @@ export function ConnectionsPage() {
                 <Row key={c.id} title={c.name} badge={<Badge>{c.provider}</Badge>} status="ok" onOpen={() => setWizard({ kind: 'cloud', provider: c.provider, edit: c })} sub={<>{c.uri_scheme}://{c.bucket ?? '<bucket>'}/… · {c.fields.join(', ')}{c.region ? ` · ${c.region}` : ''}{c.endpoint_url ? ` · ${c.endpoint_url}` : ''}</>}
                   actions={<>
                     <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'cloud', provider: c.provider, edit: c })} title="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Remove "${c.name}"?`)) { await api.del(`/api/cloud-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"?`))) { await api.del(`/api/cloud-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </>} />
               ))}
             </Section>
           )}
           {configured.http.length > 0 && (
             <Section title="HTTP credentials" icon={FAMILY_ICON.web} hint="Tokens applied to https:// reads and URL syncs.">
-              {configured.http.map((c) => <Row key={c.id} title={c.name} badge={<Badge>HTTP</Badge>} status="ok" sub={<>{c.fields.join(', ')}</>} actions={<Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Remove "${c.name}"?`)) { await api.del(`/api/connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>} />)}
+              {configured.http.map((c) => <Row key={c.id} title={c.name} badge={<Badge>HTTP</Badge>} status="ok" sub={<>{c.fields.join(', ')}</>} actions={<Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"?`))) { await api.del(`/api/connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>} />)}
             </Section>
           )}
         </div>
@@ -224,17 +224,17 @@ export function ConnectionsPage() {
             if (!items.length) return null;
             return (
               <div key={fam}>
-                <div className="mb-2 flex items-baseline gap-2"><span className="text-zinc-500">{FAMILY_ICON[fam]}</span><h3 className="text-[13px] font-semibold text-zinc-100">{catalog.families[fam].label}</h3><span className="truncate text-xs text-zinc-500">{catalog.families[fam].blurb}</span></div>
+                <div className="mb-2 flex items-baseline gap-2"><span className="text-zinc-500">{FAMILY_ICON[fam]}</span><h3 className="text-body font-semibold text-zinc-100">{catalog.families[fam].label}</h3><span className="truncate text-xs text-zinc-500">{catalog.families[fam].blurb}</span></div>
                 <div className="grid gap-x-6 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
                   {items.map((s) => (
                     <button key={s.id} type="button" data-source={s.id} disabled={s.status === 'planned' || !canEdit} onClick={() => openWizard(s)} className={cn('group flex items-start gap-3 border-b border-zinc-800/70 px-1 py-2.5 text-left', s.status === 'planned' ? 'cursor-default opacity-50' : 'hover:bg-zinc-900')} title={s.status === 'planned' ? 'Planned — not available yet' : `Connect ${s.label}`}>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="truncate text-[13px] font-medium text-zinc-100">{s.label}</span>
+                          <span className="truncate text-body font-medium text-zinc-100">{s.label}</span>
                           {s.status === 'planned' && <Badge>planned</Badge>}
                         </div>
                         <div className="truncate text-xs text-zinc-500">{s.blurb}</div>
-                        <div className="mt-0.5 truncate text-[11px] text-zinc-600">{[s.capabilities.attach && 'attach', s.capabilities.browse && 'browse', s.capabilities.remote_sql && 'remote SQL', s.capabilities.sync && 'sync'].filter(Boolean).join(' · ')}{' · '}{s.auth === 'keys' ? 'access keys' : s.auth === 'token' ? 'token' : s.auth === 'password' ? 'password' : s.auth === 'file' ? 'file' : s.auth === 'connection_string' ? 'connection string' : s.auth === 'oauth' ? (s.backend.family === 'connector' && connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector)?.auth.kind === 'google' ? 'Google account' : 'OAuth') : 'no auth'}</div>
+                        <div className="mt-0.5 truncate text-2xs text-zinc-600">{[s.capabilities.attach && 'attach', s.capabilities.browse && 'browse', s.capabilities.remote_sql && 'remote SQL', s.capabilities.sync && 'sync'].filter(Boolean).join(' · ')}{' · '}{s.auth === 'keys' ? 'access keys' : s.auth === 'token' ? 'token' : s.auth === 'password' ? 'password' : s.auth === 'file' ? 'file' : s.auth === 'connection_string' ? 'connection string' : s.auth === 'oauth' ? (s.backend.family === 'connector' && connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector)?.auth.kind === 'google' ? 'Google account' : 'OAuth') : 'no auth'}</div>
                       </div>
                       {s.status !== 'planned' && <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600 group-hover:text-zinc-200" />}
                     </button>
@@ -243,7 +243,7 @@ export function ConnectionsPage() {
               </div>
             );
           })}
-          <p className="text-[11px] text-zinc-500">Missing a source? Anything that speaks Postgres wire, S3 or an Iceberg REST catalog works through those entries; warehouses and applications go through their own APIs. Ask for a connector at <a className="text-accent-300 hover:underline" href="https://github.com/contact-ajmal/DuckView/issues" target="_blank" rel="noreferrer">github.com/contact-ajmal/DuckView/issues <ExternalLink className="inline h-3 w-3" /></a>.</p>
+          <p className="text-2xs text-zinc-500">Missing a source? Anything that speaks Postgres wire, S3 or an Iceberg REST catalog works through those entries; warehouses and applications go through their own APIs. Ask for a connector at <a className="text-accent-300 hover:underline" href="https://github.com/contact-ajmal/DuckView/issues" target="_blank" rel="noreferrer">github.com/contact-ajmal/DuckView/issues <ExternalLink className="inline h-3 w-3" /></a>.</p>
         </div>
       )}
 
@@ -264,12 +264,12 @@ export function ConnectionsPage() {
                 <div key={s.id} className="px-1 py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusDot status={s.last_run?.status ?? 'unknown'} />
-                    <span className="text-sm font-semibold text-zinc-100">{s.name}</span>
-                    <span className="font-mono text-[11px] text-zinc-500">→ {s.target_schema}.{s.target_table}</span>
+                    <span className="text-body font-semibold text-zinc-100">{s.name}</span>
+                    <span className="font-mono text-2xs text-zinc-500">→ {s.target_schema}.{s.target_table}</span>
                     <Badge>{s.mode}</Badge>
                     <Badge tone={s.enabled ? 'green' : 'amber'}>{s.enabled ? scheduleLabel(s) : 'paused'}</Badge>
-                    {s.transform_sql && <Badge tone="violet">transform</Badge>}
-                    <span className="ml-auto text-[11px] text-zinc-500">
+                    {s.transform_sql && <Badge tone="accent">transform</Badge>}
+                    <span className="ml-auto text-2xs text-zinc-500">
                       {s.last_run ? <>last {s.last_run.status}{s.last_run.rows != null ? ` · ${s.last_run.rows.toLocaleString()} rows` : ''}{s.last_run.duration_ms != null ? ` · ${(s.last_run.duration_ms / 1000).toFixed(1)} s` : ''} · {timeAgo(s.last_run.started_at)}</> : 'never run'}
                       {s.next_run_at && s.enabled ? ` · next ${new Date(s.next_run_at).toLocaleString()}` : ''}
                     </span>
@@ -278,13 +278,13 @@ export function ConnectionsPage() {
                       <Button size="sm" variant="ghost" onClick={async () => { await api.patch(`/api/syncs/${s.id}`, { enabled: !s.enabled }); await load(); }} disabled={!canEdit} title={s.enabled ? 'Pause' : 'Resume'}>{s.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}</Button>
                       <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'sync', edit: s })} disabled={!canEdit} title="Edit"><Pencil className="h-3.5 w-3.5" /></Button>
                       <Button size="sm" variant="ghost" onClick={() => void toggleRuns(s)} title="Run history"><Clock className="h-3.5 w-3.5" /></Button>
-                      <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if (confirm(`Delete sync "${s.name}"? The target table stays.`)) { await api.del(`/api/syncs/${s.id}`); await load(); } }} disabled={!canEdit} title="Delete"><Trash2 className="h-3.5 w-3.5" /></Button>
+                      <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Delete sync "${s.name}"? The target table stays.`))) { await api.del(`/api/syncs/${s.id}`); await load(); } }} disabled={!canEdit} title="Delete"><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
                   </div>
-                  <div className="mt-1 font-mono text-[10.5px] text-zinc-500">{describeSource(s, configured?.databases ?? [], configured?.connectors ?? [])}</div>
-                  {s.last_run?.error && <div className="mt-1 rounded-md border border-red-900/60 bg-red-950/30 px-2 py-1 font-mono text-[10.5px] text-red-200">{s.last_run.error}</div>}
+                  <div className="mt-1 font-mono text-2xs text-zinc-500">{describeSource(s, configured?.databases ?? [], configured?.connectors ?? [])}</div>
+                  {s.last_run?.error && <div className="mt-1 rounded-md border border-red-900/60 bg-red-950/30 px-2 py-1 font-mono text-2xs text-red-200">{s.last_run.error}</div>}
                   {runs[s.id] && (
-                    <ul className="mt-2 divide-y divide-zinc-800/60 rounded-md border border-zinc-800 text-[10.5px]">
+                    <ul className="mt-2 divide-y divide-zinc-800/60 rounded-md border border-zinc-800 text-2xs">
                       {runs[s.id]!.length === 0 && <li className="px-2 py-1 text-zinc-600">No runs yet.</li>}
                       {runs[s.id]!.map((r) => <li key={r.id} className="flex flex-wrap items-center gap-2 px-2 py-1 font-mono"><StatusDot status={r.status} /><span className="text-zinc-400">{new Date(r.started_at).toLocaleString()}</span><Badge>{r.triggered_by}</Badge><span className={r.status === 'error' ? 'text-red-300' : 'text-zinc-300'}>{r.status === 'ok' ? `${(r.rows ?? 0).toLocaleString()} rows · ${((r.duration_ms ?? 0) / 1000).toFixed(1)} s` : r.status === 'running' ? 'running…' : r.error}</span></li>)}
                     </ul>
@@ -329,7 +329,7 @@ const ROW_GRID = 'grid grid-cols-[minmax(0,1.1fr)_120px_96px_minmax(0,2fr)_auto]
 function Section({ title, icon, hint, children }: { title: string; icon: ReactNode; hint: string; children: ReactNode }) {
   return (
     <section>
-      <header className="mb-1 flex items-baseline gap-2"><span className="self-center text-zinc-500">{icon}</span><h3 className="text-[13px] font-semibold text-zinc-100">{title}</h3><span className="truncate text-xs text-zinc-500">{hint}</span></header>
+      <header className="mb-1 flex items-baseline gap-2"><span className="self-center text-zinc-500">{icon}</span><h3 className="text-body font-semibold text-zinc-100">{title}</h3><span className="truncate text-xs text-zinc-500">{hint}</span></header>
       <div className={cn(ROW_GRID, 'border-b border-zinc-800 px-1 py-1.5 text-xs text-zinc-500')}><span>Name</span><span>Type</span><span>Status</span><span>Details</span><span className="sr-only">Actions</span></div>
       <div className="divide-y divide-zinc-800/70 border-b border-zinc-800">{children}</div>
     </section>
@@ -338,7 +338,7 @@ function Section({ title, icon, hint, children }: { title: string; icon: ReactNo
 function Row({ title, badge, status, sub, actions, onOpen }: { title: string; badge: ReactNode; status: 'ok' | 'error' | 'unknown'; sub: ReactNode; actions: ReactNode; onOpen?: () => void }) {
   return (
     <div className={cn(ROW_GRID, 'group px-1 py-2', onOpen && 'cursor-pointer hover:bg-zinc-900')} onClick={onOpen} title={onOpen ? 'Open settings' : undefined}>
-      <span className="truncate text-[13px] font-medium text-zinc-100">{title}</span>
+      <span className="truncate text-body font-medium text-zinc-100">{title}</span>
       <span className="min-w-0 truncate text-xs text-zinc-400 [&>span]:bg-transparent [&>span]:p-0 [&>span]:text-xs [&>span]:font-normal [&>span]:text-zinc-400">{badge}</span>
       <span className="text-xs text-zinc-400"><span className="inline-flex items-center gap-1.5"><StatusDot status={status} />{status === 'ok' ? 'connected' : status === 'error' ? 'failing' : 'untested'}</span></span>
       <span className="min-w-0 truncate text-xs text-zinc-500">{sub}</span>

@@ -12,7 +12,7 @@ import { useTheme } from '../../store/theme';
 import { useCopilot } from '../../store/copilot';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { PageHeader } from '../../components/layout';
-import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, StatusDot, cn } from '../../components/ui';
+import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, StatusDot, cn, confirmAction, InlineError } from '../../components/ui';
 
 /** #/apps — the gallery of a workspace's Streamlit apps; #/apps/<id> — the editor with a live preview. */
 export function AppsPage() {
@@ -38,9 +38,9 @@ const RUNTIME_LABEL = { subprocess: 'next to the server', docker: 'in its own co
 
 /** Who sees the app, with a pending or rejected request to publish it. */
 function Audience({ app }: { app: DataApp }) {
-  if (app.publish_status === 'pending') return <Badge tone="amber" className="gap-1"><Globe className="h-3 w-3" /> awaiting review</Badge>;
+  if (app.publish_status === 'pending') return <Badge tone="warn" className="gap-1"><Globe className="h-3 w-3" /> awaiting review</Badge>;
   if (app.visibility === 'org') return <span className="inline-flex items-center gap-1 text-zinc-400"><Globe className="h-3 w-3 text-zinc-500" /> everyone</span>;
-  if (app.publish_status === 'rejected') return <Badge tone="red" className="gap-1"><Users className="h-3 w-3" /> not approved</Badge>;
+  if (app.publish_status === 'rejected') return <Badge tone="error" className="gap-1"><Users className="h-3 w-3" /> not approved</Badge>;
   return <span className="inline-flex items-center gap-1 text-zinc-400"><Users className="h-3 w-3 text-zinc-500" /> workspace</span>;
 }
 
@@ -100,11 +100,11 @@ function Gallery() {
           actions={<Button variant="primary" disabled={!wsId || !canEdit || !enabled} onClick={() => { setForm({ name: '', description: '', from: 'template', template: 'explorer', dashboard: '', queryIds: [], execution: 'server' }); setCreating(true); }}><Plus className="h-3.5 w-3.5" /> New app</Button>}
         />
         {!enabled && <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-zinc-300">Data apps are turned off on this server (<code className="font-mono">apps.enabled</code>). They run Python next to DuckView; an administrator can turn them on.</div>}
-        {error && <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 font-mono text-xs text-red-300">{error}</div>}
+        <InlineError error={error} />
         {apps.length === 0 ? (
           <div className="border-y border-zinc-800 py-14"><Empty icon={<AppWindow />} title="No apps yet" hint="Start from a template, a dashboard or saved queries; DuckView runs the app and serves it to the workspace." action={canEdit && enabled ? <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New app</Button> : undefined} /></div>
         ) : (
-          <table className="w-full table-fixed text-[13px]" data-testid="app-list">
+          <table className="w-full table-fixed text-body" data-testid="app-list">
             <thead>
               <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
                 <th className="py-2 pr-4 font-normal">App</th>
@@ -144,7 +144,7 @@ function Gallery() {
                         ) : (
                           <IconButton label="Start" disabled={busy === a.id || !enabled} onClick={async () => { setBusy(a.id); setError(null); try { await api.post(`/api/apps/${a.id}/start`, {}); } catch (e) { setError((e as Error).message); } finally { setBusy(null); await load(); } }}><Play className="h-3.5 w-3.5" /></IconButton>
                         )}
-                        <IconButton label="Delete" className="opacity-0 hover:text-red-400 group-hover:opacity-100" disabled={!canEdit} onClick={async () => { if (confirm(`Delete "${a.name}"?`)) { await api.del(`/api/apps/${a.id}`); await load(); } }}><Trash2 className="h-3.5 w-3.5" /></IconButton>
+                        <IconButton label="Delete" className="opacity-0 hover:text-red-400 group-hover:opacity-100" disabled={!canEdit} onClick={async () => { if ((await confirmAction(`Delete "${a.name}"?`))) { await api.del(`/api/apps/${a.id}`); await load(); } }}><Trash2 className="h-3.5 w-3.5" /></IconButton>
                       </div>
                     </td>
                   </tr>
@@ -168,8 +168,8 @@ function Gallery() {
                 <div className="grid gap-2 md:grid-cols-2">
                   {templates.map((t) => (
                     <button key={t.id} type="button" onClick={() => setForm({ ...form, template: t.id })} className={cn('rounded-lg border p-3 text-left', form.template === t.id ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
-                      <div className="flex items-center gap-1.5 text-sm text-zinc-100">{t.label}<Badge className="ml-auto">{APP_KIND_LABEL[t.kind]}</Badge></div>
-                      <div className="mt-1 text-[11px] text-zinc-500">{t.blurb}</div>
+                      <div className="flex items-center gap-1.5 text-body text-zinc-100">{t.label}<Badge className="ml-auto">{APP_KIND_LABEL[t.kind]}</Badge></div>
+                      <div className="mt-1 text-2xs text-zinc-500">{t.blurb}</div>
                     </button>
                   ))}
                 </div>
@@ -180,14 +180,14 @@ function Gallery() {
                     <option value="">{dashboards.length ? 'Pick a dashboard…' : 'No dashboards in this workspace yet'}</option>
                     {dashboards.map((d) => <option key={d.id} value={d.id}>{d.name} · {d.kind === 'mosaic' ? 'Mosaic' : 'grid'}</option>)}
                   </Select>
-                  <p className="mt-1 text-[11px] text-zinc-500">A Mosaic dashboard becomes filters, KPIs, charts and tables computed in SQL; a grid dashboard becomes one section per widget. No model involved — the code is yours to edit.</p>
+                  <p className="mt-1 text-2xs text-zinc-500">A Mosaic dashboard becomes filters, KPIs, charts and tables computed in SQL; a grid dashboard becomes one section per widget. No model involved — the code is yours to edit.</p>
                 </div>
               )}
               {form.from === 'queries' && (
                 <div className="max-h-40 space-y-1 overflow-auto rounded-md border border-zinc-800 p-2 text-xs">
                   {queries.length === 0 && <div className="text-zinc-500">No saved queries in this workspace yet.</div>}
                   {queries.map((q) => (
-                    <label key={q.id} className="flex cursor-pointer items-center gap-2 text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={form.queryIds.includes(q.id)} onChange={(e) => setForm({ ...form, queryIds: e.target.checked ? [...form.queryIds, q.id] : form.queryIds.filter((x) => x !== q.id) })} /> <span className="font-medium">{q.name}</span><span className="truncate font-mono text-[10px] text-zinc-500">{q.sql_text.slice(0, 80)}</span></label>
+                    <label key={q.id} className="flex cursor-pointer items-center gap-2 text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={form.queryIds.includes(q.id)} onChange={(e) => setForm({ ...form, queryIds: e.target.checked ? [...form.queryIds, q.id] : form.queryIds.filter((x) => x !== q.id) })} /> <span className="font-medium">{q.name}</span><span className="truncate font-mono text-2xs text-zinc-500">{q.sql_text.slice(0, 80)}</span></label>
                   ))}
                 </div>
               )}
@@ -199,13 +199,13 @@ function Gallery() {
                   {([['server', <Server key="s" className="h-4 w-4" />, 'On the server', `A Python process ${RUNTIME_LABEL[runtime]}; any package, reads with the app's own token.`], ['browser', <Monitor key="b" className="h-4 w-4" />, "In the viewer's browser", 'stlite (Pyodide): nothing runs on the server; reads with each viewer\'s own access. Pure-Python packages only.']] as const).map(([id, icon, label, hint]) => (
                     <button key={id} type="button" onClick={() => setForm({ ...form, execution: id })} className={cn('rounded-lg border p-2.5 text-left', form.execution === id ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
                       <span className="flex items-center gap-1.5 text-xs text-zinc-100"><span className="text-accent-300">{icon}</span>{label}</span>
-                      <span className="mt-1 block text-[10.5px] text-zinc-500">{hint}</span>
+                      <span className="mt-1 block text-2xs text-zinc-500">{hint}</span>
                     </button>
                   ))}
                 </div>
               </div>
             )}
-            {form.execution === 'server' && <p className="text-[11px] text-zinc-500">{runtime === 'subprocess' ? 'The first start creates a Python environment with Streamlit, pandas, pyarrow and the DuckView SDK next to the data directory — it takes a minute once.' : `Each app runs ${RUNTIME_LABEL[runtime]} from the DuckView app-runtime image (Streamlit, pandas, pyarrow and the SDK); the first start may pull the image.`}</p>}
+            {form.execution === 'server' && <p className="text-2xs text-zinc-500">{runtime === 'subprocess' ? 'The first start creates a Python environment with Streamlit, pandas, pyarrow and the DuckView SDK next to the data directory — it takes a minute once.' : `Each app runs ${RUNTIME_LABEL[runtime]} from the DuckView app-runtime image (Streamlit, pandas, pyarrow and the SDK); the first start may pull the image.`}</p>}
             {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
             <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button><Button variant="primary" loading={busy === 'create'} disabled={(form.from === 'dashboard' && !form.dashboard) || (form.from === 'queries' && !form.queryIds.length)} onClick={() => void create()}><Plus className="h-4 w-4" /> Create & open</Button></div>
           </div>
@@ -337,19 +337,19 @@ function AppEditor({ id }: { id: string }) {
       <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-2">
         <a href="#/apps" className="text-zinc-500 hover:text-zinc-200" title="Back to the gallery"><ChevronLeft className="h-4 w-4" /></a>
         <AppWindow className="h-4 w-4 text-accent-300" />
-        <span className="text-sm font-semibold text-zinc-100">{app.name}</span>
+        <span className="text-body font-semibold text-zinc-100">{app.name}</span>
         <Badge tone={STATUS_TONE[status]}>{app.execution === 'browser' && status === 'running' ? 'ready' : status}</Badge>
-        {dirty && <Badge tone="amber">unsaved</Badge>}
+        {dirty && <Badge tone="warn">unsaved</Badge>}
         <button type="button" onClick={() => setPublishing(true)} title="Who sees this app" className="disabled:opacity-50" disabled={!canEdit}><Audience app={app} /></button>
-        {app.always_on && <Badge tone="violet" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}
+        {app.always_on && <Badge tone="accent" className="gap-1"><Pin className="h-3 w-3" /> always on</Badge>}
         <Badge tone={app.kind === 'streamlit' ? 'zinc' : 'blue'}>{APP_KIND_LABEL[app.kind]}</Badge>
         {canEdit && app.kind === 'streamlit' && (
-          <Select value={app.execution} title="Where the app's Python runs" className="h-6 py-0 text-[11px]" onChange={async (e) => { try { setApp((await api.patch<{ app: DataApp }>(`/api/apps/${id}`, { execution: e.target.value })).app); setPreviewKey((k) => k + 1); } catch (err) { setError((err as Error).message); } }}>
+          <Select value={app.execution} title="Where the app's Python runs" className="h-6 py-0 text-2xs" onChange={async (e) => { try { setApp((await api.patch<{ app: DataApp }>(`/api/apps/${id}`, { execution: e.target.value })).app); setPreviewKey((k) => k + 1); } catch (err) { setError((err as Error).message); } }}>
             <option value="server">runs on the server</option>
             <option value="browser">runs in the viewer's browser</option>
           </Select>
         )}
-        <span className="text-[11px] text-zinc-500">{app.execution === 'browser' ? 'Python runs in each viewer\'s browser' : app.last_started_at ? `started ${timeAgo(app.last_started_at)}` : 'never started'}{app.last_error ? <span className="text-red-300"> · {app.last_error}</span> : null}</span>
+        <span className="text-2xs text-zinc-500">{app.execution === 'browser' ? 'Python runs in each viewer\'s browser' : app.last_started_at ? `started ${timeAgo(app.last_started_at)}` : 'never started'}{app.last_error ? <span className="text-red-300"> · {app.last_error}</span> : null}</span>
         <div className="ml-auto flex items-center gap-1">
           <Button size="sm" variant="ghost" onClick={() => void draft()} loading={drafting} disabled={!canEdit || !cp.config?.can_use || app.kind !== 'streamlit'} title={app.kind !== 'streamlit' ? 'Draft writes Streamlit apps; ask Copilot (next button) about Dash or Gradio code' : cp.config?.can_use ? 'Let Copilot write app.py for a goal (checked before it lands in the editor)' : 'Configure Copilot under Settings → Copilot first'}><Wand2 className="h-3.5 w-3.5" /> Draft</Button>
           <Button size="sm" variant="ghost" onClick={askCopilot} title="Ask Copilot about this app"><Bot className="h-3.5 w-3.5" /></Button>
@@ -372,16 +372,16 @@ function AppEditor({ id }: { id: string }) {
         </div>
       </div>
       <PublishDialog open={publishing} app={app} isAdmin={isAdmin} onClose={() => setPublishing(false)} onChanged={(a) => setApp(a)} />
-      {error && <div className="border-b border-red-900/60 bg-red-950/40 px-4 py-1.5 font-mono text-[11px] text-red-200">{error}</div>}
-      {check && (check.errors.length || check.warnings.length) ? <div className={cn('border-b px-4 py-1.5 font-mono text-[11px]', check.ok ? 'border-amber-900/60 bg-amber-950/30 text-amber-200' : 'border-red-900/60 bg-red-950/40 text-red-200')}>{[...check.errors, ...check.warnings.map((w) => `warning: ${w}`)].join(' · ')}<button className="ml-2 text-zinc-500 hover:text-zinc-200" onClick={() => setCheck(null)}>×</button></div> : null}
+      {error && <div className="border-b border-red-900/60 bg-red-950/40 px-4 py-1.5 font-mono text-2xs text-red-200">{error}</div>}
+      {check && (check.errors.length || check.warnings.length) ? <div className={cn('border-b px-4 py-1.5 font-mono text-2xs', check.ok ? 'border-amber-900/60 bg-amber-950/30 text-amber-200' : 'border-red-900/60 bg-red-950/40 text-red-200')}>{[...check.errors, ...check.warnings.map((w) => `warning: ${w}`)].join(' · ')}<button className="ml-2 text-zinc-500 hover:text-zinc-200" onClick={() => setCheck(null)}>×</button></div> : null}
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <div className="flex min-h-0 flex-col border-r border-zinc-800">
-          <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1 text-[11px]">
+          <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1 text-2xs">
             {Object.keys(files).map((f) => <button key={f} onClick={() => setActive(f)} className={cn('rounded px-2 py-0.5 font-mono', active === f ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200')}>{f}</button>)}
             <span className="ml-auto text-zinc-600">Python · ⌘S saves and {app.execution === 'browser' ? 'reloads' : 'restarts'}</span>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            <CodeMirror value={files[active] ?? ''} height="100%" theme={kind === 'dark' ? oneDark : 'light'} extensions={extensions} onChange={(v) => setFiles((f) => ({ ...f, [active]: v }))} editable={canEdit} basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, autocompletion: false }} className="h-full text-[12.5px]" />
+            <CodeMirror value={files[active] ?? ''} height="100%" theme={kind === 'dark' ? oneDark : 'light'} extensions={extensions} onChange={(v) => setFiles((f) => ({ ...f, [active]: v }))} editable={canEdit} basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, autocompletion: false }} className="h-full text-xs" />
           </div>
         </div>
         <div className="flex min-h-0 flex-col">
@@ -395,10 +395,10 @@ function AppEditor({ id }: { id: string }) {
                 <Button variant="primary" size="sm" onClick={() => void action('start')} loading={busy === 'start'}><Play className="h-3.5 w-3.5" /> Run the app</Button>
               </div>
             )}
-            {(status === 'starting' || status === 'installing') && <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-center gap-2 bg-zinc-900/80 py-1 text-[11px] text-zinc-300"><Loader2 className="h-3 w-3 animate-spin" /> {status === 'installing' ? 'Preparing the Python environment (first run takes a minute)…' : 'Starting…'}</div>}
+            {(status === 'starting' || status === 'installing') && <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-center gap-2 bg-zinc-900/80 py-1 text-2xs text-zinc-300"><Loader2 className="h-3 w-3 animate-spin" /> {status === 'installing' ? 'Preparing the Python environment (first run takes a minute)…' : 'Starting…'}</div>}
           </div>
           {showLogs && (
-            <pre className="max-h-56 overflow-auto border-t border-zinc-800 bg-zinc-950 p-2 font-mono text-[10.5px] leading-snug text-zinc-400">{logs.length ? logs.join('\n') : 'No log lines yet.'}</pre>
+            <pre className="max-h-56 overflow-auto border-t border-zinc-800 bg-zinc-950 p-2 font-mono text-2xs leading-snug text-zinc-400">{logs.length ? logs.join('\n') : 'No log lines yet.'}</pre>
           )}
         </div>
       </div>
@@ -444,7 +444,7 @@ function PublishDialog({ open, app, isAdmin, onClose, onChanged }: { open: boole
         {([['workspace', <Users key="w" className="h-4 w-4" />, 'Workspace members', 'Everyone the workspace is shared with — viewers included.'], ['org', <Globe key="o" className="h-4 w-4" />, 'Everyone signed in', review ? (isAdmin ? 'Published at once (you are an administrator). A later code change by an editor sends it back to review.' : 'An administrator reviews the request first. Changing the code later sends it back to review.') : 'Anyone with a DuckView account can open it (read-only).']] as const).map(([id, icon, label, hint]) => (
           <button key={id} type="button" onClick={() => setAudience(id)} className={cn('flex w-full items-start gap-3 rounded-lg border p-3 text-left', audience === id ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
             <span className="mt-0.5 text-accent-300">{icon}</span>
-            <span><span className="block text-sm text-zinc-100">{label}</span><span className="text-[11px] text-zinc-500">{hint}</span></span>
+            <span><span className="block text-body text-zinc-100">{label}</span><span className="text-2xs text-zinc-500">{hint}</span></span>
           </button>
         ))}
         {needsReview && <div><Label>Note for the reviewer <span className="normal-case text-zinc-600">(optional)</span></Label><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Who it is for, what data it shows" /></div>}

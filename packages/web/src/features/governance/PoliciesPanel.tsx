@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { EyeOff, Filter, Pencil, Plus, ShieldCheck, Trash2, UserSearch } from 'lucide-react';
 import { api, timeAgo, type AccessPolicy, type CatalogObject, type ColumnMask, type MaskKind, type MyRestrictions, type WorkspaceMember } from '../../api/client';
-import { Badge, Button, Empty, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Badge, Button, Empty, Input, Label, Modal, Select, cn, confirmAction } from '../../components/ui';
 
 const MASKS: { id: MaskKind | ''; label: string; example: string }[] = [
   { id: '', label: 'visible', example: 'ana@acme.com' },
@@ -76,7 +76,7 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
               {t.description && <p className="mt-1 text-zinc-400">{t.description}</p>}
               <p className="mt-1 text-zinc-500">{t.rows_filtered ? 'You see some of its rows.' : 'You see all of its rows.'}{t.masked_columns.length ? ` Masked for you: ${t.masked_columns.join(', ')}.` : ''}</p>
             </div>
-          ))}<p className="text-[11px] text-zinc-500">Under a policy you can run SELECT queries only, on tables (not data files or views over protected tables).</p></div>
+          ))}<p className="text-2xs text-zinc-500">Under a policy you can run SELECT queries only, on tables (not data files or views over protected tables).</p></div>
         )}
       </div>
     );
@@ -100,20 +100,20 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
             <div key={p.id} className={cn('rounded-lg border border-zinc-800 p-3 text-xs', !p.enabled && 'opacity-60')}>
               <div className="flex flex-wrap items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-accent-300" />
-                <span className="text-sm font-semibold text-zinc-100">{p.name}</span>
+                <span className="text-body font-semibold text-zinc-100">{p.name}</span>
                 <span className="font-mono text-zinc-400">{p.table_name}</span>
                 {!p.enabled && <Badge>off</Badge>}
-                <span className="ml-auto text-[11px] text-zinc-500">for {subjects(p)} · {timeAgo(p.updated_at)}</span>
+                <span className="ml-auto text-2xs text-zinc-500">for {subjects(p)} · {timeAgo(p.updated_at)}</span>
               </div>
               {p.description && <p className="mt-1 text-zinc-400">{p.description}</p>}
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {p.row_filter && <span className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[10.5px] text-zinc-300"><Filter className="h-3 w-3" /> {p.row_filter}</span>}
-                {Object.entries(p.column_masks).map(([c, m]) => <span key={c} className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-[10.5px] text-zinc-300"><EyeOff className="h-3 w-3" /> {c}: {m.kind}</span>)}
+                {p.row_filter && <span className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-2xs text-zinc-300"><Filter className="h-3 w-3" /> {p.row_filter}</span>}
+                {Object.entries(p.column_masks).map(([c, m]) => <span key={c} className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-2xs text-zinc-300"><EyeOff className="h-3 w-3" /> {c}: {m.kind}</span>)}
               </div>
               <div className="mt-2 flex items-center gap-1">
                 <Button size="sm" variant="ghost" onClick={() => setDraft({ id: p.id, name: p.name, description: p.description ?? '', table: p.table_name, filter: p.row_filter ?? '', masks: p.column_masks, roles: p.applies_to.roles ?? [], users: p.applies_to.users ?? [], groups: p.applies_to.groups ?? [], all: !!p.applies_to.all, embeds: !!p.applies_to.embeds })}><Pencil className="h-3.5 w-3.5" /> Edit</Button>
                 <Button size="sm" variant="ghost" onClick={() => void act(`t:${p.id}`, () => api.patch(`/api/policies/${p.id}`, { enabled: !p.enabled }))}>{p.enabled ? 'Turn off' : 'Turn on'}</Button>
-                <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={() => { if (confirm(`Delete the policy "${p.name}"? The people it restricts will see the whole table.`)) void act(`d:${p.id}`, () => api.del(`/api/policies/${p.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={async () => { if ((await confirmAction(`Delete the policy "${p.name}"? The people it restricts will see the whole table.`))) void act(`d:${p.id}`, () => api.del(`/api/policies/${p.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           ))}
@@ -127,7 +127,7 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
               <div><Label>Table</Label><Select className="w-full" value={draft.table} onChange={(e) => setDraft({ ...draft, table: e.target.value, masks: {} })}><option value="">Pick a table…</option>{objects.map((o) => <option key={`${o.schema}.${o.name}`} value={tableName(o)}>{tableName(o)} {o.type === 'VIEW' ? '(view)' : ''}</option>)}</Select></div>
               <div><Label>Name</Label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="EU sales only" /></div>
             </div>
-            <div><Label>Row filter <span className="normal-case text-zinc-600">(SQL; empty: every row)</span></Label><textarea value={draft.filter} onChange={(e) => setDraft({ ...draft, filter: e.target.value })} rows={2} spellCheck={false} placeholder="region = 'EU'  ·  owner_email = {{user.email}}  ·  list_contains({{user.groups}}, team)" className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[12px] text-zinc-200 focus:border-accent-500 focus:outline-none" /><p className="mt-0.5 text-[10.5px] text-zinc-500">Placeholders: <code>{'{{user.email}}'}</code> <code>{'{{user.id}}'}</code> <code>{'{{user.role}}'}</code> <code>{'{{user.groups}}'}</code> (a list of team names).</p></div>
+            <div><Label>Row filter <span className="normal-case text-zinc-600">(SQL; empty: every row)</span></Label><textarea value={draft.filter} onChange={(e) => setDraft({ ...draft, filter: e.target.value })} rows={2} spellCheck={false} placeholder="region = 'EU'  ·  owner_email = {{user.email}}  ·  list_contains({{user.groups}}, team)" className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" /><p className="mt-0.5 text-2xs text-zinc-500">Placeholders: <code>{'{{user.email}}'}</code> <code>{'{{user.id}}'}</code> <code>{'{{user.role}}'}</code> <code>{'{{user.groups}}'}</code> (a list of team names).</p></div>
             {columns.length > 0 && (
               <div>
                 <Label>Columns</Label>
@@ -137,8 +137,8 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
                     return (
                       <div key={c.name} className="flex items-center gap-2">
                         <span className="w-32 truncate font-mono text-zinc-300" title={c.type}>{c.name}</span>
-                        <Select className="h-7 flex-1 py-0 text-[11px]" value={m?.kind ?? ''} onChange={(e) => { const k = e.target.value as MaskKind | ''; const next = { ...draft.masks }; if (!k) delete next[c.name]; else next[c.name] = k === 'expression' ? { kind: 'expression', sql: `left(CAST("${c.name}" AS VARCHAR), 1) || '…'` } : { kind: k }; setDraft({ ...draft, masks: next }); }}>{MASKS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</Select>
-                        {m?.kind === 'expression' && <Input className="h-7 w-40 font-mono text-[10.5px]" value={m.sql} onChange={(e) => setDraft({ ...draft, masks: { ...draft.masks, [c.name]: { kind: 'expression', sql: e.target.value } } })} />}
+                        <Select className="h-7 flex-1 py-0 text-2xs" value={m?.kind ?? ''} onChange={(e) => { const k = e.target.value as MaskKind | ''; const next = { ...draft.masks }; if (!k) delete next[c.name]; else next[c.name] = k === 'expression' ? { kind: 'expression', sql: `left(CAST("${c.name}" AS VARCHAR), 1) || '…'` } : { kind: k }; setDraft({ ...draft, masks: next }); }}>{MASKS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</Select>
+                        {m?.kind === 'expression' && <Input className="h-7 w-40 font-mono text-2xs" value={m.sql} onChange={(e) => setDraft({ ...draft, masks: { ...draft.masks, [c.name]: { kind: 'expression', sql: e.target.value } } })} />}
                       </div>
                     );
                   })}
@@ -176,8 +176,8 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
             {preview.result && (
               <>
                 <p className="text-zinc-500">{preview.result.restricted ? 'Policies apply — the query ran as:' : 'No policy applies to this member.'}</p>
-                {preview.result.restricted && <pre className="max-h-24 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 font-mono text-[10.5px] text-zinc-400">{preview.result.sql}</pre>}
-                <div className="max-h-72 overflow-auto rounded border border-zinc-800"><table className="w-full text-left font-mono text-[11px]"><thead className="sticky top-0 bg-zinc-900 text-zinc-400"><tr>{preview.result.columns.map((c) => <th key={c.name} className="px-2 py-1">{c.name}</th>)}</tr></thead><tbody>{preview.result.rows.map((r, i) => <tr key={i} className="border-t border-zinc-800/60 text-zinc-200">{r.map((v, j) => <td key={j} className="px-2 py-0.5">{v === null ? <span className="text-zinc-600">NULL</span> : String(v)}</td>)}</tr>)}</tbody></table></div>
+                {preview.result.restricted && <pre className="max-h-24 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 font-mono text-2xs text-zinc-400">{preview.result.sql}</pre>}
+                <div className="max-h-72 overflow-auto rounded border border-zinc-800"><table className="w-full text-left font-mono text-2xs"><thead className="sticky top-0 bg-zinc-900 text-zinc-400"><tr>{preview.result.columns.map((c) => <th key={c.name} className="px-2 py-1">{c.name}</th>)}</tr></thead><tbody>{preview.result.rows.map((r, i) => <tr key={i} className="border-t border-zinc-800/60 text-zinc-200">{r.map((v, j) => <td key={j} className="px-2 py-0.5">{v === null ? <span className="text-zinc-600">NULL</span> : String(v)}</td>)}</tr>)}</tbody></table></div>
               </>
             )}
           </div>

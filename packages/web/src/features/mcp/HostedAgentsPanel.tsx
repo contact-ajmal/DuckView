@@ -20,7 +20,7 @@ const SCHEDULES: { id: string; label: string; make: () => SyncSchedule }[] = [
 const scheduleId = (s: SyncSchedule) => (s.kind === 'manual' ? 'manual' : s.kind === 'interval' ? 'hourly' : s.expression === '0 7 * * 1-5' ? 'weekdays' : s.expression.endsWith('* * 1') ? 'weekly' : 'daily');
 const every = (s: SyncSchedule) => (s.kind === 'interval' ? `every ${s.minutes / 60} h` : s.kind === 'cron' ? SCHEDULES.find((x) => x.id === scheduleId(s))?.label.toLowerCase() ?? `cron ${s.expression}` : 'when asked');
 
-const MD = 'text-[13px] leading-relaxed text-zinc-300 [&_h1]:mb-1 [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:text-zinc-100 [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:text-[13px] [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_h3]:mt-2 [&_h3]:font-semibold [&_li]:ml-4 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:my-1.5 [&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[11px] [&_table]:my-2 [&_td]:border [&_td]:border-zinc-800 [&_td]:px-2 [&_td]:py-0.5 [&_th]:border [&_th]:border-zinc-800 [&_th]:px-2 [&_th]:text-left';
+const MD = 'text-body leading-relaxed text-zinc-300 [&_h1]:mb-1 [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:text-zinc-100 [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:text-body [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_h3]:mt-2 [&_h3]:font-semibold [&_li]:ml-4 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:my-1.5 [&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-2xs [&_table]:my-2 [&_td]:border [&_td]:border-zinc-800 [&_td]:px-2 [&_td]:py-0.5 [&_th]:border [&_th]:border-zinc-800 [&_th]:px-2 [&_th]:text-left';
 
 type Draft = { id: string | null; name: string; description: string; instructions: string; task: string; tools: string[]; max_steps: number; schedule: string; channel_ids: string[]; published: boolean };
 const draftOf = (a: HostedAgent): Draft => ({ id: a.id, name: a.name, description: a.description ?? '', instructions: a.instructions, task: a.task, tools: a.tools, max_steps: a.max_steps, schedule: scheduleId(a.schedule), channel_ids: a.channel_ids, published: a.published });
@@ -111,7 +111,7 @@ export function HostedAgentsPanel() {
       setSelected(r.agent.id);
     });
 
-  if (!workspaceId) return <p className="text-sm text-zinc-500">Open a workspace first.</p>;
+  if (!workspaceId) return <p className="text-body text-zinc-500">Open a workspace first.</p>;
 
   return (
     <div className="space-y-8 text-xs" data-testid="hosted-agents">
@@ -119,7 +119,7 @@ export function HostedAgentsPanel() {
 
       <section className="space-y-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-[13px] font-semibold text-zinc-100">Your agents</h2>
+          <h2 className="text-body font-semibold text-zinc-100">Your agents</h2>
           <span className="text-zinc-500">DuckView runs them with read-only access to this workspace, on a schedule or when you ask</span>
           {canEdit && !draft && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setDraft({ id: null, name: '', description: '', instructions: '', task: '', tools: ['list_accessible_data', 'inspect_schema', 'execute_query'], max_steps: 8, schedule: 'manual', channel_ids: [], published: false })}><Plus className="h-3.5 w-3.5" /> Write your own</Button>}
         </div>
@@ -136,8 +136,8 @@ export function HostedAgentsPanel() {
                   <button onClick={() => setSelected(a.id)} className={cn('flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left', a.id === selected ? 'bg-zinc-800/80' : 'hover:bg-zinc-800/40')} data-agent={a.name}>
                     <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] text-zinc-100">{a.name}</span>
-                      <span className="block truncate text-[11px] text-zinc-500">{every(a.schedule)}{a.last_run ? ` · ${a.last_run.status === 'failed' ? 'failed' : 'ran'} ${timeAgo(a.last_run.finished_at)}` : ''}</span>
+                      <span className="block truncate text-body text-zinc-100">{a.name}</span>
+                      <span className="block truncate text-2xs text-zinc-500">{every(a.schedule)}{a.last_run ? ` · ${a.last_run.status === 'failed' ? 'failed' : 'ran'} ${timeAgo(a.last_run.finished_at)}` : ''}</span>
                     </span>
                     {a.last_run?.status === 'failed' && <CircleAlert className="mt-0.5 h-3.5 w-3.5 text-red-400" />}
                   </button>
@@ -149,7 +149,7 @@ export function HostedAgentsPanel() {
               <div className="min-w-0 space-y-3 rounded-md border border-zinc-800 p-3" data-testid="hosted-detail">
                 <div className="flex flex-wrap items-start gap-2">
                   <div className="min-w-0 flex-1">
-                    <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">{agent.name}{agent.published && <Badge tone="violet">A2A</Badge>}</h3>
+                    <h3 className="flex items-center gap-2 text-body font-semibold text-zinc-100">{agent.name}{agent.published && <Badge tone="accent">A2A</Badge>}</h3>
                     {agent.description && <p className="text-zinc-400">{agent.description}</p>}
                     <p className="mt-1 flex flex-wrap gap-1">{agent.tools.map((t) => <Badge key={t}>{t}</Badge>)}</p>
                   </div>
@@ -177,7 +177,7 @@ export function HostedAgentsPanel() {
                           <button onClick={() => setRunId(r.id)} className={cn('flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left', r.id === runId ? 'bg-zinc-800/80 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/40')}>
                             {r.status === 'running' ? <Loader2 className="h-3 w-3 animate-spin" /> : r.status === 'completed' ? <CheckCircle2 className="h-3 w-3 text-emerald-400" /> : <CircleAlert className="h-3 w-3 text-red-400" />}
                             <span className="min-w-0 flex-1 truncate">{r.input}</span>
-                            <span className="shrink-0 text-[10px] text-zinc-500">{timeAgo(r.started_at)}</span>
+                            <span className="shrink-0 text-2xs text-zinc-500">{timeAgo(r.started_at)}</span>
                           </button>
                         </li>
                       ))}
@@ -189,8 +189,8 @@ export function HostedAgentsPanel() {
                             {run.steps.map((s, i) => (
                               <li key={i} className="text-zinc-400">
                                 <span className={cn('inline-flex items-center gap-1 font-mono', s.ok ? 'text-zinc-200' : 'text-red-300')}><Wrench className="h-3 w-3" />{s.tool}</span>
-                                <span className="ml-1.5 font-mono text-[11px] text-zinc-500">{JSON.stringify(s.arguments).slice(0, 140)}</span>
-                                <span className="block truncate text-[11px]">{s.summary}</span>
+                                <span className="ml-1.5 font-mono text-2xs text-zinc-500">{JSON.stringify(s.arguments).slice(0, 140)}</span>
+                                <span className="block truncate text-2xs">{s.summary}</span>
                               </li>
                             ))}
                           </ol>
@@ -198,7 +198,7 @@ export function HostedAgentsPanel() {
                         {run.status === 'running' && <p className="flex items-center gap-1.5 text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Working… {run.steps.length ? `${run.steps.length} tool${run.steps.length === 1 ? '' : 's'} used` : ''}</p>}
                         {run.status === 'failed' && <p className="rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-red-200">{run.error}</p>}
                         {run.output && <div className={MD} data-testid="hosted-output"><ReactMarkdown remarkPlugins={[remarkGfm]}>{run.output}</ReactMarkdown></div>}
-                        {run.finished_at && <p className="text-[11px] text-zinc-500">{run.model ?? ''} · {run.input_tokens + run.output_tokens} tokens · {Math.round((Date.parse(run.finished_at) - Date.parse(run.started_at)) / 100) / 10} s{run.notified ? ` · sent to ${run.notified} channel${run.notified === 1 ? '' : 's'}` : ''}</p>}
+                        {run.finished_at && <p className="text-2xs text-zinc-500">{run.model ?? ''} · {run.input_tokens + run.output_tokens} tokens · {Math.round((Date.parse(run.finished_at) - Date.parse(run.started_at)) / 100) / 10} s{run.notified ? ` · sent to ${run.notified} channel${run.notified === 1 ? '' : 's'}` : ''}</p>}
                       </div>
                     )}
                   </div>
@@ -213,18 +213,18 @@ export function HostedAgentsPanel() {
 
       <section className="space-y-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-[13px] font-semibold text-zinc-100">Marketplace</h2>
+          <h2 className="text-body font-semibold text-zinc-100">Marketplace</h2>
           <span className="text-zinc-500">ready-made agents; everything stays editable after you install one</span>
         </div>
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3" data-testid="marketplace">
           {templates.map((t) => (
             <div key={t.id} className="flex flex-col rounded-md border border-zinc-800 p-3" data-template={t.id}>
               <div className="flex items-center gap-2">
-                <span className="text-[13px] font-medium text-zinc-100">{t.name}</span>
-                <span className="text-[11px] text-zinc-500">{t.category}</span>
+                <span className="text-body font-medium text-zinc-100">{t.name}</span>
+                <span className="text-2xs text-zinc-500">{t.category}</span>
               </div>
               <p className="mt-1 flex-1 text-zinc-400">{t.description}</p>
-              <p className="mt-2 text-[11px] text-zinc-500">{every(t.schedule)} · {t.tools.length} tools{t.needs.length ? ` · needs ${t.needs.join(', ')}` : ''}</p>
+              <p className="mt-2 text-2xs text-zinc-500">{every(t.schedule)} · {t.tools.length} tools{t.needs.length ? ` · needs ${t.needs.join(', ')}` : ''}</p>
               {canEdit && (
                 <div className="mt-2">
                   <Button size="sm" loading={busy === `install:${t.id}`} onClick={() => void install(t)} data-testid="template-install">{installed.has(t.id) ? 'Install another' : 'Install'}</Button>
@@ -249,14 +249,14 @@ function AgentEditor({ draft, setDraft, tools, channels, busy, onSave }: { draft
       <div><Label>What it does (shown in the list)</Label><Input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></div>
       <div>
         <Label>Instructions</Label>
-        <textarea value={draft.instructions} onChange={(e) => setDraft({ ...draft, instructions: e.target.value })} rows={7} className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-100 focus:border-accent-500 focus:outline-none" placeholder="Who the agent is, the steps it takes, and what its answer looks like." data-testid="hosted-instructions" />
+        <textarea value={draft.instructions} onChange={(e) => setDraft({ ...draft, instructions: e.target.value })} rows={7} className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-accent-500 focus:outline-none" placeholder="Who the agent is, the steps it takes, and what its answer looks like." data-testid="hosted-instructions" />
       </div>
       <div><Label>Task for scheduled runs</Label><Input value={draft.task} onChange={(e) => setDraft({ ...draft, task: e.target.value })} placeholder="e.g. What changed yesterday, and why?" /></div>
       <div>
         <Label>Tools (read-only)</Label>
         <div className="flex max-h-40 flex-wrap gap-1.5 overflow-auto">
           {tools.map((t) => (
-            <label key={t.name} title={t.description} className={cn('flex cursor-pointer items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-[11px]', draft.tools.includes(t.name) ? 'border-accent-500 text-zinc-100' : 'border-zinc-800 text-zinc-500')}>
+            <label key={t.name} title={t.description} className={cn('flex cursor-pointer items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-2xs', draft.tools.includes(t.name) ? 'border-accent-500 text-zinc-100' : 'border-zinc-800 text-zinc-500')}>
               <input type="checkbox" className="accent-accent-500" checked={draft.tools.includes(t.name)} onChange={(e) => setDraft({ ...draft, tools: e.target.checked ? [...draft.tools, t.name] : draft.tools.filter((x) => x !== t.name) })} />{t.name}
             </label>
           ))}

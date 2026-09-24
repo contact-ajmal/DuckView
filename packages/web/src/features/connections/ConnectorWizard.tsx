@@ -98,14 +98,14 @@ export function ConnectorWizard({ open, source, connector, initial, googleConfig
                   ) : f.key === 'service_account_key' ? (
                     <>
                       <Label>{f.label}</Label>
-                      <textarea value={String(values[f.key] ?? '')} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} rows={4} spellCheck={false} placeholder={initial?.credential_fields.includes(f.key) ? 'unchanged' : '{ "type": "service_account", "client_email": "…", "private_key": "…" }'} className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-[11px] text-zinc-100 focus:border-accent-500 focus:outline-none" />
-                      {f.hint && <p className="mt-0.5 text-[11px] text-zinc-500">{f.hint}</p>}
+                      <textarea value={String(values[f.key] ?? '')} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} rows={4} spellCheck={false} placeholder={initial?.credential_fields.includes(f.key) ? 'unchanged' : '{ "type": "service_account", "client_email": "…", "private_key": "…" }'} className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-2xs text-zinc-100 focus:border-accent-500 focus:outline-none" />
+                      {f.hint && <p className="mt-0.5 text-2xs text-zinc-500">{f.hint}</p>}
                     </>
                   ) : (
                     <>
                       <Label>{f.label}{f.required ? '' : <span className="normal-case text-zinc-600"> (optional)</span>}</Label>
                       <Input type={f.kind === 'secret' ? 'password' : f.kind === 'number' ? 'number' : 'text'} value={String(values[f.key] ?? '')} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} placeholder={f.kind === 'secret' && initial?.credential_fields.includes(f.key) ? 'unchanged' : f.placeholder} className={f.kind === 'url' || f.kind === 'path' ? 'font-mono' : ''} autoComplete="off" spellCheck={false} />
-                      {f.hint && <p className="mt-0.5 text-[11px] text-zinc-500">{f.hint}</p>}
+                      {f.hint && <p className="mt-0.5 text-2xs text-zinc-500">{f.hint}</p>}
                     </>
                   )}
                 </div>
@@ -124,12 +124,12 @@ export function ConnectorWizard({ open, source, connector, initial, googleConfig
                     <div className="space-y-2 rounded-md border border-amber-900/60 bg-amber-950/20 p-3">
                       <div className="flex items-center gap-1.5 font-semibold text-amber-200"><ShieldCheck className="h-3.5 w-3.5" /> One-time setup (administrator): register DuckView with Google</div>
                       <p className="text-zinc-400">Google only lets an app sign people in once it is registered — this takes two minutes and is done once for the whole server. Open <a className="text-accent-300 hover:underline" href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank" rel="noreferrer">Google Cloud → Create OAuth client <ExternalLink className="inline h-3 w-3" /></a> (type <i>Web application</i>), add the redirect URI below, then paste the client id and secret here. Enable the Drive, Sheets, BigQuery and Analytics Data APIs for the project as needed.</p>
-                      <div><Label>Authorised redirect URI</Label><code className="block select-all rounded bg-zinc-900 px-2 py-1 font-mono text-[11px] text-zinc-200">{setup.redirect_uri || '…'}</code></div>
+                      <div><Label>Authorised redirect URI</Label><code className="block select-all rounded bg-zinc-900 px-2 py-1 font-mono text-2xs text-zinc-200">{setup.redirect_uri || '…'}</code></div>
                       <div className="grid gap-2 md:grid-cols-2">
                         <div><Label>Client id</Label><Input value={setup.client_id} onChange={(e) => setSetup({ ...setup, client_id: e.target.value })} className="font-mono" placeholder="1234-abc.apps.googleusercontent.com" spellCheck={false} /></div>
                         <div><Label>Client secret</Label><Input type="password" value={setup.client_secret} onChange={(e) => setSetup({ ...setup, client_secret: e.target.value })} placeholder="GOCSPX-…" autoComplete="off" /></div>
                       </div>
-                      {setup.error && <div className="rounded-md border border-red-900 bg-red-950/50 px-2 py-1 font-mono text-[11px] text-red-200">{setup.error}</div>}
+                      {setup.error && <div className="rounded-md border border-red-900 bg-red-950/50 px-2 py-1 font-mono text-2xs text-red-200">{setup.error}</div>}
                       <div className="flex items-center gap-2">
                         <Button size="sm" variant="secondary" loading={setup.busy} disabled={!setup.client_id.trim() || !setup.client_secret.trim()} onClick={() => void saveGoogleClient()}><KeyRound className="h-3.5 w-3.5" /> Save & enable Google sign-in</Button>
                         <span className="text-zinc-500">The secret is stored encrypted and never shown again.</span>
@@ -142,7 +142,7 @@ export function ConnectorWizard({ open, source, connector, initial, googleConfig
                 <label className="flex cursor-pointer items-center gap-1.5 text-zinc-400"><input type="checkbox" className="accent-accent-500" checked={useServiceAccount} onChange={(e) => setUseServiceAccount(e.target.checked)} /> <KeyRound className="h-3 w-3" /> Server-to-server instead: use a service account key</label>
               </div>
             )}
-            {!google && <p className="text-[11px] text-zinc-500">Credentials are encrypted at rest, never shown again and never written to logs. The connection is tested right after saving.</p>}
+            {!google && <p className="text-2xs text-zinc-500">Credentials are encrypted at rest, never shown again and never written to logs. The connection is tested right after saving.</p>}
             {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose}>Cancel</Button>

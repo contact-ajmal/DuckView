@@ -78,17 +78,17 @@ export function CloudWizard({ open, onClose, onCreated, initialProvider, initial
 
   return (
     <Modal open={open} onClose={onClose} title={initial ? `Edit ${initial.name}` : fixed ? `Connect ${PROVIDER_META[provider].title}` : 'Connect cloud storage'} width="max-w-xl">
-      <div className="mb-4 flex items-center gap-2 text-[11px] text-zinc-500">
+      <div className="mb-4 flex items-center gap-2 text-2xs text-zinc-500">
         {(fixed ? [2, 3] : [1, 2, 3]).map((s) => (
           <span key={s} className={cn('flex items-center gap-1', step === s && 'text-accent-300')}>
-            <span className={cn('flex h-4 w-4 items-center justify-center rounded-full border text-[9px]', step >= s ? 'border-accent-500 bg-accent-600/30 text-accent-100' : 'border-zinc-700')}>{s}</span>
+            <span className={cn('flex h-4 w-4 items-center justify-center rounded-full border text-2xs', step >= s ? 'border-accent-500 bg-accent-600/30 text-accent-100' : 'border-zinc-700')}>{s}</span>
             {s === 1 ? 'Provider' : s === 2 ? 'Credentials' : 'Verify'}
             {s < 3 && <span className="mx-1 h-px w-6 bg-zinc-800" />}
           </span>
         ))}
       </div>
       {!externalAccess && (
-        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-900 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-900 bg-amber-950/40 px-3 py-2 text-2xs text-amber-200">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>External access is disabled on this server, so buckets can be browsed but not queried. Set <code className="font-mono">DUCKVIEW_ENABLE_EXTERNAL_ACCESS=true</code> and restart to query remote files.</span>
         </div>
@@ -98,11 +98,11 @@ export function CloudWizard({ open, onClose, onCreated, initialProvider, initial
         <div className="grid grid-cols-2 gap-2">
           {(Object.keys(PROVIDER_META) as Provider[]).map((p) => (
             <button key={p} onClick={() => setProvider(p)} className={cn('rounded-lg border p-3 text-left', provider === p ? 'border-accent-500 bg-accent-600/10' : 'border-zinc-800 hover:border-zinc-600')}>
-              <div className="flex items-center gap-2 text-sm text-zinc-100">
+              <div className="flex items-center gap-2 text-body text-zinc-100">
                 <Cloud className="h-4 w-4 text-sky-300" /> {PROVIDER_META[p].title}
               </div>
-              <div className="mt-1 text-[11px] text-zinc-500">{PROVIDER_META[p].blurb}</div>
-              <div className="mt-1 font-mono text-[10px] text-zinc-600">{specs?.[p].uri ?? ''}://bucket/path</div>
+              <div className="mt-1 text-2xs text-zinc-500">{PROVIDER_META[p].blurb}</div>
+              <div className="mt-1 font-mono text-2xs text-zinc-600">{specs?.[p].uri ?? ''}://bucket/path</div>
             </button>
           ))}
           <div className="col-span-2 flex justify-end">
@@ -145,7 +145,7 @@ export function CloudWizard({ open, onClose, onCreated, initialProvider, initial
               <Input type={/secret|token|connection_string/.test(f) ? 'password' : 'text'} value={creds[f] ?? ''} onChange={(e) => setCreds({ ...creds, [f]: e.target.value })} className="font-mono" autoComplete="off" placeholder={initial?.fields.includes(f) ? 'unchanged' : undefined} />
             </div>
           ))}
-          <p className="text-[11px] text-zinc-500">{spec.hint} Credentials are encrypted with AES-256-GCM and applied to DuckDB as a scoped <code className="font-mono">CREATE SECRET</code>; the API never returns them.</p>
+          <p className="text-2xs text-zinc-500">{spec.hint} Credentials are encrypted with AES-256-GCM and applied to DuckDB as a scoped <code className="font-mono">CREATE SECRET</code>; the API never returns them.</p>
           {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-200">{error}</div>}
           <div className="flex justify-between">
             <Button variant="ghost" onClick={() => (fixed ? onClose() : setStep(1))}>
@@ -164,10 +164,10 @@ export function CloudWizard({ open, onClose, onCreated, initialProvider, initial
             {testResult ? testResult.ok ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5" /> : <AlertTriangle className="mt-0.5 h-3.5 w-3.5" /> : <Loader2 className="mt-0.5 h-3.5 w-3.5 animate-spin" />}
             <div>
               <div>{testResult ? testResult.message : 'Testing credentials…'}</div>
-              {!testResult?.ok && testResult && <div className="mt-1 text-[10px] opacity-80">The connection is saved; you can fix the credentials from Settings → Cloud connections.</div>}
+              {!testResult?.ok && testResult && <div className="mt-1 text-2xs opacity-80">The connection is saved; you can fix the credentials from Settings → Cloud connections.</div>}
             </div>
           </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-900 p-3 font-mono text-[11px] text-zinc-300">
+          <div className="rounded-md border border-zinc-800 bg-zinc-900 p-3 font-mono text-2xs text-zinc-300">
             SELECT * FROM '{testResult?.uri_example ?? `${created.uri_scheme}://${created.bucket ?? 'bucket'}/path/file.parquet`}' LIMIT 100;
           </div>
           <div className="flex justify-end">

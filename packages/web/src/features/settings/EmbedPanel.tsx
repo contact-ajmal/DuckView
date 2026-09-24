@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Code2, KeyRound, Link2, Plus } from 'lucide-react';
 import { api, timeAgo, type Dashboard, type NotebookSummary } from '../../api/client';
 import { useWorkspaceAccess } from '../../store/workspace';
-import { Button, CopyButton, Input, Label, Select, Spinner, cn } from '../../components/ui';
+import { Button, CopyButton, Input, Label, Select, Spinner, cn, confirmAction } from '../../components/ui';
 
 interface EmbedKey { id: string; name: string; allowed_origins: string[]; created_at: string; last_used_at: string | null; revoked_at: string | null }
 
@@ -73,7 +73,7 @@ export function EmbedPanel({ workspaceId }: { workspaceId: string }) {
       {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}
 
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-zinc-100">Keys</h2>
+        <h2 className="text-body font-semibold text-zinc-100">Keys</h2>
         {keys === null ? <Spinner /> : keys.length > 0 && (
           <div className="divide-y divide-zinc-800 border-y border-zinc-800" data-testid="embed-keys">
             {keys.map((k) => (
@@ -83,7 +83,7 @@ export function EmbedPanel({ workspaceId }: { workspaceId: string }) {
                 <code className="font-mono text-zinc-400">{k.id}</code>
                 <span className="text-zinc-500">{k.allowed_origins.length ? k.allowed_origins.join(', ') : 'any site may frame it'}</span>
                 <span className="text-zinc-500">{k.revoked_at ? `revoked ${timeAgo(k.revoked_at)}` : k.last_used_at ? `used ${timeAgo(k.last_used_at)}` : 'not used yet'}</span>
-                {!k.revoked_at && <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={() => { if (confirm(`Revoke "${k.name}"? Every embed signed with it stops working at once.`)) void act('revoke', async () => { await api.del(`/api/embed/keys/${k.id}`); await load(); }); }}>Revoke</Button>}
+                {!k.revoked_at && <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={async () => { if ((await confirmAction(`Revoke "${k.name}"? Every embed signed with it stops working at once.`))) void act('revoke', async () => { await api.del(`/api/embed/keys/${k.id}`); await load(); }); }}>Revoke</Button>}
               </div>
             ))}
           </div>
@@ -98,13 +98,13 @@ export function EmbedPanel({ workspaceId }: { workspaceId: string }) {
             <p className="text-amber-100">Copy the secret of <b>{created.key.name}</b> into your server's configuration now (e.g. <code className="font-mono">DUCKVIEW_EMBED_SECRET</code>) — it is not shown again.</p>
             <div className="flex items-center gap-2"><code className="break-all rounded bg-zinc-950 px-2 py-1 font-mono text-zinc-100">{created.secret}</code><CopyButton text={created.secret} /></div>
             <div className="flex items-center gap-2 pt-1"><Code2 className="h-3.5 w-3.5 text-zinc-500" /><span className="text-zinc-400">Sign links on your server:</span><Select uiSize="sm" value={lang} onChange={(e) => setLang(e.target.value as 'node' | 'python')}><option value="node">Node.js</option><option value="python">Python</option></Select><CopyButton text={lang === 'node' ? nodeSnippet(created.key.id) : pySnippet(created.key.id)} /></div>
-            <pre className="max-h-64 overflow-auto rounded bg-zinc-950 p-2 font-mono text-[11px] text-zinc-300">{lang === 'node' ? nodeSnippet(created.key.id) : pySnippet(created.key.id)}</pre>
+            <pre className="max-h-64 overflow-auto rounded bg-zinc-950 p-2 font-mono text-2xs text-zinc-300">{lang === 'node' ? nodeSnippet(created.key.id) : pySnippet(created.key.id)}</pre>
           </div>
         )}
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-zinc-100">Try an embed</h2>
+        <h2 className="text-body font-semibold text-zinc-100">Try an embed</h2>
         <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)]">
           <div><Label>Key</Label><Select value={trial.key_id} onChange={(e) => setTrial({ ...trial, key_id: e.target.value })} className="w-full"><option value="">Choose…</option>{(keys ?? []).filter((k) => !k.revoked_at).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</Select></div>
           <div><Label>Show</Label><Select value={trial.resource} onChange={(e) => setTrial({ ...trial, resource: e.target.value })} className="w-full" data-testid="embed-resource"><option value="">Choose a dashboard or notebook…</option><optgroup label="Dashboards">{dashboards.map((d) => <option key={d.id} value={`dashboard:${d.id}`}>{d.name}</option>)}</optgroup><optgroup label="Notebooks">{notebooks.map((n) => <option key={n.id} value={`notebook:${n.id}`}>{n.title}</option>)}</optgroup></Select></div>

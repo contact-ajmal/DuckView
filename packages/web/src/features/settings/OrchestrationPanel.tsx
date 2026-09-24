@@ -76,19 +76,19 @@ curl "${location.origin}/api/orchestrate/runs/<run id>?wait=30" -H "Authorizatio
       <div>
         <Tabs size="sm" value={tool} onChange={setTool} tabs={[{ id: 'airflow', label: 'Airflow' }, { id: 'dagster', label: 'Dagster' }, { id: 'prefect', label: 'Prefect' }, { id: 'http', label: 'HTTP' }]} />
         <div className="relative mt-2">
-          <pre className="overflow-auto rounded-md bg-zinc-900 p-3 pr-20 font-mono text-[11.5px] text-zinc-200" data-testid="orchestration-snippet">{snippets[tool]}</pre>
+          <pre className="overflow-auto rounded-md bg-zinc-900 p-3 pr-20 font-mono text-xs text-zinc-200" data-testid="orchestration-snippet">{snippets[tool]}</pre>
           <div className="absolute right-2 top-2"><CopyButton text={snippets[tool]} /></div>
         </div>
       </div>
       {targets.length > 0 && (
         <div>
-          <h3 className="mb-1 text-[13px] font-medium text-zinc-100">What this workspace can run</h3>
+          <h3 className="mb-1 text-body font-medium text-zinc-100">What this workspace can run</h3>
           <ul className="divide-y divide-zinc-800/70 rounded-md border border-zinc-800">
             {targets.map((t) => (
               <li key={`${t.kind}:${t.id}`} className="flex items-center gap-2 px-3 py-1.5">
                 <span className="w-24 shrink-0 text-zinc-500">{t.kind.replace('_', ' ')}</span>
                 <span className="min-w-0 flex-1 truncate text-zinc-200">{t.name}</span>
-                <code className="font-mono text-[11px] text-zinc-500">{t.id}</code>
+                <code className="font-mono text-2xs text-zinc-500">{t.id}</code>
                 <CopyButton text={t.id} label="ID" />
               </li>
             ))}
@@ -96,7 +96,7 @@ curl "${location.origin}/api/orchestrate/runs/<run id>?wait=30" -H "Authorizatio
         </div>
       )}
       <div>
-        <h3 className="mb-1 text-[13px] font-medium text-zinc-100">Recent runs</h3>
+        <h3 className="mb-1 text-body font-medium text-zinc-100">Recent runs</h3>
         {runs && runs.length === 0 ? <p className="text-zinc-500">No runs yet.</p> : (
           <table className="w-full table-fixed text-left" data-testid="orchestration-runs">
             <thead className="text-zinc-500"><tr><th className="w-6" /><th className="w-24 py-1 font-normal">From</th><th className="w-24 font-normal">Kind</th><th className="font-normal">What</th><th className="font-normal">Result</th><th className="w-24 text-right font-normal">When</th></tr></thead>

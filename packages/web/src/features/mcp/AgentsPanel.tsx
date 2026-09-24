@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Trash2, RefreshCw, Play, MessageSquare, Code2, ShieldCheck, ShieldAlert, Search, Download, ExternalLink, Send, Square, KeyRound } from 'lucide-react';
 import { api, agentInvoke, getToken, timeAgo, type AgentRecord, type AgentFramework, type AgentConfig, type FrameworkMeta, type Snippet, type Workspace } from '../../api/client';
-import { Button, Badge, Card, CopyButton, Input, Label, Modal, Select, cn } from '../../components/ui';
+import { Button, Badge, Card, CopyButton, Input, Label, Modal, Select, cn, confirmAction, toast } from '../../components/ui';
 import { HideButton } from '../../components/LayoutMenu';
 
 export const FRAMEWORK_ORDER: AgentFramework[] = ['strands', 'langgraph', 'langchain', 'crewai', 'agentcore_runtime', 'agentcore_gateway', 'bedrock_agent', 'custom'];
@@ -15,7 +15,7 @@ export function frameworkLabel(f: AgentFramework) {
 /** Downloads the generated OpenAPI document with the session token (the endpoint needs auth). */
 export async function downloadOpenApi() {
   const res = await fetch('/api/agent/openapi.json', { headers: { authorization: `Bearer ${getToken()}` } });
-  if (!res.ok) return alert(await res.text());
+  if (!res.ok) return void toast.error(await res.text());
   const a = document.createElement('a');
   a.href = URL.createObjectURL(await res.blob());
   a.download = 'duckview-openapi.json';
@@ -34,18 +34,18 @@ export function SnippetViewer({ snippets, token }: { snippets: Snippet[]; token?
       {snippets.length > 1 && (
         <div className="mb-2 flex flex-wrap gap-1">
           {snippets.map((s, i) => (
-            <button key={s.id} onClick={() => setIdx(i)} className={cn('rounded-md px-2 py-0.5 text-[11px]', i === idx ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200')}>
+            <button key={s.id} onClick={() => setIdx(i)} className={cn('rounded-md px-2 py-0.5 text-2xs', i === idx ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200')}>
               {s.label}
             </button>
           ))}
         </div>
       )}
       <div className="mb-1 flex items-center justify-between">
-        <span className="font-mono text-[10px] text-zinc-500">{sn.file}</span>
+        <span className="font-mono text-2xs text-zinc-500">{sn.file}</span>
         <CopyButton text={code} label={token ? 'Copy with token' : 'Copy'} />
       </div>
-      <pre className="max-h-[360px] overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-300">{code}</pre>
-      {sn.notes && <p className="mt-2 text-[11px] text-zinc-500">{token ? sn.notes.split('<TOKEN>').join(token) : sn.notes}</p>}
+      <pre className="max-h-[360px] overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 font-mono text-2xs leading-relaxed text-zinc-300">{code}</pre>
+      {sn.notes && <p className="mt-2 text-2xs text-zinc-500">{token ? sn.notes.split('<TOKEN>').join(token) : sn.notes}</p>}
     </div>
   );
 }
@@ -66,7 +66,7 @@ export function FrameworksCard({ frameworks, workspaceId, token, hideId }: { fra
       className="lg:col-span-2"
       actions={
         <span className="flex items-center gap-2">
-          <button onClick={() => void downloadOpenApi()} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100" title="OpenAPI 3.0 schema of the REST tool façade (Bedrock action groups, AgentCore Gateway)">
+          <button onClick={() => void downloadOpenApi()} className="inline-flex items-center gap-1 text-2xs text-zinc-400 hover:text-zinc-100" title="OpenAPI 3.0 schema of the REST tool façade (Bedrock action groups, AgentCore Gateway)">
             <Download className="h-3.5 w-3.5" /> OpenAPI
           </button>
           <HideButton id={hideId} />
@@ -81,9 +81,9 @@ export function FrameworksCard({ frameworks, workspaceId, token, hideId }: { fra
         ))}
       </div>
       {meta && (
-        <p className="mb-3 text-[11px] text-zinc-500">
+        <p className="mb-3 text-2xs text-zinc-500">
           {meta.blurb}{' '}
-          <Badge tone="zinc" className="ml-1">{meta.transport === 'both' ? 'MCP + REST' : meta.transport.toUpperCase()}</Badge>
+          <Badge tone="neutral" className="ml-1">{meta.transport === 'both' ? 'MCP + REST' : meta.transport.toUpperCase()}</Badge>
           {meta.docs && (
             <a href={meta.docs} target="_blank" rel="noreferrer" className="ml-2 inline-flex items-center gap-0.5 text-accent-300 hover:underline">
               docs <ExternalLink className="h-3 w-3" />
@@ -92,7 +92,7 @@ export function FrameworksCard({ frameworks, workspaceId, token, hideId }: { fra
         </p>
       )}
       <SnippetViewer snippets={snippets} token={token} />
-      <p className="mt-2 text-[11px] text-zinc-500">{token ? 'The token you just created is substituted into the snippet.' : 'Register an agent (or create a token) to have its token substituted for <TOKEN>.'}</p>
+      <p className="mt-2 text-2xs text-zinc-500">{token ? 'The token you just created is substituted into the snippet.' : 'Register an agent (or create a token) to have its token substituted for <TOKEN>.'}</p>
     </Card>
   );
 }
@@ -120,14 +120,14 @@ export function AgentsCard({ agents, workspaces, frameworks, onChanged, onToken,
     await onChanged();
   };
   const rotate = async (a: AgentRecord) => {
-    if (!confirm(`Rotate the token of "${a.name}"? The current token stops working immediately.`)) return;
+    if (!(await confirmAction(`Rotate the token of "${a.name}"? The current token stops working immediately.`))) return;
     const r = await api.post<{ token: string; agent: AgentRecord }>(`/api/agents/${a.id}/rotate-token`);
     setLastToken({ agentId: a.id, token: r.token });
     onToken(r.token, r.agent);
     await onChanged();
   };
   const remove = async (a: AgentRecord) => {
-    if (!confirm(`Delete agent "${a.name}" and revoke its token?`)) return;
+    if (!(await confirmAction(`Delete agent "${a.name}" and revoke its token?`))) return;
     await api.del(`/api/agents/${a.id}`);
     await onChanged();
   };
@@ -149,7 +149,7 @@ export function AgentsCard({ agents, workspaces, frameworks, onChanged, onToken,
         <p className="py-2 text-xs text-zinc-500">No agents yet. Register one (Strands, LangGraph, LangChain, CrewAI, AgentCore, Bedrock or any HTTP client) to give it its own token and see its calls under Activity.</p>
       ) : (
         <table className="w-full text-xs">
-          <thead className="text-left text-[10px] text-zinc-500">
+          <thead className="text-left text-2xs text-zinc-500">
             <tr>
               <th className="pb-2 pr-3">Agent</th>
               <th className="whitespace-nowrap pb-2 pr-3">Framework</th>
@@ -165,13 +165,13 @@ export function AgentsCard({ agents, workspaces, frameworks, onChanged, onToken,
               <tr key={a.id} className="border-t border-zinc-800 align-top">
                 <td className="py-2 pr-2">
                   <div className="font-medium text-zinc-200">{a.name}</div>
-                  <div className="font-mono text-[10px] text-zinc-500">
+                  <div className="font-mono text-2xs text-zinc-500">
                     {a.token_revoked ? <span className="text-red-300">token revoked</span> : `${a.token_prefix}…`}
                     {a.config.runtime_arn && <span title={a.config.runtime_arn}> · {a.config.runtime_arn.split('/').pop()}</span>}
                     {a.config.agent_id && <span> · {a.config.agent_id}/{a.config.agent_alias_id}</span>}
                   </div>
-                  {a.description && <div className="text-[10px] text-zinc-500">{a.description}</div>}
-                  {testing[a.id] && <div className="mt-0.5 max-w-md truncate font-mono text-[10px] text-amber-200" title={testing[a.id]}>{testing[a.id]}</div>}
+                  {a.description && <div className="text-2xs text-zinc-500">{a.description}</div>}
+                  {testing[a.id] && <div className="mt-0.5 max-w-md truncate font-mono text-2xs text-amber-200" title={testing[a.id]}>{testing[a.id]}</div>}
                 </td>
                 <td className="py-2 pr-2">
                   <Badge tone={TONE[a.framework]}>{SHORT[a.framework]}</Badge>
@@ -221,7 +221,7 @@ export function AgentsCard({ agents, workspaces, frameworks, onChanged, onToken,
       <Modal open={!!setup} onClose={() => setSetup(null)} title={setup ? `${setup.agent.name} · ${SHORT[setup.agent.framework]}` : ''} width="max-w-3xl">
         {setup && (
           <div className="space-y-3">
-            <p className="text-[11px] text-zinc-500">
+            <p className="text-2xs text-zinc-500">
               {frameworks?.[setup.agent.framework]?.blurb}{' '}
               {lastToken?.agentId === setup.agent.id ? 'The new token is substituted below — it is shown only once.' : 'Tokens are shown once at creation; rotate the token to get a new one.'}
             </p>
@@ -296,7 +296,7 @@ function NewAgentModal({ open, onClose, workspaces, frameworks, onCreated }: { o
             </Select>
           </div>
         </div>
-        <p className="text-[11px] text-zinc-500">{frameworks?.[form.framework]?.blurb}</p>
+        <p className="text-2xs text-zinc-500">{frameworks?.[form.framework]?.blurb}</p>
         <div>
           <Label>Description <span className="normal-case text-zinc-600">(optional)</span></Label>
           <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What this agent is for" />
@@ -327,7 +327,7 @@ function NewAgentModal({ open, onClose, workspaces, frameworks, onCreated }: { o
 
         {isAws && (
           <div className="space-y-3 rounded-md border border-zinc-800 bg-zinc-950 p-3">
-            <div className="text-[10px] font-semibold text-zinc-500">AWS {form.framework === 'agentcore_gateway' ? '(informational)' : '— lets DuckView invoke this agent'}</div>
+            <div className="text-2xs font-semibold text-zinc-500">AWS {form.framework === 'agentcore_gateway' ? '(informational)' : '— lets DuckView invoke this agent'}</div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Region</Label>
@@ -370,17 +370,17 @@ function NewAgentModal({ open, onClose, workspaces, frameworks, onCreated }: { o
                   <Search className="h-3.5 w-3.5" /> Discover in {form.config.region || 'region'}
                 </Button>
                 {discovered?.agents?.map((a) => (
-                  <button key={a.id} className="rounded border border-zinc-700 px-2 py-0.5 font-mono text-[10px] text-zinc-300 hover:border-accent-500" onClick={() => cfg({ agent_id: a.id, agent_alias_id: a.aliases[0]?.id ?? '' })} title={`aliases: ${a.aliases.map((x) => `${x.name} (${x.id})`).join(', ') || 'none'}`}>
+                  <button key={a.id} className="rounded border border-zinc-700 px-2 py-0.5 font-mono text-2xs text-zinc-300 hover:border-accent-500" onClick={() => cfg({ agent_id: a.id, agent_alias_id: a.aliases[0]?.id ?? '' })} title={`aliases: ${a.aliases.map((x) => `${x.name} (${x.id})`).join(', ') || 'none'}`}>
                     {a.name} · {a.id}
                   </button>
                 ))}
                 {discovered?.runtimes?.map((r) => (
-                  <button key={r.arn} className="rounded border border-zinc-700 px-2 py-0.5 font-mono text-[10px] text-zinc-300 hover:border-accent-500" onClick={() => cfg({ runtime_arn: r.arn })} title={r.arn}>
+                  <button key={r.arn} className="rounded border border-zinc-700 px-2 py-0.5 font-mono text-2xs text-zinc-300 hover:border-accent-500" onClick={() => cfg({ runtime_arn: r.arn })} title={r.arn}>
                     {r.name} {r.status ? `· ${r.status}` : ''}
                   </button>
                 ))}
-                {discovered && !(discovered.agents?.length || discovered.runtimes?.length) && <span className="text-[11px] text-zinc-500">nothing found</span>}
-                <span className="text-[10px] text-zinc-500">Uses the DuckView server's AWS credentials.</span>
+                {discovered && !(discovered.agents?.length || discovered.runtimes?.length) && <span className="text-2xs text-zinc-500">nothing found</span>}
+                <span className="text-2xs text-zinc-500">Uses the DuckView server's AWS credentials.</span>
               </div>
             )}
           </div>
@@ -433,12 +433,12 @@ function AgentChatModal({ agent, workspaces, onClose }: { agent: AgentRecord; wo
   return (
     <Modal open onClose={onClose} title={`Chat · ${agent.name}`} width="max-w-2xl">
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-500">
+        <div className="flex flex-wrap items-center gap-3 text-2xs text-zinc-500">
           <span>{label} · {agent.config.region}</span>
           <label className="ml-auto flex items-center gap-1.5">
             <input type="checkbox" checked={includeContext} onChange={(e) => setIncludeContext(e.target.checked)} /> send workspace context
           </label>
-          <Select value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} className="h-7 text-[11px]">
+          <Select value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} className="h-7 text-2xs">
             {workspaces.map((w) => (
               <option key={w.id} value={w.id}>
                 {w.name}

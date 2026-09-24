@@ -27,7 +27,7 @@ export function InboxBell() {
       trigger={(isOpen, toggle) => (
         <button onClick={toggle} aria-expanded={isOpen} aria-label={unread ? `Inbox: ${unread} unread` : 'Inbox'} data-testid="inbox-bell" className="relative flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
           <Bell className="h-4 w-4" />
-          {unread > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-[15px] rounded-full bg-accent-500 px-1 text-center text-[9.5px] font-bold leading-[15px] text-[var(--accent-ink)]" data-testid="inbox-unread">{unread > 99 ? '99+' : unread}</span>}
+          {unread > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-[15px] rounded-full bg-accent-500 px-1 text-center text-[9.5px] font-bold leading-[15px] text-[var(--accent-ink)]" data-testid="inbox-unread">{unread > 99 ? '99+' : unread}</span>} {/* ui-lint-ignore: counter inside a 15px bubble */}
         </button>
       )}
     >
@@ -45,7 +45,7 @@ export function InboxBell() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs text-zinc-300"><b className="font-semibold text-zinc-100">{i.actor?.name ?? 'Someone'}</b> {i.kind === 'mention' ? 'mentioned you' : 'replied'} on <b className="font-medium text-zinc-100">{i.target_label}</b>{i.comment.anchor && i.comment.target_type === 'table' ? ` · ${i.comment.anchor}` : ''}</span>
                     <span className="mt-0.5 line-clamp-2 block text-xs text-zinc-500">{i.comment.body}</span>
-                    <span className="mt-0.5 block text-[11px] text-zinc-600">{i.workspace} · {timeAgo(i.created_at)}</span>
+                    <span className="mt-0.5 block text-2xs text-zinc-600">{i.workspace} · {timeAgo(i.created_at)}</span>
                   </span>
                   {!i.read && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500" aria-label="unread" />}
                 </button>

@@ -3,7 +3,7 @@ import { Bell, Globe, Mail, MessageSquare, Plus, Send, Siren, Trash2, Webhook, C
 import { api, timeAgo, type ChannelType, type NotificationChannel, type NotificationDelivery } from '../../api/client';
 import { useWorkspaceAccess } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
-import { Badge, Button, Empty, Input, Label, Modal, cn } from '../../components/ui';
+import { Badge, Button, Empty, Input, Label, Modal, cn, confirmAction } from '../../components/ui';
 
 export const CHANNEL_META: Record<ChannelType, { label: string; icon: React.ReactNode; hint: string }> = {
   slack: { label: 'Slack', icon: <MessageSquare className="h-4 w-4" />, hint: 'An incoming webhook: Slack → Apps → Incoming Webhooks → Add to a channel, copy the https://hooks.slack.com/… URL.' },
@@ -74,18 +74,18 @@ export function ChannelsPanel({ workspaceId }: { workspaceId: string }) {
             <div key={c.id} className={cn('rounded-lg border border-zinc-800 p-3', !c.enabled && 'opacity-60')}>
               <div className="flex items-center gap-2">
                 <span className="text-accent-300">{CHANNEL_META[c.type].icon}</span>
-                <span className="truncate text-sm font-semibold text-zinc-100">{c.name}</span>
+                <span className="truncate text-body font-semibold text-zinc-100">{c.name}</span>
                 <Badge>{CHANNEL_META[c.type].label}</Badge>
-                {c.scope === 'org' && <Badge tone="blue" className="gap-1"><Globe className="h-3 w-3" /> org-wide</Badge>}
+                {c.scope === 'org' && <Badge tone="info" className="gap-1"><Globe className="h-3 w-3" /> org-wide</Badge>}
                 {c.last_status && <Badge tone={c.last_status === 'ok' ? 'green' : 'red'} className="ml-auto">{c.last_status === 'ok' ? 'delivered' : 'failed'}</Badge>}
               </div>
-              <div className="mt-1 truncate font-mono text-[11px] text-zinc-500">{c.hint ?? '—'}</div>
-              <div className="mt-1 text-[10.5px] text-zinc-600">{c.last_sent_at ? `last sent ${timeAgo(c.last_sent_at)}` : 'nothing sent yet'}{c.last_error ? <span className="text-red-300"> · {c.last_error}</span> : null}</div>
+              <div className="mt-1 truncate font-mono text-2xs text-zinc-500">{c.hint ?? '—'}</div>
+              <div className="mt-1 text-2xs text-zinc-600">{c.last_sent_at ? `last sent ${timeAgo(c.last_sent_at)}` : 'nothing sent yet'}{c.last_error ? <span className="text-red-300"> · {c.last_error}</span> : null}</div>
               <div className="mt-2 flex items-center gap-1">
                 <Button size="sm" variant="secondary" disabled={!mayEdit(c)} loading={busy === `test:${c.id}`} onClick={() => void test(c)} title="Send a test message"><Send className="h-3.5 w-3.5" /> Test</Button>
                 <Button size="sm" variant="ghost" onClick={() => void api.get<{ deliveries: NotificationDelivery[] }>(`/api/channels/${c.id}/deliveries`).then((r) => setHistory({ channel: c, rows: r.deliveries }))} title="Recent deliveries"><History className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="ghost" disabled={!mayEdit(c)} onClick={() => void act(`toggle:${c.id}`, () => api.patch(`/api/channels/${c.id}`, { enabled: !c.enabled }))}>{c.enabled ? 'Disable' : 'Enable'}</Button>
-                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!mayEdit(c)} onClick={() => { if (confirm(`Delete the channel "${c.name}"? Alerts that use it stop delivering there.`)) void act(`del:${c.id}`, () => api.del(`/api/channels/${c.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!mayEdit(c)} onClick={async () => { if ((await confirmAction(`Delete the channel "${c.name}"? Alerts that use it stop delivering there.`))) void act(`del:${c.id}`, () => api.del(`/api/channels/${c.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           ))}
@@ -97,10 +97,10 @@ export function ChannelsPanel({ workspaceId }: { workspaceId: string }) {
           <div className="space-y-3 text-xs">
             <div className="grid grid-cols-5 gap-1">
               {(Object.keys(CHANNEL_META) as ChannelType[]).map((t) => (
-                <button key={t} type="button" onClick={() => setForm({ ...form, type: t })} className={cn('flex flex-col items-center gap-1 rounded-md border p-2 text-[11px]', form.type === t ? 'border-accent-500 bg-accent-600/10 text-zinc-100' : 'border-zinc-800 text-zinc-400 hover:border-zinc-600')}>{CHANNEL_META[t].icon}{CHANNEL_META[t].label}</button>
+                <button key={t} type="button" onClick={() => setForm({ ...form, type: t })} className={cn('flex flex-col items-center gap-1 rounded-md border p-2 text-2xs', form.type === t ? 'border-accent-500 bg-accent-600/10 text-zinc-100' : 'border-zinc-800 text-zinc-400 hover:border-zinc-600')}>{CHANNEL_META[t].icon}{CHANNEL_META[t].label}</button>
               ))}
             </div>
-            <p className="text-[11px] text-zinc-500">{CHANNEL_META[form.type].hint}</p>
+            <p className="text-2xs text-zinc-500">{CHANNEL_META[form.type].hint}</p>
             <div><Label>Name</Label><Input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={form.type === 'email' ? 'Ops mailing list' : '#data-alerts'} /></div>
             {(form.type === 'slack' || form.type === 'teams' || form.type === 'webhook') && <div><Label>Webhook URL</Label><Input type="password" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} className="font-mono" placeholder={form.type === 'slack' ? 'https://hooks.slack.com/services/…' : 'https://…'} autoComplete="off" /></div>}
             {form.type === 'pagerduty' && <div><Label>Integration key</Label><Input type="password" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} className="font-mono" placeholder="32 characters" autoComplete="off" /></div>}
@@ -120,7 +120,7 @@ export function ChannelsPanel({ workspaceId }: { workspaceId: string }) {
           {history?.rows.map((d) => (
             <div key={d.id} className="flex items-start gap-2 border-b border-zinc-800/60 py-1.5">
               <Badge tone={d.status === 'ok' ? 'green' : 'red'}>{d.status}</Badge>
-              <div className="min-w-0 flex-1"><div className="truncate text-zinc-200">{d.title}</div><div className="text-[10.5px] text-zinc-500">{d.source} · {timeAgo(d.created_at)} · {d.attempts} attempt{d.attempts === 1 ? '' : 's'}{d.duration_ms !== null ? ` · ${d.duration_ms} ms` : ''}</div>{d.error && <div className="font-mono text-[10.5px] text-red-300">{d.error}</div>}</div>
+              <div className="min-w-0 flex-1"><div className="truncate text-zinc-200">{d.title}</div><div className="text-2xs text-zinc-500">{d.source} · {timeAgo(d.created_at)} · {d.attempts} attempt{d.attempts === 1 ? '' : 's'}{d.duration_ms !== null ? ` · ${d.duration_ms} ms` : ''}</div>{d.error && <div className="font-mono text-2xs text-red-300">{d.error}</div>}</div>
             </div>
           ))}
         </div>

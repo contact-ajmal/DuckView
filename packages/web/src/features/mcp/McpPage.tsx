@@ -3,7 +3,7 @@ import { KeyRound, Radio, Trash2, Terminal, Wrench, Activity, Pause, Play } from
 import { api, timeAgo, type ApiToken, type McpSession, type AuditEvent, type Workspace, type AgentRecord, type AgentFramework, type FrameworkMeta } from '../../api/client';
 import { AgentsCard, FrameworksCard } from './AgentsPanel';
 import { subscribeLiveEvents, type LiveEvent } from '../../lib/liveEvents';
-import { Button, CopyButton, Input, Label, Modal, Select, StatusDot, Tabs, cn } from '../../components/ui';
+import { Button, CopyButton, Input, Label, Modal, Select, StatusDot, Tabs, cn, confirmAction } from '../../components/ui';
 import { HostedAgentsPanel } from './HostedAgentsPanel';
 import { useAuth } from '../../store/auth';
 import { PageHeader } from '../../components/layout';
@@ -110,7 +110,7 @@ export function McpPage() {
     items.length === 0 ? (
       <div className="border-y border-zinc-800 py-10 text-center text-xs text-zinc-500">{empty}</div>
     ) : (
-      <table className="w-full table-fixed text-[13px]" data-testid="activity-feed">
+      <table className="w-full table-fixed text-body" data-testid="activity-feed">
         <thead>
           <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
             <th className="w-36 py-1.5 pr-3 font-normal">Agent</th>
@@ -125,14 +125,14 @@ export function McpPage() {
             <tr key={f.id} className="border-b border-zinc-800/70 align-top hover:bg-zinc-900">
               <td className="py-2 pr-3">
                 <div className="truncate text-zinc-200">{f.agent ?? f.user ?? '—'}</div>
-                {f.via === 'rest' && <div className="text-[11px] text-zinc-500">REST</div>}
+                {f.via === 'rest' && <div className="text-2xs text-zinc-500">REST</div>}
               </td>
               <td className="py-2 pr-3">
                 <div className="flex items-center gap-1.5">
                   {f.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : f.kind === 'session' ? <Radio className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Activity className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
                   <span className="truncate font-mono text-xs text-zinc-100">{f.title}</span>
                 </div>
-                {f.detail && <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500" title={f.detail}>{f.detail}</div>}
+                {f.detail && <div className="mt-0.5 truncate font-mono text-2xs text-zinc-500" title={f.detail}>{f.detail}</div>}
               </td>
               <td className="py-2 pr-3"><StatusDot tone={f.status === 'ok' ? 'ok' : f.status === 'approval_required' || f.status === 'blocked' ? 'warn' : f.status === 'info' ? 'busy' : 'error'}>{f.status === 'approval_required' ? 'needs approval' : f.status}</StatusDot></td>
               <td className="py-2 pr-3 text-right text-xs tabular-nums text-zinc-500">{f.ms != null ? `${Math.round(f.ms)} ms` : ''}</td>
@@ -186,18 +186,18 @@ export function McpPage() {
       {aiTab === 'tools' && info && (
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
           <section>
-            <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Tools <span className="font-normal text-zinc-500">· {info.tools.length}, over MCP and the REST/OpenAPI façade</span></h2>
+            <h2 className="mb-2 text-body font-semibold text-zinc-100">Tools <span className="font-normal text-zinc-500">· {info.tools.length}, over MCP and the REST/OpenAPI façade</span></h2>
             <ul className="grid grid-cols-1 gap-x-6 border-y border-zinc-800 py-1 sm:grid-cols-2">
               {info.tools.map((t) => <li key={t} className="truncate py-1 font-mono text-xs text-zinc-300">{t}</li>)}
             </ul>
           </section>
           <section className="space-y-6">
             <div>
-              <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Resources</h2>
+              <h2 className="mb-2 text-body font-semibold text-zinc-100">Resources</h2>
               <ul className="border-y border-zinc-800 py-1">{info.resources.map((t) => <li key={t} className="break-all py-1 font-mono text-xs text-zinc-300">{t}</li>)}</ul>
             </div>
             <div>
-              <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Guided prompts</h2>
+              <h2 className="mb-2 text-body font-semibold text-zinc-100">Guided prompts</h2>
               <ul className="border-y border-zinc-800 py-1">{info.prompts.map((t) => <li key={t} className="py-1 font-mono text-xs text-zinc-300">{t}</li>)}</ul>
             </div>
             <div className="text-xs text-zinc-500">
@@ -213,18 +213,18 @@ export function McpPage() {
           {!hidden['mcp.connect'] && (
             <section>
               <div className="mb-2 flex items-center justify-between gap-2">
-                <h2 className="text-[13px] font-semibold text-zinc-100">Connect a client</h2>
+                <h2 className="text-body font-semibold text-zinc-100">Connect a client</h2>
                 <CopyButton text={snippetText} label={lastToken ? 'Copy with token' : 'Copy'} />
               </div>
               <Tabs size="sm" value={snippet} onChange={setSnippet} tabs={SNIPPETS.map((x) => ({ id: x.id, label: x.label }))} />
-              <div className="mb-1 mt-2 font-mono text-[11px] text-zinc-500">{SNIPPETS.find((x) => x.id === snippet)?.file}</div>
+              <div className="mb-1 mt-2 font-mono text-2xs text-zinc-500">{SNIPPETS.find((x) => x.id === snippet)?.file}</div>
               <pre className="overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-3 font-mono text-xs leading-relaxed text-zinc-300">{snippetText}</pre>
               <p className="mt-1.5 text-xs text-zinc-500">{lastToken ? 'Your new token is filled in.' : 'Create an API token and it is filled in for <TOKEN>.'}</p>
             </section>
           )}
           {!hidden['mcp.sessions'] && (
             <section>
-              <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">Live sessions</h2>
+              <h2 className="mb-2 text-body font-semibold text-zinc-100">Live sessions</h2>
               {sessions.length === 0 ? (
                 <p className="border-y border-zinc-800 py-4 text-xs text-zinc-500">No clients connected right now.</p>
               ) : (
@@ -242,11 +242,11 @@ export function McpPage() {
           )}
           {!hidden['mcp.tokens'] && (
             <section>
-              <h2 className="mb-2 text-[13px] font-semibold text-zinc-100">API tokens</h2>
+              <h2 className="mb-2 text-body font-semibold text-zinc-100">API tokens</h2>
               {tokens.length === 0 ? (
                 <p className="border-y border-zinc-800 py-4 text-xs text-zinc-500">No tokens yet. A token is shown once, when it is created.</p>
               ) : (
-                <table className="w-full text-[13px]">
+                <table className="w-full text-body">
                   <thead className="text-left text-xs text-zinc-500">
                     <tr className="border-b border-zinc-800">
                       <th className="py-1.5 pr-3 font-normal">Name</th>
@@ -260,13 +260,13 @@ export function McpPage() {
                   <tbody>
                     {tokens.map((t) => (
                       <tr key={t.id} className="group border-b border-zinc-800/70">
-                        <td className="py-2 pr-3"><div className="text-zinc-200">{t.name}</div><div className="font-mono text-[11px] text-zinc-500">{t.token_prefix}…</div></td>
+                        <td className="py-2 pr-3"><div className="text-zinc-200">{t.name}</div><div className="font-mono text-2xs text-zinc-500">{t.token_prefix}…</div></td>
                         <td className="py-2 pr-3 text-xs text-zinc-400">{t.scopes.join(', ')}</td>
                         <td className="py-2 pr-3 text-xs text-zinc-400">{t.workspace_id ? (workspaces.find((w) => w.id === t.workspace_id)?.name ?? t.workspace_id.slice(0, 8)) : 'all'}</td>
                         <td className="py-2 pr-3 text-xs text-zinc-500">{timeAgo(t.last_used_at)}</td>
                         <td className="py-2 pr-3 text-xs text-zinc-500">{t.expires_at ? (new Date(t.expires_at) < new Date() ? <span className="text-red-400">expired</span> : new Date(t.expires_at).toLocaleDateString()) : 'never'}</td>
                         <td className="py-2 text-right">
-                          <button className="rounded p-1 text-zinc-500 opacity-0 hover:text-red-400 group-hover:opacity-100" onClick={async () => { if (confirm(`Revoke token "${t.name}"?`)) { await api.del(`/api/tokens/${t.id}`); await refresh(); } }} title="Revoke" aria-label={`Revoke ${t.name}`}>
+                          <button className="rounded p-1 text-zinc-500 opacity-0 hover:text-red-400 group-hover:opacity-100" onClick={async () => { if ((await confirmAction(`Revoke token "${t.name}"?`))) { await api.del(`/api/tokens/${t.id}`); await refresh(); } }} title="Revoke" aria-label={`Revoke ${t.name}`}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </td>
@@ -313,7 +313,7 @@ export function McpPage() {
                 </button>
               ))}
             </div>
-            <p className="mt-1 text-[11px] text-zinc-500">`mcp` is required for MCP transports. `write` allows mutating SQL (still approval-gated). `admin` allows SET/PRAGMA/ATTACH.</p>
+            <p className="mt-1 text-2xs text-zinc-500">`mcp` is required for MCP transports. `write` allows mutating SQL (still approval-gated). `admin` allows SET/PRAGMA/ATTACH.</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

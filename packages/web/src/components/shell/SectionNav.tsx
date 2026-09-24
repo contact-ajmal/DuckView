@@ -12,7 +12,7 @@ export function SectionNav({ route }: { route: Route }) {
           key={p.id}
           href={p.hash}
           aria-current={route.sub === p.id ? 'page' : undefined}
-          className={cn('-mb-px shrink-0 border-b-2 pb-2 text-[13px] font-medium transition-colors duration-[var(--dur-fast)]', route.sub === p.id ? 'border-accent-500 text-zinc-50' : 'border-transparent text-zinc-500 hover:text-zinc-200')}
+          className={cn('-mb-px shrink-0 border-b-2 pb-2 text-body font-medium transition-colors duration-[var(--dur-fast)]', route.sub === p.id ? 'border-accent-500 text-zinc-50' : 'border-transparent text-zinc-500 hover:text-zinc-200')}
         >
           {p.label}
         </a>

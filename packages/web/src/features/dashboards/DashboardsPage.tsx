@@ -13,7 +13,7 @@ import { useCopilot } from '../../store/copilot';
 import { WidgetBody } from './widgets';
 import { WidgetEditor, type WidgetDraft } from './WidgetEditor';
 import { PageHeader } from '../../components/layout';
-import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, cn } from '../../components/ui';
+import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, cn, confirmAction, toast } from '../../components/ui';
 import { CommentsControl } from '../comments/CommentsPanel';
 import { HistoryButton } from '../history/HistoryDrawer';
 
@@ -87,7 +87,7 @@ function DashboardList() {
       {list.length === 0 ? (
         <div className="border-y border-zinc-800 py-14"><Empty icon={<LayoutDashboard />} title="No dashboards yet" hint="A grid dashboard holds KPIs, charts and tables from saved queries; a Mosaic dashboard is interactive and cross-filtered." action={access.canEdit ? <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New dashboard</Button> : undefined} /></div>
       ) : (
-        <table className="w-full table-fixed text-[13px]" data-testid="dashboard-list">
+        <table className="w-full table-fixed text-body" data-testid="dashboard-list">
           <thead>
             <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
               <th className="py-2 pr-4 font-normal">Name</th>
@@ -123,8 +123,8 @@ function DashboardList() {
                 ['mosaic', 'Mosaic', 'Interactive, cross-filtered charts from a declarative spec — brush, toggle and zoom over millions of rows.', <Sparkles key="m" className="h-4 w-4" />],
               ] as const).map(([k, label, hint, icon]) => (
                 <button key={k} type="button" onClick={() => setKind(k)} className={cn('rounded-lg border p-3 text-left', kind === k ? 'border-accent-500 bg-accent-500/10' : 'border-zinc-800 hover:border-zinc-600')}>
-                  <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">{icon} {label}</div>
-                  <div className="mt-1 text-[11px] leading-snug text-zinc-500">{hint}</div>
+                  <div className="flex items-center gap-1.5 text-body font-semibold text-zinc-100">{icon} {label}</div>
+                  <div className="mt-1 text-2xs leading-snug text-zinc-500">{hint}</div>
                 </button>
               ))}
             </div>
@@ -188,7 +188,7 @@ function DashboardCanvas({ id }: { id: string }) {
     await load();
   };
   const removeWidget = async (w: DashboardWidget) => {
-    if (!confirm(`Remove widget "${w.title}"?`)) return;
+    if (!(await confirmAction(`Remove widget "${w.title}"?`))) return;
     await api.del(`/api/dashboards/${id}/widgets/${w.id}`);
     await load();
   };
@@ -212,7 +212,7 @@ function DashboardCanvas({ id }: { id: string }) {
             </form>
           ) : (
             <div className="min-w-0">
-              <h1 className="flex items-center gap-2 truncate text-[15px] font-semibold text-zinc-50">
+              <h1 className="flex items-center gap-2 truncate text-title font-semibold text-zinc-50">
                 {dash.name}
                 {canWrite && <button onClick={() => setRenaming(true)} className="text-zinc-600 hover:text-zinc-200" title="Rename" aria-label="Rename dashboard"><Pencil className="h-3.5 w-3.5" /></button>}
               </h1>
@@ -240,7 +240,7 @@ function DashboardCanvas({ id }: { id: string }) {
                     <MenuItem icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => { close(); setRenaming(true); }}>Rename</MenuItem>
                     <MenuItem icon={<Camera className="h-3.5 w-3.5" />} onClick={() => { close(); location.hash = '#/alerts/snapshots'; }}>Schedule a snapshot…</MenuItem>
                     <MenuDivider />
-                    <MenuItem danger icon={<Trash2 className="h-3.5 w-3.5" />} onClick={async () => { close(); if (confirm(`Delete dashboard "${dash.name}"?`)) { await api.del(`/api/dashboards/${id}`); location.hash = '#/dashboards'; } }}>Delete dashboard</MenuItem>
+                    <MenuItem danger icon={<Trash2 className="h-3.5 w-3.5" />} onClick={async () => { close(); if ((await confirmAction(`Delete dashboard "${dash.name}"?`))) { await api.del(`/api/dashboards/${id}`); toast.success(`Deleted ${dash.name}`); location.hash = '#/dashboards'; } }}>Delete dashboard</MenuItem>
                   </>
                 )}
               </Menu>
@@ -259,7 +259,7 @@ function DashboardCanvas({ id }: { id: string }) {
               <header className="flex h-8 shrink-0 items-center gap-1.5 px-3">
                 {edit && <GripVertical className="widget-drag h-3.5 w-3.5 cursor-grab text-zinc-500" />}
                 <span className="truncate text-xs font-semibold text-zinc-200">{w.title}</span>
-                {w.refresh_interval_sec > 0 && <span className="font-mono text-[9px] text-zinc-600" title="Auto-refresh">↻ {w.refresh_interval_sec}s</span>}
+                {w.refresh_interval_sec > 0 && <span className="font-mono text-2xs text-zinc-600" title="Auto-refresh">↻ {w.refresh_interval_sec}s</span>}
                 {edit && (
                   <span className="ml-auto flex items-center gap-1">
                     <button onClick={() => setEditor({ open: true, widget: w })} className="rounded p-0.5 text-zinc-500 hover:text-zinc-100" title="Configure"><Settings2 className="h-3.5 w-3.5" /></button>

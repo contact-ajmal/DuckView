@@ -5,7 +5,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, BookOpenText, Braces, Downloa
 import { api, getToken, timeAgo, type ChartConfig, type Notebook, type NotebookCell, type NotebookOutput, type NotebookSummary } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
-import { Button, Empty, IconButton, Input, Menu, MenuDivider, MenuItem, Select, Spinner, cn } from '../../components/ui';
+import { Button, Empty, IconButton, Input, Menu, MenuDivider, MenuItem, Select, Spinner, cn, confirmAction } from '../../components/ui';
 import { PageHeader } from '../../components/layout';
 import { SqlEditor } from '../workspace/SqlEditor';
 import { ResultsGrid } from '../workspace/ResultsGrid';
@@ -60,7 +60,7 @@ function NotebookList({ workspaceId }: { workspaceId: string }) {
             <div className="grid grid-cols-[minmax(0,1fr)_120px_140px] gap-3 border-b border-zinc-800 px-1 py-1.5 text-xs text-zinc-500"><span>Title</span><span>Cells</span><span>Saved</span></div>
             {list.map((n) => (
               <a key={n.id} href={`#/notebooks/${n.id}`} className="grid grid-cols-[minmax(0,1fr)_120px_140px] items-center gap-3 border-b border-zinc-800/70 px-1 py-2 last:border-0 hover:bg-zinc-900/60">
-                <span className="flex min-w-0 items-center gap-2 text-[13px] text-zinc-100"><BookOpenText className="h-4 w-4 shrink-0 text-zinc-500" /><span className="truncate">{n.title}</span></span>
+                <span className="flex min-w-0 items-center gap-2 text-body text-zinc-100"><BookOpenText className="h-4 w-4 shrink-0 text-zinc-500" /><span className="truncate">{n.title}</span></span>
                 <span className="text-xs text-zinc-500">{n.cell_count} · {n.sql_cells} SQL</span>
                 <span className="text-xs text-zinc-500">{timeAgo(n.updated_at)}</span>
               </a>
@@ -258,7 +258,7 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
       <div className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur">
         <div className="mx-auto flex h-11 max-w-[1040px] items-center gap-2 px-6">
           <a href="#/notebooks" className="text-zinc-500 hover:text-zinc-200" aria-label="All notebooks"><ArrowLeft className="h-4 w-4" /></a>
-          <input value={nb.title} readOnly={!canEdit} onChange={(e) => change((n) => ({ ...n, title: e.target.value }))} aria-label="Title" data-testid="notebook-title" className="min-w-0 flex-1 truncate rounded bg-transparent px-1 py-0.5 text-[15px] font-semibold text-zinc-50 outline-none hover:bg-zinc-900 focus:bg-zinc-900" />
+          <input value={nb.title} readOnly={!canEdit} onChange={(e) => change((n) => ({ ...n, title: e.target.value }))} aria-label="Title" data-testid="notebook-title" className="min-w-0 flex-1 truncate rounded bg-transparent px-1 py-0.5 text-title font-semibold text-zinc-50 outline-none hover:bg-zinc-900 focus:bg-zinc-900" />
           <span className={cn('shrink-0 text-xs', save === 'conflict' || save === 'error' ? 'text-red-300' : 'text-zinc-500')} data-testid="save-state">{!canEdit ? 'View only' : save === 'saved' ? 'Saved' : save === 'saving' ? 'Saving…' : save === 'dirty' ? 'Unsaved' : save === 'conflict' ? 'Not saved — changed elsewhere' : 'Not saved'}</span>
           <CommentsButton count={counts.open} onClick={() => setComments({})} />
           <HistoryButton workspaceId={workspaceId} objectType="notebook" objectId={id} title={nb.title} onRestored={() => { if (saveTimer.current) clearTimeout(saveTimer.current); dirty.current = false; void api.get<{ notebook: Notebook }>(`/api/notebooks/${id}`).then((r) => { setNb(r.notebook); setSave('saved'); }); }} />
@@ -269,7 +269,7 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
               <>
                 <MenuItem icon={<Download className="h-3.5 w-3.5" />} onClick={() => { close(); void exportMd(); }}>Export as Markdown</MenuItem>
                 <MenuDivider />
-                <MenuItem danger icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => { close(); if (canEdit && confirm(`Delete "${nb.title}"?`)) void api.del(`/api/notebooks/${id}`).then(() => (location.hash = '#/notebooks')); }}>Delete notebook</MenuItem>
+                <MenuItem danger icon={<Trash2 className="h-3.5 w-3.5" />} onClick={async () => { close(); if (canEdit && (await confirmAction(`Delete "${nb.title}"?`))) void api.del(`/api/notebooks/${id}`).then(() => (location.hash = '#/notebooks')); }}>Delete notebook</MenuItem>
               </>
             )}
           </Menu>
@@ -314,15 +314,15 @@ function AddBar({ onAdd, always }: { onAdd: (t: NotebookCell['type']) => void; a
   return (
     <div className={cn('group flex h-6 items-center justify-center gap-1', !always && 'opacity-0 transition-opacity hover:opacity-100 focus-within:opacity-100')}>
       <span className="h-px flex-1 bg-zinc-800" />
-      <button className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100" onClick={() => onAdd('sql')} data-add="sql"><Plus className="h-3 w-3" /> SQL</button>
-      <button className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100" onClick={() => onAdd('markdown')} data-add="markdown"><Type className="h-3 w-3" /> Text</button>
-      <button className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100" onClick={() => onAdd('input')} data-add="input"><Variable className="h-3 w-3" /> Input</button>
+      <button className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100" onClick={() => onAdd('sql')} data-add="sql"><Plus className="h-3 w-3" /> SQL</button>
+      <button className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100" onClick={() => onAdd('markdown')} data-add="markdown"><Type className="h-3 w-3" /> Text</button>
+      <button className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100" onClick={() => onAdd('input')} data-add="input"><Variable className="h-3 w-3" /> Input</button>
       <span className="h-px flex-1 bg-zinc-800" />
     </div>
   );
 }
 
-const MD = 'text-[13.5px] leading-relaxed text-zinc-300 [&_a]:text-accent-300 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-900 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-zinc-50 [&_h2]:mb-1.5 [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_h3]:mt-2 [&_h3]:font-semibold [&_h3]:text-zinc-100 [&_li]:ml-5 [&_ol]:list-decimal [&_p]:my-1.5 [&_strong]:text-zinc-100 [&_table]:my-2 [&_td]:border [&_td]:border-zinc-800 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-zinc-800 [&_th]:px-2 [&_th]:py-1 [&_ul]:list-disc';
+const MD = 'text-body leading-relaxed text-zinc-300 [&_a]:text-accent-300 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-900 [&_code]:px-1 [&_code]:font-mono [&_code]:text-xs [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-zinc-50 [&_h2]:mb-1.5 [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_h3]:mt-2 [&_h3]:font-semibold [&_h3]:text-zinc-100 [&_li]:ml-5 [&_ol]:list-decimal [&_p]:my-1.5 [&_strong]:text-zinc-100 [&_table]:my-2 [&_td]:border [&_td]:border-zinc-800 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-zinc-800 [&_th]:px-2 [&_th]:py-1 [&_ul]:list-disc';
 
 function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFocus, onChange, onRun, onMove, onDelete, comments, onComments }: { cell: NotebookCell; focused: boolean; canEdit: boolean; running: boolean; schema: Record<string, string[]>; duplicateName: boolean; onFocus: () => void; onChange: (p: Partial<NotebookCell>) => void; onRun: () => void; onMove: (d: -1 | 1) => void; onDelete: () => void; comments: number; onComments: () => void }) {
   const [editing, setEditing] = useState(false);
@@ -338,7 +338,7 @@ function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFo
       <div className="mb-1 flex h-6 items-center gap-2 text-xs text-zinc-500">
         <span className="text-zinc-600">{icon}</span>
         {cell.type !== 'markdown' ? (
-          <input value={cell.name ?? ''} readOnly={!canEdit} onChange={(e) => onChange({ name: e.target.value.replace(/[^\w]/g, '_') })} aria-label="Cell name" className={cn('w-40 rounded bg-transparent px-1 font-mono text-[12px] outline-none hover:bg-zinc-900 focus:bg-zinc-900', duplicateName ? 'text-red-300' : 'text-zinc-300')} title={cell.type === 'sql' ? 'Later cells query this result by its name' : 'Use it in SQL as {{ name }}'} />
+          <input value={cell.name ?? ''} readOnly={!canEdit} onChange={(e) => onChange({ name: e.target.value.replace(/[^\w]/g, '_') })} aria-label="Cell name" className={cn('w-40 rounded bg-transparent px-1 font-mono text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900', duplicateName ? 'text-red-300' : 'text-zinc-300')} title={cell.type === 'sql' ? 'Later cells query this result by its name' : 'Use it in SQL as {{ name }}'} />
         ) : <span>Text</span>}
         {cell.type === 'sql' && cell.output && !cell.output.error && <span className="truncate">{cell.output.rows_changed != null && !cell.output.columns.length ? `${cell.output.rows_changed} rows changed` : `${cell.output.row_count.toLocaleString()} row${cell.output.row_count === 1 ? '' : 's'}`} · {cell.output.duration_ms} ms{cell.output.ran_by ? ` · ${cell.output.ran_by}` : ''} · {timeAgo(cell.output.ran_at)}</span>}
         {comments > 0 && <button onClick={onComments} className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-accent-300 hover:bg-zinc-900" title="Open comments on this cell" data-testid="cell-comments"><MessageSquare className="h-3.5 w-3.5" /> {comments}</button>}
@@ -352,7 +352,7 @@ function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFo
       </div>
 
       {cell.type === 'markdown' && (editing && canEdit ? (
-        <textarea autoFocus value={cell.source} onChange={(e) => onChange({ source: e.target.value })} onBlur={() => setEditing(false)} onKeyDown={(e) => { if (e.key === 'Escape' || ((e.metaKey || e.ctrlKey) && e.key === 'Enter')) setEditing(false); }} rows={Math.max(3, cell.source.split('\n').length + 1)} aria-label="Text" className="w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[12.5px] text-zinc-200 focus:border-accent-500 focus:outline-none" />
+        <textarea autoFocus value={cell.source} onChange={(e) => onChange({ source: e.target.value })} onBlur={() => setEditing(false)} onKeyDown={(e) => { if (e.key === 'Escape' || ((e.metaKey || e.ctrlKey) && e.key === 'Enter')) setEditing(false); }} rows={Math.max(3, cell.source.split('\n').length + 1)} aria-label="Text" className="w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" />
       ) : (
         <div className={cn(MD, canEdit && 'cursor-text')} onDoubleClick={() => setEditing(true)} onClick={() => !cell.source.trim() && setEditing(true)} title={canEdit ? 'Double-click to edit' : undefined}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{cell.source || '*Empty text cell*'}</ReactMarkdown>
@@ -376,7 +376,7 @@ function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFo
       {cell.type === 'sql' && (
         <>
           <div className="overflow-hidden rounded-md border border-zinc-800" data-testid="cell-editor">
-            {canEdit ? <SqlEditor autoHeight value={cell.source} onChange={stableChange} onRun={stableRun} schema={schema} placeholder="SELECT … — ⌘/Ctrl+Enter runs this cell" /> : <pre className="overflow-auto bg-zinc-950 p-2.5 font-mono text-[12.5px] text-zinc-200">{cell.source}</pre>}
+            {canEdit ? <SqlEditor autoHeight value={cell.source} onChange={stableChange} onRun={stableRun} schema={schema} placeholder="SELECT … — ⌘/Ctrl+Enter runs this cell" /> : <pre className="overflow-auto bg-zinc-950 p-2.5 font-mono text-xs text-zinc-200">{cell.source}</pre>}
           </div>
           {duplicateName && <p className="mt-1 text-xs text-red-300">Another cell above already has this name.</p>}
           {cell.output && <Output cell={cell} canEdit={canEdit} onChange={onChange} />}
@@ -388,7 +388,7 @@ function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFo
 
 function Output({ cell, onChange }: { cell: NotebookCell; canEdit: boolean; onChange: (p: Partial<NotebookCell>) => void }) {
   const o = cell.output!;
-  if (o.error) return <pre className="mt-2 whitespace-pre-wrap rounded-md border border-red-900/60 bg-red-950/30 px-2.5 py-2 font-mono text-[12px] text-red-200" data-testid="cell-error">{o.error}</pre>;
+  if (o.error) return <pre className="mt-2 whitespace-pre-wrap rounded-md border border-red-900/60 bg-red-950/30 px-2.5 py-2 font-mono text-xs text-red-200" data-testid="cell-error">{o.error}</pre>;
   if (!o.columns.length) return <p className="mt-2 text-xs text-zinc-500">{o.rows_changed != null ? `${o.rows_changed} rows changed.` : 'Done.'}</p>;
   const view = cell.view ?? 'table';
   const chart: ChartConfig = cell.chart ?? { type: 'bar', x: o.columns[0]?.name, y: o.columns.filter((c) => c.kind === 'number').slice(0, 1).map((c) => c.name) };
