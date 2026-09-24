@@ -191,7 +191,7 @@ body { background: var(--color-zinc-950); color: var(--color-zinc-100); font-siz
 .mosaic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .mosaic-cell { min-width: 0; overflow: hidden; border: 1px solid var(--color-zinc-800); border-radius: 0.5rem; background: color-mix(in oklab, var(--color-zinc-900) 60%, transparent); padding: 8px 8px 4px; }
 .mosaic-cell-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0 4px 4px; font-family: var(--font-mono); font-size: 11px; color: var(--color-zinc-200); }
-.mosaic-cell-title em { font-style: normal; color: var(--color-zinc-500); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mosaic-cell-title em { font-style: normal; color: var(--color-zinc-500); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mosaic-cell svg, .mosaic-explore svg { max-width: 100%; height: auto; font-family: var(--font-sans); }
 .mosaic-explore svg [aria-label='x-axis label'], .mosaic-explore svg [aria-label='y-axis label'] { fill: var(--color-zinc-400); }
 .mosaic-explore svg [aria-label$='tick label'] { fill: var(--color-zinc-400); }
@@ -199,7 +199,7 @@ body { background: var(--color-zinc-950); color: var(--color-zinc-100); font-siz
 .mosaic-explore svg [aria-label='frame'] { stroke: var(--color-zinc-800); }
 .mosaic-explore .selection rect, .mosaic-explore rect.selection { fill: color-mix(in oklab, var(--color-accent-400) 25%, transparent); stroke: var(--color-accent-400); }
 .mosaic-table-host table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; color: var(--color-zinc-200); }
-.mosaic-table-host thead th { position: sticky; top: 0; background: var(--color-zinc-900); color: var(--color-zinc-400); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--color-zinc-800); }
+.mosaic-table-host thead th { position: sticky; top: 0; background: var(--color-zinc-900); color: var(--color-zinc-400); font-weight: 500; font-size: 11px; padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--color-zinc-800); }
 .mosaic-table-host tbody td { padding: 4px 8px; border-bottom: 1px solid color-mix(in oklab, var(--color-zinc-800) 60%, transparent); white-space: nowrap; }
 .mosaic-table-host tbody tr:hover td { background: color-mix(in oklab, var(--color-zinc-800) 50%, transparent); }
 .mosaic-table-host > div { border: 1px solid var(--color-zinc-800); border-radius: 0.5rem; overflow: auto; }
@@ -214,7 +214,7 @@ body { background: var(--color-zinc-950); color: var(--color-zinc-100); font-siz
 .mosaic-dashboard .input input[type='range'] { accent-color: var(--color-accent-500); }
 .mosaic-dashboard .input.table, .mosaic-dashboard div:has(> table) { display: block; border: 1px solid var(--color-zinc-800); border-radius: 0.5rem; }
 .mosaic-dashboard table { border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; color: var(--color-zinc-200); }
-.mosaic-dashboard thead th { position: sticky; top: 0; background: var(--color-zinc-900); color: var(--color-zinc-400); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--color-zinc-800); }
+.mosaic-dashboard thead th { position: sticky; top: 0; background: var(--color-zinc-900); color: var(--color-zinc-400); font-weight: 500; font-size: 11px; padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--color-zinc-800); }
 .mosaic-dashboard tbody td { padding: 4px 8px; border-bottom: 1px solid color-mix(in oklab, var(--color-zinc-800) 60%, transparent); white-space: nowrap; }
 .mosaic-dashboard tbody tr:hover td { background: color-mix(in oklab, var(--color-zinc-800) 50%, transparent); }
 .mosaic-dashboard svg text, .mosaic-dashboard .legend { fill: var(--color-zinc-300); color: var(--color-zinc-300); font-size: 11px; }

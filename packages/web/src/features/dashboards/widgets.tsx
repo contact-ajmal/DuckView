@@ -7,9 +7,10 @@ import { ArrowUpRight, ArrowDownRight, Loader2, RefreshCw, ChevronLeft, ChevronR
 import '../../lib/chart';
 import { MAX_SERIES, withAlpha, compactNumber, useChartTheme } from '../../lib/chart';
 import { type DashboardWidget, type ColumnSchema, type WidgetChartConfig } from '../../api/client';
-import { cn } from '../../components/ui';
+import { cn, InlineError } from '../../components/ui';
 import { fetchCached } from '../../lib/useCached';
 import { useAuth } from '../../store/auth';
+import { ChartSkeleton } from '../../components/data';
 
 export interface WidgetData { columns: ColumnSchema[]; rows: unknown[][]; rowCount: number; totalRows: number | null; durationMs: number }
 
@@ -253,8 +254,9 @@ export function MarkdownWidget({ config }: { config: WidgetChartConfig }) {
 export function WidgetBody({ dashboardId, widget, tick, workspaceId, version }: { dashboardId: string; widget: DashboardWidget; tick: number; workspaceId: string; version?: number }) {
   const { data, error, loading, at, fromCache } = useWidgetData(dashboardId, widget, tick, workspaceId, version);
   if (widget.widget_type === 'MARKDOWN') return <MarkdownWidget config={widget.chart_config} />;
-  if (error) return <div className="m-3 rounded-md border border-red-900 bg-red-950/40 p-2 font-mono text-2xs text-red-200">{error}</div>;
-  if (!data) return <div className="flex h-full items-center justify-center text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /></div>;
+  if (error) return <div className="p-3"><InlineError error={error} /></div>;
+  if (!data) return <ChartSkeleton shape={widget.widget_type === 'KPI' ? 'kpi' : widget.widget_type === 'TABLE' ? 'table' : 'chart'} />;
+  if (widget.widget_type !== 'KPI' && data.rows.length === 0) return <div className="flex h-full items-center justify-center px-4 text-center text-xs text-zinc-500">The query returned no rows.</div>;
   return (
     <div className="relative h-full">
       {loading && <RefreshCw className="absolute right-2 top-1 z-10 h-3 w-3 animate-spin text-zinc-600" />}

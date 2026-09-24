@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import GridLayout, { WidthProvider, type Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { LayoutDashboard, Plus, Pencil, Trash2, RefreshCw, GripVertical, Settings2, Check, ArrowLeft, Lock, Unlock, Sparkles, MoreHorizontal, Camera } from 'lucide-react';
+import { LayoutDashboard, Plus, Pencil, Trash2, RefreshCw, GripVertical, Settings2, Check, ArrowLeft, Lock, Unlock, Sparkles, MoreHorizontal, Camera, SquareTerminal } from 'lucide-react';
 import { api, timeAgo, type Dashboard, type DashboardKind, type DashboardWidget, type LayoutItem, type SavedQuery } from '../../api/client';
 import { describeSpec } from '../../lib/mosaic/summary';
 
@@ -16,7 +16,7 @@ import { PageHeader } from '../../components/layout';
 import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, cn, confirmAction, toast } from '../../components/ui';
 import { CommentsControl } from '../comments/CommentsPanel';
 import { HistoryButton } from '../history/HistoryDrawer';
-import { DataTable } from '../../components/data';
+import { DataTable, ChartFrame } from '../../components/data';
 import { usePageObject } from '../../store/context';
 
 const Grid = WidthProvider(GridLayout);
@@ -146,6 +146,8 @@ function DashboardCanvas({ id }: { id: string }) {
   const [edit, setEdit] = useState(false);
   const [editor, setEditor] = useState<{ open: boolean; widget: DashboardWidget | null }>({ open: false, widget: null });
   const [saved, setSaved] = useState<SavedQuery[]>([]);
+  const ws = useWorkspace();
+  const widgetSql = (w: DashboardWidget) => w.custom_sql ?? saved.find((q) => q.id === w.saved_query_id)?.sql_text ?? null;
   const [tick, setTick] = useState(0);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState('');
@@ -249,18 +251,29 @@ function DashboardCanvas({ id }: { id: string }) {
         <Grid className={cn('layout', edit && 'editing')} layout={layout} cols={12} rowHeight={64} margin={[12, 12]} isDraggable={edit} isResizable={edit} draggableHandle=".widget-drag" onLayoutChange={onLayoutChange} compactType="vertical">
           {dash.widgets.map((w) => (
             <div key={w.id} className={cn('flex flex-col overflow-hidden rounded-lg border bg-zinc-950', edit ? 'border-accent-500/50 border-dashed' : 'border-zinc-800')}>
-              <header className="flex h-8 shrink-0 items-center gap-1.5 px-3">
-                {edit && <GripVertical className="widget-drag h-3.5 w-3.5 cursor-grab text-zinc-500" />}
-                <span className="truncate text-xs font-semibold text-zinc-200">{w.title}</span>
-                {w.refresh_interval_sec > 0 && <span className="font-mono text-2xs text-zinc-600" title="Auto-refresh">↻ {w.refresh_interval_sec}s</span>}
-                {edit && (
-                  <span className="ml-auto flex items-center gap-1">
-                    <button onClick={() => setEditor({ open: true, widget: w })} className="rounded p-0.5 text-zinc-500 hover:text-zinc-100" title="Configure"><Settings2 className="h-3.5 w-3.5" /></button>
-                    <button onClick={() => void removeWidget(w)} className="rounded p-0.5 text-zinc-500 hover:text-red-300" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
-                  </span>
-                )}
-              </header>
-              <div className="min-h-0 flex-1"><WidgetBody dashboardId={id} widget={w} tick={tick} workspaceId={dash.workspace_id} version={dataVersion} /></div>
+              <ChartFrame
+                className="h-full"
+                testid="widget"
+                title={w.title}
+                meta={w.refresh_interval_sec > 0 ? <span className="font-mono" title="Refreshes by itself">↻ {w.refresh_interval_sec}s</span> : undefined}
+                leading={edit ? <GripVertical className="widget-drag h-3.5 w-3.5 cursor-grab text-zinc-500" /> : undefined}
+                actionsVisible={edit}
+                actions={
+                  edit ? (
+                    <>
+                      <IconButton label="Configure" className="h-6 w-6" onClick={() => setEditor({ open: true, widget: w })}><Settings2 className="h-3.5 w-3.5" /></IconButton>
+                      <IconButton label="Remove" className="h-6 w-6 hover:text-red-300" onClick={() => void removeWidget(w)}><Trash2 className="h-3.5 w-3.5" /></IconButton>
+                    </>
+                  ) : widgetSql(w) ? (
+                    <>
+                      <IconButton label="Open in SQL" className="h-6 w-6" onClick={() => { void ws.addTab({ title: w.title, sql: widgetSql(w)! }); location.hash = '#/query'; }}><SquareTerminal className="h-3.5 w-3.5" /></IconButton>
+                      <IconButton label="Ask AI about this" className="h-6 w-6" onClick={() => { cp.toggle(true); void cp.send({ workspaceId: dash.workspace_id, message: `Explain the widget "${w.title}" on the dashboard "${dash.name}": what it shows and anything notable in it. Its SQL:\n${widgetSql(w)}` }); }}><Sparkles className="h-3.5 w-3.5" /></IconButton>
+                    </>
+                  ) : undefined
+                }
+              >
+                <WidgetBody dashboardId={id} widget={w} tick={tick} workspaceId={dash.workspace_id} version={dataVersion} />
+              </ChartFrame>
             </div>
           ))}
         </Grid>

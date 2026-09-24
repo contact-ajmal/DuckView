@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type LineageEdge, type LineageKind, type LineageNode } from '../../api/client';
 import { Badge, Select, cn } from '../../components/ui';
 
+/** Colour by role in the flow: inputs, transformations, data, queries, outputs (the theme's series palette). */
 const KIND: Record<LineageKind, { label: string; color: string; col: number }> = {
-  source: { label: 'source', color: '#0ea5e9', col: 0 },
-  file: { label: 'file', color: '#14b8a6', col: 0 },
-  sync: { label: 'sync', color: '#8b5cf6', col: 1 },
-  dbt: { label: 'dbt', color: '#f97316', col: 1 },
-  table: { label: 'table', color: '#22c55e', col: 2 },
-  view: { label: 'view', color: '#84cc16', col: 3 },
-  saved_query: { label: 'query', color: '#f59e0b', col: 4 },
-  dashboard: { label: 'dashboard', color: '#ec4899', col: 5 },
-  alert: { label: 'alert', color: '#ef4444', col: 5 },
-  app: { label: 'app', color: '#6366f1', col: 5 },
-  snapshot: { label: 'snapshot', color: '#a855f7', col: 6 },
+  source: { label: 'source', color: 'var(--series-6)', col: 0 },
+  file: { label: 'file', color: 'var(--series-6)', col: 0 },
+  sync: { label: 'sync', color: 'var(--series-1)', col: 1 },
+  dbt: { label: 'dbt', color: 'var(--series-1)', col: 1 },
+  table: { label: 'table', color: 'var(--series-3)', col: 2 },
+  view: { label: 'view', color: 'var(--series-3)', col: 3 },
+  saved_query: { label: 'query', color: 'var(--series-4)', col: 4 },
+  dashboard: { label: 'dashboard', color: 'var(--series-5)', col: 5 },
+  alert: { label: 'alert', color: 'var(--series-8)', col: 5 },
+  app: { label: 'app', color: 'var(--series-2)', col: 5 },
+  snapshot: { label: 'snapshot', color: 'var(--series-5)', col: 6 },
 };
 const W = 170;
 const H = 34;
@@ -24,12 +25,21 @@ const GAP_Y = 12;
 export function LineagePanel({ workspaceId }: { workspaceId: string }) {
   const [graph, setGraph] = useState<{ nodes: LineageNode[]; edges: LineageEdge[] } | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
+  // #/governance/lineage?focus=<table>: open centred on that object (links from a dataset).
+  const wanted = useRef(new URLSearchParams(location.hash.split('?')[1] ?? '').get('focus'));
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     setGraph(null);
     api.get<{ nodes: LineageNode[]; edges: LineageEdge[] }>(`/api/workspaces/${workspaceId}/lineage`).then(setGraph).catch((e) => setError((e as Error).message));
   }, [workspaceId]);
 
+  useEffect(() => {
+    if (!graph || !wanted.current) return;
+    const w = wanted.current.toLowerCase();
+    const hit = graph.nodes.find((n) => n.id.toLowerCase() === w || n.label.toLowerCase() === w || n.label.toLowerCase().endsWith(`.${w}`));
+    if (hit) setFocus(hit.id);
+    wanted.current = null;
+  }, [graph]);
   // Everything upstream and downstream of the focused node.
   const related = useMemo(() => {
     if (!graph || !focus) return null;
@@ -89,8 +99,8 @@ export function LineagePanel({ workspaceId }: { workspaceId: string }) {
               const p = layout.pos.get(n.id)!;
               return (
                 <g key={n.id} data-node={n.id} transform={`translate(${p.x},${p.y})`} className="cursor-pointer" onClick={() => setFocus(focus === n.id ? null : n.id)}>
-                  <rect width={W} height={H} rx={6} className={focus === n.id ? 'fill-zinc-800' : 'fill-zinc-900'} stroke={KIND[n.kind].color} strokeWidth={focus === n.id ? 2 : 1} />
-                  <rect width={4} height={H} rx={2} fill={KIND[n.kind].color} />
+                  <rect width={W} height={H} rx={6} className={focus === n.id ? 'fill-zinc-800' : 'fill-zinc-900'} style={{ stroke: KIND[n.kind].color }} strokeWidth={focus === n.id ? 2 : 1} />
+                  <rect width={4} height={H} rx={2} style={{ fill: KIND[n.kind].color }} />
                   <text x={10} y={14} fontSize={11} className="fill-zinc-100">{n.label.length > 24 ? `${n.label.slice(0, 23)}…` : n.label}</text>
                   <text x={10} y={27} fontSize={9} className="fill-zinc-500">{KIND[n.kind].label}{n.detail ? ` · ${n.detail.slice(0, 26)}` : ''}</text>
                   <title>{`${n.label}${n.description ? `\n${n.description}` : ''}`}</title>
