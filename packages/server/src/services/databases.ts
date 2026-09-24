@@ -70,6 +70,14 @@ export class DatabaseConnectionService {
     return { ...rest, has_password, example_sql: `SELECT * FROM ${c.alias}.${c.engine === 'postgres' ? 'public' : 'main'}.<table> LIMIT 100`, needs_external_access: NETWORK[c.engine] };
   }
 
+  /** A Postgres connection's settings for a direct client (change data capture), password included. */
+  async pgClientConfig(userId: string, id: string): Promise<{ host: string; port: number; database: string; user: string; password?: string; ssl?: boolean }> {
+    const c = await this.getOwned(userId, id);
+    if (c.engine !== 'postgres') throw badRequest('Change data capture needs a Postgres connection');
+    const password = this.decrypt(c).password;
+    return { host: c.config.host ?? 'localhost', port: c.config.port ?? 5432, database: c.config.database ?? 'postgres', user: c.config.user ?? 'postgres', ...(password ? { password } : {}), ...(c.config.ssl ? { ssl: true } : {}) };
+  }
+
   async list(userId: string): Promise<PublicDatabaseConnection[]> {
     const rows = await this.db.select().from(this.s.databaseConnections).where(eq(this.s.databaseConnections.user_id, userId)).orderBy(desc(this.s.databaseConnections.created_at));
     return rows.map((r) => this.toPublic(r));

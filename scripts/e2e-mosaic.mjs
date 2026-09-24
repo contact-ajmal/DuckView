@@ -65,6 +65,9 @@
  * The streams scenario creates an HTTP push stream in Connections → Streams and pushes events to it with its key,
  * then a Kafka stream (a Kafka-compatible broker at E2E_KAFKA, default localhost:19092 — e.g. a Redpanda
  * container): test the connection, start it, and watch the rows arrive.
+ * The cdc scenario mirrors a Postgres table (E2E_PG_CDC, default postgres://cdc:cdcpass@localhost:55432/shop — a
+ * Postgres with wal_level = logical) through a Postgres CDC stream: the existing rows, then an update and a delete
+ * made in Postgres, with the history of changes; removing the stream drops its replication slot.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -996,6 +999,71 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'cdc') {
+    const { createRequire } = await import('node:module');
+    const require = createRequire(new URL('../packages/server/package.json', import.meta.url));
+    const pg = require('pg');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const url = new URL(process.env.E2E_PG_CDC ?? 'postgres://cdc:cdcpass@localhost:55432/shop');
+    const src = new pg.Client({ connectionString: url.toString() });
+    try {
+      await src.connect();
+    } catch (err) {
+      report.details.skipped = `no Postgres at ${url.host} (${err.message})`;
+    }
+    if (!report.details.skipped) {
+      const table = `e2e_customers_${Date.now()}`;
+      await src.query(`CREATE TABLE ${table} (id int PRIMARY KEY, name text, plan text, mrr numeric(8,2))`);
+      await src.query(`INSERT INTO ${table} VALUES (1, 'Acme', 'pro', 99.00), (2, 'Globex', 'free', 0), (3, 'Initech', 'team', 49.50)`);
+      const conn = await j('POST', '/api/database-connections', { name: 'E2E CDC source', engine: 'postgres', config: { host: url.hostname, port: Number(url.port), database: url.pathname.slice(1), user: url.username }, password: decodeURIComponent(url.password) });
+      const connId = conn.connection?.id ?? conn.id;
+      const before = new Set(((await j('GET', `/api/workspaces/${wsId}/streams`)).streams ?? []).map((x) => x.id));
+      cleanup = async () => {
+        for (const x of (await j('GET', `/api/workspaces/${wsId}/streams`)).streams ?? []) if (!before.has(x.id)) await j('DELETE', `/api/streams/${x.id}`);
+        await j('DELETE', `/api/database-connections/${connId}`);
+        await q('DROP TABLE IF EXISTS e2e_customers');
+        await q('DROP TABLE IF EXISTS e2e_customers__changes');
+        await src.query(`DROP TABLE IF EXISTS ${table}`).catch(() => undefined);
+        await src.end().catch(() => undefined);
+      };
+      await q('DROP TABLE IF EXISTS e2e_customers');
+      await q('DROP TABLE IF EXISTS e2e_customers__changes');
+      await send('Page.navigate', { url: `${BASE}/#/` });
+      await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app');
+      await evaluate(`location.hash = '#/connections/streams'; true`);
+      await waitFor(`!!document.querySelector('[data-testid="stream-new"]')`, 20000, 'streams tab');
+      await evaluate(`document.querySelector('[data-testid="stream-new"]').click(); true`);
+      await evaluate(`document.querySelector('[data-testid="stream-kind-postgres"]').click(); true`);
+      await waitFor(`!!document.querySelector('[data-testid="stream-pg-connection"] option[value="${connId}"]')`, 10000, 'connection listed');
+      await setField('[data-testid="stream-pg-connection"]', connId, 'change');
+      await setField('[data-testid="stream-pg-table"]', table);
+      await setField('[data-testid="stream-table"]', 'e2e_customers');
+      await evaluate(`document.querySelector('[data-testid="stream-history"]').click(); true`);
+      await evaluate(`document.querySelector('[data-testid="stream-test"]').click(); true`);
+      await waitFor(`!!document.querySelector('[data-testid="stream-tested"]')`, 20000, 'connection tested');
+      report.details.tested = await evaluate(`document.querySelector('[data-testid="stream-tested"]').innerText`);
+      await evaluate(`document.querySelector('[data-testid="stream-save"]').click(); true`);
+      await waitFor(`document.querySelectorAll('[data-stream="e2e_customers"] [data-testid="stream-latest"] tbody tr').length === 3`, 30000, 'snapshot rows');
+      await waitFor(`document.querySelector('[data-stream="e2e_customers"] [data-testid="stream-status"]')?.innerText === 'running'`, 20000, 'running');
+      // Changes made in Postgres arrive.
+      await src.query(`UPDATE ${table} SET plan = 'team', mrr = 49.50 WHERE id = 2`);
+      await src.query(`DELETE FROM ${table} WHERE id = 3`);
+      await waitFor(`document.querySelectorAll('[data-stream="e2e_customers"] [data-testid="stream-latest"] tbody tr').length === 2`, 30000, 'delete mirrored');
+      await sleep(1500);
+      report.details.mirror = (await q('SELECT id, name, plan, mrr::DOUBLE AS mrr FROM e2e_customers ORDER BY id')).rows;
+      report.details.history = (await q('SELECT _op, count(*)::INTEGER FROM e2e_customers__changes GROUP BY 1 ORDER BY 1')).rows;
+      report.details.detail = await evaluate(`document.querySelector('[data-stream="e2e_customers"]').innerText.split('\\n').slice(0, 5).join(' | ')`);
+      { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_cdc.png'), Buffer.from(shot.result.data, 'base64')); }
+      // Removing the stream drops the slot.
+      const streams = (await j('GET', `/api/workspaces/${wsId}/streams`)).streams;
+      const st = streams.find((x) => x.target_table === 'e2e_customers');
+      await j('DELETE', `/api/streams/${st.id}`);
+      report.details.slotsLeft = (await src.query(`SELECT count(*)::int AS n FROM pg_replication_slots WHERE slot_name LIKE 'duckview_${st.id.replace(/-/g, '').slice(0, 24)}%'`)).rows[0].n;
+    }
+    report.details.charts = 1;
+  }
   else if (scenario === 'streams') {
     const { createRequire } = await import('node:module');
     const require = createRequire(new URL('../packages/server/package.json', import.meta.url));
@@ -1568,6 +1636,12 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'cdc' && !d.skipped) {
+    if (!/4 columns, key id; wal_level logical/.test(d.tested ?? '')) problems.push(`tested: ${d.tested}`);
+    if (JSON.stringify(d.mirror) !== JSON.stringify([[1, 'Acme', 'pro', 99], [2, 'Globex', 'team', 49.5]])) problems.push(`mirror: ${JSON.stringify(d.mirror)}`);
+    if (JSON.stringify(d.history) !== JSON.stringify([['d', 1], ['r', 3], ['u', 1]])) problems.push(`history: ${JSON.stringify(d.history)}`);
+    if (d.slotsLeft !== 0) problems.push(`replication slot not dropped (${d.slotsLeft})`);
   }
   if (scenario === 'streams') {
     if (d.push !== 202) problems.push(`push: ${d.push}`);

@@ -160,7 +160,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const connectors = new ConnectorConnectionService(store, cipher, cfg);
   syncs.connectors = connectors;
   syncs.stageDir = path.join(engines.jail.baseDir, '.duckview', 'sync');
-  const streams = new StreamService(cfg, store, cipher, workspaces, queries, auth, cloud, audit);
+  const streams = new StreamService(cfg, store, cipher, workspaces, queries, auth, cloud, databases, audit);
   streams.stageDir = path.join(engines.jail.baseDir, '.duckview', 'streams');
   if (cfg.duckdb.sync_scheduler_enabled) syncs.start();
   const notifications = new NotificationService(store, cfg, cipher, workspaces, audit);

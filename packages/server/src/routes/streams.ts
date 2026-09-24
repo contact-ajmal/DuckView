@@ -1,5 +1,5 @@
 /**
- * Streams: Kafka, Kinesis and HTTP pushes appended to workspace tables.
+ * Streams: Kafka, Kinesis, HTTP pushes and Postgres change data capture, into workspace tables.
  *   GET/POST /api/workspaces/:id/streams                list · create (editors; an HTTP stream's push key is returned once)
  *   GET/PATCH/DELETE /api/streams/:id                   one stream with its latest rows · edit (restarts it) · delete
  *   POST /api/streams/test {config, sasl_password?, stream_id?}   can DuckView reach the topic / stream?
@@ -15,12 +15,16 @@ const Config = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('kafka'), brokers: z.array(z.string().max(300)).min(1).max(20), topic: z.string().min(1).max(250), group_id: z.string().max(250).nullable().optional(), from_beginning: z.boolean().optional(), ssl: z.boolean().optional(), sasl_mechanism: z.enum(['plain', 'scram-sha-256', 'scram-sha-512']).nullable().optional(), sasl_username: z.string().max(300).nullable().optional() }),
   z.object({ kind: z.literal('kinesis'), stream: z.string().min(1).max(128), region: z.string().min(1).max(40), cloud_connection_id: z.string().max(64).nullable().optional(), endpoint: z.string().max(500).nullable().optional(), start: z.enum(['LATEST', 'TRIM_HORIZON']).optional() }),
   z.object({ kind: z.literal('http') }),
+  z.object({ kind: z.literal('postgres'), connection_id: z.string().max(64), table: z.string().min(1).max(200), snapshot: z.boolean().optional() }),
 ]);
 const Body = z.object({
   name: z.string().max(120).optional(),
   config: Config,
   sasl_password: z.string().max(1000).nullable().optional(),
-  format: z.enum(['json', 'text']).optional(),
+  format: z.enum(['json', 'text', 'debezium']).optional(),
+  mode: z.enum(['append', 'mirror']).optional(),
+  key_columns: z.array(z.string().max(63)).max(10).optional(),
+  keep_history: z.boolean().optional(),
   target_schema: z.string().max(63).optional(),
   target_table: z.string().max(63),
   include_metadata: z.boolean().optional(),

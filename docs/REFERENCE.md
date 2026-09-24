@@ -695,7 +695,7 @@ Config (`a2a`):
 - `allow_private_targets`: allows intranet agents and tests
 - `timeout_seconds`: how long a remote answer is waited for; default 180
 
-## Streams: Kafka, Kinesis and HTTP pushes
+## Streams: Kafka, Kinesis, HTTP pushes and change data capture
 
 **Events appended to a table as they arrive** (`services/streams.ts`, Connections → Streams). A stream reads from one of three sources:
 
@@ -711,6 +711,26 @@ Config (`a2a`):
 - **Metadata columns** (optional): `_key`, `_partition`, `_offset`, `_timestamp` and `_ingested_at`.
 
 **At least once.** Kafka offsets are committed, and Kinesis checkpoints (shard → sequence number) saved, only after a batch is written. A paused or restarted stream resumes where it stopped.
+
+### Change data capture
+
+A stream can **mirror** a table instead of appending to it. The table then keeps each key's latest state:
+
+- inserts and updates replace the key's row;
+- deletes remove it;
+- two changes to the same key in one batch leave only the later one.
+
+With *Keep a history of changes*, every change is also appended, with `_op`, to `<table>__changes`: `c` insert, `u` update, `d` delete, `r` snapshot read, `t` truncate.
+
+- **Postgres CDC.** A Postgres connection plus a table, read through logical replication (`pgoutput`). DuckView:
+  - creates a publication and a replication slot for the stream;
+  - optionally copies the existing rows first;
+  - creates the table with the source's types (numeric → DECIMAL, timestamptz → TIMESTAMPTZ, arrays, JSON…);
+  - then applies inserts, updates (a changed primary key removes the old row), deletes and truncates.
+
+  It acknowledges the WAL position only after a batch is written, and acknowledges idle heartbeats so Postgres can recycle WAL. The key is the primary key; for a table without one, give key columns and set `REPLICA IDENTITY FULL`. Needs `wal_level = logical` and a user with REPLICATION; *Test connection* checks both. **Removing the stream drops its slot and publication.** A paused stream keeps its slot, so Postgres holds WAL for it until it resumes.
+- **Debezium.** The format *Debezium change events* reads Debezium's envelope, with or without the schema wrapper, on a Kafka topic or an HTTP push. This covers MySQL, SQL Server, Oracle, MongoDB and anything else Debezium captures. Deletes use the `before` image; tombstones are skipped. The key columns come from the message key when not given.
+- **Any JSON feed** can mirror too: *Keep the latest per key*, with the key columns.
 
 Streams appear in lineage (topic → stream → table), on the live feed, and to agents through `list_streams`.
 

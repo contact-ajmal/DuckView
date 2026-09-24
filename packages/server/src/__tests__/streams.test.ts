@@ -2,7 +2,9 @@
  * Streams: decoding (JSON objects, other values, text that is not JSON, metadata columns), HTTP pushes with a key
  * (JSON, NDJSON, columns that appear later, values that do not fit), Kinesis with checkpoints that a restart
  * resumes from (a fake client), lineage, and — with DUCKVIEW_TEST_KAFKA_BROKERS set (e.g. a Redpanda container on
- * localhost:19092) — a real Kafka topic whose committed offsets survive a restart.
+ * localhost:19092) — a real Kafka topic whose committed offsets survive a restart. Change data capture: Debezium
+ * events mirrored into a table (with history), and — with DUCKVIEW_TEST_PG_CDC set — a real Postgres table
+ * through logical replication: snapshot, inserts, updates, deletes, a changed key and a truncate.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
@@ -10,11 +12,12 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { Kafka, logLevel } from 'kafkajs';
+import pg from 'pg';
 import { loadConfig } from '../config/index.js';
 import { initLogger } from '../observability/logger.js';
 import { createContext, type AppContext } from '../context.js';
 import { buildApp } from '../app.js';
-import { rowsOf, recordsOfPush, type KinesisLike } from '../services/streams.js';
+import { rowsOf, recordsOfPush, debeziumChange, duckdbTypeOf, type KinesisLike } from '../services/streams.js';
 import type { Principal } from '../services/principal.js';
 
 let dir: string;
@@ -24,6 +27,8 @@ let base: string;
 let wsId: string;
 let admin: Principal;
 const KAFKA = process.env.DUCKVIEW_TEST_KAFKA_BROKERS;
+/** e.g. postgres://cdc:cdcpass@localhost:55432/shop — a Postgres with wal_level = logical. */
+const PG_CDC = process.env.DUCKVIEW_TEST_PG_CDC;
 
 const q = async (sql: string) => (await ctx.queries.run(admin, wsId, sql, { cache: false })).rows;
 const until = async (check: () => Promise<boolean>, ms = 20_000) => {
@@ -175,4 +180,64 @@ describe.skipIf(!KAFKA)('Kafka', () => {
     expect(await q('SELECT "order", amount FROM kafka_orders ORDER BY "order"')).toEqual([0, 1, 2, 3, 4].map((i) => [i, 10 * i]));
     await ctx.streams.remove(admin, stream.id);
   }, 90_000);
+});
+
+describe('change data capture', () => {
+  it('mirrors Debezium events: latest state per key, deletes, and the history of changes', async () => {
+    expect(debeziumChange({ payload: { op: 'u', before: { id: 1 }, after: { id: 1, v: 2 }, ts_ms: 0 } })).toEqual({ op: 'u', row: { id: 1, v: 2 }, ts: '1970-01-01T00:00:00.000Z' });
+    expect(debeziumChange(null)).toBeNull();
+    expect(duckdbTypeOf('numeric(10,2)')).toBe('DECIMAL(10,2)');
+    expect(duckdbTypeOf('timestamp with time zone')).toBe('TIMESTAMPTZ');
+    expect(duckdbTypeOf('character varying(20)[]')).toBe('VARCHAR[]');
+    await expect(ctx.streams.create(admin, wsId, { config: { kind: 'http' }, mode: 'mirror', target_table: 'nokeys' })).rejects.toThrow(/key columns/);
+    const { stream, push_key } = await ctx.streams.create(admin, wsId, { name: 'Customers CDC', config: { kind: 'http' }, format: 'debezium', key_columns: ['id'], keep_history: true, target_table: 'customers' });
+    expect(stream).toMatchObject({ mode: 'mirror', key_columns: ['id'], keep_history: true });
+    const ev = (op: string, before: object | null, after: object | null) => ({ schema: {}, payload: { op, before, after, ts_ms: 1_790_000_000_000 } });
+    const push = (events: unknown[]) => fetch(`${base}/api/streams/${stream.id}/push`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${push_key}` }, body: JSON.stringify(events) });
+    expect((await push([ev('r', null, { id: 1, name: 'Ada', tier: 'free' }), ev('r', null, { id: 2, name: 'Bo', tier: 'pro' }), ev('c', null, { id: 3, name: 'Cy', tier: 'free' })])).status).toBe(202);
+    // One batch with two changes to the same key: the later one wins.
+    expect((await push([ev('u', { id: 1 }, { id: 1, name: 'Ada', tier: 'pro' }), ev('u', { id: 1 }, { id: 1, name: 'Ada L.', tier: 'pro' }), ev('d', { id: 2, name: 'Bo', tier: 'pro' }, null), null])).status).toBe(202);
+    expect(await q('SELECT id, name, tier FROM customers ORDER BY id')).toEqual([[1, 'Ada L.', 'pro'], [3, 'Cy', 'free']]);
+    expect(await q('SELECT _op, count(*)::INTEGER FROM customers__changes GROUP BY 1 ORDER BY 1')).toEqual([['c', 1], ['d', 1], ['r', 2], ['u', 2]]);
+    expect((await q("SELECT count(*) FROM information_schema.columns WHERE table_name = 'customers' AND column_name IN ('_op', '_seq')"))[0]![0]).toBe(0);
+  });
+
+  it.skipIf(!PG_CDC)('mirrors a Postgres table through logical replication', async () => {
+    const src = new pg.Client({ connectionString: PG_CDC });
+    await src.connect();
+    const table = `orders_${Date.now()}`;
+    await src.query(`CREATE TABLE ${table} (id serial PRIMARY KEY, customer text NOT NULL, amount numeric(10,2), placed_at timestamptz DEFAULT now(), tags text[])`);
+    await src.query(`INSERT INTO ${table} (customer, amount, tags) VALUES ('ada', 10.50, '{a,b}'), ('bo', 20.00, NULL), ('cy', 30.25, '{c}')`);
+    const u = new URL(PG_CDC!);
+    const conn = await ctx.databases.create(admin.userId, { name: 'CDC source', engine: 'postgres', config: { host: u.hostname, port: Number(u.port), database: u.pathname.slice(1), user: u.username }, password: decodeURIComponent(u.password) });
+    const config = { kind: 'postgres' as const, connection_id: conn.id, table };
+    expect((await ctx.streams.test(admin, { config })).detail).toMatch(new RegExp(`public.${table}: 5 columns, key id; wal_level logical`));
+    const { stream } = await ctx.streams.create(admin, wsId, { name: 'Orders CDC', config, target_table: 'pg_orders', keep_history: true, batch_seconds: 1 });
+    expect(stream).toMatchObject({ mode: 'mirror', format: 'json' });
+    const count = async () => Number((await q('SELECT count(*) FROM pg_orders').catch(() => [[-1]]))[0]![0]);
+    await until(async () => (await count()) === 3, 30_000);
+    await until(async () => (await ctx.streams.list(admin, wsId)).find((x) => x.id === stream.id)!.status === 'running', 15_000);
+    // Types come from Postgres.
+    const types = Object.fromEntries((await q("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'pg_orders'")) as [string, string][]);
+    expect(types).toMatchObject({ id: 'INTEGER', customer: 'VARCHAR', amount: 'DECIMAL(10,2)', placed_at: 'TIMESTAMP WITH TIME ZONE', tags: 'VARCHAR[]' });
+    await src.query(`INSERT INTO ${table} (customer, amount) VALUES ('dee', 40.00)`);
+    await src.query(`UPDATE ${table} SET amount = 11.00 WHERE customer = 'ada'`);
+    await src.query(`DELETE FROM ${table} WHERE customer = 'bo'`);
+    await src.query(`UPDATE ${table} SET id = 100 WHERE customer = 'cy'`);
+    await until(async () => JSON.stringify(await q('SELECT id, customer, amount::DOUBLE FROM pg_orders ORDER BY id')) === JSON.stringify([[1, 'ada', 11], [4, 'dee', 40], [100, 'cy', 30.25]]), 30_000);
+    expect(await q('SELECT tags FROM pg_orders WHERE id = 1')).toEqual([[['a', 'b']]]);
+    const history = () => q('SELECT _op, count(*)::INTEGER FROM pg_orders__changes GROUP BY 1 ORDER BY 1');
+    await until(async () => JSON.stringify(await history()) === JSON.stringify([['c', 1], ['d', 2], ['r', 3], ['u', 2]]), 10_000).catch(async () => expect(await history()).toEqual([['c', 1], ['d', 2], ['r', 3], ['u', 2]]));
+    // Truncate at the source empties the mirror.
+    await src.query(`TRUNCATE ${table}`);
+    await until(async () => (await count()) === 0, 30_000);
+    // Removing the stream drops its replication slot and publication.
+    const slot = ctx.streams.slotName(stream);
+    expect((await src.query('SELECT 1 FROM pg_replication_slots WHERE slot_name = $1', [slot])).rowCount).toBe(1);
+    await ctx.streams.remove(admin, stream.id);
+    expect((await src.query('SELECT 1 FROM pg_replication_slots WHERE slot_name = $1', [slot])).rowCount).toBe(0);
+    expect((await src.query('SELECT 1 FROM pg_publication WHERE pubname = $1', [slot])).rowCount).toBe(0);
+    await src.query(`DROP TABLE ${table}`);
+    await src.end();
+  }, 120_000);
 });

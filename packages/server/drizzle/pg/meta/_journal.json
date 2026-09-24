@@ -260,6 +260,13 @@
       "when": 1790241039335,
       "tag": "0036_streams",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1790242240617,
+      "tag": "0037_stream_cdc",
+      "breakpoints": true
     }
   ]
 }

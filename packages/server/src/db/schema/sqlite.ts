@@ -1557,15 +1557,19 @@ export const a2aRemotes = sqliteTable(
 export type A2aRemote = typeof a2aRemotes.$inferSelect;
 
 /** Streams: Kafka topics, Kinesis streams and HTTP pushes appended continuously to a workspace table. */
-export const STREAM_KINDS = ['kafka', 'kinesis', 'http'] as const;
+export const STREAM_KINDS = ['kafka', 'kinesis', 'http', 'postgres'] as const;
 export type StreamKind = (typeof STREAM_KINDS)[number];
-export const STREAM_FORMATS = ['json', 'text'] as const;
+export const STREAM_FORMATS = ['json', 'text', 'debezium'] as const;
+/** append: every message is a new row. mirror: the table keeps each key's latest state (inserts, updates, deletes). */
+export const STREAM_MODES = ['append', 'mirror'] as const;
 export const STREAM_STATUSES = ['stopped', 'starting', 'running', 'error'] as const;
 export type StreamStatus = (typeof STREAM_STATUSES)[number];
 export type StreamConfig =
   | { kind: 'kafka'; brokers: string[]; topic: string; group_id?: string | null; from_beginning?: boolean; ssl?: boolean; sasl_mechanism?: 'plain' | 'scram-sha-256' | 'scram-sha-512' | null; sasl_username?: string | null }
   | { kind: 'kinesis'; stream: string; region: string; cloud_connection_id?: string | null; endpoint?: string | null; start?: 'LATEST' | 'TRIM_HORIZON' }
-  | { kind: 'http' };
+  | { kind: 'http' }
+  /** Change data capture from a Postgres table through logical replication (pgoutput). */
+  | { kind: 'postgres'; connection_id: string; table: string; snapshot?: boolean };
 export interface StreamStats { rows_total: number; batches: number; last_batch_rows: number; last_batch_at: string | null; last_error: string | null; last_error_at: string | null }
 
 export const streams = sqliteTable(
@@ -1584,6 +1588,11 @@ export const streams = sqliteTable(
     /** HTTP pushes: sha256 of the ingest key. */
     key_hash: text('key_hash'),
     format: text('format', { enum: STREAM_FORMATS }).notNull().default('json'),
+    mode: text('mode', { enum: STREAM_MODES }).notNull().default('append'),
+    /** mirror: the columns that identify a row (Postgres: its primary key; Debezium: the message key's fields). */
+    key_columns: text('key_columns', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** mirror: also append every change (with _op) to <table>__changes. */
+    keep_history: integer('keep_history', { mode: 'boolean' }).notNull().default(false),
     target_schema: text('target_schema').notNull().default('main'),
     target_table: text('target_table').notNull(),
     /** Add _key, _partition, _offset, _timestamp and _ingested_at columns. */
@@ -1593,7 +1602,7 @@ export const streams = sqliteTable(
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     status: text('status', { enum: STREAM_STATUSES }).notNull().default('stopped'),
     stats: text('stats', { mode: 'json' }).$type<StreamStats>().notNull().default({ rows_total: 0, batches: 0, last_batch_rows: 0, last_batch_at: null, last_error: null, last_error_at: null }),
-    /** Where reading resumes: Kinesis shard → sequence number (Kafka keeps its offsets in the consumer group). */
+    /** Where reading resumes: Kinesis shard → sequence number; Postgres: lsn and snapshot (Kafka keeps its offsets in the consumer group). */
     checkpoints: text('checkpoints', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
     created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),

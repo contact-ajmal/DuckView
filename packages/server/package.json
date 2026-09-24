@@ -57,6 +57,7 @@
     "openai": "^7.17.0",
     "openid-client": "^6.0.0",
     "pg": "^8.16.0",
+    "pg-logical-replication": "^2.5.0",
     "pino": "^9.0.0",
     "pino-pretty": "^13.0.0",
     "prom-client": "^15.1.0",

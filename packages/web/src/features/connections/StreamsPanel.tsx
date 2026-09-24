@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import { KeyRound, Pause, Play, Plus, Radio, Trash2, Webhook, Waves, FlaskConical } from 'lucide-react';
-import { api, timeAgo, type CloudConnection, type Stream, type StreamConfig } from '../../api/client';
+import { Database, KeyRound, Pause, Play, Plus, Radio, Trash2, Webhook, Waves, FlaskConical } from 'lucide-react';
+import { api, timeAgo, type CloudConnection, type DatabaseConnection, type Stream, type StreamConfig } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { Badge, Button, CopyButton, Input, Label, Select, cn } from '../../components/ui';
 
 type Kind = Stream['kind'];
-type Draft = { name: string; kind: Kind; brokers: string; topic: string; group_id: string; from_beginning: boolean; ssl: boolean; sasl_mechanism: '' | 'plain' | 'scram-sha-256' | 'scram-sha-512'; sasl_username: string; sasl_password: string; stream: string; region: string; cloud_connection_id: string; start: 'LATEST' | 'TRIM_HORIZON'; format: 'json' | 'text'; target_table: string; include_metadata: boolean; batch_rows: number; batch_seconds: number };
-const EMPTY: Draft = { name: '', kind: 'kafka', brokers: '', topic: '', group_id: '', from_beginning: true, ssl: false, sasl_mechanism: '', sasl_username: '', sasl_password: '', stream: '', region: 'us-east-1', cloud_connection_id: '', start: 'TRIM_HORIZON', format: 'json', target_table: '', include_metadata: true, batch_rows: 1000, batch_seconds: 5 };
+type Draft = { name: string; kind: Kind; brokers: string; topic: string; group_id: string; from_beginning: boolean; ssl: boolean; sasl_mechanism: '' | 'plain' | 'scram-sha-256' | 'scram-sha-512'; sasl_username: string; sasl_password: string; stream: string; region: string; cloud_connection_id: string; start: 'LATEST' | 'TRIM_HORIZON'; connection_id: string; pg_table: string; snapshot: boolean; format: 'json' | 'text' | 'debezium'; mirror: boolean; key_columns: string; keep_history: boolean; target_table: string; include_metadata: boolean; batch_rows: number; batch_seconds: number };
+const EMPTY: Draft = { name: '', kind: 'kafka', brokers: '', topic: '', group_id: '', from_beginning: true, ssl: false, sasl_mechanism: '', sasl_username: '', sasl_password: '', stream: '', region: 'us-east-1', cloud_connection_id: '', start: 'TRIM_HORIZON', connection_id: '', pg_table: '', snapshot: true, format: 'json', mirror: false, key_columns: '', keep_history: false, target_table: '', include_metadata: true, batch_rows: 1000, batch_seconds: 5 };
 const KINDS: { id: Kind; label: string; hint: string; icon: typeof Radio }[] = [
   { id: 'kafka', label: 'Kafka', hint: 'Apache Kafka, Confluent, Redpanda, MSK', icon: Radio },
   { id: 'kinesis', label: 'Kinesis', hint: 'Amazon Kinesis Data Streams', icon: Waves },
   { id: 'http', label: 'HTTP push', hint: 'your app POSTs events to DuckView', icon: Webhook },
+  { id: 'postgres', label: 'Postgres CDC', hint: 'a table\'s inserts, updates and deletes', icon: Database },
 ];
 
 const configOf = (d: Draft): StreamConfig =>
@@ -19,11 +20,15 @@ const configOf = (d: Draft): StreamConfig =>
     ? { kind: 'kafka', brokers: d.brokers.split(/[,\s]+/).filter(Boolean), topic: d.topic.trim(), group_id: d.group_id.trim() || null, from_beginning: d.from_beginning, ssl: d.ssl, sasl_mechanism: d.sasl_mechanism || null, sasl_username: d.sasl_username.trim() || null }
     : d.kind === 'kinesis'
       ? { kind: 'kinesis', stream: d.stream.trim(), region: d.region.trim(), cloud_connection_id: d.cloud_connection_id || null, start: d.start }
-      : { kind: 'http' };
-const describe = (c: StreamConfig) => (c.kind === 'kafka' ? `topic ${c.topic} · ${c.brokers.join(', ')}` : c.kind === 'kinesis' ? `stream ${c.stream} · ${c.region}` : 'HTTP pushes');
+      : d.kind === 'postgres'
+        ? { kind: 'postgres', connection_id: d.connection_id, table: d.pg_table.trim(), snapshot: d.snapshot }
+        : { kind: 'http' };
+const describe = (c: StreamConfig) => (c.kind === 'kafka' ? `topic ${c.topic} · ${c.brokers.join(', ')}` : c.kind === 'kinesis' ? `stream ${c.stream} · ${c.region}` : c.kind === 'postgres' ? `Postgres ${c.table} (changes)` : 'HTTP pushes');
+/** Postgres CDC and Debezium feeds keep each row's latest state. */
+const mirrors = (d: Draft) => d.kind === 'postgres' || d.format === 'debezium' || d.mirror;
 
 /** Connections → Streams: Kafka topics, Kinesis streams and HTTP pushes appended to workspace tables as they arrive. */
-export function StreamsPanel({ workspaceId, clouds }: { workspaceId: string; clouds: CloudConnection[] }) {
+export function StreamsPanel({ workspaceId, clouds, databases }: { workspaceId: string; clouds: CloudConnection[]; databases: DatabaseConnection[] }) {
   const { canEdit } = useWorkspaceAccess();
   const ws = useWorkspace();
   const [streams, setStreams] = useState<Stream[] | null>(null);
@@ -67,7 +72,7 @@ export function StreamsPanel({ workspaceId, clouds }: { workspaceId: string; clo
   };
   const save = (d: Draft) =>
     act('save', async () => {
-      const r = await api.post<{ stream: Stream; push_key: string | null }>(`/api/workspaces/${workspaceId}/streams`, { name: d.name.trim() || undefined, config: configOf(d), sasl_password: d.sasl_password || null, format: d.format, target_table: d.target_table.trim(), include_metadata: d.include_metadata, batch_rows: d.batch_rows, batch_seconds: d.batch_seconds });
+      const r = await api.post<{ stream: Stream; push_key: string | null }>(`/api/workspaces/${workspaceId}/streams`, { name: d.name.trim() || undefined, config: configOf(d), sasl_password: d.sasl_password || null, format: d.kind === 'postgres' ? 'json' : d.format, mode: mirrors(d) ? 'mirror' : 'append', key_columns: d.key_columns.split(/[,\s]+/).filter(Boolean), keep_history: mirrors(d) && d.keep_history, target_table: d.target_table.trim(), include_metadata: d.include_metadata, batch_rows: d.batch_rows, batch_seconds: d.batch_seconds });
       if (r.push_key) setKey({ id: r.stream.id, key: r.push_key });
       setDraft(null);
       setTested(null);
@@ -81,7 +86,7 @@ export function StreamsPanel({ workspaceId, clouds }: { workspaceId: string; clo
   return (
     <div className="space-y-3 text-xs" data-testid="streams">
       <div className="flex items-center gap-2">
-        <p className="text-zinc-400">Events appended to a table as they arrive — from a Kafka topic, a Kinesis stream, or your app pushing JSON. New fields become columns; offsets are committed only after rows are written.</p>
+        <p className="text-zinc-400">Data kept flowing into tables as it happens: events from a Kafka topic, a Kinesis stream or your app, and the changes of a Postgres table (inserts, updates, deletes). New fields become columns; nothing is acknowledged before it is written.</p>
         {canEdit && !draft && <Button size="sm" className="ml-auto" onClick={() => { setDraft({ ...EMPTY }); setTested(null); }} data-testid="stream-new"><Plus className="h-3.5 w-3.5" /> New stream</Button>}
       </div>
       {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}
@@ -120,11 +125,22 @@ export function StreamsPanel({ workspaceId, clouds }: { workspaceId: string; clo
               <div><Label>Start from</Label><Select value={draft.start} onChange={(e) => setDraft({ ...draft, start: e.target.value as Draft['start'] })}><option value="TRIM_HORIZON">The oldest record</option><option value="LATEST">New records only</option></Select></div>
             </div>
           )}
+          {draft.kind === 'postgres' && (
+            <div className="flex flex-wrap gap-3">
+              <div><Label>Postgres connection</Label><Select value={draft.connection_id} onChange={(e) => setDraft({ ...draft, connection_id: e.target.value })} data-testid="stream-pg-connection"><option value="">Choose…</option>{databases.filter((c) => c.engine === 'postgres').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></div>
+              <div className="w-56"><Label>Table</Label><Input value={draft.pg_table} onChange={(e) => setDraft({ ...draft, pg_table: e.target.value })} placeholder="public.orders" data-testid="stream-pg-table" /></div>
+              <label className="flex items-center gap-1.5 self-end pb-1.5 text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={draft.snapshot} onChange={(e) => setDraft({ ...draft, snapshot: e.target.checked })} /> Copy the existing rows first</label>
+              <p className="basis-full text-zinc-500">Needs <code className="font-mono">wal_level = logical</code> and a user with REPLICATION. DuckView creates a publication and a replication slot for this stream, and drops them when you remove it.</p>
+            </div>
+          )}
           {draft.kind === 'http' && <p className="text-zinc-400">After saving you get a URL and a key. POST a JSON object, an array of objects, or newline-delimited JSON to it; each request is appended as one batch.</p>}
           <div className="flex flex-wrap gap-3">
             <div className="w-56"><Label>Into table</Label><Input value={draft.target_table} onChange={(e) => setDraft({ ...draft, target_table: e.target.value.replace(/[^\w]/g, '_') })} placeholder="events" data-testid="stream-table" /></div>
             <div className="min-w-[12rem] flex-1"><Label>Name</Label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={draft.target_table || 'Orders stream'} /></div>
-            <div><Label>Messages are</Label><Select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as Draft['format'] })}><option value="json">JSON (fields → columns)</option><option value="text">Text (one value column)</option></Select></div>
+            {draft.kind !== 'postgres' && <div><Label>Messages are</Label><Select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as Draft['format'] })} data-testid="stream-format"><option value="json">JSON (fields → columns)</option><option value="text">Text (one value column)</option><option value="debezium">Debezium change events</option></Select></div>}
+            {draft.kind !== 'postgres' && draft.format === 'json' && <label className="flex items-center gap-1.5 self-end pb-1.5 text-zinc-300" title="Each key's latest message replaces the previous one instead of adding a row"><input type="checkbox" className="accent-accent-500" checked={draft.mirror} onChange={(e) => setDraft({ ...draft, mirror: e.target.checked })} /> Keep the latest per key</label>}
+            {mirrors(draft) && draft.kind !== 'postgres' && <div className="w-48"><Label>Key columns{draft.format === 'debezium' ? ' (else from the message key)' : ''}</Label><Input value={draft.key_columns} onChange={(e) => setDraft({ ...draft, key_columns: e.target.value })} placeholder="id" data-testid="stream-keys" /></div>}
+            {mirrors(draft) && <label className="flex items-center gap-1.5 self-end pb-1.5 text-zinc-300" title="Every change, with _op, in <table>__changes"><input type="checkbox" className="accent-accent-500" checked={draft.keep_history} onChange={(e) => setDraft({ ...draft, keep_history: e.target.checked })} data-testid="stream-history" /> Keep a history of changes</label>}
             {draft.kind !== 'http' && <div><Label>Write every</Label><div className="flex items-center gap-1"><Input type="number" min={1} max={300} className="w-16" value={draft.batch_seconds} onChange={(e) => setDraft({ ...draft, batch_seconds: Number(e.target.value) || 1 })} /><span className="text-zinc-500">s or</span><Input type="number" min={1} className="w-20" value={draft.batch_rows} onChange={(e) => setDraft({ ...draft, batch_rows: Number(e.target.value) || 1 })} /><span className="text-zinc-500">rows</span></div></div>}
             <label className="flex items-center gap-1.5 self-end pb-1.5 text-zinc-300" title="_key, _partition, _offset, _timestamp and _ingested_at"><input type="checkbox" className="accent-accent-500" checked={draft.include_metadata} onChange={(e) => setDraft({ ...draft, include_metadata: e.target.checked })} /> Keep key, partition, offset and time</label>
           </div>
@@ -151,7 +167,7 @@ export function StreamsPanel({ workspaceId, clouds }: { workspaceId: string; clo
                     <span className="truncate text-zinc-500">{describe(s.config)} → {s.target_schema !== 'main' ? `${s.target_schema}.` : ''}{s.target_table}</span>
                   </button>
                   <span className={cn('flex items-center gap-1.5', s.status === 'running' ? 'text-emerald-300' : s.status === 'error' ? 'text-red-300' : 'text-zinc-400')} data-testid="stream-status"><span className={cn('h-1.5 w-1.5 rounded-full', s.status === 'running' ? 'bg-emerald-400' : s.status === 'error' ? 'bg-red-400' : s.status === 'starting' ? 'bg-amber-400' : 'bg-zinc-600')} />{s.enabled ? s.status : 'paused'}</span>
-                  <span className="w-40 text-right tabular-nums text-zinc-400" data-testid="stream-rows">{s.stats.rows_total.toLocaleString()} rows{s.stats.last_batch_at ? ` · ${timeAgo(s.stats.last_batch_at)}` : ''}</span>
+                  <span className="w-40 text-right tabular-nums text-zinc-400" data-testid="stream-rows">{s.stats.rows_total.toLocaleString()} {s.mode === 'mirror' ? 'changes' : 'rows'}{s.stats.last_batch_at ? ` · ${timeAgo(s.stats.last_batch_at)}` : ''}</span>
                   {canEdit && <Button size="sm" variant="ghost" onClick={() => void act(`toggle:${s.id}`, async () => { await api.patch(`/api/streams/${s.id}`, { enabled: !s.enabled }); await load(); })} title={s.enabled ? 'Pause' : 'Resume'}>{s.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}</Button>}
                   {canEdit && <Button size="sm" variant="ghost" onClick={() => void act(`del:${s.id}`, async () => { if (confirm(`Stop and remove "${s.name}"? The table ${s.target_table} is kept.`)) { await api.del(`/api/streams/${s.id}`); await load(); } })} title="Remove (the table is kept)"><Trash2 className="h-3.5 w-3.5" /></Button>}
                 </div>
@@ -170,8 +186,9 @@ export function StreamsPanel({ workspaceId, clouds }: { workspaceId: string; clo
                         ) : canEdit && <Button size="sm" variant="ghost" onClick={() => void act('rotate', async () => setKey({ id: s.id, key: (await api.post<{ push_key: string }>(`/api/streams/${s.id}/rotate-key`, {})).push_key }))}><KeyRound className="h-3.5 w-3.5" /> New key (the old one stops working)</Button>}
                       </div>
                     )}
-                    {s.kind !== 'http' && Object.keys(s.checkpoints).length > 0 && <p className="text-zinc-500">Checkpoints: {Object.entries(s.checkpoints).map(([k, v]) => `${k} @ ${v}`).join(' · ')}</p>}
-                    <p className="text-zinc-500">{s.stats.batches.toLocaleString()} batch{s.stats.batches === 1 ? '' : 'es'} · last {s.stats.last_batch_rows.toLocaleString()} row{s.stats.last_batch_rows === 1 ? '' : 's'} · {s.format === 'json' ? 'JSON' : 'text'}{s.include_metadata ? ' · with key, partition, offset and time' : ''}</p>
+                    {s.kind === 'postgres' && <p className="text-zinc-500">{s.checkpoints.snapshot === 'done' ? 'Existing rows copied' : 'Copying the existing rows…'}{s.checkpoints.lsn ? ` · replicated up to ${s.checkpoints.lsn}` : ''}</p>}
+                    {(s.kind === 'kinesis') && Object.keys(s.checkpoints).length > 0 && <p className="text-zinc-500">Checkpoints: {Object.entries(s.checkpoints).map(([k, v]) => `${k} @ ${v}`).join(' · ')}</p>}
+                    <p className="text-zinc-500">{s.mode === 'mirror' ? `Latest state per ${s.key_columns.join(', ') || 'key'}${s.keep_history ? ` · every change in ${s.target_table}__changes` : ''} · ` : ''}{s.stats.batches.toLocaleString()} batch{s.stats.batches === 1 ? '' : 'es'} · last {s.stats.last_batch_rows.toLocaleString()} row{s.stats.last_batch_rows === 1 ? '' : 's'} · {s.format === 'json' ? 'JSON' : s.format === 'debezium' ? 'Debezium' : 'text'}{s.include_metadata ? ' · with key, partition, offset and time' : ''}</p>
                     {latest && latest.rows.length > 0 ? (
                       <div className="max-h-64 overflow-auto rounded border border-zinc-800" data-testid="stream-latest">
                         <table className="w-full text-[11px]">

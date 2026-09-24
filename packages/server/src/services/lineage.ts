@@ -234,15 +234,16 @@ export class LineageService {
     const streams = await this.db.select().from(this.s.streams).where(eq(this.s.streams.workspace_id, workspaceId));
     for (const st of streams) {
       const id = `stream:${st.id}`;
-      const what = st.config.kind === 'kafka' ? `Kafka topic ${st.config.topic}` : st.config.kind === 'kinesis' ? `Kinesis stream ${st.config.stream}` : 'HTTP pushes';
+      const c = st.config;
+      const what = c.kind === 'kafka' ? `Kafka topic ${c.topic}` : c.kind === 'kinesis' ? `Kinesis stream ${c.stream}` : c.kind === 'postgres' ? `Postgres table ${c.table} (change data capture)` : 'HTTP pushes';
       nodes.set(id, { id, kind: 'sync', label: st.name, detail: `streaming · ${what}`, href: '#/connections' });
       const target = `${st.target_schema !== 'main' ? `${st.target_schema}.` : ''}${st.target_table}`;
       const tid = known.get(target.toLowerCase()) ?? `table:${target}`;
       if (!nodes.has(tid)) nodes.set(tid, { id: tid, kind: 'table', label: target, detail: 'not created yet' });
       edge(id, tid, 'loads');
-      if (st.config.kind !== 'http') {
-        const sid = `source:${st.config.kind}:${st.config.kind === 'kafka' ? `${st.config.brokers[0]}/${st.config.topic}` : `${st.config.region}/${st.config.stream}`}`;
-        if (!nodes.has(sid)) nodes.set(sid, { id: sid, kind: 'source', label: st.config.kind === 'kafka' ? st.config.topic : st.config.stream, detail: what });
+      if (c.kind !== 'http') {
+        const sid = `source:${c.kind}:${c.kind === 'kafka' ? `${c.brokers[0]}/${c.topic}` : c.kind === 'kinesis' ? `${c.region}/${c.stream}` : `${c.connection_id}/${c.table}`}`;
+        if (!nodes.has(sid)) nodes.set(sid, { id: sid, kind: 'source', label: c.kind === 'kafka' ? c.topic : c.kind === 'kinesis' ? c.stream : c.table, detail: what });
         edge(sid, id, 'reads');
       }
     }
