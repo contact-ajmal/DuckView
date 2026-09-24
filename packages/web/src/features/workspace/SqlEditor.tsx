@@ -10,6 +10,8 @@ export interface SqlEditorHandle {
   /** Inserts text at the cursor (replacing any selection) and focuses the editor. */
   insert(text: string): void;
   focus(): void;
+  /** Selects a line (1-based) and scrolls to it, e.g. where an error points. */
+  goToLine(line: number): void;
 }
 
 interface Props {
@@ -42,6 +44,13 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({
     },
     focus() {
       cm.current?.view?.focus();
+    },
+    goToLine(line) {
+      const view = cm.current?.view;
+      if (!view) return;
+      const l = view.state.doc.line(Math.min(Math.max(1, line), view.state.doc.lines));
+      view.dispatch({ selection: { anchor: l.from, head: l.to }, effects: EditorView.scrollIntoView(l.from, { y: 'center' }) });
+      view.focus();
     },
   }));
 

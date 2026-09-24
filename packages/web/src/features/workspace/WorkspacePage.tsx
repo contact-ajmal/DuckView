@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search, Send } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
+import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search, Send, XCircle, Keyboard } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess, lakehouseEngine, engineConnectionId } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { fetchCached } from '../../lib/useCached';
@@ -16,6 +16,7 @@ import { SchemaTree } from './SchemaTree';
 import { SavedQueriesTree } from './SavedQueries';
 import { REVERSE_DRAFT_KEY } from '../connections/ReversePanel';
 import { HistoryDrawer } from '../history/HistoryDrawer';
+import { ApprovalCard } from '../../components/ai';
 import { SaveDbtModelDialog } from '../transform/SaveDbtModelDialog';
 import { Explorer, type ExplorerNode } from '../explorer/Explorer';
 import { SchemaPanel } from '../explorer/SchemaPanel';
@@ -27,7 +28,7 @@ import { TypePill } from '../../components/layout';
 import { SplitPane, StackedPanes, usePersisted } from '../../components/panes';
 import { useLayout } from '../../store/layout';
 import { HideButton } from '../../components/LayoutMenu';
-import { Badge, Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, Tabs, cn, confirmAction, toast } from '../../components/ui';
+import { Badge, Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, Tabs, cn, confirmAction, toast, CopyButton, Kbd } from '../../components/ui';
 import { usePageObject } from '../../store/context';
 
 type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile' | 'explore';
@@ -48,7 +49,7 @@ export function WorkspacePage() {
   const [profileMeta, setProfileMeta] = useState<{ fromCache: boolean; computedAt: string; serverCached: boolean; target: string } | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = usePersisted<boolean>('duckview.pane.workbench.sidebar.collapsed', false);
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersisted<boolean>('duckview.pane.workbench.sidebar.collapsed', typeof window !== 'undefined' && window.innerWidth < 1024);
   const hidden = useLayout((l) => l.hidden);
   const isHidden = (id: string) => !!hidden[id];
   const [copied, setCopied] = useState(false);
@@ -274,6 +275,28 @@ export function WorkspacePage() {
       setMaterialize((m) => ({ ...m, busy: false, error: (e as Error).message }));
     }
   };
+  // Keyboard: ⌘S saves, ⌘⇧↵ explains, Esc stops a running query (⌘↵ runs, in the editor).
+  const keys = useRef({ save: openSave, explain: () => { setView('plan'); void explain(false); }, stop: () => tab && result?.status === 'running' && ws.cancelQuery(tab.id), canSave: !!sql.trim() && canWrite });
+  keys.current = { save: openSave, explain: () => { setView('plan'); void explain(false); }, stop: () => tab && result?.status === 'running' && ws.cancelQuery(tab.id), canSave: !!sql.trim() && canWrite };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (keys.current.canSave) keys.current.save();
+      } else if (mod && e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        keys.current.explain();
+      } else if (e.key === 'Escape' && !mod) {
+        keys.current.stop();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const [shortcuts, setShortcuts] = useState(false);
+
   if (!workspace) return <Empty title="No workspace" hint="Create a workspace from the switcher in the top bar." />;
 
   const executed = result?.status === 'done';
@@ -383,7 +406,7 @@ export function WorkspacePage() {
           {result.truncated && <span className="text-amber-500">· capped at {ws.maxRows.toLocaleString()}</span>}
           {result.restoredAt && <span title="Restored from this browser after a reload — press Run (⌘↵) to re-execute.">· restored, not re-run</span>}
           {result.engine === 'databricks' && <Badge tone="warn">databricks</Badge>}
-          {result.statements.filter((st) => st.class !== 'read').map((st, i) => <Badge key={i} tone={st.class === 'destructive' ? 'red' : 'violet'}>{st.verb}</Badge>)}
+          {result.statements.filter((st) => st.class !== 'read').map((st, i) => <Badge key={i} tone={st.class === 'destructive' ? 'error' : 'accent'}>{st.verb}</Badge>)}
         </span>
       )}
       {result?.status === 'error' && <span className="inline-flex items-center gap-1.5 text-red-400"><span className="h-1.5 w-1.5 rounded-full bg-red-500" /> {result.errorCode}</span>}
@@ -447,11 +470,6 @@ export function WorkspacePage() {
           )}
           <div className="mx-1 h-4 w-px bg-zinc-800" />
           {runStatus}
-          {result?.status === 'error' && (
-            <Button size="sm" variant="ghost" onClick={() => { cp.toggle(true); if (wsId) void cp.send({ workspaceId: wsId, message: '', action: 'fix', activeSql: sql, errorMessage: result.error }); }}>
-              <Wrench className="h-3 w-3" /> Fix with AI
-            </Button>
-          )}
           {executed && result.engine === 'databricks' && result.connectionId && canWrite && (
             <Button size="sm" variant="ghost" onClick={() => setMaterialize({ open: true, connectionId: result.connectionId!, connectionName: tabEngineConn?.name ?? 'warehouse', sql: result.sql ?? sql, table: (tab?.title ?? 'remote').replace(/[^A-Za-z0-9_]/g, '_').toLowerCase() || 'remote_result', busy: false, error: null, done: null })} title="Run this query on the warehouse and store the result as a DuckDB table you can join with local data">
               <DatabaseZap className="h-3 w-3" /> Materialise into DuckDB
@@ -482,6 +500,7 @@ export function WorkspacePage() {
                   <MenuItem icon={<Download className="h-3.5 w-3.5" />} onClick={() => { close(); exportTab(); }}>Export tab as .sql</MenuItem>
                   <MenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} onClick={() => { close(); exportAll(); }}>Export all tabs</MenuItem>
                   <MenuDivider />
+                  <MenuItem icon={<Keyboard className="h-3.5 w-3.5" />} onClick={() => { close(); setShortcuts(true); }}>Keyboard shortcuts</MenuItem>
                   <MenuItem icon={<PanelLeft className="h-3.5 w-3.5" />} onClick={() => { close(); setSidebarCollapsed((c) => !c); }}>{sidebarCollapsed ? 'Show schema panel' : 'Hide schema panel'}</MenuItem>
                 </>
               )}
@@ -526,7 +545,7 @@ export function WorkspacePage() {
             <>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-500" />
-                <input value={gridFilter} onChange={(e) => setGridFilter(e.target.value)} placeholder="Filter rows" aria-label="Filter result rows" className="h-[26px] w-40 rounded-md border border-zinc-800 bg-zinc-950 pl-6 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none" />
+                <Input uiSize="sm" value={gridFilter} onChange={(e) => setGridFilter(e.target.value)} placeholder="Filter rows" aria-label="Filter result rows" className="h-[26px] w-40 rounded-md border border-zinc-800 bg-zinc-950 pl-6 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none" />
               </div>
               {gridFilter && <span className="text-xs tabular-nums text-zinc-500">{shownRows.length.toLocaleString()} of {result.rows.length.toLocaleString()}</span>}
               <IconButton label={rowsCopied ? 'Copied' : 'Copy rows (tab-separated)'} onClick={() => { void navigator.clipboard.writeText(rowsToTsv(result.columns, shownRows)).then(() => { setRowsCopied(true); setTimeout(() => setRowsCopied(false), 1200); }); }}>
@@ -557,19 +576,26 @@ export function WorkspacePage() {
         {view === 'table' && (
           <>
             {result?.status === 'approval' && result.challenge && (
-              <div className="m-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-                <div className="flex items-center gap-2 text-body font-semibold text-zinc-100"><ShieldAlert className="h-4 w-4 text-amber-500" /> This statement changes data</div>
-                <p className="mt-1 text-xs text-zinc-400">{result.challenge.reason}</p>
-                <ul className="mt-2 space-y-1 font-mono text-2xs text-zinc-400">{result.challenge.statements.map((st) => <li key={st.index}><Badge tone="error">{st.verb}</Badge> {st.preview}</li>)}</ul>
-                <Button size="sm" variant="danger" className="mt-3" onClick={() => run(null, false)}>Approve and run</Button>
-              </div>
+              <ApprovalCard className="m-3" title="This statement changes data" reason={result.challenge.reason} statements={result.challenge.statements.map((st) => ({ verb: st.verb, preview: st.preview, destructive: true }))} onApprove={() => run(null, false)} />
             )}
-            {result?.status === 'error' && (
-              <div className="m-3 rounded-lg border border-red-500/30 bg-red-500/5 p-4">
-                <div className="mb-1 text-xs font-semibold text-red-400">{result.errorCode}</div>
-                <pre className="whitespace-pre-wrap font-mono text-xs text-zinc-200">{result.error}</pre>
-              </div>
-            )}
+            {result?.status === 'error' && (() => {
+              const line = /LINE (\d+):/.exec(result.error ?? '')?.[1];
+              return (
+                <section role="alert" className="m-3 rounded-lg border border-red-500/30 bg-red-500/5 p-4" data-testid="query-error">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <XCircle className="h-4 w-4 shrink-0 text-red-400" />
+                    <h3 className="text-body font-semibold text-zinc-100">The query failed</h3>
+                    {result.errorCode && <Badge tone="error">{result.errorCode}</Badge>}
+                    <div className="ml-auto flex items-center gap-1">
+                      {line && <Button size="sm" variant="ghost" onClick={() => editor.current?.goToLine(Number(line))}>Go to line {line}</Button>}
+                      <CopyButton text={result.error ?? ''} label="Copy error" />
+                      <Button size="sm" onClick={() => { cp.toggle(true); if (wsId) void cp.send({ workspaceId: wsId, message: '', action: 'fix', activeSql: sql, errorMessage: result.error }); }}><Wrench className="h-3.5 w-3.5" /> Fix with AI</Button>
+                    </div>
+                  </div>
+                  <pre className="mt-2 whitespace-pre-wrap font-mono text-xs text-zinc-200">{result.error}</pre>
+                </section>
+              );
+            })()}
             {(result?.status === 'done' || result?.status === 'running') && result.columns.length > 0 && <ResultsGrid columns={result.columns} rows={result.rows} filter={gridFilter} onVisibleRows={setShownRows} />}
             {result?.status === 'done' && result.columns.length === 0 && <Empty title="Statement executed" hint="It returned no rows." />}
             {(!result || result.status === 'idle') && <Empty icon={<Play />} title="Run a query" hint="⌘/Ctrl + Enter runs the editor, or just the selection. Pick a table or file on the left to insert or preview it." />}
@@ -674,6 +700,24 @@ export function WorkspacePage() {
         }}
       />
 
+      <Modal open={shortcuts} onClose={() => setShortcuts(false)} title="Keyboard shortcuts" width="max-w-md">
+        <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-2 text-body" data-testid="shortcuts">
+          {([
+            ['Run the editor, or the selection', ['⌘', '↵']],
+            ['Explain the query', ['⌘', '⇧', '↵']],
+            ['Stop the running query', ['Esc']],
+            ['Save to the query library', ['⌘', 'S']],
+            ['Search data, queries and commands', ['⌘', 'K']],
+            ['Autocomplete tables and columns', ['Ctrl', 'Space']],
+          ] as const).map(([what, k]) => (
+            <Fragment key={what}>
+              <dt className="text-zinc-300">{what}</dt>
+              <dd className="flex gap-1">{k.map((x) => <Kbd key={x}>{x}</Kbd>)}</dd>
+            </Fragment>
+          ))}
+        </dl>
+        <p className="mt-3 text-2xs text-zinc-500">On Windows and Linux, ⌘ is Ctrl.</p>
+      </Modal>
       {queryHistory && wsId && <HistoryDrawer open onClose={() => setQueryHistory(null)} workspaceId={wsId} objectType="query" objectId={queryHistory.id} title={queryHistory.name} onRestored={() => void loadSaved()} />}
       {dbtModel !== null && wsId && <SaveDbtModelDialog workspaceId={wsId} sql={dbtModel} suggestedName={tab?.title} onClose={() => setDbtModel(null)} />}
       <Modal open={saveModal.open} onClose={() => setSaveModal({ ...saveModal, open: false })} title={saveModal.existing ? 'Update saved query' : 'Save query'}>

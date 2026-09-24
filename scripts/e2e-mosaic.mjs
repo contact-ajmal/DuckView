@@ -1199,6 +1199,45 @@ try {
     await waitFor(`[...document.querySelectorAll('[role=tab]')].some(t => t.textContent.startsWith('Activity') && t.getAttribute('aria-selected') === 'true')`, 10000, 'agents open on activity');
     report.details.charts = 1;
   }
+  else if (scenario === 'sql-workspace') {
+    // The workbench: a failing query explains itself and points at the line; keyboard shortcuts.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const before = new Set(((await (await authed(`/api/workspaces/${wsId}/tabs`)).json()).tabs ?? []).map((t) => t.id));
+    cleanup = async () => {
+      for (const t of (await (await authed(`/api/workspaces/${wsId}/tabs`)).json()).tabs ?? []) if (!before.has(t.id)) await authed(`/api/workspaces/${wsId}/tabs/${t.id}`, { method: 'DELETE' });
+    };
+    const key = async (k, modifiers = 0, code = k) => { await send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code, modifiers, windowsVirtualKeyCode: { Enter: 13, Escape: 27, s: 83 }[k], ...(k === 'Enter' && !modifiers ? { text: '\r' } : {}) }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, modifiers }); await sleep(200); };
+    const META = 4;
+    await evaluate(`location.hash = '#/query'; 'ok'`);
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New tab')`, 20000, 'workbench');
+    await clickButton('New tab');
+    await waitFor(`!!document.querySelector('.cm-content')`, 10000, 'editor');
+    await sleep(500);
+    await evaluate(`document.querySelector('.cm-content').focus(); 'ok'`);
+    await send('Input.insertText', { text: 'SELECT 1 AS a,\nFROM nowhere_at_all' });
+    await sleep(300);
+    await evaluate(`document.querySelector('[data-testid="run-query"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="query-error"]')`, 20000, 'error panel');
+    report.details.errorPanel = await evaluate(`({ title: document.querySelector('[data-testid="query-error"] h3').textContent, goto: [...document.querySelectorAll('[data-testid="query-error"] button')].map(b => b.textContent.trim()) })`);
+    await evaluate(`[...document.querySelectorAll('[data-testid="query-error"] button')].find(b => b.textContent.startsWith('Go to line')).click(); 'ok'`);
+    await sleep(300);
+    report.details.selection = await evaluate(`window.getSelection().toString()`);
+    // ⌘S opens Save; Escape closes it.
+    await key('s', META, 'KeyS');
+    await waitFor(`!!document.querySelector('[role="dialog"][aria-label="Save query"]')`, 5000, 'save dialog from ⌘S');
+    report.details.saveFocus = await evaluate(`document.activeElement?.tagName`);
+    await key('Escape');
+    await waitFor(`!document.querySelector('[role="dialog"]')`, 3000, 'save dialog closed');
+    // The shortcuts sheet.
+    await evaluate(`document.querySelector('[aria-label="More query actions"]').click(); 'ok'`);
+    await waitFor(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Keyboard shortcuts'))`, 3000, 'menu');
+    await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.includes('Keyboard shortcuts')).click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="shortcuts"]')`, 3000, 'shortcuts');
+    report.details.shortcuts = await evaluate(`[...document.querySelectorAll('[data-testid="shortcuts"] dt')].map(d => d.textContent)`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_shortcuts.png'), Buffer.from(shot.result.data, 'base64')); }
+    await key('Escape');
+    report.details.charts = 1;
+  }
   else if (scenario === 'orchestration') {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
@@ -2034,6 +2073,12 @@ try {
     if (d.narrowSettings?.nav !== 'none' || !d.narrowSettings?.picker) problems.push(`narrow settings: ${JSON.stringify(d.narrowSettings)}`);
     if (d.phoneRail !== 'none') problems.push(`rail on a phone: ${d.phoneRail}`);
     if ((d.drawer ?? []).length !== 8) problems.push(`drawer: ${JSON.stringify(d.drawer)}`);
+  }
+  if (scenario === 'sql-workspace') {
+    if (d.errorPanel?.title !== 'The query failed' || !(d.errorPanel?.goto ?? []).includes('Go to line 2') || !(d.errorPanel?.goto ?? []).includes('Fix with AI')) problems.push(`error panel: ${JSON.stringify(d.errorPanel)}`);
+    if (!/FROM nowhere_at_all/.test(d.selection ?? '')) problems.push(`go to line selected: ${JSON.stringify(d.selection)}`);
+    if (d.saveFocus !== 'INPUT') problems.push(`save dialog focus: ${d.saveFocus}`);
+    if ((d.shortcuts ?? []).length !== 6) problems.push(`shortcuts: ${JSON.stringify(d.shortcuts)}`);
   }
   if (scenario === 'orchestration') {
     if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);
