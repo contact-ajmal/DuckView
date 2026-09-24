@@ -1294,7 +1294,47 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`Created monitor **${m.name}** (\`${m.id}\`) on ${m.metric} by ${m.grain}.${first}`)], structuredContent: { status: 'ok', monitor: m, findings } };
       },
     }),
+    // ---------------------------------------------------------------- other agents
+    define({
+      name: 'list_agents',
+      title: 'List agents to ask',
+      description: 'Agents you can hand a question to with ask_agent: the workspace\'s DuckView agents (hosted: data analyst, anomaly investigator, pipeline watcher and others, each with its tools and last run) and the remote A2A agents you registered (with their skills).',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const hosted = await env.ctx.hostedAgents.list(env.principal, ws);
+        const remotes = await env.ctx.a2a.listRemotes(env.principal);
+        const lines = [
+          ...hosted.map((a) => `- DuckView agent **${a.name}** (\`${a.id}\`): ${a.description ?? a.instructions.split('\n')[0]} · tools: ${a.tools.join(', ')}${a.last_run ? ` · last run ${a.last_run.status}` : ''}`),
+          ...remotes.map((r) => `- remote A2A agent **${r.name}** (\`${r.id}\`): ${String(r.card.description ?? '')}${(r.card as { skills?: { name: string }[] }).skills?.length ? ` · skills: ${(r.card as { skills: { name: string }[] }).skills.map((x) => x.name).join(', ')}` : ''}`),
+        ];
+        return { content: [text(lines.length ? lines.join('\n') : 'No agents yet. Install one from the marketplace (AI → DuckView agents) or add a remote A2A agent there.')], structuredContent: { status: 'ok', workspace_id: ws, hosted: hosted.map((a) => ({ id: a.id, name: a.name, description: a.description, tools: a.tools, template: a.template })), remote: remotes.map((r) => ({ id: r.id, name: r.name, endpoint: r.endpoint, skills: (r.card as { skills?: unknown[] }).skills ?? [] })) } };
+      },
+    }),
+
+    define({
+      name: 'ask_agent',
+      title: 'Ask another agent',
+      description: 'Hands a question or task to another agent and waits for its answer: a DuckView agent of the workspace (it runs read-only, as you, with its own tools and instructions — answers include the tools it used) or a remote A2A agent you registered. Name the agent by id or name (list_agents). Pass context_id from a previous answer to continue that conversation with a remote agent.',
+      inputSchema: { agent: z.string().describe('agent id or name'), message: z.string().min(1).max(20_000), context_id: z.string().optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, { agent, message, context_id, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const want = agent.trim().toLowerCase();
+        const hosted = (await env.ctx.hostedAgents.list(env.principal, ws)).find((a) => a.id === agent || a.name.toLowerCase() === want);
+        if (hosted) {
+          const run = await env.ctx.hostedAgents.run(hosted.id, { p: env.principal, actAs: env.principal, input: message, triggeredBy: 'agent', wait: true });
+          const used = run.steps.map((s) => `${s.ok ? '' : 'failed: '}${s.tool}`).join(', ');
+          return { content: [text(run.status === 'completed' ? `**${hosted.name}**${used ? ` (used ${used})` : ''}:\n\n${run.output}` : `${hosted.name} could not finish: ${run.error}`)], structuredContent: { status: run.status === 'completed' ? 'ok' : 'error', agent: { kind: 'hosted', id: hosted.id, name: hosted.name }, run_id: run.id, answer: run.output, error: run.error, steps: run.steps } };
+        }
+        const remote = (await env.ctx.a2a.listRemotes(env.principal)).find((r) => r.id === agent || r.name.toLowerCase() === want);
+        if (!remote) throw new HttpError(404, `No agent ${agent} — list_agents shows the ones you can ask`, 'NOT_FOUND');
+        const r = await env.ctx.a2a.ask(env.principal, remote.id, message, { contextId: context_id });
+        return { content: [text(`**${remote.name}** (${r.state})${r.context_id ? ` · context_id ${r.context_id}` : ''}:\n\n${r.text}`)], structuredContent: { status: r.state === 'completed' ? 'ok' : 'error', agent: { kind: 'remote', id: remote.id, name: remote.name }, answer: r.text, state: r.state, task_id: r.task_id, context_id: r.context_id } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent'] as const;

@@ -968,6 +968,7 @@ export const hostedAgentRuns = pgTable(
     status: text('status', { enum: HOSTED_RUN_STATUSES }).notNull(),
     triggered_by: text('triggered_by').notNull(),
     actor_id: text('actor_id'),
+    context_id: text('context_id'),
     input: text('input').notNull(),
     output: text('output'),
     steps: jsonb('steps').$type<HostedAgentStep[]>().notNull().default([]),
@@ -980,4 +981,23 @@ export const hostedAgentRuns = pgTable(
     finished_at: ts('finished_at'),
   },
   (t) => [index('hosted_agent_runs_agent_idx').on(t.agent_id, t.started_at)],
+);
+
+export const a2aRemotes = pgTable(
+  'a2a_remotes',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    card_url: text('card_url').notNull(),
+    endpoint: text('endpoint').notNull(),
+    card: jsonb('card').$type<Record<string, unknown>>().notNull(),
+    encrypted_headers: text('encrypted_headers'),
+    iv: text('iv'),
+    tag: text('tag'),
+    last_used_at: ts('last_used_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('a2a_remotes_user_idx').on(t.user_id)],
 );

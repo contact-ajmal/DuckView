@@ -29,6 +29,10 @@ export interface EgressOptions {
   timeoutMs: number;
   /** Plain http:// targets (tests, intranets); https is required otherwise. */
   allowHttp?: boolean;
+  /** The most of the response body kept (default 64 KiB). */
+  maxBytes?: number;
+  /** Named in errors about private addresses: the setting that allows them. */
+  setting?: string;
 }
 
 export interface EgressResponse {
@@ -38,6 +42,13 @@ export interface EgressResponse {
 
 /** POSTs a body to a URL under the egress rules. Redirects are not followed. */
 export function egressPost(url: string, body: string | Buffer, headers: Record<string, string>, opts: EgressOptions): Promise<EgressResponse> {
+  return egressRequest('POST', url, body, headers, opts);
+}
+
+/** A GET or POST to a URL under the egress rules. Redirects are not followed. */
+export function egressRequest(method: 'GET' | 'POST', url: string, body: string | Buffer | null, headers: Record<string, string>, opts: EgressOptions): Promise<EgressResponse> {
+  const setting = opts.setting ?? 'notifications.allow_private_targets';
+  const maxBytes = opts.maxBytes ?? 64 * 1024;
   let target: URL;
   try {
     target = new URL(url);
@@ -50,29 +61,29 @@ export function egressPost(url: string, body: string | Buffer, headers: Record<s
     dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
       if (err) return cb(err, '', 0);
       const list = (addresses as dns.LookupAddress[]).filter((a) => opts.allowPrivate || !isPrivateAddress(a.address));
-      if (!list.length) return cb(new EgressError(`${hostname} resolves to a private address — not allowed (notifications.allow_private_targets)`), '', 0);
+      if (!list.length) return cb(new EgressError(`${hostname} resolves to a private address — not allowed (${setting})`), '', 0);
       if ((options as { all?: boolean }).all) return (cb as unknown as (e: null, a: dns.LookupAddress[]) => void)(null, list);
       cb(null, list[0]!.address, list[0]!.family);
     });
   };
   // A literal IP skips DNS: check it here.
   const host = target.hostname.replace(/^\[|\]$/g, '');
-  if (net.isIP(host) && !opts.allowPrivate && isPrivateAddress(host)) return Promise.reject(new EgressError(`${host} is a private address — not allowed (notifications.allow_private_targets)`));
+  if (net.isIP(host) && !opts.allowPrivate && isPrivateAddress(host)) return Promise.reject(new EgressError(`${host} is a private address — not allowed (${setting})`));
   const lib = target.protocol === 'https:' ? https : http;
-  const payload = typeof body === 'string' ? Buffer.from(body) : body;
+  const payload = body === null ? null : typeof body === 'string' ? Buffer.from(body) : body;
   return new Promise((resolve, reject) => {
-    const req = lib.request(target, { method: 'POST', headers: { ...headers, 'content-length': String(payload.length) }, lookup, timeout: opts.timeoutMs }, (res) => {
+    const req = lib.request(target, { method, headers: payload ? { ...headers, 'content-length': String(payload.length) } : headers, lookup, timeout: opts.timeoutMs }, (res) => {
       const chunks: Buffer[] = [];
       let size = 0;
       res.on('data', (c: Buffer) => {
         size += c.length;
-        if (size <= 64 * 1024) chunks.push(c);
+        if (size <= maxBytes) chunks.push(c);
       });
       res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }));
       res.on('error', reject);
     });
     req.on('timeout', () => req.destroy(new EgressError(`No answer from ${target.host} within ${Math.round(opts.timeoutMs / 1000)} s`)));
     req.on('error', reject);
-    req.end(payload);
+    req.end(payload ?? undefined);
   });
 }

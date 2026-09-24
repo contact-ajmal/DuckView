@@ -1516,6 +1516,8 @@ export const hostedAgentRuns = sqliteTable(
     /** manual | schedule | a2a | agent */
     triggered_by: text('triggered_by').notNull(),
     actor_id: text('actor_id'),
+    /** An A2A caller's conversation (contextId). */
+    context_id: text('context_id'),
     input: text('input').notNull(),
     output: text('output'),
     steps: text('steps', { mode: 'json' }).$type<HostedAgentStep[]>().notNull().default([]),
@@ -1530,3 +1532,26 @@ export const hostedAgentRuns = sqliteTable(
   (t) => [index('hosted_agent_runs_agent_idx').on(t.agent_id, t.started_at)],
 );
 export type HostedAgentRun = typeof hostedAgentRuns.$inferSelect;
+
+/** Remote A2A agents a person asks from DuckView, registered by the URL of their Agent Card. */
+export const a2aRemotes = sqliteTable(
+  'a2a_remotes',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    card_url: text('card_url').notNull(),
+    /** The JSON-RPC endpoint (the card's url). */
+    endpoint: text('endpoint').notNull(),
+    card: text('card', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    /** AES-256-GCM JSON: { headers } sent with every call (e.g. Authorization). */
+    encrypted_headers: text('encrypted_headers'),
+    iv: text('iv'),
+    tag: text('tag'),
+    last_used_at: integer('last_used_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('a2a_remotes_user_idx').on(t.user_id)],
+);
+export type A2aRemote = typeof a2aRemotes.$inferSelect;

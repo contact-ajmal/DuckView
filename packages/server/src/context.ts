@@ -32,6 +32,7 @@ import { SemanticService } from './services/semantic.js';
 import { QualityService } from './services/quality.js';
 import { InsightService } from './services/insights.js';
 import { HostedAgentService } from './services/hosted-agents.js';
+import { A2AService } from './services/a2a.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
 import { CommentService } from './services/comments.js';
@@ -87,6 +88,7 @@ export interface AppContext {
   quality: QualityService;
   insights: InsightService;
   hostedAgents: HostedAgentService;
+  a2a: A2AService;
   reverse: ReverseEtlService;
   notebooks: NotebookService;
   comments: CommentService;
@@ -188,6 +190,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   copilot.insights = insights;
   const hostedAgents = new HostedAgentService(cfg, store, workspaces, auth, notifications, audit);
   hostedAgents.model = copilot;
+  const a2a = new A2AService(cfg, store, cipher, workspaces, hostedAgents, audit);
   const reverse = new ReverseEtlService(store, cfg, cipher, engines, workspaces, databases, cloud, auth, notifications, audit);
   copilot.reverse = reverse;
   const notebooks = new NotebookService(store, workspaces, queries, audit);
@@ -270,6 +273,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     quality,
     insights,
     hostedAgents,
+    a2a,
     reverse,
     notebooks,
     comments,

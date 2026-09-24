@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (55 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (57 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -650,6 +650,50 @@ API:
 - `POST /api/hosted-agents/:id/run {input?, wait?}`
 - `GET /api/hosted-agent-runs/:id`
 - `GET /api/hosted-agent-tools`
+
+## Agent2Agent (A2A)
+
+**DuckView speaks A2A (protocol 0.3), both ways** (`services/a2a.ts`, `routes/a2a.ts`).
+
+**Other agents call DuckView's agents.** Turn on *Other agents can call it* on a DuckView agent. It then gets:
+
+- a public **Agent Card** at `/a2a/agents/:id/.well-known/agent-card.json`, with one skill: the agent;
+- a **JSON-RPC 2.0** endpoint at `/a2a/agents/:id`.
+
+DuckView's own card is at `/.well-known/agent-card.json` (also `agent.json`). Its endpoint `/a2a` runs the published agent named in `metadata.agent`, by id or name. `agent/getAuthenticatedExtendedCard` lists the agents the caller can reach.
+
+Calls carry a DuckView API token as `Authorization: Bearer …`; without one the endpoint answers 401 with a Bearer challenge. The endpoints support:
+
+- `message/send`, blocking by default. With `configuration.blocking: false` it returns the working task at once.
+- `message/stream`: server-sent events. First the task as `submitted`, then a `status-update` (`working`) for each tool the agent uses, then an `artifact-update` with the answer, and finally the final `status-update`.
+- `tasks/get` and `tasks/cancel`. A task is visible to its caller only.
+
+A task is one run of the agent. `contextId` is kept, and the answer is an artifact: the text (markdown) and a data part with the steps, the model and the tokens used.
+
+**Each call runs as the caller:** read-only, in the agent's workspace only if the caller is a member, under the caller's access policies. So a published agent never shows anyone more than they could query themselves.
+
+**DuckView asks other agents.** Under *Agents you can ask*, add a remote agent by its URL or the URL of its card. DuckView reads the card (name, description, skills). An auth header is optional; it is stored encrypted and sent with every call.
+
+Ask it from the page, or let agents use it:
+
+- `list_agents` lists the workspace's DuckView agents and your remote agents.
+- `ask_agent` hands a question to either and waits for the answer: `message/send`, then `tasks/get` while the task works. `context_id` continues a conversation.
+
+A2A calls go through the same egress guard as webhooks: https only, public addresses only, no redirects.
+
+API:
+
+- `GET /api/a2a`
+- `GET/POST /api/a2a/remotes {url, headers?, name?}`
+- `POST /api/a2a/remotes/:id/refresh`
+- `DELETE /api/a2a/remotes/:id`
+- `POST /api/a2a/remotes/:id/ask {message, context_id?}`
+
+Config (`a2a`):
+
+- `enabled`
+- `allow_private_targets`: allows intranet agents and tests
+- `timeout_seconds`: how long a remote answer is waited for; default 180
 
 ## Governance
 

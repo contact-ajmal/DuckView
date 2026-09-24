@@ -385,6 +385,16 @@ export const ConfigSchema = z.object({
       timeout_seconds: z.coerce.number().int().min(5).default(120),
     })
     .default({}),
+  /** Agent2Agent (A2A): published DuckView agents answer other agents; people and agents ask remote A2A agents. */
+  a2a: z
+    .object({
+      enabled: z.coerce.boolean().default(true),
+      /** Let remote agents live on private / loopback addresses (an intranet agent; tests). Off: public hosts, https. */
+      allow_private_targets: z.coerce.boolean().default(false),
+      /** A remote agent's answer is waited for this long. */
+      timeout_seconds: z.coerce.number().int().min(5).max(900).default(180),
+    })
+    .default({}),
   /** Delivery of alerts and scheduled snapshots: Slack, Microsoft Teams, email, PagerDuty and webhooks. */
   notifications: z
     .object({

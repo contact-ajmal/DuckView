@@ -246,6 +246,13 @@
       "when": 1790237958663,
       "tag": "0034_hosted_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1790238850503,
+      "tag": "0035_a2a",
+      "breakpoints": true
     }
   ]
 }

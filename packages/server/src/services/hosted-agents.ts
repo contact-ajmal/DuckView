@@ -105,6 +105,8 @@ export class HostedAgentService {
   private ctx!: AppContext;
   private ticker: NodeJS.Timeout | null = null;
   private running = new Set<string>();
+  /** Runs in flight, for wait(). */
+  private pending = new Map<string, Promise<HostedAgentRun>>();
   /** The server's model (set by the context from DuckView AI). */
   model: { serverModel(byok?: ByokModel | null): Promise<{ instance: LlmProvider }> } | null = null;
 
@@ -254,31 +256,55 @@ export class HostedAgentService {
 
   /**
    * Starts a run. With wait, resolves when it is finished; otherwise returns the run as soon as it is recorded
-   * (poll getRun). `p` must be able to see the agent; the run itself acts as the agent's owner, read-only.
+   * (poll getRun). `p` must be able to see the agent; the run itself acts as the agent's owner (or `actAs`),
+   * read-only. Scheduled and manual runs of an agent take turns; calls from other agents (actAs) run side by side.
    */
-  async run(id: string, opts: { p?: Principal | null; input?: string | null; triggeredBy?: string; wait?: boolean; signal?: AbortSignal; byok?: ByokModel | null } = {}): Promise<HostedAgentRun> {
+  async run(id: string, opts: { p?: Principal | null; input?: string | null; triggeredBy?: string; wait?: boolean; signal?: AbortSignal; byok?: ByokModel | null; actAs?: Principal | null; contextId?: string | null; onStep?: (run: HostedAgentRun, step: HostedAgentStep) => void } = {}): Promise<HostedAgentRun> {
     const agent = opts.p ? await this.get(opts.p, id) : (await this.db.select().from(this.s.hostedAgents).where(eq(this.s.hostedAgents.id, id)).limit(1))[0];
     if (!agent) throw notFound('Agent');
-    if (this.running.has(id)) throw badRequest('This agent is running right now');
-    const run: HostedAgentRun = { id: newId(), agent_id: id, workspace_id: agent.workspace_id, status: 'running', triggered_by: opts.triggeredBy ?? 'manual', actor_id: opts.p?.userId ?? null, input: (opts.input?.trim() || agent.task).slice(0, 8000), output: null, steps: [], error: null, model: null, input_tokens: 0, output_tokens: 0, notified: 0, started_at: new Date(), finished_at: null };
+    const exclusive = !opts.actAs;
+    if (exclusive && this.running.has(id)) throw badRequest('This agent is running right now');
+    const run: HostedAgentRun = { id: newId(), agent_id: id, workspace_id: agent.workspace_id, status: 'running', triggered_by: opts.triggeredBy ?? 'manual', actor_id: opts.p?.userId ?? null, context_id: opts.contextId ?? null, input: (opts.input?.trim() || agent.task).slice(0, 8000), output: null, steps: [], error: null, model: null, input_tokens: 0, output_tokens: 0, notified: 0, started_at: new Date(), finished_at: null };
     await this.db.insert(this.s.hostedAgentRuns).values(run);
-    this.running.add(id);
-    const done = this.execute(agent, run, opts.signal, opts.p ? opts.byok : null).finally(() => this.running.delete(id));
+    if (exclusive) this.running.add(id);
+    const done = this.execute(agent, run, { signal: opts.signal, byok: opts.p ? opts.byok : null, actAs: opts.actAs ?? null, onStep: opts.onStep }).finally(() => {
+      if (exclusive) this.running.delete(id);
+      this.pending.delete(run.id);
+    });
+    this.pending.set(run.id, done);
     if (opts.wait) return done;
     done.catch((err) => logger().warn({ agent: id, err: (err as Error).message }, 'Hosted agent run failed'));
     return run;
   }
 
-  private async execute(agent: HostedAgent, run: HostedAgentRun, signal?: AbortSignal, byok?: ByokModel | null): Promise<HostedAgentRun> {
+  /** A run's final state: waits for it when it is still going. */
+  async wait(runId: string): Promise<HostedAgentRun> {
+    const p = this.pending.get(runId);
+    if (p) return p;
+    const run = (await this.db.select().from(this.s.hostedAgentRuns).where(eq(this.s.hostedAgentRuns.id, runId)).limit(1))[0];
+    if (!run) throw notFound('Agent run');
+    return run;
+  }
+
+  /**
+   * Runs as the agent's owner — or, with actAs, as whoever asked (A2A callers, other agents): read-only either way,
+   * so a caller never sees more than their own access allows.
+   */
+  private async execute(agent: HostedAgent, run: HostedAgentRun, o: { signal?: AbortSignal; byok?: ByokModel | null; actAs?: Principal | null; onStep?: (run: HostedAgentRun, step: HostedAgentStep) => void }): Promise<HostedAgentRun> {
+    const { signal, byok } = o;
     const save = (set: Partial<HostedAgentRun>) => this.db.update(this.s.hostedAgentRuns).set(set).where(eq(this.s.hostedAgentRuns.id, run.id));
     const steps: HostedAgentStep[] = [];
     let usage = { input: 0, output: 0 };
     let final: Partial<HostedAgentRun>;
     try {
       if (!this.model) throw new Error('DuckView AI is not available on this server');
-      const owner = await this.auth.findActive(agent.user_id);
-      if (!owner) throw new Error('The agent\'s owner no longer exists or has been deactivated.');
-      const base = this.auth.principalFromUser(owner, 'jwt', 'hosted-agent');
+      let base: Principal;
+      if (o.actAs) base = o.actAs;
+      else {
+        const owner = await this.auth.findActive(agent.user_id);
+        if (!owner) throw new Error('The agent\'s owner no longer exists or has been deactivated.');
+        base = this.auth.principalFromUser(owner, 'jwt', 'hosted-agent');
+      }
       const principal: Principal = { ...base, scopes: ['read'], workspaceScope: agent.workspace_id, actorType: 'AGENT' };
       const ws = await this.workspaces.get(principal, agent.workspace_id);
       const catalog = new Map(hostedToolCatalog(this.cfg).map((t) => [t.name, t]));
@@ -328,11 +354,12 @@ export class HostedAgentService {
         steps.push({ tool: call.name, arguments: call.arguments, ok, summary: summary ?? summarize(resultText), duration_ms: Math.round(performance.now() - started) });
         messages.push({ role: 'user', content: `Result of ${call.name}:\n${resultText}` });
         await save({ steps: [...steps] });
+        o.onStep?.(run, steps.at(-1)!);
         liveEvents.publish({ type: 'hosted_agent', at: new Date().toISOString(), workspace_id: agent.workspace_id, agent_id: agent.id, run_id: run.id, status: 'running', step: steps.length });
       }
       final = { status: 'completed', output: answer || '(The agent did not write an answer.)' };
     } catch (err) {
-      final = { status: 'failed', error: ((err as Error).message ?? String(err)).slice(0, 1000) };
+      final = { status: 'failed', error: signal?.aborted ? 'Stopped' : ((err as Error).message ?? String(err)).slice(0, 1000) };
     }
     const finished: HostedAgentRun = { ...run, ...final, steps, input_tokens: usage.input, output_tokens: usage.output, finished_at: new Date() };
     if ((run.triggered_by === 'schedule' || run.triggered_by === 'manual') && agent.channel_ids.length) {

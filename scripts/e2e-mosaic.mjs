@@ -59,6 +59,9 @@
  * monitor that explains the drop by region, and finds the insight on the monitor feed and on Home.
  * The hosted-agents scenario installs "Data analyst" from the agent marketplace (AI → DuckView agents) and runs it
  * with a question: the (mock) model asks for SQL, gets the result and answers; the steps and the report show.
+ * The a2a scenario checks DuckView's Agent Card, publishes a hosted agent for other agents, registers a (mock)
+ * remote A2A agent by its card with an auth header, and asks it a question from AI → DuckView agents.
+ * (The server must allow private A2A targets: DUCKVIEW__a2a__allow_private_targets=true.)
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -990,6 +993,68 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'a2a') {
+    const http = await import('node:http');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const beforeAgents = new Set(((await j('GET', `/api/workspaces/${wsId}/hosted-agents`)).agents ?? []).map((a) => a.id));
+    const beforeRemotes = new Set(((await j('GET', '/api/a2a/remotes')).remotes ?? []).map((r) => r.id));
+    // A remote agent: its card, and JSON-RPC that needs the right bearer token.
+    const remote = http.createServer((req, res) => {
+      const port = remote.address().port;
+      if (req.method === 'GET' && req.url === '/.well-known/agent-card.json') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ protocolVersion: '0.3.0', name: 'E2E forecaster', description: 'Forecasts the weather for a city.', url: `http://127.0.0.1:${port}/rpc`, preferredTransport: 'JSONRPC', version: '1', capabilities: { streaming: false }, defaultInputModes: ['text/plain'], defaultOutputModes: ['text/plain'], skills: [{ id: 'forecast', name: 'Forecast', description: 'Weather for a city', tags: ['weather'], examples: ['Weather in Lisbon?'] }] }));
+        return;
+      }
+      let b = '';
+      req.on('data', (d) => (b += d));
+      req.on('end', () => {
+        if (req.headers.authorization !== 'Bearer e2e-secret') { res.writeHead(401); res.end('{}'); return; }
+        const body = JSON.parse(b);
+        const text = body.params.message.parts.map((p) => p.text ?? '').join(' ');
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { kind: 'task', id: 't1', contextId: body.params.message.contextId ?? 'c1', status: { state: 'completed', timestamp: new Date().toISOString() }, artifacts: [{ artifactId: 'a1', parts: [{ kind: 'text', text: `**Sunny**, 24 °C — you asked: ${text}` }] }] } }));
+      });
+    });
+    await new Promise((r) => remote.listen(0, '127.0.0.1', r));
+    cleanup = async () => {
+      remote.close();
+      for (const a of (await j('GET', `/api/workspaces/${wsId}/hosted-agents`)).agents ?? []) if (!beforeAgents.has(a.id)) await j('DELETE', `/api/hosted-agents/${a.id}`);
+      for (const r of (await j('GET', '/api/a2a/remotes')).remotes ?? []) if (!beforeRemotes.has(r.id)) await j('DELETE', `/api/a2a/remotes/${r.id}`);
+    };
+    // DuckView's own card is public.
+    report.details.card = (await (await fetch(`${BASE}/.well-known/agent-card.json`)).json()).name;
+    // A hosted agent, published.
+    await j('POST', `/api/workspaces/${wsId}/hosted-agents`, { template: 'data-analyst', name: 'E2E analyst', schedule: { kind: 'manual' } });
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app');
+    await evaluate(`location.hash = '#/mcp/hosted'; true`);
+    await waitFor(`!!document.querySelector('[data-agent="E2E analyst"]')`, 20000, 'agent listed');
+    await evaluate(`document.querySelector('[data-agent="E2E analyst"]').click(); true`);
+    await waitFor(`document.querySelector('[data-testid="hosted-detail"] h3')?.innerText.startsWith('E2E analyst')`, 10000, 'agent selected');
+    await evaluate(`document.querySelector('[data-testid="hosted-publish"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[data-testid="a2a-published"] li')].some(li => li.innerText.includes('E2E analyst'))`, 10000, 'published');
+    report.details.published = await evaluate(`[...document.querySelectorAll('[data-testid="a2a-published"] li')].find(li => li.innerText.includes('E2E analyst')).innerText.replace(/\\s+/g, ' ')`);
+    const agentId = ((await j('GET', `/api/workspaces/${wsId}/hosted-agents`)).agents ?? []).find((a) => a.name === 'E2E analyst').id;
+    const own = await fetch(`${BASE}/a2a/agents/${agentId}/.well-known/agent-card.json`);
+    report.details.agentCard = own.status === 200 ? (await own.json()).name : own.status;
+    // A remote agent, added by its URL with an auth header, then asked.
+    await evaluate(`document.querySelector('[data-testid="a2a-add"]').click(); true`);
+    await setField('[data-testid="a2a-url"]', `http://127.0.0.1:${remote.address().port}`);
+    await setField('[data-testid="a2a-header"]', 'Bearer e2e-secret');
+    await evaluate(`document.querySelector('[data-testid="a2a-save"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-remote="E2E forecaster"]')`, 15000, 'remote added');
+    report.details.skills = await evaluate(`document.querySelector('[data-remote="E2E forecaster"]').innerText.includes('Forecast')`);
+    await setField('[data-remote="E2E forecaster"] [data-testid="a2a-ask-input"]', 'Weather in Lisbon?');
+    await evaluate(`document.querySelector('[data-remote="E2E forecaster"] [data-testid="a2a-ask"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-remote="E2E forecaster"] [data-testid="a2a-answer"]')`, 20000, 'answer');
+    report.details.answer = await evaluate(`document.querySelector('[data-remote="E2E forecaster"] [data-testid="a2a-answer"]').innerText`);
+    await evaluate(`document.querySelector('[data-testid="a2a"]').scrollIntoView(); true`);
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_a2a.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'hosted-agents') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -1429,6 +1494,13 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'a2a') {
+    if (d.card !== 'DuckView') problems.push(`card: ${d.card}`);
+    if (!/E2E analyst .*\/a2a\/agents\//.test(d.published ?? '')) problems.push(`published: ${d.published}`);
+    if (d.agentCard !== 'E2E analyst') problems.push(`agent card: ${d.agentCard}`);
+    if (!d.skills) problems.push('remote skills not shown');
+    if (!/Sunny, 24 °C — you asked: Weather in Lisbon\?/.test(d.answer ?? '')) problems.push(`answer: ${d.answer}`);
   }
   if (scenario === 'hosted-agents') {
     if ((d.templates ?? 0) < 7) problems.push(`marketplace: ${d.templates} templates`);

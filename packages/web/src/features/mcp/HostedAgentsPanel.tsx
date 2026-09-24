@@ -7,6 +7,7 @@ import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { byokBody } from '../../store/copilot';
 import { Badge, Button, Input, Label, Select, cn } from '../../components/ui';
 import { CHANNEL_META } from '../alerts/ChannelsPanel';
+import { A2APanel } from './A2APanel';
 
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const SCHEDULES: { id: string; label: string; make: () => SyncSchedule }[] = [
@@ -21,8 +22,8 @@ const every = (s: SyncSchedule) => (s.kind === 'interval' ? `every ${s.minutes /
 
 const MD = 'text-[13px] leading-relaxed text-zinc-300 [&_h1]:mb-1 [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:text-zinc-100 [&_h2]:mb-1 [&_h2]:mt-3 [&_h2]:text-[13px] [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_h3]:mt-2 [&_h3]:font-semibold [&_li]:ml-4 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:my-1.5 [&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[11px] [&_table]:my-2 [&_td]:border [&_td]:border-zinc-800 [&_td]:px-2 [&_td]:py-0.5 [&_th]:border [&_th]:border-zinc-800 [&_th]:px-2 [&_th]:text-left';
 
-type Draft = { id: string | null; name: string; description: string; instructions: string; task: string; tools: string[]; max_steps: number; schedule: string; channel_ids: string[] };
-const draftOf = (a: HostedAgent): Draft => ({ id: a.id, name: a.name, description: a.description ?? '', instructions: a.instructions, task: a.task, tools: a.tools, max_steps: a.max_steps, schedule: scheduleId(a.schedule), channel_ids: a.channel_ids });
+type Draft = { id: string | null; name: string; description: string; instructions: string; task: string; tools: string[]; max_steps: number; schedule: string; channel_ids: string[]; published: boolean };
+const draftOf = (a: HostedAgent): Draft => ({ id: a.id, name: a.name, description: a.description ?? '', instructions: a.instructions, task: a.task, tools: a.tools, max_steps: a.max_steps, schedule: scheduleId(a.schedule), channel_ids: a.channel_ids, published: a.published });
 
 /** AI → DuckView agents: the marketplace, the workspace's hosted agents, and what each run did. */
 export function HostedAgentsPanel() {
@@ -103,7 +104,7 @@ export function HostedAgentsPanel() {
     });
   const save = (d: Draft) =>
     act('save', async () => {
-      const body = { name: d.name, description: d.description || null, instructions: d.instructions, task: d.task, tools: d.tools, max_steps: d.max_steps, schedule: SCHEDULES.find((s) => s.id === d.schedule)!.make(), channel_ids: d.channel_ids };
+      const body = { name: d.name, description: d.description || null, instructions: d.instructions, task: d.task, tools: d.tools, max_steps: d.max_steps, schedule: SCHEDULES.find((s) => s.id === d.schedule)!.make(), channel_ids: d.channel_ids, published: d.published };
       const r = d.id ? await api.patch<{ agent: HostedAgent }>(`/api/hosted-agents/${d.id}`, body) : await api.post<{ agent: HostedAgent }>(`/api/workspaces/${workspaceId}/hosted-agents`, body);
       setDraft(null);
       await load();
@@ -120,7 +121,7 @@ export function HostedAgentsPanel() {
         <div className="flex items-center gap-2">
           <h2 className="text-[13px] font-semibold text-zinc-100">Your agents</h2>
           <span className="text-zinc-500">DuckView runs them with read-only access to this workspace, on a schedule or when you ask</span>
-          {canEdit && !draft && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setDraft({ id: null, name: '', description: '', instructions: '', task: '', tools: ['list_accessible_data', 'inspect_schema', 'execute_query'], max_steps: 8, schedule: 'manual', channel_ids: [] })}><Plus className="h-3.5 w-3.5" /> Write your own</Button>}
+          {canEdit && !draft && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setDraft({ id: null, name: '', description: '', instructions: '', task: '', tools: ['list_accessible_data', 'inspect_schema', 'execute_query'], max_steps: 8, schedule: 'manual', channel_ids: [], published: false })}><Plus className="h-3.5 w-3.5" /> Write your own</Button>}
         </div>
 
         {draft && <AgentEditor draft={draft} setDraft={setDraft} tools={tools} channels={channels} busy={busy === 'save'} onSave={() => void save(draft)} />}
@@ -148,10 +149,16 @@ export function HostedAgentsPanel() {
               <div className="min-w-0 space-y-3 rounded-md border border-zinc-800 p-3" data-testid="hosted-detail">
                 <div className="flex flex-wrap items-start gap-2">
                   <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-semibold text-zinc-100">{agent.name}</h3>
+                    <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">{agent.name}{agent.published && <Badge tone="violet">A2A</Badge>}</h3>
                     {agent.description && <p className="text-zinc-400">{agent.description}</p>}
                     <p className="mt-1 flex flex-wrap gap-1">{agent.tools.map((t) => <Badge key={t}>{t}</Badge>)}</p>
                   </div>
+                  {canEdit && (
+                    <label className="flex cursor-pointer items-center gap-1.5 text-zinc-400" title="Other agents may call it over A2A with a DuckView API token; each call runs as the token's owner, read-only">
+                      <input type="checkbox" className="accent-accent-500" checked={agent.published} onChange={(e) => void act('publish', async () => { await api.patch(`/api/hosted-agents/${agent.id}`, { published: e.target.checked }); await load(); })} data-testid="hosted-publish" />
+                      Other agents can call it
+                    </label>
+                  )}
                   {canEdit && <Button size="sm" variant="ghost" onClick={() => setDraft(draftOf(agent))}><Pencil className="h-3.5 w-3.5" /> Edit</Button>}
                   {canEdit && <Button size="sm" variant="ghost" onClick={() => void act('delete', async () => { await api.del(`/api/hosted-agents/${agent.id}`); setSelected(null); await load(); })} title="Delete the agent and its runs"><Trash2 className="h-3.5 w-3.5" /></Button>}
                 </div>
@@ -161,6 +168,7 @@ export function HostedAgentsPanel() {
                     <Button variant="primary" loading={busy === `run:${agent.id}`} disabled={running} onClick={() => void start(agent)} data-testid="hosted-run"><Play className="h-3.5 w-3.5" /> Run</Button>
                   </div>
                 )}
+                {runs.length === 0 && <p className="text-zinc-500">No runs yet. Give it a task above, or leave the box empty to run its default task.</p>}
                 {runs.length > 0 && (
                   <div className="grid gap-3 xl:grid-cols-[200px_minmax(0,1fr)]">
                     <ul className="space-y-0.5">
@@ -200,6 +208,8 @@ export function HostedAgentsPanel() {
           </div>
         )}
       </section>
+
+      <A2APanel refreshKey={agents.filter((a) => a.published).length} />
 
       <section className="space-y-2">
         <div className="flex items-center gap-2">
