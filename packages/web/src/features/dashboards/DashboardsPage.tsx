@@ -16,6 +16,7 @@ import { PageHeader } from '../../components/layout';
 import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, cn, confirmAction, toast } from '../../components/ui';
 import { CommentsControl } from '../comments/CommentsPanel';
 import { HistoryButton } from '../history/HistoryDrawer';
+import { DataTable } from '../../components/data';
 
 const Grid = WidthProvider(GridLayout);
 
@@ -87,29 +88,19 @@ function DashboardList() {
       {list.length === 0 ? (
         <div className="border-y border-zinc-800 py-14"><Empty icon={<LayoutDashboard />} title="No dashboards yet" hint="A grid dashboard holds KPIs, charts and tables from saved queries; a Mosaic dashboard is interactive and cross-filtered." action={access.canEdit ? <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New dashboard</Button> : undefined} /></div>
       ) : (
-        <table className="w-full table-fixed text-body" data-testid="dashboard-list">
-          <thead>
-            <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
-              <th className="py-2 pr-4 font-normal">Name</th>
-              <th className="w-28 py-2 pr-4 font-normal @max-2xl:hidden">Type</th>
-              <th className="w-40 py-2 pr-4 font-normal @max-3xl:hidden">Contents</th>
-              <th className="w-32 py-2 font-normal">Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((d) => (
-              <tr key={d.id} className="cursor-pointer border-b border-zinc-800/70 hover:bg-zinc-900" onClick={() => (location.hash = `#/dashboards/${d.id}`)}>
-                <td className="py-2.5 pr-4">
-                  <a href={`#/dashboards/${d.id}`} className="block truncate font-medium text-zinc-100" onClick={(e) => e.stopPropagation()}>{d.name}</a>
-                  {d.description && <div className="truncate text-xs text-zinc-500">{d.description}</div>}
-                </td>
-                <td className="py-2.5 pr-4 text-xs text-zinc-400 @max-2xl:hidden"><span className="inline-flex items-center gap-1.5">{d.kind === 'mosaic' ? <Sparkles className="h-3.5 w-3.5 text-zinc-500" /> : <LayoutDashboard className="h-3.5 w-3.5 text-zinc-500" />}{d.kind === 'mosaic' ? 'Mosaic' : 'Grid'}</span></td>
-                <td className="py-2.5 pr-4 text-xs text-zinc-500 @max-3xl:hidden">{d.kind === 'mosaic' ? mosaicSummary(d) : `${d.layout.length} widget${d.layout.length === 1 ? '' : 's'}`}</td>
-                <td className="py-2.5 text-xs text-zinc-500" title={new Date(d.updated_at).toLocaleString()}>{timeAgo(d.updated_at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          label="Dashboards"
+          rows={shown}
+          rowKey={(d) => d.id}
+          onRowClick={(d) => (location.hash = `#/dashboards/${d.id}`)}
+          columns={[
+            { key: 'name', header: 'Name', sortValue: (d) => d.name, cell: (d) => <><a href={`#/dashboards/${d.id}`} className="block truncate font-medium text-zinc-100" onClick={(e) => e.stopPropagation()}>{d.name}</a>
+                  {d.description && <div className="truncate text-xs text-zinc-500">{d.description}</div>}</> },
+            { key: 'type', header: 'Type', width: 'w-28', sortValue: (d) => d.kind, cell: (d) => <div className="text-xs text-zinc-400"><span className="inline-flex items-center gap-1.5">{d.kind === 'mosaic' ? <Sparkles className="h-3.5 w-3.5 text-zinc-500" /> : <LayoutDashboard className="h-3.5 w-3.5 text-zinc-500" />}{d.kind === 'mosaic' ? 'Mosaic' : 'Grid'}</span></div> },
+            { key: 'contents', header: 'Contents', width: 'w-40', sortValue: (d) => d.kind, cell: (d) => <span className="text-xs text-zinc-500">{d.kind === 'mosaic' ? mosaicSummary(d) : `${d.layout.length} widget${d.layout.length === 1 ? '' : 's'}`}</span> },
+            { key: 'updated', header: 'Updated', width: 'w-32', cell: (d) => <span className="text-xs text-zinc-500">{timeAgo(d.updated_at)}</span> },
+          ]}
+        />
       )}
       <Modal open={creating} onClose={() => setCreating(false)} title="New dashboard">
         <div className="space-y-3">

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Copy, KeyRound, RefreshCw, Trash2, Users } from 'lucide-react';
 import { api, timeAgo, type Group, type ScimStatus } from '../../api/client';
 import { Badge, Button, confirmAction } from '../../components/ui';
+import { DataTable } from '../../components/data';
 
 /** Governance → Provisioning (administrators): the SCIM 2.0 endpoint and token, and the teams linked to IdP groups. */
 export function ProvisioningPanel() {
@@ -95,21 +96,18 @@ export function ProvisioningPanel() {
         {groups.length === 0 ? (
           <div className="border-y border-zinc-800 p-4 text-center text-zinc-500">No linked teams yet.</div>
         ) : (
-          <table className="w-full max-w-3xl">
-            <thead className="text-left text-2xs text-zinc-500">
-              <tr><th className="pb-1.5">Team</th><th className="pb-1.5">IdP group</th><th className="pb-1.5">Members</th><th className="pb-1.5">Updated</th></tr>
-            </thead>
-            <tbody>
-              {groups.map((g) => (
-                <tr key={g.id} className="border-t border-zinc-800" data-team={g.name}>
-                  <td className="py-1.5 text-zinc-200">{g.name}</td>
-                  <td className="py-1.5 font-mono text-zinc-400">{g.external_id}</td>
-                  <td className="py-1.5 text-zinc-400">{g.member_count}</td>
-                  <td className="py-1.5 text-zinc-500">{timeAgo(g.updated_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            label="Provisioned users"
+            rows={groups}
+            rowKey={(g) => g.id}
+            rowProps={(g) => ({ 'data-team': g.name })}
+            columns={[
+              { key: 'team', header: 'Team', sortValue: (g) => g.name, cell: (g) => <span className="text-zinc-200">{g.name}</span> },
+              { key: 'idp_group', header: 'IdP group', sortValue: (g) => g.external_id, cell: (g) => <span className="font-mono text-zinc-400">{g.external_id}</span> },
+              { key: 'members', header: 'Members', sortValue: (g) => g.member_count, cell: (g) => <span className="text-zinc-400">{g.member_count}</span> },
+              { key: 'updated', header: 'Updated', cell: (g) => <span className="text-zinc-500">{timeAgo(g.updated_at)}</span> },
+            ]}
+          />
         )}
       </section>
     </div>

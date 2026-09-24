@@ -6,6 +6,7 @@ import { Button, Empty, cn } from '../../components/ui';
 import { fetchCached } from '../../lib/useCached';
 import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
+import { DataTable } from '../../components/data';
 
 /** Inline schema preview for the results pane (bottom) — DESCRIBE … LIMIT 0, no data scan. */
 export function SchemaPanel({ workspaceId, target, remoteConnectionId, onQuery, onProfile, onAskCopilot }: { workspaceId: string; target: string | null; /** Lakehouse connection id when the target is a remote (non-attached) table — metadata comes from the catalog API. */ remoteConnectionId?: string | null; onQuery: (sql: string, title: string) => void; onProfile?: (target: string) => void; onAskCopilot?: (target: string) => void }) {
@@ -71,26 +72,17 @@ export function SchemaPanel({ workspaceId, target, remoteConnectionId, onQuery, 
         <div className="min-h-0 flex-1 overflow-auto">
           {error && <div className="m-4 rounded-md border border-red-900 bg-red-950/40 p-3 font-mono text-xs text-red-200">{error}</div>}
           {result && (
-            <table className="w-full font-mono text-xs">
-              <thead className="sticky top-0 bg-zinc-950 text-left text-2xs text-zinc-500">
-                <tr className="border-b border-zinc-800">
-                  <th className="px-4 py-2 font-normal">#</th>
-                  <th className="px-2 py-2 font-normal">column</th>
-                  <th className="px-2 py-2 font-normal">type</th>
-                  <th className="px-4 py-2 text-right font-normal">nullable</th>
-                </tr>
-              </thead>
-              <tbody>
-                {columns.map((c, i) => (
-                  <tr key={c.name} className="border-b border-zinc-800/60 hover:bg-zinc-800/40">
-                    <td className="px-4 py-1.5 text-zinc-600">{i + 1}</td>
-                    <td className="px-2 py-1.5 text-zinc-100">{c.name}</td>
-                    <td className="px-2 py-1.5"><TypePill type={c.type} /></td>
-                    <td className="px-4 py-1.5 text-right text-zinc-400">{c.nullable ? 'yes' : 'no'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              label="Columns"
+              rows={columns}
+              rowKey={(c) => c.name}
+              columns={[
+                { key: 'c0', header: '#', cell: (c) => <span className="text-zinc-600">{columns.indexOf(c) + 1}</span> },
+                { key: 'column', header: 'column', sortValue: (c) => c.name, cell: (c) => <span className="text-zinc-100">{c.name}</span> },
+                { key: 'type', header: 'type', cell: (c) => <><TypePill type={c.type} /></> },
+                { key: 'nullable', header: 'nullable', align: 'right', cell: (c) => <span className="text-zinc-400">{c.nullable ? 'yes' : 'no'}</span> },
+              ]}
+            />
           )}
         </div>
       </div>

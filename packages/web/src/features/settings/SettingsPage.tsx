@@ -26,6 +26,7 @@ import { PgWirePanel } from './PgWirePanel';
 import { OrchestrationPanel } from './OrchestrationPanel';
 import { ClusterPanel } from './ClusterPanel';
 import { UsagePanel } from './UsagePanel';
+import { DataTable } from '../../components/data';
 
 type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients' | 'orchestration' | 'cluster' | 'usage';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; group: string; admin?: boolean }[] = [
@@ -235,38 +236,21 @@ export function SettingsPage() {
               )}
               {live && live.duckdb.engines.length > 0 && !hidden['settings.engines'] && (
                 <Panel hideId="settings.engines" title="Warm engines" meta={`${live.duckdb.engines.length} cached`} bodyClassName="p-0">
-                  <table className="w-full font-mono text-xs">
-                    <thead className="text-left text-2xs text-zinc-500">
-                      <tr className="border-b border-zinc-800">
-                        <th className="px-4 py-2 font-normal">workspace</th>
-                        <th className="px-2 py-2 font-normal">database</th>
-                        <th className="px-2 py-2 font-normal">allocated</th>
-                        <th className="px-2 py-2 font-normal">ceiling</th>
-                        <th className="px-2 py-2 font-normal">spill</th>
-                        <th className="px-2 py-2 font-normal">threads</th>
-                        <th className="px-2 py-2 font-normal">active</th>
-                        {isAdmin && <th />}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {live.duckdb.engines.map((e) => (
-                        <tr key={e.workspaceId} className="border-b border-zinc-800/60 last:border-0">
-                          <td className="px-4 py-2 text-zinc-200">{ws.workspaces.find((w) => w.id === e.workspaceId)?.name ?? e.workspaceId.slice(0, 8)}</td>
-                          <td className="px-2 py-2 text-zinc-400">{e.dbPath}</td>
-                          <td className="px-2 py-2 text-zinc-200">{formatBytes(e.memory_usage_bytes)}</td>
-                          <td className="px-2 py-2 text-zinc-400">{formatBytes(e.memory_limit_bytes)}</td>
-                          <td className="px-2 py-2 text-zinc-400">{formatBytes(e.temporary_storage_bytes)}</td>
-                          <td className="px-2 py-2 text-zinc-400">{e.threads}</td>
-                          <td className="px-2 py-2"><Activity className={`h-3.5 w-3.5 ${e.active_queries ? 'text-emerald-400' : 'text-zinc-600'}`} /></td>
-                          {isAdmin && (
-                            <td className="px-2 py-2 text-right">
-                              <Button size="sm" variant="ghost" onClick={() => api.post(`/api/admin/engines/${e.workspaceId}/evict`)}>Evict</Button>
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <DataTable
+                    label="Warm engines"
+                    rows={live.duckdb.engines}
+                    rowKey={(e) => e.workspaceId}
+                    columns={[
+                      { key: 'workspace', header: 'workspace', cell: (e) => <span className="text-zinc-200">{ws.workspaces.find((w) => w.id === e.workspaceId)?.name ?? e.workspaceId.slice(0, 8)}</span> },
+                      { key: 'database', header: 'database', sortValue: (e) => e.dbPath, cell: (e) => <span className="text-zinc-400">{e.dbPath}</span> },
+                      { key: 'allocated', header: 'allocated', cell: (e) => <span className="text-zinc-200">{formatBytes(e.memory_usage_bytes)}</span> },
+                      { key: 'ceiling', header: 'ceiling', cell: (e) => <span className="text-zinc-400">{formatBytes(e.memory_limit_bytes)}</span> },
+                      { key: 'spill', header: 'spill', cell: (e) => <span className="text-zinc-400">{formatBytes(e.temporary_storage_bytes)}</span> },
+                      { key: 'threads', header: 'threads', sortValue: (e) => e.threads, cell: (e) => <span className="text-zinc-400">{e.threads}</span> },
+                      { key: 'active', header: 'active', cell: (e) => <><Activity className={`h-3.5 w-3.5 ${e.active_queries ? 'text-emerald-400' : 'text-zinc-600'}`} /></> },
+                      { key: 'c7', header: '', align: 'right', cell: (e) => <><Button size="sm" variant="ghost" onClick={() => api.post(`/api/admin/engines/${e.workspaceId}/evict`)}>Evict</Button></> },
+                    ]}
+                  />
                 </Panel>
               )}
             </div>
@@ -424,23 +408,19 @@ export function SettingsPage() {
 
           {cat === 'users' && isAdmin && (
             <Card title="Users" actions={<Button size="sm" onClick={() => setNewUser({ open: true, email: '', password: '', role: 'USER' })}><Users className="h-3.5 w-3.5" /> Add</Button>}>
-              <table className="w-full text-xs">
-                <thead className="text-left text-2xs text-zinc-500">
-                  <tr><th className="pb-2">User</th><th className="pb-2">Provider</th><th className="pb-2">Created</th><th className="pb-2">Role</th><th className="pb-2">Status</th><th /></tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => (
-                    <tr key={u.id} className={cn('border-t border-zinc-800', u.disabled && 'opacity-60')} data-user={u.email}>
-                      <td className="py-2"><div className="text-zinc-200">{u.display_name ?? u.email}</div><div className="text-2xs text-zinc-500">{u.email}</div></td>
-                      <td className="py-2 text-zinc-400">{u.auth_provider}</td>
-                      <td className="py-2 text-zinc-400">{timeAgo(u.created_at)}</td>
-                      <td className="py-2">
-                        <Select value={u.role} disabled={u.id === auth.user?.id} className="h-7 text-xs" onChange={async (e) => { await api.patch(`/api/admin/users/${u.id}`, { role: e.target.value }); await refresh(); }}>
+              <DataTable
+                label="Users"
+                rows={users}
+                rowKey={(u) => u.id}
+                rowProps={(u) => ({ 'data-user': u.email })}
+                columns={[
+                  { key: 'user', header: 'User', sortValue: (u) => u.email, cell: (u) => <><div className="text-zinc-200">{u.display_name ?? u.email}</div><div className="text-2xs text-zinc-500">{u.email}</div></> },
+                  { key: 'provider', header: 'Provider', sortValue: (u) => u.auth_provider, cell: (u) => <span className="text-zinc-400">{u.auth_provider}</span> },
+                  { key: 'created', header: 'Created', cell: (u) => <span className="text-zinc-400">{timeAgo(u.created_at)}</span> },
+                  { key: 'role', header: 'Role', cell: (u) => <><Select value={u.role} disabled={u.id === auth.user?.id} className="h-7 text-xs" onChange={async (e) => { await api.patch(`/api/admin/users/${u.id}`, { role: e.target.value }); await refresh(); }}>
                           {['ADMIN', 'USER', 'READ_ONLY'].map((r) => <option key={r} value={r}>{r}</option>)}
-                        </Select>
-                      </td>
-                      <td className="py-2">
-                        {u.id === auth.user?.id ? (
+                        </Select></> },
+                  { key: 'status', header: 'Status', cell: (u) => <>{u.id === auth.user?.id ? (
                           <Badge tone="ok">Active</Badge>
                         ) : (
                           <button
@@ -457,19 +437,14 @@ export function SettingsPage() {
                           >
                             {u.disabled ? 'Deactivated · Reactivate' : 'Deactivate'}
                           </button>
-                        )}
-                      </td>
-                      <td className="py-2 text-right">
-                        {u.id !== auth.user?.id && (
+                        )}</> },
+                  { key: 'c5', header: '', align: 'right', sortValue: (u) => u.email, cell: (u) => <>{u.id !== auth.user?.id && (
                           <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete ${u.email}? Their workspaces and tokens are removed.`))) { await api.del(`/api/admin/users/${u.id}`); await refresh(); } }}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        )}</> },
+                ]}
+              />
             </Card>
           )}
         </div>

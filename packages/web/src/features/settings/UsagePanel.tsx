@@ -4,6 +4,7 @@ import { api, authedBlobUrl, formatBytes } from '../../api/client';
 import { Button, Input, Label, Menu, MenuItem, Modal, Select, Tabs, cn, InlineError } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
+import { DataTable } from '../../components/data';
 
 interface Cost { compute: number; ai: number; storage: number; total: number }
 interface UsageReport {
@@ -296,22 +297,25 @@ function BudgetForm({ isAdmin, onClose, onSaved, currency }: { isAdmin: boolean;
 
 function Table({ title, head, rows, wide, testid }: { title: string; head: string[]; rows: React.ReactNode[][]; wide?: boolean; testid?: string }) {
   return (
-    <section className="min-w-0" data-testid={testid}>
+    <section className="min-w-0">
       <h3 className="mb-1.5 text-body font-medium text-zinc-100">{title}</h3>
-      {rows.length === 0 ? <p className="text-zinc-500">Nothing in this period.</p> : (
-        <table className={cn('w-full text-left', wide && 'table-fixed')}>
-          <thead className="text-zinc-500">
-            <tr>{head.map((h, i) => <th key={h} className={cn('py-1 font-normal', i > 0 && 'pl-3 text-right', wide && i === 0 && 'w-auto', wide && i > 0 && 'w-24')}>{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, 10).map((r, i) => (
-              <tr key={i} className="border-t border-zinc-800/70">
-                {r.map((c, j) => <td key={j} className={cn('max-w-0 truncate py-1.5', j === 0 ? 'text-zinc-200' : 'pl-3 text-right tabular-nums text-zinc-400')}>{c}</td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <DataTable
+        label={title}
+        testid={testid}
+        pageSize={10}
+        rows={rows.map((cells, i) => ({ i, cells }))}
+        rowKey={(r) => String(r.i)}
+        empty={<p className="py-2 text-zinc-500">Nothing in this period.</p>}
+        columns={head.map((h, j) => ({
+          key: String(j),
+          header: h,
+          align: j > 0 ? 'right' : 'left',
+          numeric: j > 0,
+          truncate: j === 0,
+          width: wide && j > 0 ? 'w-24' : undefined,
+          cell: (r: { cells: React.ReactNode[] }) => <span className={j === 0 ? 'text-zinc-200' : 'text-zinc-400'}>{r.cells[j]}</span>,
+        }))}
+      />
     </section>
   );
 }

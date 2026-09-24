@@ -1,3 +1,4 @@
+import { ResultPreview } from '../../components/data';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { EyeOff, Filter, Pencil, Plus, ShieldCheck, Trash2, UserSearch } from 'lucide-react';
 import { api, timeAgo, type AccessPolicy, type CatalogObject, type ColumnMask, type MaskKind, type MyRestrictions, type WorkspaceMember } from '../../api/client';
@@ -177,7 +178,7 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
               <>
                 <p className="text-zinc-500">{preview.result.restricted ? 'Policies apply — the query ran as:' : 'No policy applies to this member.'}</p>
                 {preview.result.restricted && <pre className="max-h-24 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 font-mono text-2xs text-zinc-400">{preview.result.sql}</pre>}
-                <div className="max-h-72 overflow-auto rounded border border-zinc-800"><table className="w-full text-left font-mono text-2xs"><thead className="sticky top-0 bg-zinc-900 text-zinc-400"><tr>{preview.result.columns.map((c) => <th key={c.name} className="px-2 py-1">{c.name}</th>)}</tr></thead><tbody>{preview.result.rows.map((r, i) => <tr key={i} className="border-t border-zinc-800/60 text-zinc-200">{r.map((v, j) => <td key={j} className="px-2 py-0.5">{v === null ? <span className="text-zinc-600">NULL</span> : String(v)}</td>)}</tr>)}</tbody></table></div>
+                <ResultPreview maxHeight="max-h-72" label="What this member sees" columns={preview.result.columns} rows={preview.result.rows} />
               </>
             )}
           </div>

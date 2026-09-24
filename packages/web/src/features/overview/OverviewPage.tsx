@@ -19,6 +19,7 @@ import { Button, Empty, Spinner, Stat, Tabs, cn } from '../../components/ui';
 import { quoteIdent } from '../workspace/SchemaTree';
 import { QualityChip } from '../transform/QualityChip';
 import { CommentsControl } from '../comments/CommentsPanel';
+import { DataTable } from '../../components/data';
 
 
 function Distribution({ col }: { col: OverviewColumn }) {
@@ -303,43 +304,26 @@ export function OverviewPage() {
               )}
 
               {dtab === 'schema' && (
-                <table className="w-full text-xs" data-testid="dataset-schema">
-                  <thead className="text-left text-xs text-zinc-500">
-                    <tr className="border-b border-zinc-800">
-                      <th className="w-10 py-2 pr-2 font-normal">#</th>
-                      <th className="py-2 pr-2 font-normal">Column</th>
-                      <th className="py-2 pr-2 font-normal">Type</th>
-                      <th className="py-2 pr-2 text-right font-normal">Nulls</th>
-                      <th className="py-2 pr-2 text-right font-normal">Distinct ≈</th>
-                      <th className="py-2 pr-2 font-normal">Min</th>
-                      <th className="py-2 pr-2 font-normal">Max</th>
-                      <th className="py-2 text-right font-normal">Avg</th>
-                    </tr>
-                  </thead>
-                  <tbody className="font-mono">
-                    {overview.columns.map((c, i) => (
-                      <tr key={c.name} className="border-b border-zinc-800/60 hover:bg-zinc-900">
-                        <td className="py-1.5 pr-2 text-zinc-600">{i + 1}</td>
-                        <td className="py-1.5 pr-2">
-                          <button className="text-zinc-100 hover:text-accent-300" onClick={() => openInQuery(`SELECT ${quoteIdent(c.name)}, count(*) AS n FROM ${relation} GROUP BY 1 ORDER BY 2 DESC LIMIT 20;`)} title="Value counts in SQL">
+                <DataTable
+                  label="Columns"
+                  rows={overview.columns}
+                  rowKey={(c) => c.name}
+                  columns={[
+                    { key: 'c0', header: '#', width: 'w-10', cell: (c) => <span className="text-zinc-600">{overview.columns.indexOf(c) + 1}</span> },
+                    { key: 'column', header: 'Column', sortValue: (c) => c.name, cell: (c) => <><button className="text-zinc-100 hover:text-accent-300" onClick={() => openInQuery(`SELECT ${quoteIdent(c.name)}, count(*) AS n FROM ${relation} GROUP BY 1 ORDER BY 2 DESC LIMIT 20;`)} title="Value counts in SQL">
                             {c.name}
-                          </button>
-                        </td>
-                        <td className="py-1.5 pr-2"><TypePill type={c.type} /></td>
-                        <td className="py-1.5 pr-2">
-                          <div className="flex items-center justify-end gap-2">
+                          </button></> },
+                    { key: 'type', header: 'Type', cell: (c) => <><TypePill type={c.type} /></> },
+                    { key: 'nulls', header: 'Nulls', align: 'right', cell: (c) => <><div className="flex items-center justify-end gap-2">
                             <div className="h-1.5 w-12 overflow-hidden rounded-full bg-zinc-800"><div className="h-full rounded-full" style={{ width: `${Math.min(100, c.null_percentage)}%`, background: nullTone(c.null_percentage) }} /></div>
                             <span className="w-10 text-right tabular-nums text-zinc-400">{c.null_percentage.toFixed(c.null_percentage > 0 && c.null_percentage < 1 ? 1 : 0)}%</span>
-                          </div>
-                        </td>
-                        <td className="py-1.5 pr-2 text-right tabular-nums text-zinc-400">{c.approx_unique?.toLocaleString() ?? '—'}</td>
-                        <td className="max-w-[180px] truncate py-1.5 pr-2 text-zinc-400" title={c.min ?? ''}>{c.min ?? '—'}</td>
-                        <td className="max-w-[180px] truncate py-1.5 pr-2 text-zinc-400" title={c.max ?? ''}>{c.max ?? '—'}</td>
-                        <td className="py-1.5 text-right tabular-nums text-zinc-400">{c.avg != null ? Number(c.avg).toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          </div></> },
+                    { key: 'distinct', header: 'Distinct ≈', align: 'right', cell: (c) => <span className="tabular-nums text-zinc-400">{c.approx_unique?.toLocaleString() ?? '—'}</span> },
+                    { key: 'min', header: 'Min', truncate: true, cell: (c) => <span className="max-w-[180px] truncate text-zinc-400">{c.min ?? '—'}</span> },
+                    { key: 'max', header: 'Max', truncate: true, cell: (c) => <span className="max-w-[180px] truncate text-zinc-400">{c.max ?? '—'}</span> },
+                    { key: 'avg', header: 'Avg', align: 'right', cell: (c) => <span className="tabular-nums text-zinc-400">{c.avg != null ? Number(c.avg).toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}</span> },
+                  ]}
+                />
               )}
 
               {dtab === 'preview' && (

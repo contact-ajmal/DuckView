@@ -1,7 +1,8 @@
+import { DataTable } from '../../components/data';
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, Send, Trash2, Radio, Copy } from 'lucide-react';
 import { api, timeAgo, type AuditEvent, type AuditSink, type AuditSinkType, type CloudConnection } from '../../api/client';
-import { Badge, Button, Input, Label, Modal, Select, cn, confirmAction } from '../../components/ui';
+import { Badge, Button, Input, Label, Modal, Select, cn, confirmAction, Empty } from '../../components/ui';
 
 const TYPES: Record<AuditSinkType, { label: string; hint: string }> = {
   splunk: { label: 'Splunk', hint: 'HTTP Event Collector: the Splunk URL (https://splunk.example.com:8088) and a HEC token.' },
@@ -83,12 +84,23 @@ export function AuditPanel({ isAdmin }: { isAdmin: boolean }) {
       )}
       <section>
         <h3 className="mb-1.5 text-2xs font-semibold text-zinc-500">{isAdmin ? 'Recent events' : 'Your recent activity'}</h3>
-        <div className="max-h-[28rem] overflow-auto rounded-lg border border-zinc-800">
-          <table className="w-full text-left text-2xs">
-            <thead className="sticky top-0 bg-zinc-900 text-zinc-500"><tr><th className="px-2 py-1">When</th><th className="px-2 py-1">Action</th><th className="px-2 py-1">Actor</th><th className="px-2 py-1">Resource</th><th className="px-2 py-1">Status</th></tr></thead>
-            <tbody>{events.map((e) => <tr key={e.id} className="border-t border-zinc-800/60"><td className="whitespace-nowrap px-2 py-1 text-zinc-500">{timeAgo(e.timestamp)}</td><td className="px-2 py-1 font-mono text-zinc-200">{e.action}</td><td className="px-2 py-1 text-zinc-400">{e.actor_type.toLowerCase()}</td><td className="max-w-xs truncate px-2 py-1 font-mono text-zinc-500" title={e.query_text ?? e.resource ?? ''}>{e.resource}</td><td className="px-2 py-1"><Badge tone={e.status === 'ok' ? 'zinc' : 'red'}>{e.status}</Badge></td></tr>)}</tbody>
-          </table>
-        </div>
+        <DataTable
+          label="Audit events"
+          testid="audit-events"
+          rows={events}
+          rowKey={(e) => e.id}
+          pageSize={50}
+          search={(e) => `${e.action} ${e.actor_type} ${e.resource ?? ''} ${e.status}`}
+          searchPlaceholder="Filter events"
+          empty={<Empty title="No events yet" hint="Queries, sign-ins and changes appear here as they happen." />}
+          columns={[
+            { key: 'when', header: 'When', width: 'w-24', sortValue: (e) => e.timestamp, cell: (e) => <span className="whitespace-nowrap text-xs text-zinc-500">{timeAgo(e.timestamp)}</span> },
+            { key: 'action', header: 'Action', sortValue: (e) => e.action, cell: (e) => <span className="font-mono text-xs text-zinc-200">{e.action}</span> },
+            { key: 'actor', header: 'Actor', width: 'w-24', sortValue: (e) => e.actor_type, cell: (e) => <span className="text-xs text-zinc-400">{e.actor_type.toLowerCase()}</span> },
+            { key: 'resource', header: 'Resource', truncate: true, cell: (e) => <span className="font-mono text-xs text-zinc-500" title={e.query_text ?? e.resource ?? ''}>{e.resource}</span> },
+            { key: 'status', header: 'Status', width: 'w-20', sortValue: (e) => e.status, cell: (e) => <Badge tone={e.status === 'ok' ? 'neutral' : 'error'}>{e.status}</Badge> },
+          ]}
+        />
       </section>
 
       <Modal open={!!draft} onClose={() => setDraft(null)} title="Stream the audit log to…" width="max-w-lg">

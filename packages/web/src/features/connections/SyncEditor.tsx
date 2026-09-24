@@ -1,3 +1,4 @@
+import { ResultPreview } from '../../components/data';
 import { useEffect, useMemo, useState } from 'react';
 import { Play, Save, Loader2, Eye, Wand2, ChevronRight, Folder, FileText, Table2 } from 'lucide-react';
 import { api, copilotChat, type DataSync, type DatabaseConnection, type DatabaseEntry, type LakehouseConnection, type SyncSource, type SyncSchedule, type ConnectorConnection, type BrowseEntry } from '../../api/client';
@@ -291,12 +292,7 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
             {preview && <span className="text-2xs text-zinc-500">{preview.columns.length} column{preview.columns.length === 1 ? '' : 's'} · first {preview.rows.length} row{preview.rows.length === 1 ? '' : 's'}</span>}
           </div>
           {preview && (
-            <div className="max-h-56 overflow-auto rounded-md border border-zinc-800">
-              <table className="w-full text-2xs">
-                <thead className="sticky top-0 bg-zinc-900 text-left text-2xs uppercase text-zinc-500"><tr>{preview.columns.map((c) => <th key={c.name} className="px-2 py-1 font-mono">{c.name}<span className="ml-1 text-zinc-600">{c.type}</span></th>)}</tr></thead>
-                <tbody>{preview.rows.map((r, i) => <tr key={i} className="border-t border-zinc-800/60">{r.map((v, j) => <td key={j} className="px-2 py-0.5 font-mono text-zinc-300">{v == null ? <span className="text-zinc-600">null</span> : String(v)}</td>)}</tr>)}</tbody>
-              </table>
-            </div>
+            <ResultPreview maxHeight="max-h-56" showTypes label="Preview of the source" columns={preview.columns} rows={preview.rows} />
           )}
           {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
         </div>

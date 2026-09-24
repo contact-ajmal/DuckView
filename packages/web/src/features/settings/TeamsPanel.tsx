@@ -3,6 +3,7 @@ import { Users, Plus, Trash2, Pencil, UserPlus, Crown, KeyRound } from 'lucide-r
 import { api, timeAgo, type Group, type GroupMember, type DirectoryUser } from '../../api/client';
 import { Button, Badge, Card, Input, Label, Modal, Select, cn, confirmAction } from '../../components/ui';
 import { useAuth } from '../../store/auth';
+import { DataTable } from '../../components/data';
 
 /**
  * Teams: the groups workspaces can be shared with. Administrators create and delete teams; administrators and
@@ -176,24 +177,14 @@ export function TeamsPanel() {
             ) : members.length === 0 ? (
               <div className="border-y border-zinc-800 px-3 py-4 text-center text-xs text-zinc-500">No members yet.</div>
             ) : (
-              <table className="w-full text-xs">
-                <thead className="text-left text-2xs text-zinc-500">
-                  <tr>
-                    <th className="pb-2">Member</th>
-                    <th className="pb-2">Role</th>
-                    <th className="pb-2">Added</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {members.map((m) => (
-                    <tr key={m.user_id} className="border-t border-zinc-800">
-                      <td className="py-2">
-                        <div className="text-zinc-200">{m.display_name ?? m.email}</div>
-                        <div className="text-2xs text-zinc-500">{m.email}</div>
-                      </td>
-                      <td className="py-2">
-                        {canManageMembers ? (
+              <DataTable
+                label="Team members"
+                rows={members}
+                rowKey={(m) => m.user_id}
+                columns={[
+                  { key: 'member', header: 'Member', sortValue: (m) => m.email, cell: (m) => <><div className="text-zinc-200">{m.display_name ?? m.email}</div>
+                        <div className="text-2xs text-zinc-500">{m.email}</div></> },
+                  { key: 'role', header: 'Role', cell: (m) => <>{canManageMembers ? (
                           <Select
                             value={m.role}
                             className="h-7 text-xs"
@@ -212,11 +203,9 @@ export function TeamsPanel() {
                             {m.role === 'MANAGER' && <Crown className="h-3 w-3 text-amber-300" />}
                             {m.role.toLowerCase()}
                           </span>
-                        )}
-                      </td>
-                      <td className="py-2 text-zinc-400">{timeAgo(m.added_at)}</td>
-                      <td className="py-2 text-right">
-                        {(canManageMembers || m.user_id === auth.user?.id) && (
+                        )}</> },
+                  { key: 'added', header: 'Added', cell: (m) => <span className="text-zinc-400">{timeAgo(m.added_at)}</span> },
+                  { key: 'c3', header: '', align: 'right', cell: (m) => <>{(canManageMembers || m.user_id === auth.user?.id) && (
                           <button
                             className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300"
                             title={m.user_id === auth.user?.id ? 'Leave team' : 'Remove from team'}
@@ -231,12 +220,9 @@ export function TeamsPanel() {
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        )}</> },
+                ]}
+              />
             )}
           </div>
         )}

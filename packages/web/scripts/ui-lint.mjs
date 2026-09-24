@@ -17,6 +17,7 @@ const RULES = [
   { re: /\b(bg|text|border|fill|stroke|ring|from|to|via)-(violet|purple|indigo|pink|rose|lime|teal|cyan)-\d/, why: 'colour by name: use accent / status tones / --series-*' },
   { re: /gradient\(|bg-gradient-/, why: 'gradients are not part of the design system' },
   { re: /<select\b/, why: 'raw <select>: use Select' },
+  { re: /<table\b/, why: 'raw <table>: use DataTable (lists) or ResultPreview (query rows)', skip: /components\/data\// },
 ];
 const WARN = [{ re: /['"`]#[0-9a-fA-F]{6}['"`]/, why: 'literal hex colour' }];
 
@@ -39,7 +40,7 @@ for (const f of files) {
   const lines = fs.readFileSync(f, 'utf8').split('\n');
   lines.forEach((line, i) => {
     if (/ui-lint-ignore/.test(line) || /ui-lint-ignore/.test(lines[i - 1] ?? '') || /^\s*(\*|\/\/)/.test(line)) return;
-    for (const r of RULES) if (r.re.test(line)) { errors++; console.log(`error  ${rel}:${i + 1}  ${r.why}\n       ${line.trim().slice(0, 140)}`); }
+    for (const r of RULES) if (r.re.test(line) && !(r.skip && r.skip.test(rel))) { errors++; console.log(`error  ${rel}:${i + 1}  ${r.why}\n       ${line.trim().slice(0, 140)}`); }
     for (const r of WARN) if (r.re.test(line)) { warnings++; if (process.argv.includes('--warnings')) console.log(`warn   ${rel}:${i + 1}  ${r.why}`); }
   });
 }

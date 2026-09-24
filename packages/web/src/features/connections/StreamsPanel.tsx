@@ -1,3 +1,4 @@
+import { ResultPreview } from '../../components/data';
 import { useCallback, useEffect, useState } from 'react';
 import { Database, KeyRound, Pause, Play, Plus, Radio, Trash2, Webhook, Waves, FlaskConical } from 'lucide-react';
 import { api, timeAgo, type CloudConnection, type DatabaseConnection, type Stream, type StreamConfig } from '../../api/client';
@@ -140,6 +141,7 @@ export function StreamsPanel({ workspaceId, clouds, databases }: { workspaceId: 
             {draft.kind !== 'postgres' && <div><Label>Messages are</Label><Select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as Draft['format'] })} data-testid="stream-format"><option value="json">JSON (fields → columns)</option><option value="text">Text (one value column)</option><option value="debezium">Debezium change events</option></Select></div>}
             {draft.kind !== 'postgres' && draft.format === 'json' && <label className="flex items-center gap-1.5 self-end pb-1.5 text-zinc-300" title="Each key's latest message replaces the previous one instead of adding a row"><input type="checkbox" className="accent-accent-500" checked={draft.mirror} onChange={(e) => setDraft({ ...draft, mirror: e.target.checked })} /> Keep the latest per key</label>}
             {mirrors(draft) && draft.kind !== 'postgres' && <div className="w-48"><Label>Key columns{draft.format === 'debezium' ? ' (else from the message key)' : ''}</Label><Input value={draft.key_columns} onChange={(e) => setDraft({ ...draft, key_columns: e.target.value })} placeholder="id" data-testid="stream-keys" /></div>}
+            {/* ui-lint-ignore: "<table>__changes" is text in a tooltip */}
             {mirrors(draft) && <label className="flex items-center gap-1.5 self-end pb-1.5 text-zinc-300" title="Every change, with _op, in <table>__changes"><input type="checkbox" className="accent-accent-500" checked={draft.keep_history} onChange={(e) => setDraft({ ...draft, keep_history: e.target.checked })} data-testid="stream-history" /> Keep a history of changes</label>}
             {draft.kind !== 'http' && <div><Label>Write every</Label><div className="flex items-center gap-1"><Input type="number" min={1} max={300} className="w-16" value={draft.batch_seconds} onChange={(e) => setDraft({ ...draft, batch_seconds: Number(e.target.value) || 1 })} /><span className="text-zinc-500">s or</span><Input type="number" min={1} className="w-20" value={draft.batch_rows} onChange={(e) => setDraft({ ...draft, batch_rows: Number(e.target.value) || 1 })} /><span className="text-zinc-500">rows</span></div></div>}
             <label className="flex items-center gap-1.5 self-end pb-1.5 text-zinc-300" title="_key, _partition, _offset, _timestamp and _ingested_at"><input type="checkbox" className="accent-accent-500" checked={draft.include_metadata} onChange={(e) => setDraft({ ...draft, include_metadata: e.target.checked })} /> Keep key, partition, offset and time</label>
@@ -190,12 +192,7 @@ export function StreamsPanel({ workspaceId, clouds, databases }: { workspaceId: 
                     {(s.kind === 'kinesis') && Object.keys(s.checkpoints).length > 0 && <p className="text-zinc-500">Checkpoints: {Object.entries(s.checkpoints).map(([k, v]) => `${k} @ ${v}`).join(' · ')}</p>}
                     <p className="text-zinc-500">{s.mode === 'mirror' ? `Latest state per ${s.key_columns.join(', ') || 'key'}${s.keep_history ? ` · every change in ${s.target_table}__changes` : ''} · ` : ''}{s.stats.batches.toLocaleString()} batch{s.stats.batches === 1 ? '' : 'es'} · last {s.stats.last_batch_rows.toLocaleString()} row{s.stats.last_batch_rows === 1 ? '' : 's'} · {s.format === 'json' ? 'JSON' : s.format === 'debezium' ? 'Debezium' : 'text'}{s.include_metadata ? ' · with key, partition, offset and time' : ''}</p>
                     {latest && latest.rows.length > 0 ? (
-                      <div className="max-h-64 overflow-auto rounded border border-zinc-800" data-testid="stream-latest">
-                        <table className="w-full text-2xs">
-                          <thead className="sticky top-0 bg-zinc-900"><tr>{latest.columns.map((c) => <th key={c.name} className="px-2 py-1 text-left font-medium text-zinc-400">{c.name}</th>)}</tr></thead>
-                          <tbody>{latest.rows.map((r, i) => <tr key={i} className="border-t border-zinc-800/60">{r.map((v, j) => <td key={j} className="max-w-[16rem] truncate px-2 py-1 font-mono text-zinc-300">{v === null ? <span className="text-zinc-600">null</span> : typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>)}</tr>)}</tbody>
-                        </table>
-                      </div>
+                      <ResultPreview testid="stream-latest" label={`Latest rows of ${s.target_table}`} columns={latest.columns} rows={latest.rows} />
                     ) : <p className="text-zinc-500">No rows yet.</p>}
                     <div className="flex gap-2"><Badge>{s.target_schema}.{s.target_table}</Badge><button className="text-accent-300 hover:underline" onClick={() => void ws.addTab({ title: s.target_table, sql: `SELECT * FROM ${s.target_schema === 'main' ? '' : `${s.target_schema}.`}${s.target_table} ORDER BY ${s.include_metadata ? '_ingested_at' : '1'} DESC LIMIT 100` }).then(() => (location.hash = '#/query'))}>Query it</button></div>
                   </div>

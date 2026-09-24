@@ -13,6 +13,7 @@ import { useCopilot } from '../../store/copilot';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { PageHeader } from '../../components/layout';
 import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, StatusDot, cn, confirmAction, InlineError } from '../../components/ui';
+import { DataTable } from '../../components/data';
 
 /** #/apps — the gallery of a workspace's Streamlit apps; #/apps/<id> — the editor with a live preview. */
 export function AppsPage() {
@@ -104,39 +105,36 @@ function Gallery() {
         {apps.length === 0 ? (
           <div className="border-y border-zinc-800 py-14"><Empty icon={<AppWindow />} title="No apps yet" hint="Start from a template, a dashboard or saved queries; DuckView runs the app and serves it to the workspace." action={canEdit && enabled ? <Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New app</Button> : undefined} /></div>
         ) : (
-          <table className="w-full table-fixed text-body" data-testid="app-list">
-            <thead>
-              <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
-                <th className="py-2 pr-4 font-normal">App</th>
-                <th className="w-28 py-2 pr-4 font-normal">Status</th>
-                <th className="w-40 py-2 pr-4 font-normal @max-3xl:hidden">Runs</th>
-                <th className="w-28 py-2 pr-4 font-normal @max-4xl:hidden">Shared with</th>
-                <th className="w-28 py-2 pr-4 font-normal @max-2xl:hidden">Last started</th>
-                <th className="w-44 py-2 font-normal"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {apps.map((a) => {
+          <DataTable
+            label="Data apps"
+            testid="app-list"
+            rows={apps}
+            rowKey={(a) => a.id}
+            rowProps={(a) => ({ 'data-app': a.name })}
+            rowClassName={() => 'group hover:bg-zinc-900'}
+            search={(a) => `${a.name} ${a.description ?? ''} ${a.kind} ${a.status}`}
+            searchPlaceholder="Filter apps"
+            columns={[
+              { key: 'app', header: 'App', truncate: true, sortValue: (a) => a.name, cell: (a) => (
+                <><a href={`#/apps/${a.id}`} className="block truncate font-medium text-zinc-100 hover:underline">{a.name}</a>
+                      <div className="truncate text-xs text-zinc-500" title={a.last_error ?? a.description ?? ''}>{a.last_error ? <span className="text-red-400">{a.last_error}</span> : a.description || `${a.entry} · ${(a.source_bytes / 1024).toFixed(1)} KB`}</div></>
+              ) },
+              { key: 'status', header: 'Status', width: 'w-28', sortValue: (a) => a.status, cell: (a) => {
                 const status = a.execution === 'browser' && a.status === 'running' ? 'ready' : a.status;
                 const tone = a.status === 'running' ? 'ok' : a.status === 'error' ? 'error' : a.status === 'starting' || a.status === 'installing' ? 'busy' : 'idle';
-                return (
-                  <tr key={a.id} className="group border-b border-zinc-800/70 hover:bg-zinc-900" data-app={a.name}>
-                    <td className="py-2.5 pr-4">
-                      <a href={`#/apps/${a.id}`} className="block truncate font-medium text-zinc-100 hover:underline">{a.name}</a>
-                      <div className="truncate text-xs text-zinc-500" title={a.last_error ?? a.description ?? ''}>{a.last_error ? <span className="text-red-400">{a.last_error}</span> : a.description || `${a.entry} · ${(a.source_bytes / 1024).toFixed(1)} KB`}</div>
-                    </td>
-                    <td className="py-2.5 pr-4"><StatusDot tone={tone} pulse={tone === 'busy'}>{status}</StatusDot></td>
-                    <td className="py-2.5 pr-4 text-xs text-zinc-400 @max-3xl:hidden">
-                      <span className="inline-flex items-center gap-1.5">
+                return <StatusDot tone={tone} pulse={tone === 'busy'}>{status}</StatusDot>;
+              } },
+              { key: 'runs', header: 'Runs', width: 'w-40', responsive: '@max-3xl:hidden', cell: (a) => (
+                <div className="text-xs text-zinc-400"><span className="inline-flex items-center gap-1.5">
                         {a.execution === 'browser' ? <Monitor className="h-3.5 w-3.5 text-zinc-500" /> : <Server className="h-3.5 w-3.5 text-zinc-500" />}
                         {APP_KIND_LABEL[a.kind]} · {a.execution === 'browser' ? 'browser' : 'server'}
                         {a.always_on && <Pin className="h-3 w-3 text-zinc-500" aria-label="always on" />}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-4 text-xs @max-4xl:hidden"><Audience app={a} /></td>
-                    <td className="py-2.5 pr-4 text-xs text-zinc-500 @max-2xl:hidden">{a.execution === 'browser' ? '—' : a.last_started_at ? timeAgo(a.last_started_at) : 'never'}</td>
-                    <td className="py-2.5">
-                      <div className="flex items-center justify-end gap-0.5">
+                      </span></div>
+              ) },
+              { key: 'audience', header: 'Shared with', width: 'w-28', responsive: '@max-4xl:hidden', cell: (a) => <div className="text-xs"><Audience app={a} /></div> },
+              { key: 'started', header: 'Last started', width: 'w-28', responsive: '@max-2xl:hidden', sortValue: (a) => a.last_started_at ?? '', cell: (a) => <span className="text-xs text-zinc-500">{a.execution === 'browser' ? '—' : a.last_started_at ? timeAgo(a.last_started_at) : 'never'}</span> },
+              { key: 'actions', header: <span className="sr-only">Actions</span>, width: 'w-44', cell: (a) => (
+                <div className="flex items-center justify-end gap-0.5">
                         <Button size="sm" variant="ghost" onClick={() => void openInTab(a)} title="Open the app in a new tab"><ExternalLink className="h-3.5 w-3.5" /> Open</Button>
                         <Button size="sm" variant="ghost" onClick={() => (location.hash = `#/apps/${a.id}`)} title="Edit and preview">Edit</Button>
                         {a.execution === 'browser' ? null : a.status === 'running' || a.status === 'starting' ? (
@@ -146,12 +144,9 @@ function Gallery() {
                         )}
                         <IconButton label="Delete" className="opacity-0 hover:text-red-400 group-hover:opacity-100" disabled={!canEdit} onClick={async () => { if ((await confirmAction(`Delete "${a.name}"?`))) { await api.del(`/api/apps/${a.id}`); await load(); } }}><Trash2 className="h-3.5 w-3.5" /></IconButton>
                       </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+              ) },
+            ]}
+          />
         )}
         <Modal open={creating} onClose={() => setCreating(false)} title="New data app" width="max-w-lg">
           <div className="space-y-3">

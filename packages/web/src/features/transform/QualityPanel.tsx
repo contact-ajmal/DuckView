@@ -1,3 +1,4 @@
+import { ResultPreview } from '../../components/data';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, FileCode2, FlaskConical, MoreHorizontal, Pencil, Play, Plus, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react';
 import { api, timeAgo, type DbtTestSummary, type NotificationChannel, type QualityCheck, type QualityCheckResult, type QualityCheckType, type QualityOutcome, type QualityRun, type QualityStatus, type QualitySuite, type SyncSchedule } from '../../api/client';
@@ -221,12 +222,7 @@ function Results({ results, summary, onOpen }: { results: QualityCheckResult[]; 
               {expanded && (
                 <div className="space-y-2 pb-3 pl-7">
                   {r.sample && r.sample.rows.length > 0 && (
-                    <div className="overflow-x-auto rounded-md border border-zinc-800">
-                      <table className="w-full font-mono text-2xs">
-                        <thead className="bg-zinc-900/60 text-left text-zinc-500"><tr>{r.sample.columns.map((c) => <th key={c} className="whitespace-nowrap px-2 py-1 font-normal">{c}</th>)}</tr></thead>
-                        <tbody>{r.sample.rows.map((row, i) => <tr key={i} className="border-t border-zinc-800/70">{row.map((v, j) => <td key={j} className="max-w-[240px] truncate whitespace-nowrap px-2 py-1 text-zinc-300">{v === null ? <span className="text-zinc-600">null</span> : typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>)}</tr>)}</tbody>
-                      </table>
-                    </div>
+                    <ResultPreview maxHeight="max-h-48" label="Failing rows" columns={r.sample.columns} rows={r.sample.rows} />
                   )}
                   {r.sql && <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-zinc-950 px-2 py-1.5 font-mono text-2xs text-zinc-400">{r.sql}</pre>}
                   {onOpen && r.sql && <Button size="sm" variant="ghost" onClick={() => onOpen(r)}><FileCode2 className="h-3.5 w-3.5" /> Open failing rows in SQL</Button>}

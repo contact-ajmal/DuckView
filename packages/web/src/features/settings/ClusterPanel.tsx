@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CircleAlert, CircleCheck } from 'lucide-react';
 import { api, timeAgo } from '../../api/client';
 import { CopyButton, cn } from '../../components/ui';
+import { DataTable } from '../../components/data';
 
 interface ClusterNode { id: string; url: string; version: string; started_at: string; heartbeat_at: string; self: boolean; alive: boolean; leases: string[] }
 interface ClusterStatus { enabled: boolean; node_id: string; nodes: ClusterNode[] }
@@ -57,21 +58,21 @@ export function ClusterPanel() {
   return (
     <div className="space-y-3 text-xs" data-testid="cluster-panel" data-cluster="on">
       <p className="text-zinc-400">{alive} of {status.nodes.length} node{status.nodes.length === 1 ? '' : 's'} answering. This page was served by <span className="font-mono text-zinc-200">{status.node_id}</span>.</p>
-      <table className="w-full table-fixed text-left" data-testid="cluster-nodes">
-        <thead className="text-zinc-500"><tr><th className="w-6" /><th className="w-40 py-1 font-normal">Node</th><th className="font-normal">Address</th><th className="w-20 font-normal">Version</th><th className="w-28 font-normal">Last heartbeat</th><th className="font-normal">Holds</th></tr></thead>
-        <tbody>
-          {status.nodes.map((n) => (
-            <tr key={n.id} className="border-t border-zinc-800/70 align-top" data-node={n.id} data-alive={n.alive}>
-              <td className="py-1.5">{n.alive ? <CircleCheck className="h-3.5 w-3.5 text-emerald-400" /> : <CircleAlert className="h-3.5 w-3.5 text-amber-400" />}</td>
-              <td className="py-1.5 font-mono text-zinc-200">{n.id}{n.self && <span className="ml-1.5 font-sans text-zinc-500">(this one)</span>}</td>
-              <td className="truncate py-1.5 font-mono text-zinc-400" title={n.url}>{n.url}</td>
-              <td className="py-1.5 text-zinc-400">{n.version}</td>
-              <td className={cn('py-1.5', n.alive ? 'text-zinc-400' : 'text-amber-300')}>{timeAgo(n.heartbeat_at)}</td>
-              <td className="py-1.5 text-zinc-400">{n.leases.length ? n.leases.map(leaseLabel).join(', ') : <span className="text-zinc-600">nothing</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        label="Cluster nodes"
+        testid="cluster-nodes"
+        rows={status.nodes}
+        rowKey={(n) => n.id}
+        rowProps={(n) => ({ 'data-node': n.id, 'data-alive': n.alive })}
+        columns={[
+          { key: 'c0', header: '', width: 'w-6', cell: (n) => <>{n.alive ? <CircleCheck className="h-3.5 w-3.5 text-emerald-400" /> : <CircleAlert className="h-3.5 w-3.5 text-amber-400" />}</> },
+          { key: 'node', header: 'Node', width: 'w-40', cell: (n) => <span className="font-mono text-zinc-200">{n.id}{n.self && <span className="ml-1.5 font-sans text-zinc-500">(this one)</span>}</span> },
+          { key: 'address', header: 'Address', truncate: true, sortValue: (n) => n.url, cell: (n) => <span className="truncate font-mono text-zinc-400">{n.url}</span> },
+          { key: 'version', header: 'Version', width: 'w-20', sortValue: (n) => n.version, cell: (n) => <span className="text-zinc-400">{n.version}</span> },
+          { key: 'last_heartbeat', header: 'Last heartbeat', width: 'w-28', cell: (n) => <>{timeAgo(n.heartbeat_at)}</> },
+          { key: 'holds', header: 'Holds', cell: (n) => <span className="text-zinc-400">{n.leases.length ? n.leases.map(leaseLabel).join(', ') : <span className="text-zinc-600">nothing</span>}</span> },
+        ]}
+      />
       <p className="text-zinc-500">A node that stops answering for a lease period loses what it holds; the next request for one of its workspaces opens it on another node.</p>
     </div>
   );

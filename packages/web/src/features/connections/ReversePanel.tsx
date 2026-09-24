@@ -1,3 +1,4 @@
+import { ResultPreview } from '../../components/data';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowUpRight, Eye, MoreHorizontal, Pause, Pencil, Play, Plus, Send, Trash2, X } from 'lucide-react';
 import { api, timeAgo, type CloudConnection, type DatabaseConnection, type LakehouseConnection, type NotificationChannel, type ReverseDestination, type ReverseMode, type ReversePlan, type ReverseRun, type ReverseSync, type SyncSchedule } from '../../api/client';
@@ -176,12 +177,7 @@ export function ReversePanel({ workspaceId, databases, clouds, lakes }: { worksp
           <div className="space-y-3 text-xs" data-testid="reverse-plan">
             <p className="text-zinc-300">Would send <b>{plan.plan.to_send.toLocaleString()}</b> of {plan.plan.rows_read.toLocaleString()} rows{plan.plan.to_delete ? <> and <b>{plan.plan.to_delete.toLocaleString()}</b> deletions</> : null} to <span className="font-mono">{plan.plan.destination}</span>{plan.plan.incremental ? ' — the changes since the last run.' : '.'}</p>
             {plan.plan.sample.length > 0 && (
-              <div className="overflow-x-auto rounded-md border border-zinc-800">
-                <table className="w-full font-mono text-2xs">
-                  <thead className="bg-zinc-900/60 text-left text-zinc-500"><tr>{plan.plan.columns.map((c) => <th key={c} className="whitespace-nowrap px-2 py-1 font-normal">{c}</th>)}</tr></thead>
-                  <tbody>{plan.plan.sample.map((row, i) => <tr key={i} className="border-t border-zinc-800/70">{plan.plan.columns.map((c) => <td key={c} className="max-w-[220px] truncate whitespace-nowrap px-2 py-1 text-zinc-300">{row[c] == null ? <span className="text-zinc-600">null</span> : String(row[c])}</td>)}</tr>)}</tbody>
-                </table>
-              </div>
+              <ResultPreview maxHeight="max-h-48" label="Rows to send" columns={plan.plan.columns} rows={plan.plan.sample} />
             )}
             <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setPlan(null)}>Close</Button><Button variant="primary" disabled={!canEdit} loading={busy === `run:${plan.id}`} onClick={() => void act(`run:${plan.id}`, async () => { await api.post(`/api/reverse-syncs/${plan.id}/run`, {}); setOpen(plan.id); setPlan(null); })}><Play className="h-3.5 w-3.5" /> Run now</Button></div>
           </div>

@@ -207,6 +207,7 @@ export function TableWidget({ data, config }: { data: WidgetData; config: Widget
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-auto">
+        {/* ui-lint-ignore: the table widget renders a paged query result with its own formatting */}
         <table className="w-full font-mono text-2xs">
           <thead className="sticky top-0 bg-zinc-900 text-left text-2xs text-zinc-500">
             <tr>

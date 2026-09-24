@@ -3,6 +3,7 @@ import { Bot, Trash2, RefreshCw, Play, MessageSquare, Code2, ShieldCheck, Shield
 import { api, agentInvoke, getToken, timeAgo, type AgentRecord, type AgentFramework, type AgentConfig, type FrameworkMeta, type Snippet, type Workspace } from '../../api/client';
 import { Button, Badge, Card, CopyButton, Input, Label, Modal, Select, cn, confirmAction, toast } from '../../components/ui';
 import { HideButton } from '../../components/LayoutMenu';
+import { DataTable } from '../../components/data';
 
 export const FRAMEWORK_ORDER: AgentFramework[] = ['strands', 'langgraph', 'langchain', 'crewai', 'agentcore_runtime', 'agentcore_gateway', 'bedrock_agent', 'custom'];
 const SHORT: Record<AgentFramework, string> = { strands: 'Strands', langgraph: 'LangGraph', langchain: 'LangChain', crewai: 'CrewAI', agentcore_runtime: 'AgentCore Runtime', agentcore_gateway: 'AgentCore Gateway', bedrock_agent: 'Bedrock Agents', custom: 'HTTP / custom' };
@@ -148,60 +149,38 @@ export function AgentsCard({ agents, workspaces, frameworks, onChanged, onToken,
       {agents.length === 0 ? (
         <p className="py-2 text-xs text-zinc-500">No agents yet. Register one (Strands, LangGraph, LangChain, CrewAI, AgentCore, Bedrock or any HTTP client) to give it its own token and see its calls under Activity.</p>
       ) : (
-        <table className="w-full text-xs">
-          <thead className="text-left text-2xs text-zinc-500">
-            <tr>
-              <th className="pb-2 pr-3">Agent</th>
-              <th className="whitespace-nowrap pb-2 pr-3">Framework</th>
-              <th className="whitespace-nowrap pb-2 pr-3">Workspace</th>
-              <th className="whitespace-nowrap pb-2 pr-3">Access</th>
-              <th className="whitespace-nowrap pb-2 pr-3 text-right">Calls</th>
-              <th className="whitespace-nowrap pb-2 pr-3">Last seen</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {agents.map((a) => (
-              <tr key={a.id} className="border-t border-zinc-800 align-top">
-                <td className="py-2 pr-2">
-                  <div className="font-medium text-zinc-200">{a.name}</div>
+        <DataTable
+          label="Connected agents"
+          rows={agents}
+          rowKey={(a) => a.id}
+          columns={[
+            { key: 'agent', header: 'Agent', sortValue: (a) => a.name, cell: (a) => <><div className="font-medium text-zinc-200">{a.name}</div>
                   <div className="font-mono text-2xs text-zinc-500">
                     {a.token_revoked ? <span className="text-red-300">token revoked</span> : `${a.token_prefix}…`}
                     {a.config.runtime_arn && <span title={a.config.runtime_arn}> · {a.config.runtime_arn.split('/').pop()}</span>}
                     {a.config.agent_id && <span> · {a.config.agent_id}/{a.config.agent_alias_id}</span>}
                   </div>
                   {a.description && <div className="text-2xs text-zinc-500">{a.description}</div>}
-                  {testing[a.id] && <div className="mt-0.5 max-w-md truncate font-mono text-2xs text-amber-200" title={testing[a.id]}>{testing[a.id]}</div>}
-                </td>
-                <td className="py-2 pr-2">
-                  <Badge tone={TONE[a.framework]}>{SHORT[a.framework]}</Badge>
-                </td>
-                <td className="py-2 pr-2 text-zinc-400">{a.workspace_id ? (workspaces.find((w) => w.id === a.workspace_id)?.name ?? a.workspace_id.slice(0, 8)) : 'all'}</td>
-                <td className="py-2 pr-2">
-                  {a.allow_mutations ? (
+                  {testing[a.id] && <div className="mt-0.5 max-w-md truncate font-mono text-2xs text-amber-200" title={testing[a.id]}>{testing[a.id]}</div>}</> },
+            { key: 'framework', header: 'Framework', cell: (a) => <><Badge tone={TONE[a.framework]}>{SHORT[a.framework]}</Badge></> },
+            { key: 'workspace', header: 'Workspace', cell: (a) => <span className="text-zinc-400">{a.workspace_id ? (workspaces.find((w) => w.id === a.workspace_id)?.name ?? a.workspace_id.slice(0, 8)) : 'all'}</span> },
+            { key: 'access', header: 'Access', cell: (a) => <>{a.allow_mutations ? (
                     <span className="inline-flex items-center gap-1 text-amber-200" title="write scope — mutations still need human approval"><ShieldAlert className="h-3.5 w-3.5" /> read + write</span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-emerald-300"><ShieldCheck className="h-3.5 w-3.5" /> read-only</span>
-                  )}
-                </td>
-                <td className="whitespace-nowrap py-2 pr-3 text-right font-mono text-zinc-300">
-                  {a.call_count.toLocaleString()}
-                  {a.error_count > 0 && <span className="text-red-300"> · {a.error_count} err</span>}
-                </td>
-                <td className="whitespace-nowrap py-2 pr-3 text-zinc-400">{a.last_seen_at ? timeAgo(a.last_seen_at) : 'never'}</td>
-                <td className="py-2 text-right">
-                  <div className="flex justify-end gap-0.5">
+                  )}</> },
+            { key: 'calls', header: 'Calls', align: 'right', cell: (a) => <span className="whitespace-nowrap font-mono text-zinc-300">{a.call_count.toLocaleString()}
+                  {a.error_count > 0 && <span className="text-red-300"> · {a.error_count} err</span>}</span> },
+            { key: 'last_seen', header: 'Last seen', cell: (a) => <span className="whitespace-nowrap text-zinc-400">{a.last_seen_at ? timeAgo(a.last_seen_at) : 'never'}</span> },
+            { key: 'c6', header: '', align: 'right', cell: (a) => <><div className="flex justify-end gap-0.5">
                     <button className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100" title="Setup snippet" onClick={() => void openSetup(a)}><Code2 className="h-3.5 w-3.5" /></button>
                     <button className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100" title="Self-test: call list_accessible_data as this agent" onClick={() => void test(a)}><Play className="h-3.5 w-3.5" /></button>
                     {a.can_invoke && <button className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-accent-300" title="Chat with this agent" onClick={() => setChat(a)}><MessageSquare className="h-3.5 w-3.5" /></button>}
                     <button className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100" title="Rotate token" onClick={() => void rotate(a)}><RefreshCw className="h-3.5 w-3.5" /></button>
                     <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" title="Delete" onClick={() => void remove(a)}><Trash2 className="h-3.5 w-3.5" /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  </div></> },
+          ]}
+        />
       )}
 
       <NewAgentModal

@@ -4,6 +4,7 @@ import { api, openAppInTab, timeAgo, type AdminApp, type AppRuntimeInfo, type Da
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { Badge, Button, Card, Input, cn } from '../../components/ui';
 import { KvRows } from '../../components/layout';
+import { DataTable } from '../../components/data';
 
 const RUNTIME_TITLE = { subprocess: 'Subprocess — a shared virtualenv next to the server', docker: 'Docker — one hardened container per app', kubernetes: 'Kubernetes — one pod per app' } as const;
 
@@ -90,26 +91,20 @@ export function AppsAdminPanel() {
       <Card title={`All apps (${apps.length}) · ${running.length} running`}>
         {apps.length === 0 ? <p className="text-xs text-zinc-500">No data apps on this server yet.</p> : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="text-2xs text-zinc-500">
-                <tr><th className="py-1.5 pr-3 font-medium">App</th><th className="pr-3 font-medium">Workspace · owner</th><th className="pr-3 font-medium">Status</th><th className="pr-3 font-medium">Audience</th><th className="pr-3 font-medium">Instance</th><th className="font-medium" /></tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/70">
-                {apps.map((a) => (
-                  <tr key={a.id} className="align-middle">
-                    <td className="py-2 pr-3"><a href={`#/apps/${a.id}`} className="font-medium text-zinc-100 hover:underline">{a.name}</a></td>
-                    <td className="pr-3 text-zinc-400">{a.workspace_name ?? '—'} · {a.owner_email ?? '—'}</td>
-                    <td className="pr-3"><Badge tone={a.status === 'running' ? 'green' : a.status === 'error' ? 'red' : a.status === 'stopped' ? 'zinc' : 'amber'}>{a.status}</Badge>{a.last_used_ms !== null && <span className="ml-1.5 text-2xs text-zinc-500">used {Math.round(a.last_used_ms / 60_000)} min ago</span>}</td>
-                    <td className="pr-3">{a.visibility === 'org' ? <Badge tone="info" className="gap-1"><Globe className="h-3 w-3" /> everyone</Badge> : <span className="text-zinc-500">workspace{a.publish_status === 'pending' ? ' · pending' : a.publish_status === 'rejected' ? ' · rejected' : ''}</span>}</td>
-                    <td className="pr-3 font-mono text-2xs text-zinc-500">{a.runtime_ref ?? (a.runtime ? `${a.runtime}` : '—')}</td>
-                    <td className="whitespace-nowrap text-right">
-                      <Button size="sm" variant="ghost" className={cn(a.always_on && 'text-accent-300')} loading={busy === `pin:${a.id}`} onClick={() => void act(`pin:${a.id}`, () => api.post<{ app: DataApp }>(`/api/apps/${a.id}/always-on`, { on: !a.always_on }))} title={a.always_on ? 'Always on — click to let it scale to zero' : 'Keep always on'}><Pin className="h-3.5 w-3.5" /></Button>
-                      <Button size="sm" variant="ghost" disabled={a.status === 'stopped' || a.status === 'error'} loading={busy === `stop:${a.id}`} onClick={() => void act(`stop:${a.id}`, () => api.post(`/api/admin/apps/${a.id}/stop`, {}))} title="Stop"><Square className="h-3.5 w-3.5" /></Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              label="Data apps"
+              rows={apps}
+              rowKey={(a) => a.id}
+              columns={[
+                { key: 'app', header: 'App', sortValue: (a) => a.name, cell: (a) => <><a href={`#/apps/${a.id}`} className="font-medium text-zinc-100 hover:underline">{a.name}</a></> },
+                { key: 'workspace_owner', header: 'Workspace · owner', cell: (a) => <span className="text-zinc-400">{a.workspace_name ?? '—'} · {a.owner_email ?? '—'}</span> },
+                { key: 'status', header: 'Status', sortValue: (a) => a.status, cell: (a) => <><Badge tone={a.status === 'running' ? 'green' : a.status === 'error' ? 'red' : a.status === 'stopped' ? 'zinc' : 'amber'}>{a.status}</Badge>{a.last_used_ms !== null && <span className="ml-1.5 text-2xs text-zinc-500">used {Math.round(a.last_used_ms / 60_000)} min ago</span>}</> },
+                { key: 'audience', header: 'Audience', cell: (a) => <>{a.visibility === 'org' ? <Badge tone="info" className="gap-1"><Globe className="h-3 w-3" /> everyone</Badge> : <span className="text-zinc-500">workspace{a.publish_status === 'pending' ? ' · pending' : a.publish_status === 'rejected' ? ' · rejected' : ''}</span>}</> },
+                { key: 'instance', header: 'Instance', cell: (a) => <span className="font-mono text-2xs text-zinc-500">{a.runtime_ref ?? (a.runtime ? `${a.runtime}` : '—')}</span> },
+                { key: 'c5', header: '', align: 'right', sortValue: (a) => a.status, cell: (a) => <div className="whitespace-nowrap"><Button size="sm" variant="ghost" className={cn(a.always_on && 'text-accent-300')} loading={busy === `pin:${a.id}`} onClick={() => void act(`pin:${a.id}`, () => api.post<{ app: DataApp }>(`/api/apps/${a.id}/always-on`, { on: !a.always_on }))} title={a.always_on ? 'Always on — click to let it scale to zero' : 'Keep always on'}><Pin className="h-3.5 w-3.5" /></Button>
+                      <Button size="sm" variant="ghost" disabled={a.status === 'stopped' || a.status === 'error'} loading={busy === `stop:${a.id}`} onClick={() => void act(`stop:${a.id}`, () => api.post(`/api/admin/apps/${a.id}/stop`, {}))} title="Stop"><Square className="h-3.5 w-3.5" /></Button></div> },
+              ]}
+            />
           </div>
         )}
       </Card>

@@ -6,6 +6,7 @@ import { useWorkspace } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
 import { useAuth } from '../../store/auth';
 import { Button, StatusDot, cn } from '../../components/ui';
+import { DataTable } from '../../components/data';
 
 /** The first table or file a statement reads, for the "dataset" column. */
 function datasetOf(sql: string): string | null {
@@ -139,29 +140,19 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
               {recentQueries.length === 0 ? (
                 <Quiet>Queries you run and save appear here.</Quiet>
               ) : (
-                <table className="w-full table-fixed text-body">
-                  <thead>
-                    <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
-                      <th className="py-1.5 pr-3 font-normal">Query</th>
-                      <th className="w-[26%] py-1.5 pr-3 font-normal @max-3xl:hidden">Dataset</th>
-                      <th className="w-24 py-1.5 pr-3 font-normal">Last used</th>
-                      <th className="w-20 py-1.5 font-normal">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentQueries.map((q) => (
-                      <tr key={q.key} onClick={q.open} className="cursor-pointer border-b border-zinc-800/70 hover:bg-zinc-900" title="Open in a SQL tab">
-                        <td className="py-2 pr-3">
-                          <div className="truncate text-zinc-100">{q.name}</div>
-                          <div className="truncate font-mono text-2xs text-zinc-500">{q.sql.replace(/\s+/g, ' ').slice(0, 120)}</div>
-                        </td>
-                        <td className="truncate py-2 pr-3 font-mono text-xs text-zinc-400 @max-3xl:hidden">{q.dataset ?? '—'}</td>
-                        <td className="py-2 pr-3 text-xs text-zinc-500">{timeAgo(q.when)}</td>
-                        <td className="py-2"><StatusDot tone={q.status === 'ok' ? 'ok' : q.status === 'error' ? 'error' : 'idle'}>{q.status === 'saved' ? 'saved' : q.status === 'ok' ? 'ran' : 'failed'}</StatusDot></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  label="Recent queries"
+                  rows={recentQueries}
+                  rowKey={(q) => q.key}
+                  onRowClick={(q) => q.open()}
+                  columns={[
+                    { key: 'query', header: 'Query', sortValue: (q) => q.name, cell: (q) => <><div className="truncate text-zinc-100">{q.name}</div>
+                          <div className="truncate font-mono text-2xs text-zinc-500">{q.sql.replace(/\s+/g, ' ').slice(0, 120)}</div></> },
+                    { key: 'dataset', header: 'Dataset', width: 'w-[26%]', truncate: true, cell: (q) => <span className="truncate font-mono text-xs text-zinc-400">{q.dataset ?? '—'}</span> },
+                    { key: 'last_used', header: 'Last used', width: 'w-24', cell: (q) => <span className="text-xs text-zinc-500">{timeAgo(q.when)}</span> },
+                    { key: 'status', header: 'Status', width: 'w-20', sortValue: (q) => q.status, cell: (q) => <><StatusDot tone={q.status === 'ok' ? 'ok' : q.status === 'error' ? 'error' : 'idle'}>{q.status === 'saved' ? 'saved' : q.status === 'ok' ? 'ran' : 'failed'}</StatusDot></> },
+                  ]}
+                />
               )}
             </Section>
 
@@ -171,31 +162,21 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
                   Drop a CSV, Parquet or JSON file in <a className="text-accent-300 hover:underline" href="#/data">Data</a>, or <a className="text-accent-300 hover:underline" href="#/connections">connect a source</a>.
                 </Quiet>
               ) : (
-                <table className="w-full table-fixed text-body">
-                  <thead>
-                    <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
-                      <th className="py-1.5 pr-3 font-normal">Dataset</th>
-                      <th className="w-24 py-1.5 pr-3 font-normal">Source</th>
-                      <th className="w-28 py-1.5 pr-3 text-right font-normal">Rows / size</th>
-                      <th className="w-24 py-1.5 font-normal">Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {datasets.map((d) => (
-                      <tr key={d.key} onClick={() => openDataset(d.name)} className="cursor-pointer border-b border-zinc-800/70 hover:bg-zinc-900" title="Open in Data">
-                        <td className="py-2 pr-3">
-                          <span className="flex min-w-0 items-center gap-2">
+                <DataTable
+                  label="Recent datasets"
+                  rows={datasets}
+                  rowKey={(d) => d.key}
+                  onRowClick={(d) => openDataset(d.name)}
+                  columns={[
+                    { key: 'dataset', header: 'Dataset', sortValue: (d) => d.kind, cell: (d) => <><span className="flex min-w-0 items-center gap-2">
                             {d.kind === 'file' ? <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Table2 className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
                             <span className="truncate font-mono text-xs text-zinc-100">{d.name}</span>
-                          </span>
-                        </td>
-                        <td className="truncate py-2 pr-3 text-xs text-zinc-400">{d.source}</td>
-                        <td className="py-2 pr-3 text-right font-mono text-xs tabular-nums text-zinc-400">{d.rows != null ? d.rows.toLocaleString() : d.size != null ? formatBytes(d.size) : '—'}</td>
-                        <td className="py-2 text-xs text-zinc-500">{d.updated ? timeAgo(d.updated) : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          </span></> },
+                    { key: 'source', header: 'Source', width: 'w-24', truncate: true, sortValue: (d) => d.source, cell: (d) => <span className="truncate text-xs text-zinc-400">{d.source}</span> },
+                    { key: 'rows_size', header: 'Rows / size', width: 'w-28', align: 'right', cell: (d) => <span className="font-mono text-xs tabular-nums text-zinc-400">{d.rows != null ? d.rows.toLocaleString() : d.size != null ? formatBytes(d.size) : '—'}</span> },
+                    { key: 'updated', header: 'Updated', width: 'w-24', cell: (d) => <span className="text-xs text-zinc-500">{d.updated ? timeAgo(d.updated) : '—'}</span> },
+                  ]}
+                />
               )}
             </Section>
           </div>

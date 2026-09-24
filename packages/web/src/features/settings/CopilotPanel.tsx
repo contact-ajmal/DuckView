@@ -3,6 +3,7 @@ import { Bot, CheckCircle2, ExternalLink, Eye, EyeOff, KeyRound, Loader2, PlugZa
 import { api, type CopilotConfig, type CopilotProvider, type CopilotProviderPreset, type CopilotServerSettings, type CopilotUsageReport, type CopilotUsageTotals } from '../../api/client';
 import { useCopilot } from '../../store/copilot';
 import { Badge, Button, Input, Label, Select, cn, confirmAction, InlineError } from '../../components/ui';
+import { DataTable } from '../../components/data';
 
 /** Compact number for token counts: 1.2k, 3.4M. */
 export const fmtTokens = (n: number | null | undefined) => (n == null ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k` : String(n));
@@ -327,38 +328,34 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
           <div>
             <div className="mb-1.5 flex items-center gap-1 text-2xs font-semibold text-zinc-500"><Gauge className="h-3 w-3" /> By model</div>
             {report.by_model.length === 0 ? <p className="text-2xs text-zinc-600">Nothing yet.</p> : (
-              <table className="w-full text-2xs">
-                <thead className="text-left text-2xs uppercase text-zinc-500"><tr><th className="py-1">Model</th><th className="py-1 text-right">Requests</th><th className="py-1 text-right">In</th><th className="py-1 text-right">Out</th></tr></thead>
-                <tbody>
-                  {report.by_model.map((m) => (
-                    <tr key={`${m.provider}/${m.model}`} className="border-t border-zinc-800/60">
-                      <td className="py-1 font-mono text-zinc-200">{label(m.provider)} · {m.model}{m.byok ? <span className="ml-1 text-2xs text-accent-300">own key</span> : null}</td>
-                      <td className="py-1 text-right font-mono text-zinc-400">{m.requests}{m.errors ? <span className="text-red-300"> ({m.errors}✗)</span> : null}</td>
-                      <td className="py-1 text-right font-mono text-zinc-400">{fmtTokens(m.input_tokens)}</td>
-                      <td className="py-1 text-right font-mono text-zinc-400">{fmtTokens(m.output_tokens)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <DataTable
+                label="Usage by model"
+                rows={report.by_model}
+                rowKey={(m) => `${m.provider}/${m.model}/${m.byok}`}
+                columns={[
+                  { key: 'model', header: 'Model', cell: (m) => <span className="font-mono text-zinc-200">{label(m.provider)} · {m.model}{m.byok ? <span className="ml-1 text-2xs text-accent-300">own key</span> : null}</span> },
+                  { key: 'requests', header: 'Requests', align: 'right', cell: (m) => <span className="font-mono text-zinc-400">{m.requests}{m.errors ? <span className="text-red-300"> ({m.errors}✗)</span> : null}</span> },
+                  { key: 'in', header: 'In', align: 'right', cell: (m) => <span className="font-mono text-zinc-400">{fmtTokens(m.input_tokens)}</span> },
+                  { key: 'out', header: 'Out', align: 'right', cell: (m) => <span className="font-mono text-zinc-400">{fmtTokens(m.output_tokens)}</span> },
+                ]}
+              />
             )}
           </div>
           {report.scope === 'all' && (
             <div>
               <div className="mb-1.5 flex items-center gap-1 text-2xs font-semibold text-zinc-500"><Users className="h-3 w-3" /> By person</div>
               {report.by_user.length === 0 ? <p className="text-2xs text-zinc-600">Nothing yet.</p> : (
-                <table className="w-full text-2xs">
-                  <thead className="text-left text-2xs uppercase text-zinc-500"><tr><th className="py-1">Person</th><th className="py-1 text-right">Requests</th><th className="py-1 text-right">In</th><th className="py-1 text-right">Out</th></tr></thead>
-                  <tbody>
-                    {report.by_user.map((u) => (
-                      <tr key={u.user_id} className="border-t border-zinc-800/60">
-                        <td className="py-1 text-zinc-200">{u.email}</td>
-                        <td className="py-1 text-right font-mono text-zinc-400">{u.requests}</td>
-                        <td className="py-1 text-right font-mono text-zinc-400">{fmtTokens(u.input_tokens)}</td>
-                        <td className="py-1 text-right font-mono text-zinc-400">{fmtTokens(u.output_tokens)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  label="Usage by person"
+                  rows={report.by_user}
+                  rowKey={(u) => u.user_id}
+                  columns={[
+                    { key: 'person', header: 'Person', sortValue: (u) => u.email, cell: (u) => <span className="text-zinc-200">{u.email}</span> },
+                    { key: 'requests', header: 'Requests', align: 'right', sortValue: (u) => u.requests, cell: (u) => <span className="font-mono text-zinc-400">{u.requests}</span> },
+                    { key: 'in', header: 'In', align: 'right', cell: (u) => <span className="font-mono text-zinc-400">{fmtTokens(u.input_tokens)}</span> },
+                    { key: 'out', header: 'Out', align: 'right', cell: (u) => <span className="font-mono text-zinc-400">{fmtTokens(u.output_tokens)}</span> },
+                  ]}
+                />
               )}
             </div>
           )}

@@ -1,3 +1,4 @@
+import { ResultPreview } from '../../components/data';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -62,12 +63,7 @@ function MetricCard({ block, workspaceId }: { block: CopilotMetricBlock | undefi
       ) : (
         <>
           {block.rows.length > 1 && <div className="h-40 px-1 pt-1"><ChartWidget data={data} config={{ chart: time ? 'line' : 'bar', x: dims[0], y: q.metrics.slice(0, 3) }} /></div>}
-          <div className="max-h-48 overflow-auto">
-            <table className="w-full font-mono text-2xs">
-              <thead className="sticky top-0 bg-zinc-900 text-left text-zinc-500"><tr>{block.columns.map((c) => <th key={c.name} className="px-2 py-1 font-normal">{c.name}</th>)}</tr></thead>
-              <tbody>{block.rows.slice(0, 50).map((r, i) => <tr key={i} className="border-t border-zinc-800/60">{r.map((v, j) => <td key={j} className={cn('px-2 py-0.5 text-zinc-300', typeof v === 'number' && 'text-right')}>{fmt(v)}</td>)}</tr>)}</tbody>
-            </table>
-          </div>
+          <ResultPreview maxHeight="max-h-48" className="rounded-none border-x-0 border-b-0" limit={50} format={fmt} label="Metric values" columns={block.columns} rows={block.rows} />
         </>
       )}
       {sql && <pre className="max-h-48 overflow-auto border-t border-zinc-800 p-2 font-mono text-2xs text-zinc-400">{block.sql}</pre>}
@@ -343,6 +339,7 @@ export function CopilotDrawer() {
     h1: ({ children }: { children?: ReactNode }) => <h3 className="mt-3 mb-1 text-body font-semibold text-zinc-50">{children}</h3>,
     h2: ({ children }: { children?: ReactNode }) => <h3 className="mt-3 mb-1 text-body font-semibold text-zinc-50">{children}</h3>,
     h3: ({ children }: { children?: ReactNode }) => <h4 className="mt-2 mb-1 text-body font-semibold text-zinc-100">{children}</h4>,
+    // ui-lint-ignore: markdown tables inside AI replies
     table: ({ children }: { children?: ReactNode }) => <table className="my-2 w-full border-collapse font-mono text-2xs">{children}</table>,
     th: ({ children }: { children?: ReactNode }) => <th className="border border-zinc-800 bg-zinc-900 px-2 py-1 text-left">{children}</th>,
     td: ({ children }: { children?: ReactNode }) => <td className="border border-zinc-800 px-2 py-1">{children}</td>,

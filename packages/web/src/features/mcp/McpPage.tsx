@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { KeyRound, Radio, Trash2, Terminal, Wrench, Activity, Pause, Play } from 'lucide-react';
+import { DataTable, type Column } from '../../components/data';
 import { api, timeAgo, type ApiToken, type McpSession, type AuditEvent, type Workspace, type AgentRecord, type AgentFramework, type FrameworkMeta } from '../../api/client';
 import { AgentsCard, FrameworksCard } from './AgentsPanel';
 import { subscribeLiveEvents, type LiveEvent } from '../../lib/liveEvents';
-import { Button, CopyButton, Input, Label, Modal, Select, StatusDot, Tabs, cn, confirmAction } from '../../components/ui';
+import { Button, CopyButton, Input, Label, Modal, Select, StatusDot, Tabs, cn, confirmAction, Empty } from '../../components/ui';
 import { HostedAgentsPanel } from './HostedAgentsPanel';
 import { useAuth } from '../../store/auth';
 import { PageHeader } from '../../components/layout';
@@ -106,42 +107,27 @@ export function McpPage() {
   const visible = feed.filter((f) => filter === 'all' || f.kind === filter || (filter === 'audit' && f.kind === 'session'));
 
   const approvals = feed.filter((f) => f.status === 'approval_required' || f.status === 'blocked');
-  const feedTable = (items: Feed[], empty: string) =>
-    items.length === 0 ? (
-      <div className="border-y border-zinc-800 py-10 text-center text-xs text-zinc-500">{empty}</div>
-    ) : (
-      <table className="w-full table-fixed text-body" data-testid="activity-feed">
-        <thead>
-          <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
-            <th className="w-36 py-1.5 pr-3 font-normal">Agent</th>
-            <th className="py-1.5 pr-3 font-normal">Action</th>
-            <th className="w-28 py-1.5 pr-3 font-normal">Status</th>
-            <th className="w-20 py-1.5 pr-3 text-right font-normal">Duration</th>
-            <th className="w-24 py-1.5 font-normal">When</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((f) => (
-            <tr key={f.id} className="border-b border-zinc-800/70 align-top hover:bg-zinc-900">
-              <td className="py-2 pr-3">
-                <div className="truncate text-zinc-200">{f.agent ?? f.user ?? '—'}</div>
-                {f.via === 'rest' && <div className="text-2xs text-zinc-500">REST</div>}
-              </td>
-              <td className="py-2 pr-3">
-                <div className="flex items-center gap-1.5">
-                  {f.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : f.kind === 'session' ? <Radio className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Activity className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
-                  <span className="truncate font-mono text-xs text-zinc-100">{f.title}</span>
-                </div>
-                {f.detail && <div className="mt-0.5 truncate font-mono text-2xs text-zinc-500" title={f.detail}>{f.detail}</div>}
-              </td>
-              <td className="py-2 pr-3"><StatusDot tone={f.status === 'ok' ? 'ok' : f.status === 'approval_required' || f.status === 'blocked' ? 'warn' : f.status === 'info' ? 'busy' : 'error'}>{f.status === 'approval_required' ? 'needs approval' : f.status}</StatusDot></td>
-              <td className="py-2 pr-3 text-right text-xs tabular-nums text-zinc-500">{f.ms != null ? `${Math.round(f.ms)} ms` : ''}</td>
-              <td className="py-2 text-xs text-zinc-500">{timeAgo(f.at)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
+  const feedColumns: Column<Feed>[] = [
+    { key: 'agent', header: 'Agent', width: 'w-36', truncate: true, sortValue: (f) => f.agent ?? f.user ?? '', cell: (f) => (
+      <>
+        <div className="truncate text-zinc-200">{f.agent ?? f.user ?? '—'}</div>
+        {f.via === 'rest' && <div className="text-2xs text-zinc-500">REST</div>}
+      </>
+    ) },
+    { key: 'action', header: 'Action', truncate: true, cell: (f) => (
+      <>
+        <div className="flex items-center gap-1.5">
+          {f.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : f.kind === 'session' ? <Radio className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Activity className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
+          <span className="truncate font-mono text-xs text-zinc-100">{f.title}</span>
+        </div>
+        {f.detail && <div className="mt-0.5 truncate font-mono text-2xs text-zinc-500" title={f.detail}>{f.detail}</div>}
+      </>
+    ) },
+    { key: 'status', header: 'Status', width: 'w-32', sortValue: (f) => f.status, cell: (f) => <StatusDot tone={f.status === 'ok' ? 'ok' : f.status === 'approval_required' || f.status === 'blocked' ? 'warn' : f.status === 'info' ? 'busy' : 'error'}>{f.status === 'approval_required' ? 'needs approval' : f.status}</StatusDot> },
+    { key: 'ms', header: 'Duration', width: 'w-20', align: 'right', numeric: true, sortValue: (f) => f.ms ?? null, cell: (f) => <span className="text-xs text-zinc-500">{f.ms != null ? `${Math.round(f.ms)} ms` : ''}</span> },
+    { key: 'at', header: 'When', width: 'w-24', sortValue: (f) => f.at, cell: (f) => <span className="text-xs text-zinc-500">{timeAgo(f.at)}</span> },
+  ];
+  const feedTable = (items: Feed[], empty: string) => <DataTable label="Agent activity" testid="activity-feed" rows={items} columns={feedColumns} rowKey={(f) => f.id} search={(f) => `${f.agent ?? ''} ${f.user ?? ''} ${f.title} ${f.detail ?? ''} ${f.status}`} searchPlaceholder="Filter activity" empty={<Empty title={empty} />} />;
 
   return (
     <div className="h-full overflow-auto">
@@ -246,34 +232,21 @@ export function McpPage() {
               {tokens.length === 0 ? (
                 <p className="border-y border-zinc-800 py-4 text-xs text-zinc-500">No tokens yet. A token is shown once, when it is created.</p>
               ) : (
-                <table className="w-full text-body">
-                  <thead className="text-left text-xs text-zinc-500">
-                    <tr className="border-b border-zinc-800">
-                      <th className="py-1.5 pr-3 font-normal">Name</th>
-                      <th className="py-1.5 pr-3 font-normal">Scopes</th>
-                      <th className="py-1.5 pr-3 font-normal">Workspace</th>
-                      <th className="py-1.5 pr-3 font-normal">Last used</th>
-                      <th className="py-1.5 pr-3 font-normal">Expires</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tokens.map((t) => (
-                      <tr key={t.id} className="group border-b border-zinc-800/70">
-                        <td className="py-2 pr-3"><div className="text-zinc-200">{t.name}</div><div className="font-mono text-2xs text-zinc-500">{t.token_prefix}…</div></td>
-                        <td className="py-2 pr-3 text-xs text-zinc-400">{t.scopes.join(', ')}</td>
-                        <td className="py-2 pr-3 text-xs text-zinc-400">{t.workspace_id ? (workspaces.find((w) => w.id === t.workspace_id)?.name ?? t.workspace_id.slice(0, 8)) : 'all'}</td>
-                        <td className="py-2 pr-3 text-xs text-zinc-500">{timeAgo(t.last_used_at)}</td>
-                        <td className="py-2 pr-3 text-xs text-zinc-500">{t.expires_at ? (new Date(t.expires_at) < new Date() ? <span className="text-red-400">expired</span> : new Date(t.expires_at).toLocaleDateString()) : 'never'}</td>
-                        <td className="py-2 text-right">
-                          <button className="rounded p-1 text-zinc-500 opacity-0 hover:text-red-400 group-hover:opacity-100" onClick={async () => { if ((await confirmAction(`Revoke token "${t.name}"?`))) { await api.del(`/api/tokens/${t.id}`); await refresh(); } }} title="Revoke" aria-label={`Revoke ${t.name}`}>
+                <DataTable
+                  label="API tokens"
+                  rows={tokens}
+                  rowKey={(t) => t.id}
+                  columns={[
+                    { key: 'name', header: 'Name', sortValue: (t) => t.name, cell: (t) => <><div className="text-zinc-200">{t.name}</div><div className="font-mono text-2xs text-zinc-500">{t.token_prefix}…</div></> },
+                    { key: 'scopes', header: 'Scopes', cell: (t) => <span className="text-xs text-zinc-400">{t.scopes.join(', ')}</span> },
+                    { key: 'workspace', header: 'Workspace', cell: (t) => <span className="text-xs text-zinc-400">{t.workspace_id ? (workspaces.find((w) => w.id === t.workspace_id)?.name ?? t.workspace_id.slice(0, 8)) : 'all'}</span> },
+                    { key: 'last_used', header: 'Last used', cell: (t) => <span className="text-xs text-zinc-500">{timeAgo(t.last_used_at)}</span> },
+                    { key: 'expires', header: 'Expires', cell: (t) => <span className="text-xs text-zinc-500">{t.expires_at ? (new Date(t.expires_at) < new Date() ? <span className="text-red-400">expired</span> : new Date(t.expires_at).toLocaleDateString()) : 'never'}</span> },
+                    { key: 'c5', header: '', align: 'right', sortValue: (t) => t.name, cell: (t) => <><button className="rounded p-1 text-zinc-500 opacity-0 hover:text-red-400 group-hover:opacity-100" onClick={async () => { if ((await confirmAction(`Revoke token "${t.name}"?`))) { await api.del(`/api/tokens/${t.id}`); await refresh(); } }} title="Revoke" aria-label={`Revoke ${t.name}`}>
                             <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          </button></> },
+                  ]}
+                />
               )}
             </section>
           )}

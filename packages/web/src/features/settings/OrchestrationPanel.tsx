@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2, CircleAlert, Loader2 } from 'lucide-react';
 import { api, timeAgo } from '../../api/client';
 import { CopyButton, Tabs, cn } from '../../components/ui';
+import { DataTable } from '../../components/data';
 
 interface OrchestrationRun { id: string; kind: string; target_id: string | null; label: string; status: 'running' | 'succeeded' | 'failed'; summary: string | null; source: string; external_run_id: string | null; started_at: string; finished_at: string | null }
 interface Target { kind: string; id: string; name: string }
@@ -98,21 +99,21 @@ curl "${location.origin}/api/orchestrate/runs/<run id>?wait=30" -H "Authorizatio
       <div>
         <h3 className="mb-1 text-body font-medium text-zinc-100">Recent runs</h3>
         {runs && runs.length === 0 ? <p className="text-zinc-500">No runs yet.</p> : (
-          <table className="w-full table-fixed text-left" data-testid="orchestration-runs">
-            <thead className="text-zinc-500"><tr><th className="w-6" /><th className="w-24 py-1 font-normal">From</th><th className="w-24 font-normal">Kind</th><th className="font-normal">What</th><th className="font-normal">Result</th><th className="w-24 text-right font-normal">When</th></tr></thead>
-            <tbody>
-              {(runs ?? []).map((r) => (
-                <tr key={r.id} className="border-t border-zinc-800/70" data-run-status={r.status}>
-                  <td className="py-1.5">{r.status === 'running' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : r.status === 'succeeded' ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> : <CircleAlert className="h-3.5 w-3.5 text-red-400" />}</td>
-                  <td className="text-zinc-300" title={r.external_run_id ?? undefined}>{SOURCE[r.source] ?? r.source}</td>
-                  <td className="text-zinc-400">{r.kind.replace('_', ' ')}</td>
-                  <td className="truncate text-zinc-200" title={r.label}>{r.label}</td>
-                  <td className={cn('truncate', r.status === 'failed' ? 'text-red-300' : 'text-zinc-400')} title={r.summary ?? undefined}>{r.summary ?? '…'}</td>
-                  <td className="text-right text-zinc-500">{timeAgo(r.started_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            label="Recent runs"
+            testid="orchestration-runs"
+            rows={(runs ?? [])}
+            rowKey={(r) => r.id}
+            rowProps={(r) => ({ 'data-run-status': r.status })}
+            columns={[
+              { key: 'c0', header: '', width: 'w-6', sortValue: (r) => r.status, cell: (r) => <>{r.status === 'running' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : r.status === 'succeeded' ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> : <CircleAlert className="h-3.5 w-3.5 text-red-400" />}</> },
+              { key: 'from', header: 'From', width: 'w-24', cell: (r) => <span className="text-zinc-300">{SOURCE[r.source] ?? r.source}</span> },
+              { key: 'kind', header: 'Kind', width: 'w-24', sortValue: (r) => r.kind, cell: (r) => <span className="text-zinc-400">{r.kind.replace('_', ' ')}</span> },
+              { key: 'what', header: 'What', truncate: true, sortValue: (r) => r.label, cell: (r) => <span className="truncate text-zinc-200">{r.label}</span> },
+              { key: 'result', header: 'Result', truncate: true, cell: (r) => <span className="truncate">{r.summary ?? '…'}</span> },
+              { key: 'when', header: 'When', width: 'w-24', align: 'right', cell: (r) => <span className="text-zinc-500">{timeAgo(r.started_at)}</span> },
+            ]}
+          />
         )}
       </div>
     </div>

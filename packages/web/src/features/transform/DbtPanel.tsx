@@ -13,6 +13,7 @@ import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { useCopilot } from '../../store/copilot';
 import { Badge, Button, Empty, Input, Label, Modal, Select, cn, confirmAction, promptAction } from '../../components/ui';
 import { HistoryButton } from '../history/HistoryDrawer';
+import { DataTable } from '../../components/data';
 
 const COMMANDS: { id: DbtCommand; label: string; hint: string }[] = [
   { id: 'build', label: 'Build', hint: 'Seeds, models and tests in dependency order; a failing test skips what is downstream' },
@@ -383,28 +384,23 @@ function ProjectView({ id }: { id: string }) {
               {run.error && <div className="whitespace-pre-wrap rounded-md border border-red-900 bg-red-950/40 px-3 py-2 font-mono text-2xs text-red-200" data-testid="dbt-run-error">{run.error}</div>}
               {showLog && run.log && <pre className="max-h-72 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-2xs text-zinc-400">{run.log}</pre>}
               {results.length > 0 && (
-                <table className="w-full">
-                  <thead className="text-left text-2xs text-zinc-500">
-                    <tr><th className="pb-1">Node</th><th className="pb-1">Type</th><th className="pb-1">Status</th><th className="pb-1 text-right">Rows</th><th className="pb-1 text-right">Time</th><th className="pb-1 pl-3">Message</th></tr>
-                  </thead>
-                  <tbody>
-                    {results.map((r) => (
-                      <Fragment key={r.unique_id}>
-                        <tr className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-900/60" onClick={() => setOpenSql(openSql === r.unique_id ? null : r.unique_id)} data-node={r.name}>
-                          <td className="py-1 font-mono text-zinc-200">{r.relation ?? r.name}</td>
-                          <td className="py-1 text-zinc-500">{r.resource_type}{r.materialized ? ` · ${r.materialized}` : ''}</td>
-                          <td className="py-1"><Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge></td>
-                          <td className="py-1 text-right text-zinc-400">{r.rows ?? (r.failures !== null ? `${r.failures} failing` : '')}</td>
-                          <td className="py-1 text-right text-zinc-500">{r.duration_ms} ms</td>
-                          <td className="max-w-[28rem] truncate py-1 pl-3 text-zinc-400" title={r.message ?? ''}>{r.message}</td>
-                        </tr>
-                        {openSql === r.unique_id && r.sql && (
-                          <tr><td colSpan={6}><pre className="max-h-64 overflow-auto rounded bg-zinc-950 p-2 font-mono text-2xs text-zinc-300">{r.sql}</pre></td></tr>
-                        )}
-                      </Fragment>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  label="dbt run results"
+                  density="compact"
+                  rows={results}
+                  rowKey={(r) => r.unique_id}
+                  rowProps={(r) => ({ 'data-node': r.name })}
+                  onRowClick={(r) => setOpenSql(openSql === r.unique_id ? null : r.unique_id)}
+                  expanded={(r) => (openSql === r.unique_id && r.sql ? <pre className="max-h-64 overflow-auto rounded bg-zinc-950 p-2 font-mono text-2xs text-zinc-300">{r.sql}</pre> : null)}
+                  columns={[
+                    { key: 'node', header: 'Node', sortValue: (r) => r.relation ?? r.name, cell: (r) => <span className="font-mono text-zinc-200">{r.relation ?? r.name}</span> },
+                    { key: 'type', header: 'Type', sortValue: (r) => r.resource_type, cell: (r) => <span className="text-zinc-500">{r.resource_type}{r.materialized ? ` · ${r.materialized}` : ''}</span> },
+                    { key: 'status', header: 'Status', sortValue: (r) => r.status, cell: (r) => <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge> },
+                    { key: 'rows', header: 'Rows', align: 'right', numeric: true, sortValue: (r) => r.rows ?? r.failures ?? null, cell: (r) => <span className="text-zinc-400">{r.rows ?? (r.failures !== null ? `${r.failures} failing` : '')}</span> },
+                    { key: 'time', header: 'Time', align: 'right', numeric: true, sortValue: (r) => r.duration_ms, cell: (r) => <span className="text-zinc-500">{r.duration_ms} ms</span> },
+                    { key: 'message', header: 'Message', truncate: true, cell: (r) => <span className="text-zinc-400" title={r.message ?? ''}>{r.message}</span> },
+                  ]}
+                />
               )}
             </>
           )}
