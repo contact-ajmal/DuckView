@@ -68,6 +68,9 @@
  * The cdc scenario mirrors a Postgres table (E2E_PG_CDC, default postgres://cdc:cdcpass@localhost:55432/shop — a
  * Postgres with wal_level = logical) through a Postgres CDC stream: the existing rows, then an update and a delete
  * made in Postgres, with the history of changes; removing the stream drops its replication slot.
+ * The saas-sources scenario finds the GitHub, Jira, Zendesk, Shopify, Intercom, Linear, Pipedrive and Mailchimp
+ * sources in Connections → Add a source and opens their forms (the vendor APIs themselves are covered by server
+ * tests against mocks).
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -999,6 +1002,22 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'saas-sources') {
+    const ids = ['github', 'jira', 'zendesk', 'shopify', 'intercom', 'linear', 'pipedrive', 'mailchimp'];
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app');
+    await evaluate(`location.hash = '#/connections/catalog'; true`);
+    await waitFor(`!!document.querySelector('[data-source="github"]')`, 20000, 'catalog');
+    report.details.cards = await evaluate(`${JSON.stringify(ids)}.filter(id => !!document.querySelector('[data-source="' + id + '"]'))`);
+    await setField('input[placeholder^="Search sources"]', 'jira');
+    await waitFor(`!!document.querySelector('[data-source="jira"]') && !document.querySelector('[data-source="github"]')`, 5000, 'search');
+    await evaluate(`document.querySelector('[data-source="jira"]').click(); true`);
+    await waitFor(`/API token/.test(document.body.innerText) && /Site URL/.test(document.body.innerText)`, 10000, 'jira form');
+    report.details.jiraForm = await evaluate(`['Site URL', 'Atlassian account email', 'API token'].every(t => document.body.innerText.includes(t))`);
+    await sleep(400);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_jira.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'cdc') {
     const { createRequire } = await import('node:module');
     const require = createRequire(new URL('../packages/server/package.json', import.meta.url));
@@ -1636,6 +1655,10 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'saas-sources') {
+    if ((d.cards ?? []).length !== 8) problems.push(`cards: ${JSON.stringify(d.cards)}`);
+    if (!d.jiraForm) problems.push('the Jira form is missing fields');
   }
   if (scenario === 'cdc' && !d.skipped) {
     if (!/4 columns, key id; wal_level logical/.test(d.tested ?? '')) problems.push(`tested: ${d.tested}`);

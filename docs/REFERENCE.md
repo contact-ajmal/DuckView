@@ -248,7 +248,7 @@ API: `POST /api/workspaces/:id/dashboards {name, description?, kind?: grid|mosai
 | Databases | PostgreSQL, MySQL / MariaDB, SQLite files, DuckDB files |
 | Web, Drive & Sheets | HTTP / REST endpoints (CSV, JSON, Parquet, Excel over HTTPS with a bearer token or headers), **Google Drive** and **Google Sheets** through a Google account, Google Sheets shared links (no sign-in) |
 | Warehouses | **Snowflake**, **Google BigQuery**, **Amazon Redshift**, **ClickHouse**, **Microsoft Fabric / OneLake** |
-| SaaS applications | **Salesforce**, **HubSpot**, **Stripe**, **Google Analytics 4**, **Airtable**, **Notion** |
+| SaaS applications | **Salesforce**, **HubSpot**, **Stripe**, **Google Analytics 4**, **Airtable**, **Notion**, **GitHub**, **Jira**, **Zendesk**, **Shopify**, **Intercom**, **Linear**, **Pipedrive**, **Mailchimp** |
 
 **Connectors** (`services/connectors/`, `connector_connections`, `/api/connectors` · `/api/connector-connections` CRUD · `/test` · `/browse?path=a/b` · `/query`) cover the warehouses, the SaaS applications and Google Drive / Sheets. Each connector module knows how to *test* a connection, *browse* what it offers one level at a time (databases → schemas → tables, bases → tables, objects, folders → files, spreadsheets → tabs …), *read* a resource as row batches and, for warehouses, run *SQL remotely*:
 
@@ -265,6 +265,14 @@ API: `POST /api/workspaces/:id/dashboards {name, description?, kind?: grid|mosai
 | GA4 | Data API `runReport` (dimensions × metrics × date range, offset paging) | Google account or service account | report presets, editable resource `{dimensions, metrics, start_date, end_date}` |
 | Airtable | meta bases / tables, records with `offset` paging | personal access token | base → table (optional view) |
 | Notion | `search` for databases, `query` with `start_cursor`; properties flattened to plain values | internal integration secret | database |
+| GitHub | REST, `Link` header paging (GitHub Enterprise through the API URL); pull requests left out of issues, labels and assignees as lists | fine-grained personal access token | repository → issues, pulls, commits, releases, workflow runs, contributors |
+| Jira | REST v3 enhanced JQL search (`nextPageToken`); columns named after Jira's fields (custom fields too), people and options as their names, descriptions as plain text | account email + API token | project, or `{jql}` |
+| Zendesk | REST, cursor paging (`page[size]`, `links.next`) | agent email + API token | tickets, users, organizations, groups, satisfaction ratings, ticket fields |
+| Shopify | Admin REST (2025-01), `Link` header `page_info` paging; orders of every status | Admin API access token | orders, customers, products, draft orders, collections, locations |
+| Intercom | REST (2.11), `starting_after` cursors; US, EU and AU hosts | access token | contacts, conversations, companies, admins, tags, teams |
+| Linear | GraphQL with `first`/`after` cursors; nested objects flattened (`state.name`, `assignee.name`), connections as lists | personal API key | issues, projects, cycles, teams, users |
+| Pipedrive | REST v1, `start`/`limit` paging; custom fields renamed from their hash keys | company domain + API token | deals, persons, organizations, activities, leads, products, pipelines, stages, users |
+| Mailchimp | Marketing API 3.0, `offset`/`count`; the host from the key's data center | API key | audience → members, campaigns, reports |
 | Google Drive | Drive v3 listing; CSV / TSV / JSON / Parquet / Excel downloaded, a Google Sheet exported as CSV | Google account | folder → file |
 | Google Sheets | Drive listing + Sheets v4 `values` (first row = header, padding rows dropped) | Google account | spreadsheet → tab |
 

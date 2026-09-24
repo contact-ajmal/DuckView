@@ -267,7 +267,7 @@ describe('registry and secrecy', () => {
   it('lists the 13 connectors with their auth kinds and never returns credentials', async () => {
     const r = await api('GET', '/api/connectors');
     const connectors = r.json.connectors as { id: string; auth: { kind: string; scopes?: string[] }; remote_sql: boolean }[];
-    expect(connectors.map((c) => c.id)).toEqual(['snowflake', 'bigquery', 'redshift', 'clickhouse', 'fabric', 'salesforce', 'hubspot', 'stripe', 'ga4', 'airtable', 'notion', 'google_drive', 'google_sheets']);
+    expect(connectors.map((c) => c.id)).toEqual(['snowflake', 'bigquery', 'redshift', 'clickhouse', 'fabric', 'salesforce', 'hubspot', 'stripe', 'ga4', 'airtable', 'notion', 'github', 'jira', 'zendesk', 'shopify', 'intercom', 'linear', 'pipedrive', 'mailchimp', 'google_drive', 'google_sheets']);
     expect(connectors.filter((c) => c.auth.kind === 'google').map((c) => c.id)).toEqual(['bigquery', 'ga4', 'google_drive', 'google_sheets']);
     expect(connectors.filter((c) => c.remote_sql).map((c) => c.id)).toEqual(['snowflake', 'bigquery', 'redshift', 'clickhouse']);
     expect(r.json.google).toEqual({ configured: false });

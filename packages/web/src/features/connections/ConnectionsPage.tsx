@@ -227,7 +227,7 @@ export function ConnectionsPage() {
                 <div className="mb-2 flex items-baseline gap-2"><span className="text-zinc-500">{FAMILY_ICON[fam]}</span><h3 className="text-[13px] font-semibold text-zinc-100">{catalog.families[fam].label}</h3><span className="truncate text-xs text-zinc-500">{catalog.families[fam].blurb}</span></div>
                 <div className="grid gap-x-6 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
                   {items.map((s) => (
-                    <button key={s.id} type="button" disabled={s.status === 'planned' || !canEdit} onClick={() => openWizard(s)} className={cn('group flex items-start gap-3 border-b border-zinc-800/70 px-1 py-2.5 text-left', s.status === 'planned' ? 'cursor-default opacity-50' : 'hover:bg-zinc-900')} title={s.status === 'planned' ? 'Planned — not available yet' : `Connect ${s.label}`}>
+                    <button key={s.id} type="button" data-source={s.id} disabled={s.status === 'planned' || !canEdit} onClick={() => openWizard(s)} className={cn('group flex items-start gap-3 border-b border-zinc-800/70 px-1 py-2.5 text-left', s.status === 'planned' ? 'cursor-default opacity-50' : 'hover:bg-zinc-900')} title={s.status === 'planned' ? 'Planned — not available yet' : `Connect ${s.label}`}>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="truncate text-[13px] font-medium text-zinc-100">{s.label}</span>

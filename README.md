@@ -43,7 +43,7 @@ Most "SQL UIs" stop at the query box. DuckView is a complete, self-hosted data w
 |  |  |
 |---|---|
 | ⚡ **Query anything, instantly** | Parquet, CSV, JSON, Excel, DuckDB files, S3 / R2 / GCS / Azure objects, Iceberg catalogs on AWS Glue, S3 Tables, any Iceberg REST catalog and Databricks. Drop a file, add a folder from anywhere on the machine, or pick a bucket — it's queryable in seconds. |
-| 🔌 **Every source, one page** | **Connections** covers object storage, lakehouse catalogs, PostgreSQL / MySQL / SQLite / DuckDB files, **Snowflake · BigQuery · Redshift · ClickHouse · Microsoft Fabric**, **Salesforce · HubSpot · Stripe · Google Analytics 4 · Airtable · Notion**, HTTP endpoints and **Google Drive / Sheets with your Google account** — health-checked, browsable in place, credentials encrypted and write-only. **Syncs** load any of them into a workspace table on a schedule, with a transformation validated before it is saved. |
+| 🔌 **Every source, one page** | **Connections** covers object storage, lakehouse catalogs, PostgreSQL / MySQL / SQLite / DuckDB files, **Snowflake · BigQuery · Redshift · ClickHouse · Microsoft Fabric**, **Salesforce · HubSpot · Stripe · Google Analytics 4 · Airtable · Notion · GitHub · Jira · Zendesk · Shopify · Intercom · Linear · Pipedrive · Mailchimp**, HTTP endpoints and **Google Drive / Sheets with your Google account** — health-checked, browsable in place, credentials encrypted and write-only. **Syncs** load any of them into a workspace table on a schedule, with a transformation validated before it is saved. |
 | 📜 **Audit to your SIEM** | Every action in the audit log streamed to **Splunk, Datadog, Elasticsearch / OpenSearch**, a signed webhook, or gzipped NDJSON in S3 / R2 / GCS / Azure — in order, from a cursor, at least once through outages. |
 | 🧭 **Catalog & lineage** | Descriptions and tags on tables and columns (Copilot and agents read them), and a lineage graph from sources and syncs through tables and views to queries, dashboards, alerts, apps and snapshots — SQL read with DuckDB's own parser. Sync runs emit **OpenLineage** events for Marquez, DataHub or OpenMetadata. |
 | 🛡 **Row & column security** | Access policies per table: a row filter (`region = 'EU'`, `owner_email = {{user.email}}`, team membership) and column masks (hidden, redacted, hashed, last-4) for viewers, editors, people or teams — rewritten into every query with DuckDB's own parser, so joins, CTEs, dashboards, Mosaic, alerts, exports and agents all see only what's allowed. Owners preview a query as any member. |
@@ -134,7 +134,7 @@ One page for every source. Each card in the catalog opens the form for that exac
 | Lakehouse catalogs | AWS Glue / SageMaker Lakehouse, Amazon S3 Tables, any Iceberg REST catalog, Databricks |
 | Databases | PostgreSQL, MySQL / MariaDB, SQLite files, DuckDB files — attached read-only as `alias.schema.table` |
 | Warehouses | Snowflake (SQL API), Google BigQuery, Amazon Redshift (Data API), ClickHouse, Microsoft Fabric / OneLake — browse, run SQL remotely, land the result in DuckDB |
-| SaaS applications | Salesforce, HubSpot, Stripe, Google Analytics 4, Airtable, Notion — objects pulled page by page on a schedule |
+| SaaS applications | Salesforce, HubSpot, Stripe, Google Analytics 4, Airtable, Notion, GitHub, Jira, Zendesk, Shopify, Intercom, Linear, Pipedrive, Mailchimp — objects pulled page by page on a schedule |
 | Web, Drive & Sheets | HTTP / REST endpoints, Google Drive and Google Sheets with your Google account (admin-registered OAuth client, read-only scopes) or a service account, shared-link sheets |
 
 <p align="center"><img src="docs/screenshots/connections.png" alt="The Connections catalog: object storage, lakehouse catalogs, databases, warehouses, SaaS applications, Drive and Sheets" width="92%"></p>
@@ -299,7 +299,7 @@ Full details — configuration keys, every endpoint, the MCP tool contracts, CLI
 
 ## 🧪 Quality
 
-`pnpm test` runs **240 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API), stand in for Snowflake, BigQuery, Redshift, ClickHouse, Salesforce, HubSpot, Stripe, GA4, Airtable, Notion and Google's OAuth / Drive / Sheets APIs, run the data-app runner and proxy against a fake Streamlit, drive the Python SDK against the server, and exercise the agent façade against a fake AWS bridge. CI runs it on Linux; `scripts/smoke.mjs` verifies a running instance (or the Docker image) end to end, a Streamlit app included.
+`pnpm test` runs **240 tests** that boot real DuckDB engines and the MCP server over every transport, serve **real Iceberg tables** through a mock REST catalog, emulate a Databricks workspace (Unity Catalog + Statement Execution API), stand in for Snowflake, BigQuery, Redshift, ClickHouse, Salesforce, HubSpot, Stripe, GA4, Airtable, Notion, GitHub, Jira, Zendesk, Shopify, Intercom, Linear, Pipedrive, Mailchimp and Google's OAuth / Drive / Sheets APIs, run the data-app runner and proxy against a fake Streamlit, drive the Python SDK against the server, and exercise the agent façade against a fake AWS bridge. CI runs it on Linux; `scripts/smoke.mjs` verifies a running instance (or the Docker image) end to end, a Streamlit app included.
 
 ---
 
