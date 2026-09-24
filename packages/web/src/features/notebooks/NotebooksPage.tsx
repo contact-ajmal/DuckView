@@ -13,6 +13,7 @@ import { ChartPanel } from '../workspace/ChartPanel';
 import { registerCopilotHost } from '../copilot/CopilotDrawer';
 import { CommentsButton, CommentsPanel, useCommentCounts } from '../comments/CommentsPanel';
 import { HistoryButton } from '../history/HistoryDrawer';
+import { usePageObject } from '../../store/context';
 
 const idOf = () => /^#\/notebooks\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
 
@@ -91,6 +92,7 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
   const ws = useWorkspace();
   const cp = useCopilot();
   const [nb, setNb] = useState<Notebook | null>(null);
+  usePageObject(nb ? { kind: 'notebook', id: nb.id, label: nb.title } : null);
   const [error, setError] = useState<string | null>(null);
   const [save, setSave] = useState<Save>('saved');
   const [conflict, setConflict] = useState<string | null>(null);

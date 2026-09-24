@@ -14,6 +14,7 @@ import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { PageHeader } from '../../components/layout';
 import { Badge, Button, Empty, IconButton, Input, Label, Modal, Select, StatusDot, cn, confirmAction, InlineError } from '../../components/ui';
 import { DataTable } from '../../components/data';
+import { usePageObject } from '../../store/context';
 
 /** #/apps — the gallery of a workspace's Streamlit apps; #/apps/<id> — the editor with a live preview. */
 export function AppsPage() {
@@ -216,6 +217,7 @@ function AppEditor({ id }: { id: string }) {
   const { canEdit } = useWorkspaceAccess();
   const isAdmin = useAuth((a) => a.user?.role === 'ADMIN');
   const [app, setApp] = useState<DataApp | null>(null);
+  usePageObject(app ? { kind: 'app', id: app.id, label: app.name } : null);
   const [publishing, setPublishing] = useState(false);
   const [files, setFiles] = useState<Record<string, string>>({});
   const [active, setActive] = useState('app.py');

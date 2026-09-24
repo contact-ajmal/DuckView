@@ -39,7 +39,7 @@ export function McpPage() {
   const auth = useAuth();
   const [aiTab, setAiTab] = useState<AiTab>(() => {
     const t = (location.hash.split('/')[2] ?? '').split('?')[0]!;
-    return ['hosted', 'agents', 'tools', 'mcp', 'activity', 'approvals'].includes(t) ? (t as AiTab) : 'agents';
+    return ['hosted', 'agents', 'tools', 'mcp', 'activity', 'approvals'].includes(t) ? (t as AiTab) : 'activity';
   });
   const [info, setInfo] = useState<McpInfo | null>(null);
   const [tokens, setTokens] = useState<ApiToken[]>([]);
@@ -133,7 +133,7 @@ export function McpPage() {
     <div className="h-full overflow-auto">
     <div className="mx-auto max-w-[1280px] space-y-4 px-6 py-5">
       <PageHeader
-        title="AI"
+        title="Agents"
         description="Agents and MCP clients working with this server, what they do, and what waits for your approval."
         actions={<Button onClick={() => setCreating(true)}><KeyRound className="h-3.5 w-3.5" /> New API token</Button>}
       />
@@ -149,14 +149,14 @@ export function McpPage() {
       )}
       <Tabs<AiTab>
         value={aiTab}
-        onChange={(t) => { setAiTab(t); history.replaceState(null, '', `#/mcp/${t}`); }}
+        onChange={(t) => { setAiTab(t); history.replaceState(null, '', `#/agents/${t}`); }}
         tabs={[
-          { id: 'hosted', label: 'DuckView agents' },
-          { id: 'agents', label: 'Connected agents', count: agents.length },
-          { id: 'tools', label: 'Tools', count: info?.tools.length },
-          { id: 'mcp', label: 'MCP clients', count: sessions.length },
           { id: 'activity', label: 'Activity' },
           { id: 'approvals', label: 'Approvals', count: approvals.length },
+          { id: 'hosted', label: 'DuckView agents' },
+          { id: 'agents', label: 'Connected agents', count: agents.length },
+          { id: 'mcp', label: 'MCP clients', count: sessions.length },
+          { id: 'tools', label: 'Tools', count: info?.tools.length },
         ]}
       />
 

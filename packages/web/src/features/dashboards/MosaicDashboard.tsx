@@ -12,6 +12,7 @@ import { CommentsControl } from '../comments/CommentsPanel';
 import { MosaicSpecView, type SpecRenderStatus } from './MosaicSpecView';
 import { SpecEditor } from './SpecEditor';
 import { HistoryButton } from '../history/HistoryDrawer';
+import { usePageObject } from '../../store/context';
 
 const STARTER = `# Mosaic dashboard — https://idl.uw.edu/mosaic/spec/
 # Reference workspace tables directly (from: my_table) or define datasets below.
@@ -50,6 +51,7 @@ export function MosaicDashboard({ id }: { id: string }) {
   const ws = useWorkspace();
   const { canEdit: canWrite } = useWorkspaceAccess();
   const [dash, setDash] = useState<Dashboard | null>(null);
+  usePageObject(dash ? { kind: 'dashboard', id: dash.id, label: dash.name } : null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [edit, setEdit] = useState(false);
   const [format, setFormat] = useState<'yaml' | 'json'>('yaml');

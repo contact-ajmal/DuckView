@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, Search, Sparkles, Users, Plus, LogOut, Moon, Sun, Check, SlidersHorizontal, LayoutPanelLeft, Eye, Cloud, HardDrive, Zap, FolderOpen, AlertTriangle } from 'lucide-react';
-import { sectionOf, type Route } from '../../app/routes';
+import { ChevronDown, Search, Sparkles, Users, Plus, LogOut, Moon, Sun, Check, SlidersHorizontal, LayoutPanelLeft, Eye, Cloud, HardDrive, Zap, FolderOpen, AlertTriangle, AppWindow, Bot, Boxes, FileCode2, LayoutDashboard, NotebookPen, Table2, Menu as MenuIcon } from 'lucide-react';
+import { SECTIONS, sectionOf, type Route } from '../../app/routes';
 import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
@@ -9,7 +9,8 @@ import { storageKindOf, type Workspace } from '../../api/client';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { usePalette } from './palette';
 import { InboxBell } from './InboxBell';
-import { Kbd, Menu, MenuDivider, MenuItem, StatusDot, cn } from '../ui';
+import { Kbd, Menu, MenuDivider, MenuItem, StatusDot, cn, IconButton, Drawer } from '../ui';
+import { usePageContext, type PageObjectKind } from '../../store/context';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -25,6 +26,9 @@ function storageLabel(w: Workspace): { icon: typeof Cloud; text: string; title: 
   return { icon: kind === 'folder' ? FolderOpen : HardDrive, text: w.active_db_path.split('/').pop() ?? w.active_db_path, title: kind === 'folder' ? `Stored in a folder on the server: ${w.active_db_path}` : `DuckDB file in the data directory: ${w.active_db_path}` };
 }
 
+const OBJECT_ICON: Record<PageObjectKind, typeof Table2> = { dataset: Table2, dashboard: LayoutDashboard, notebook: NotebookPen, query: FileCode2, app: AppWindow, model: Boxes, agent: Bot };
+const OBJECT_NOUN: Record<PageObjectKind, string> = { dataset: 'Dataset', dashboard: 'Dashboard', notebook: 'Notebook', query: 'Query tab', app: 'App', model: 'Model', agent: 'Agent' };
+
 /** Compact application header: where you are, the command bar, status, AI and your account. */
 export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNewWorkspace: () => void; onShare: () => void }) {
   const auth = useAuth();
@@ -36,10 +40,27 @@ export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNew
   useEffect(() => subscribeLiveEvents(() => undefined, setLive), []);
   const active = ws.workspaces.find((w) => w.id === ws.activeId);
   const section = sectionOf(route.section);
+  const object = usePageContext((c) => c.object);
+  const [navOpen, setNavOpen] = useState(false);
   const storage = active ? storageLabel(active) : null;
 
   return (
     <header className="flex h-[var(--topbar-h)] shrink-0 items-center gap-3 border-b border-zinc-800 bg-zinc-950 pl-3 pr-2">
+      {/* Narrow screens: the rail is hidden; its sections open from here. */}
+      <IconButton label="Open navigation" className="sm:hidden" onClick={() => setNavOpen(true)}><MenuIcon className="h-4 w-4" /></IconButton>
+      <Drawer open={navOpen} onClose={() => setNavOpen(false)} title="DuckView" width="w-72">
+        <nav aria-label="Sections" className="p-2">
+          {SECTIONS.map((s) => (
+            <a key={s.id} href={s.hash} onClick={() => setNavOpen(false)} aria-current={route.section === s.id ? 'page' : undefined} className={cn('flex items-center gap-3 rounded-md px-3 py-2 text-body', route.section === s.id ? 'bg-zinc-800/80 text-zinc-50' : 'text-zinc-300 hover:bg-zinc-900')}>
+              <s.icon className="h-4 w-4 text-zinc-500" />
+              <span className="min-w-0 flex-1">
+                <span className="block">{s.label}</span>
+                <span className="block truncate text-2xs text-zinc-500">{s.hint}</span>
+              </span>
+            </a>
+          ))}
+        </nav>
+      </Drawer>
       {/* Workspace › section › page */}
       <div className="flex min-w-0 flex-1 items-center gap-1 text-body">
         <Menu
@@ -103,6 +124,15 @@ export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNew
           <>
             <span className="text-zinc-700">/</span>
             <span className="truncate px-1.5 text-zinc-400">{route.crumb}</span>
+          </>
+        )}
+        {object && (
+          <>
+            <span className="text-zinc-700">/</span>
+            <span className="flex min-w-0 items-center gap-1.5 px-1.5 text-zinc-100" data-testid="page-object" title={`${OBJECT_NOUN[object.kind]}: ${object.label}`}>
+              {(() => { const I = OBJECT_ICON[object.kind]; return <I className="h-3.5 w-3.5 shrink-0 text-zinc-500" />; })()}
+              <span className="truncate">{object.label}</span>
+            </span>
           </>
         )}
       </div>

@@ -3,7 +3,7 @@
  * used still resolves (links in docs, notifications, agents and snapshots keep working); pages that used to be
  * top-level now live inside the section they belong to.
  */
-import { House, Database, SquareTerminal, LayoutDashboard, AppWindow, Sparkles, Plug, Settings, type LucideIcon } from 'lucide-react';
+import { House, Database, SquareTerminal, LayoutDashboard, AppWindow, Bot, Plug, Settings, type LucideIcon } from 'lucide-react';
 
 export type Section = 'home' | 'data' | 'sql' | 'dashboards' | 'apps' | 'ai' | 'connections' | 'settings';
 /** Which component renders the page. */
@@ -15,7 +15,7 @@ export const SECTIONS: { id: Section; label: string; hash: string; icon: LucideI
   { id: 'sql', label: 'SQL', hash: '#/query', icon: SquareTerminal, hint: 'The SQL workbench and notebooks' },
   { id: 'dashboards', label: 'Dashboards', hash: '#/dashboards', icon: LayoutDashboard, hint: 'Dashboards, alerts and scheduled snapshots' },
   { id: 'apps', label: 'Apps', hash: '#/apps', icon: AppWindow, hint: 'Data apps (Streamlit, Dash, Gradio)' },
-  { id: 'ai', label: 'AI', hash: '#/mcp', icon: Sparkles, hint: 'Agents, MCP, activity and approvals' },
+  { id: 'ai', label: 'Agents', hash: '#/agents', icon: Bot, hint: 'What agents are doing, what waits for your approval, and the agents and tools that reach DuckView' },
   { id: 'connections', label: 'Connections', hash: '#/connections', icon: Plug, hint: 'Storage, databases, warehouses, SaaS and lakehouses' },
   { id: 'settings', label: 'Settings', hash: '#/settings', icon: Settings, hint: 'Workspace, appearance, security and more' },
 ];

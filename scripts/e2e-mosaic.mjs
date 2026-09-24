@@ -1168,6 +1168,37 @@ try {
     report.details.afterDelete = (await authed(`/api/dashboards/${dash.id}`)).status;
     report.details.charts = 1;
   }
+  else if (scenario === 'shell') {
+    // Where am I: the open object in the breadcrumb; Settings in three groups; narrow screens.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const dash = (await (await authed(`/api/workspaces/${wsId}/dashboards`, { method: 'POST', body: JSON.stringify({ name: `E2E shell ${Date.now()}` }) })).json()).dashboard;
+    cleanup = async () => { await send('Emulation.clearDeviceMetricsOverride'); await authed(`/api/dashboards/${dash.id}`, { method: 'DELETE' }); };
+    await evaluate(`location.hash = '#/dashboards/${dash.id}'; 'ok'`);
+    await waitFor(`document.querySelector('[data-testid="page-object"]')?.textContent === ${JSON.stringify(dash.name)}`, 15000, 'dashboard in the breadcrumb');
+    report.details.crumb = await evaluate(`document.querySelector('[data-testid="page-object"]').parentElement.innerText.split('\\n').map(x => x.trim()).filter(x => x && x !== '/').join(' | ')`);
+    await evaluate(`location.hash = '#/settings/usage'; 'ok'`);
+    await waitFor(`!!document.querySelector('nav[aria-label="Settings"]')`, 10000, 'settings');
+    await waitFor(`!document.querySelector('[data-testid="page-object"]')`, 5000, 'object cleared on another page');
+    report.details.groups = await evaluate(`[...document.querySelectorAll('nav[aria-label="Settings"] > div > div:first-child')].map(d => d.textContent)`);
+    report.details.rail = await evaluate(`[...document.querySelectorAll('nav[aria-label="Primary"] a')].map(a => a.textContent.trim()).filter(Boolean)`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_settings.png'), Buffer.from(shot.result.data, 'base64')); }
+    // Narrow: the settings nav becomes a picker; below 640 the rail hides behind a menu button.
+    await send('Emulation.setDeviceMetricsOverride', { width: 900, height: 900, deviceScaleFactor: 1, mobile: false });
+    await sleep(500);
+    report.details.narrowSettings = await evaluate(`({ nav: getComputedStyle(document.querySelector('nav[aria-label="Settings"]')).display, picker: !!document.querySelector('select[aria-label="Settings page"]')?.offsetParent })`);
+    await send('Emulation.setDeviceMetricsOverride', { width: 600, height: 900, deviceScaleFactor: 1, mobile: false });
+    await sleep(500);
+    report.details.phoneRail = await evaluate(`getComputedStyle(document.querySelector('nav[aria-label="Primary"]')).display`);
+    await evaluate(`document.querySelector('[aria-label="Open navigation"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('nav[aria-label="Sections"]')`, 3000, 'navigation drawer');
+    report.details.drawer = await evaluate(`[...document.querySelectorAll('nav[aria-label="Sections"] a')].map(a => a.querySelector('span span').textContent)`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_phone.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`[...document.querySelectorAll('nav[aria-label="Sections"] a')].find(a => a.textContent.startsWith('Agents')).click(); 'ok'`);
+    await waitFor(`location.hash === '#/agents' && !document.querySelector('nav[aria-label="Sections"]')`, 5000, 'navigated from the drawer');
+    await send('Emulation.clearDeviceMetricsOverride');
+    await waitFor(`[...document.querySelectorAll('[role=tab]')].some(t => t.textContent.startsWith('Activity') && t.getAttribute('aria-selected') === 'true')`, 10000, 'agents open on activity');
+    report.details.charts = 1;
+  }
   else if (scenario === 'orchestration') {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
@@ -1995,6 +2026,14 @@ try {
     if (!d.trapped) problems.push('focus left the dialog');
     if (d.afterCancel !== 200) problems.push(`cancel deleted it (${d.afterCancel})`);
     if (!/^Deleted E2E confirm \d+$/.test(d.toast ?? '') || d.afterDelete !== 404) problems.push(`delete: ${d.toast} ${d.afterDelete}`);
+  }
+  if (scenario === 'shell') {
+    if (!/Dashboards \| .*E2E shell \d+/.test(d.crumb ?? '')) problems.push(`crumb: ${d.crumb}`);
+    if (JSON.stringify(d.groups) !== JSON.stringify(['Your account', `Workspace ${d.groups?.[1]?.slice(10)}`, 'Administration']) || !String(d.groups?.[1]).startsWith('Workspace ')) problems.push(`groups: ${JSON.stringify(d.groups)}`);
+    if (!(d.rail ?? []).includes('Agents') || (d.rail ?? []).includes('AI')) problems.push(`rail: ${JSON.stringify(d.rail)}`);
+    if (d.narrowSettings?.nav !== 'none' || !d.narrowSettings?.picker) problems.push(`narrow settings: ${JSON.stringify(d.narrowSettings)}`);
+    if (d.phoneRail !== 'none') problems.push(`rail on a phone: ${d.phoneRail}`);
+    if ((d.drawer ?? []).length !== 8) problems.push(`drawer: ${JSON.stringify(d.drawer)}`);
   }
   if (scenario === 'orchestration') {
     if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);

@@ -17,6 +17,7 @@ import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, M
 import { CommentsControl } from '../comments/CommentsPanel';
 import { HistoryButton } from '../history/HistoryDrawer';
 import { DataTable } from '../../components/data';
+import { usePageObject } from '../../store/context';
 
 const Grid = WidthProvider(GridLayout);
 
@@ -140,6 +141,7 @@ function mosaicSummary(d: Dashboard): string {
 function DashboardCanvas({ id }: { id: string }) {
   const cp = useCopilot();
   const [dash, setDash] = useState<(Dashboard & { widgets: DashboardWidget[] }) | null>(null);
+  usePageObject(dash ? { kind: 'dashboard', id: dash.id, label: dash.name } : null);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState(false);
   const [editor, setEditor] = useState<{ open: boolean; widget: DashboardWidget | null }>({ open: false, widget: null });

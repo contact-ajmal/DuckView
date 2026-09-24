@@ -30,27 +30,27 @@ import { DataTable } from '../../components/data';
 
 type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients' | 'orchestration' | 'cluster' | 'usage';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; group: string; admin?: boolean }[] = [
-  { id: 'account', group: 'General', label: 'Account', blurb: 'Your password and identity', icon: <UserRound className="h-4 w-4" /> },
-  { id: 'usage', group: 'General', label: 'Usage & cost', blurb: 'Queries, AI and storage, what they cost, and monthly budgets', icon: <ReceiptText className="h-4 w-4" /> },
-  { id: 'teams', group: 'General', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
-  { id: 'appearance', group: 'Appearance', label: 'Theme & fonts', blurb: 'Themes, fonts and interface size', icon: <Palette className="h-4 w-4" /> },
-  { id: 'layout', group: 'Appearance', label: 'Layout', blurb: 'Show or hide parts of the interface', icon: <LayoutTemplate className="h-4 w-4" /> },
-  { id: 'storage', group: 'Connections', label: 'Storage & credentials', blurb: 'Cloud storage, lakehouse catalogs and stored credentials', icon: <Cloud className="h-4 w-4" /> },
-  { id: 'integrations', group: 'Connections', label: 'Integrations', blurb: 'Google sign-in for Drive, Sheets and BigQuery', icon: <Plug className="h-4 w-4" /> },
-  { id: 'users', group: 'Security', label: 'Users', blurb: 'Roles, access and deactivation', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
-  { id: 'audit', group: 'Security', label: 'Audit log', blurb: 'Who did what, and where the log is streamed', icon: <ScrollText className="h-4 w-4" /> },
-  { id: 'provisioning', group: 'Security', label: 'Provisioning', blurb: 'SCIM 2.0 users and teams from your identity provider', icon: <KeyRound className="h-4 w-4" />, admin: true },
-  { id: 'embedding', group: 'Security', label: 'Embedding', blurb: 'Show dashboards and notebooks inside your own application', icon: <Code2 className="h-4 w-4" /> },
-  { id: 'copilot', group: 'AI', label: 'AI assistant', blurb: 'The model DuckView AI uses, keys and usage', icon: <Bot className="h-4 w-4" /> },
-  { id: 'engine', group: 'Data', label: 'Engine', blurb: 'Memory, threads, timeouts and storage of this workspace', icon: <Database className="h-4 w-4" /> },
-  { id: 'sql-clients', group: 'Data', label: 'SQL clients & BI tools', blurb: 'Tableau, Power BI, Metabase, psql and drivers over the Postgres protocol', icon: <Database className="h-4 w-4" /> },
-  { id: 'orchestration', group: 'Data', label: 'Orchestration', blurb: 'Run syncs, dbt and checks from Airflow, Dagster, Prefect or any scheduler', icon: <Workflow className="h-4 w-4" /> },
-  { id: 'git', group: 'Data', label: 'Git', blurb: 'Notebooks, queries, dashboards and models in a Git repository', icon: <GitBranch className="h-4 w-4" /> },
-  { id: 'hardware', group: 'Data', label: 'Resources', blurb: 'Live memory, CPU, disk and warm engines', icon: <Cpu className="h-4 w-4" /> },
-  { id: 'cluster', group: 'Advanced', label: 'Cluster', blurb: 'The nodes serving DuckView and the workspaces each one runs', icon: <Server className="h-4 w-4" />, admin: true },
-  { id: 'apps', group: 'Advanced', label: 'Data apps', blurb: 'App runtime, running apps and publish requests', icon: <AppWindow className="h-4 w-4" />, admin: true },
+  { id: 'account', group: 'Your account', label: 'Account', blurb: 'Your password and identity', icon: <UserRound className="h-4 w-4" /> },
+  { id: 'usage', group: 'Administration', label: 'Usage & cost', blurb: 'Queries, AI and storage, what they cost, and monthly budgets', icon: <ReceiptText className="h-4 w-4" /> },
+  { id: 'teams', group: 'Your account', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
+  { id: 'appearance', group: 'Your account', label: 'Theme & fonts', blurb: 'Themes, fonts and interface size', icon: <Palette className="h-4 w-4" /> },
+  { id: 'layout', group: 'Your account', label: 'Layout', blurb: 'Show or hide parts of the interface', icon: <LayoutTemplate className="h-4 w-4" /> },
+  { id: 'storage', group: 'Your account', label: 'Storage & credentials', blurb: 'Cloud storage, lakehouse catalogs and stored credentials', icon: <Cloud className="h-4 w-4" /> },
+  { id: 'integrations', group: 'Your account', label: 'Integrations', blurb: 'Google sign-in for Drive, Sheets and BigQuery', icon: <Plug className="h-4 w-4" /> },
+  { id: 'users', group: 'Administration', label: 'Users', blurb: 'Roles, access and deactivation', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
+  { id: 'audit', group: 'Administration', label: 'Audit log', blurb: 'Who did what, and where the log is streamed', icon: <ScrollText className="h-4 w-4" /> },
+  { id: 'provisioning', group: 'Administration', label: 'Provisioning', blurb: 'SCIM 2.0 users and teams from your identity provider', icon: <KeyRound className="h-4 w-4" />, admin: true },
+  { id: 'embedding', group: 'This workspace', label: 'Embedding', blurb: 'Show dashboards and notebooks inside your own application', icon: <Code2 className="h-4 w-4" /> },
+  { id: 'copilot', group: 'Your account', label: 'AI assistant', blurb: 'The model DuckView AI uses, keys and usage', icon: <Bot className="h-4 w-4" /> },
+  { id: 'engine', group: 'This workspace', label: 'Engine', blurb: 'Memory, threads, timeouts and storage of this workspace', icon: <Database className="h-4 w-4" /> },
+  { id: 'sql-clients', group: 'This workspace', label: 'SQL clients & BI tools', blurb: 'Tableau, Power BI, Metabase, psql and drivers over the Postgres protocol', icon: <Database className="h-4 w-4" /> },
+  { id: 'orchestration', group: 'This workspace', label: 'Orchestration', blurb: 'Run syncs, dbt and checks from Airflow, Dagster, Prefect or any scheduler', icon: <Workflow className="h-4 w-4" /> },
+  { id: 'git', group: 'This workspace', label: 'Git', blurb: 'Notebooks, queries, dashboards and models in a Git repository', icon: <GitBranch className="h-4 w-4" /> },
+  { id: 'hardware', group: 'Administration', label: 'Resources', blurb: 'Live memory, CPU, disk and warm engines', icon: <Cpu className="h-4 w-4" /> },
+  { id: 'cluster', group: 'Administration', label: 'Cluster', blurb: 'The nodes serving DuckView and the workspaces each one runs', icon: <Server className="h-4 w-4" />, admin: true },
+  { id: 'apps', group: 'Administration', label: 'Data apps', blurb: 'App runtime, running apps and publish requests', icon: <AppWindow className="h-4 w-4" />, admin: true },
 ];
-const GROUPS = ['General', 'Appearance', 'Connections', 'Security', 'AI', 'Data', 'Advanced'];
+const GROUPS = ['Your account', 'This workspace', 'Administration'];
 
 function useCategory(): [Category, (c: Category) => void] {
   const parse = (): Category => {
@@ -132,13 +132,13 @@ export function SettingsPage() {
     <>
     <div className="flex h-full min-h-0">
       {/* Category navigation */}
-      <nav aria-label="Settings" className="flex w-56 shrink-0 flex-col overflow-y-auto border-r border-zinc-800 bg-zinc-900 px-2 py-3">
+      <nav aria-label="Settings" className="hidden w-56 shrink-0 flex-col overflow-y-auto border-r border-zinc-800 bg-zinc-900 px-2 py-3 lg:flex">
         {GROUPS.map((g) => {
           const items = CATEGORIES.filter((c) => c.group === g && (!c.admin || isAdmin));
           if (!items.length) return null;
           return (
             <div key={g} className="mb-3">
-              <div className="px-2 pb-1 text-2xs font-medium text-zinc-500">{g}</div>
+              <div className="truncate px-2 pb-1 text-2xs font-medium text-zinc-500" title={g === 'This workspace' && workspace ? workspace.name : undefined}>{g === 'This workspace' && workspace ? `Workspace ${workspace.name}` : g}</div>
               {items.map((c) => (
                 <button key={c.id} onClick={() => setCat(c.id)} aria-current={cat === c.id ? 'page' : undefined} className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body', cat === c.id ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100')}>
                   <span className={cn('shrink-0', cat === c.id ? 'text-zinc-200' : 'text-zinc-500')}>{c.icon}</span>
@@ -160,6 +160,14 @@ export function SettingsPage() {
       {/* Category content */}
       <main className="min-w-0 flex-1 overflow-auto">
         <div className="mx-auto max-w-5xl space-y-5 px-6 py-5">
+          <div className="lg:hidden">
+            <Select aria-label="Settings page" value={cat} onChange={(e) => setCat(e.target.value as Category)} className="w-full">
+              {GROUPS.map((g) => {
+                const items = CATEGORIES.filter((c) => c.group === g && (!c.admin || isAdmin));
+                return items.length ? <optgroup key={g} label={g === 'This workspace' && workspace ? `Workspace ${workspace.name}` : g}>{items.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</optgroup> : null;
+              })}
+            </Select>
+          </div>
           <PageHeader title={current.label} description={current.blurb} />
 
           {cat === 'appearance' && <AppearanceSettings />}

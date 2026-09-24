@@ -20,6 +20,7 @@ import { quoteIdent } from '../workspace/SchemaTree';
 import { QualityChip } from '../transform/QualityChip';
 import { CommentsControl } from '../comments/CommentsPanel';
 import { DataTable } from '../../components/data';
+import { usePageObject } from '../../store/context';
 
 
 function Distribution({ col }: { col: OverviewColumn }) {
@@ -88,6 +89,7 @@ export function OverviewPage() {
   // The selection lives in the store (persisted per workspace): moving to Query and back keeps the same dataset on
   // screen, and the profile only changes when a different file is picked (or its data actually changes).
   const target = wsId ? ws.overviewTarget[wsId] ?? null : null;
+  usePageObject(target ? { kind: 'dataset', id: target, label: target.split('/').pop() ?? target } : null);
   const setTarget = (t: string | null) => wsId && ws.setOverviewTarget(wsId, t);
   // #/data?table=orders (links from comments and the inbox) opens that table.
   useEffect(() => {

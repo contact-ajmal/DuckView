@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { api, authedBlobUrl, formatBytes } from '../../api/client';
-import { Button, Input, Label, Menu, MenuItem, Modal, Select, Tabs, cn, InlineError } from '../../components/ui';
+import { Button, Input, Label, Menu, MenuItem, Modal, Select, Tabs, cn, InlineError, ErrorState, Skeleton } from '../../components/ui';
 import { useAuth } from '../../store/auth';
 import { useWorkspace } from '../../store/workspace';
 import { DataTable } from '../../components/data';
@@ -65,8 +65,15 @@ export function UsagePanel() {
     URL.revokeObjectURL(url);
   };
 
-  if (error) return <p className="text-xs text-red-300">{error}</p>;
-  if (!report) return null;
+  if (error) return <ErrorState error={error} onRetry={load} title="Usage could not be loaded" />;
+  if (!report)
+    return (
+      <div className="space-y-6" aria-busy="true">
+        <div className="grid grid-cols-2 gap-8 border-y border-zinc-800 py-4 md:grid-cols-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} lines={3} />)}</div>
+        <Skeleton className="h-32" />
+        <Skeleton lines={6} />
+      </div>
+    );
   const t = report.totals;
 
   return (

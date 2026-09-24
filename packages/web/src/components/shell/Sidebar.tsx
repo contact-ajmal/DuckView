@@ -27,7 +27,7 @@ export function Sidebar({ active }: { active: Section }) {
     );
   };
   return (
-    <nav aria-label="Primary" className="flex w-[var(--rail-w)] shrink-0 flex-col items-center border-r border-zinc-800 bg-zinc-900 px-1 pb-2">
+    <nav aria-label="Primary" className="hidden w-[var(--rail-w)] sm:flex shrink-0 flex-col items-center border-r border-zinc-800 bg-zinc-900 px-1 pb-2">
       <a href="#/" className="flex h-[var(--topbar-h)] shrink-0 items-center justify-center" title="DuckView — home">
         <Logo className="h-7 w-7" />
       </a>

@@ -28,6 +28,7 @@ import { SplitPane, StackedPanes, usePersisted } from '../../components/panes';
 import { useLayout } from '../../store/layout';
 import { HideButton } from '../../components/LayoutMenu';
 import { Badge, Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, Tabs, cn, confirmAction, toast } from '../../components/ui';
+import { usePageObject } from '../../store/context';
 
 type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile' | 'explore';
 
@@ -36,6 +37,7 @@ export function WorkspacePage() {
   const cp = useCopilot();
   const workspace = ws.workspaces.find((w) => w.id === ws.activeId) ?? null;
   const tab = ws.tabs.find((t) => t.id === ws.activeTabId) ?? null;
+  usePageObject(tab ? { kind: 'query', id: tab.id, label: tab.title } : null);
   const result = tab ? ws.results[tab.id] : undefined;
   const sql = tab ? (ws.drafts[tab.id] ?? tab.sql_content) : '';
   const editor = useRef<SqlEditorHandle>(null);
