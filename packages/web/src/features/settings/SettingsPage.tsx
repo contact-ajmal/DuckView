@@ -22,8 +22,9 @@ import { AuditPanel } from '../governance/AuditPanel';
 import { ProvisioningPanel } from '../governance/ProvisioningPanel';
 import { GitPanel } from './GitPanel';
 import { EmbedPanel } from './EmbedPanel';
+import { PgWirePanel } from './PgWirePanel';
 
-type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding';
+type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; group: string; admin?: boolean }[] = [
   { id: 'account', group: 'General', label: 'Account', blurb: 'Your password and identity', icon: <UserRound className="h-4 w-4" /> },
   { id: 'teams', group: 'General', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
@@ -37,6 +38,7 @@ const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.Reac
   { id: 'embedding', group: 'Security', label: 'Embedding', blurb: 'Show dashboards and notebooks inside your own application', icon: <Code2 className="h-4 w-4" /> },
   { id: 'copilot', group: 'AI', label: 'AI assistant', blurb: 'The model DuckView AI uses, keys and usage', icon: <Bot className="h-4 w-4" /> },
   { id: 'engine', group: 'Data', label: 'Engine', blurb: 'Memory, threads, timeouts and storage of this workspace', icon: <Database className="h-4 w-4" /> },
+  { id: 'sql-clients', group: 'Data', label: 'SQL clients & BI tools', blurb: 'Tableau, Power BI, Metabase, psql and drivers over the Postgres protocol', icon: <Database className="h-4 w-4" /> },
   { id: 'git', group: 'Data', label: 'Git', blurb: 'Notebooks, queries, dashboards and models in a Git repository', icon: <GitBranch className="h-4 w-4" /> },
   { id: 'hardware', group: 'Data', label: 'Resources', blurb: 'Live memory, CPU, disk and warm engines', icon: <Cpu className="h-4 w-4" /> },
   { id: 'apps', group: 'Advanced', label: 'Data apps', blurb: 'App runtime, running apps and publish requests', icon: <AppWindow className="h-4 w-4" />, admin: true },
@@ -45,7 +47,7 @@ const GROUPS = ['General', 'Appearance', 'Connections', 'Security', 'AI', 'Data'
 
 function useCategory(): [Category, (c: Category) => void] {
   const parse = (): Category => {
-    const m = /^#\/settings\/?([a-z]*)/.exec(location.hash)?.[1] as Category | undefined;
+    const m = /^#\/settings\/?([a-z-]*)/.exec(location.hash)?.[1] as Category | undefined;
     return m && CATEGORIES.some((c) => c.id === m) ? m : 'account';
   };
   const [cat, setCat] = useState<Category>(parse);
@@ -160,6 +162,7 @@ export function SettingsPage() {
           {cat === 'git' && ws.activeId && <GitPanel key={ws.activeId} workspaceId={ws.activeId} />}
 
           {cat === 'embedding' && ws.activeId && <EmbedPanel key={ws.activeId} workspaceId={ws.activeId} />}
+          {cat === 'sql-clients' && <PgWirePanel />}
 
           {cat === 'hardware' && (
             <div className="space-y-5">

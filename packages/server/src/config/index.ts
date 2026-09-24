@@ -385,6 +385,23 @@ export const ConfigSchema = z.object({
       timeout_seconds: z.coerce.number().int().min(5).default(120),
     })
     .default({}),
+  /** The PostgreSQL wire protocol: BI tools and drivers connect to workspaces as if they were Postgres databases. */
+  pgwire: z
+    .object({
+      enabled: z.coerce.boolean().default(false),
+      /** Listen address: localhost by default; 0.0.0.0 to accept other machines (then configure TLS). */
+      host: z.string().default('127.0.0.1'),
+      port: z.coerce.number().int().min(0).max(65535).default(5433),
+      /** PEM files for TLS (sslmode=require); without them passwords travel in clear text. */
+      tls_cert: z.string().default(''),
+      tls_key: z.string().default(''),
+      /** Refuse clients that do not upgrade to TLS (only with a certificate). */
+      require_tls: z.coerce.boolean().default(false),
+      max_connections: z.coerce.number().int().min(1).max(10_000).default(100),
+      /** Rows returned per statement at most. */
+      max_rows: z.coerce.number().int().min(1).max(100_000_000).default(1_000_000),
+    })
+    .default({}),
   /** Streams: Kafka topics, Kinesis streams and HTTP pushes appended continuously to workspace tables. */
   streams: z
     .object({

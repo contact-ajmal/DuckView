@@ -760,6 +760,27 @@ Config (`streams`):
 - `max_batch_rows`
 - `max_push_mb`
 
+## The Postgres protocol (BI tools and drivers)
+
+**Anything that speaks PostgreSQL can query DuckView** (`services/pgwire.ts`, Settings → SQL clients & BI tools): Tableau, Power BI, Metabase, Superset, DBeaver, Excel, psql, JDBC and ODBC drivers, psycopg and node-postgres. Turn it on with `pgwire.enabled` (off by default).
+
+- **Connect with:**
+  - *host* and *port*: `pgwire.host`, default `127.0.0.1`; `pgwire.port`, default `5433`.
+  - *user*: the account's email.
+  - *password*: the account's password, or an API token. A token's scopes and workspace scope apply, so a read-only token only reads.
+  - *database*: a workspace, by name or id. When none is given, or the client sends the user name, it opens the first workspace the person can open (the token's workspace for a scoped token).
+- **Everything runs through the SQL workbench's path**: the workspace engine, the SQL guard, the person's access policies, and the audit log (logins included). Failed logins are slowed down.
+- **Protocol:** v3, with the simple and extended (prepared statement) query protocols.
+  - Parameters are bound as SQL literals, typed when the driver sends a type. The scanner skips strings, quoted identifiers, comments and dollar quotes.
+  - Results are sent as text, and as binary for the common numeric types when a driver asks. Types map to Postgres OIDs, and decimals keep their scale.
+- **What clients probe:**
+  - `version()` answers `PostgreSQL 15.0 (DuckView, DuckDB …)`.
+  - `SHOW` answers the usual settings (`server_version`, `transaction_isolation`, `search_path`…).
+  - `pg_catalog` queries go to DuckDB's own `pg_catalog`.
+  - `SET`, `BEGIN`/`COMMIT`/`ROLLBACK`, `DISCARD` and the like are accepted without effect: each statement runs on its own.
+- **TLS:** with `pgwire.tls_cert` / `pgwire.tls_key` (PEM) clients upgrade with `sslmode=require`, and `pgwire.require_tls` refuses those that do not. Without TLS, passwords travel in clear text, so keep the default localhost address or a private network.
+- **Limits:** `pgwire.max_connections` (default 100) and `pgwire.max_rows` per statement (default 1,000,000).
+
 ## Governance
 
 **Catalog** (`#/governance/catalog`, `services/lineage.ts`): descriptions and tags (lower-case, e.g. `pii`, `finance`) on tables, views and columns, written by editors, read by every member (`GET /api/workspaces/:id/catalog/annotated`, `PUT /api/workspaces/:id/catalog/annotations {object_name, column_name?, description, tags}` — an empty description and no tags removes the note). Copilot's context carries the notes ("trust these over guesses from names"), and `inspect_schema` shows them next to the columns.

@@ -74,6 +74,8 @@
  * The lake-write scenario sends query results to a Delta Lake table in the data directory (created, then read back
  * with delta_scan) and — with an Iceberg REST catalog at E2E_ICEBERG (default http://localhost:8181, MinIO at
  * localhost:9000) — to an Iceberg table, both from the reverse ETL editor.
+ * The pgwire scenario opens Settings → SQL clients & BI tools and connects over the Postgres protocol with psql and
+ * node-postgres (the server must run with DUCKVIEW__pgwire__enabled=true).
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -1005,6 +1007,44 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'pgwire') {
+    const { createRequire } = await import('node:module');
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const require = createRequire(new URL('../packages/server/package.json', import.meta.url));
+    const pg = require('pg');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    cleanup = async () => {
+      await q('DROP TABLE IF EXISTS e2e_pg_orders');
+    };
+    await q("CREATE OR REPLACE TABLE e2e_pg_orders AS SELECT * FROM (VALUES (1, 'EU', 19.90), (2, 'US', 5.00), (3, 'EU', 7.50)) t(id, region, amount)");
+    const info = await j('GET', '/api/pgwire');
+    if (!info.enabled) throw new Error('The Postgres protocol listener is off (restart with DUCKVIEW__pgwire__enabled=true)');
+    const workspace = (await j('GET', '/api/workspaces')).workspaces?.find((w) => w.id === wsId)?.name ?? info.databases[0];
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app');
+    await evaluate(`location.hash = '#/settings/sql-clients'; true`);
+    await waitFor(`!!document.querySelector('[data-testid="pgwire-fields"]')`, 15000, 'panel');
+    report.details.fields = await evaluate(`[...document.querySelectorAll('[data-testid="pgwire-fields"] dd')].map(d => d.firstChild?.textContent?.trim() ?? '')`);
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_pgwire.png'), Buffer.from(shot.result.data, 'base64')); }
+    // psql, with the account's password.
+    try {
+      const { stdout } = await promisify(execFile)('psql', ['-h', '127.0.0.1', '-p', String(info.port), '-U', EMAIL, '-d', workspace, '-At', '-c', "SELECT region || '=' || sum(amount) FROM e2e_pg_orders GROUP BY region ORDER BY region"], { env: { ...process.env, PGPASSWORD: PASSWORD, PGCONNECT_TIMEOUT: '10' } });
+      report.details.psql = stdout.trim().split('\n');
+    } catch (err) {
+      report.details.psql = err.code === 'ENOENT' ? 'skipped: psql not installed' : `error: ${err.stderr ?? err.message}`;
+    }
+    // node-postgres: the extended protocol, with parameters.
+    const c = new pg.Client({ host: '127.0.0.1', port: info.port, user: EMAIL, password: PASSWORD, database: workspace });
+    await c.connect();
+    report.details.driver = (await c.query('SELECT id, amount FROM e2e_pg_orders WHERE region = $1 AND amount > $2 ORDER BY id', ['EU', 10])).rows;
+    report.details.version = (await c.query('SELECT version() AS v')).rows[0].v;
+    await c.end();
+    report.details.charts = 1;
+  }
   else if (scenario === 'lake-write') {
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -1728,6 +1768,12 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'pgwire') {
+    if (!/^\d+$/.test(String((d.fields ?? [])[1] ?? ''))) problems.push(`fields: ${JSON.stringify(d.fields)}`);
+    if (!String(d.psql).startsWith('skipped') && JSON.stringify(d.psql) !== JSON.stringify(['EU=27.40', 'US=5.00'])) problems.push(`psql: ${JSON.stringify(d.psql)}`);
+    if (JSON.stringify(d.driver) !== JSON.stringify([{ id: 1, amount: '19.90' }])) problems.push(`driver: ${JSON.stringify(d.driver)}`);
+    if (!/^PostgreSQL 15\.0 \(DuckView/.test(d.version ?? '')) problems.push(`version: ${d.version}`);
   }
   if (scenario === 'lake-write') {
     if (!/3 rows written — created lake\/e2e_orders_\d+ \(version 0\)/.test(d.delta ?? '')) problems.push(`delta: ${d.delta}`);

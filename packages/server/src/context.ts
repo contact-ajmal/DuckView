@@ -34,6 +34,7 @@ import { InsightService } from './services/insights.js';
 import { HostedAgentService } from './services/hosted-agents.js';
 import { A2AService } from './services/a2a.js';
 import { StreamService } from './services/streams.js';
+import { PgWireServer } from './services/pgwire.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
 import { CommentService } from './services/comments.js';
@@ -91,6 +92,7 @@ export interface AppContext {
   hostedAgents: HostedAgentService;
   a2a: A2AService;
   streams: StreamService;
+  pgwire: PgWireServer;
   reverse: ReverseEtlService;
   notebooks: NotebookService;
   comments: CommentService;
@@ -236,6 +238,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
   await auth.bootstrapAdmin();
   void streams.startAll().catch((err) => logger().warn({ err: (err as Error).message }, 'Streams could not start'));
+  const pgwire = new PgWireServer(cfg, auth, workspaces, queries, audit);
+  await pgwire.start().catch((err) => logger().error({ err: (err as Error).message }, 'The Postgres protocol listener could not start'));
   if (cfg.security.filesystem_mode === 'full') {
     logger().warn({ dataDir: cfg.security.data_jail_directory }, 'filesystem_mode=full: users can mount any local folder and DuckDB may read anywhere this process can. Set security.filesystem_mode=sandboxed for multi-tenant deployments.');
   }
@@ -280,6 +284,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     hostedAgents,
     a2a,
     streams,
+    pgwire,
     reverse,
     notebooks,
     comments,
@@ -296,6 +301,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     async shutdown() {
       syncs.stop();
       await streams.stopAll().catch(() => undefined);
+      await pgwire.stop().catch(() => undefined);
       alerts.stop();
       snapshots.stop();
       auditExport.stop();
