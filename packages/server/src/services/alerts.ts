@@ -294,7 +294,9 @@ export class AlertService {
     const ran: string[] = [];
     for (const a of due) {
       // Move the next check first so a slow one is not picked up again by the next tick.
-      await this.db.update(this.s.alerts).set({ next_run_at: nextRunAt(a.schedule, now) }).where(eq(this.s.alerts.id, a.id));
+      // Claimed atomically: with several nodes (cluster mode) only the one whose update lands runs it.
+      const claimed = await this.db.update(this.s.alerts).set({ next_run_at: nextRunAt(a.schedule, now) }).where(and(eq(this.s.alerts.id, a.id), eq(this.s.alerts.next_run_at, a.next_run_at!))).returning({ id: this.s.alerts.id });
+      if (!claimed.length) continue;
       try {
         await this.run(a.id, 'schedule');
         ran.push(a.id);

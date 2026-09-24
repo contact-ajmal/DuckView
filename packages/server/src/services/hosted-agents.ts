@@ -396,7 +396,9 @@ export class HostedAgentService {
     const due = await this.db.select().from(this.s.hostedAgents).where(and(eq(this.s.hostedAgents.enabled, true), isNotNull(this.s.hostedAgents.next_run_at), lte(this.s.hostedAgents.next_run_at, now)));
     const ran: string[] = [];
     for (const a of due) {
-      await this.db.update(this.s.hostedAgents).set({ next_run_at: nextRunAt(a.schedule, now) }).where(eq(this.s.hostedAgents.id, a.id));
+      // Claimed atomically: with several nodes (cluster mode) only the one whose update lands runs it.
+      const claimed = await this.db.update(this.s.hostedAgents).set({ next_run_at: nextRunAt(a.schedule, now) }).where(and(eq(this.s.hostedAgents.id, a.id), eq(this.s.hostedAgents.next_run_at, a.next_run_at!))).returning({ id: this.s.hostedAgents.id });
+      if (!claimed.length) continue;
       try {
         await this.run(a.id, { triggeredBy: 'schedule' });
         ran.push(a.id);

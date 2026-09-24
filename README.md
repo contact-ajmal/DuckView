@@ -266,6 +266,10 @@ Six themes decide both colour and typeface, applied through runtime CSS variable
 
 ---
 
+## 📈 Scale out
+
+Run several DuckView nodes behind one load balancer, sharing a PostgreSQL metadata store and a data volume. Each workspace's engine runs on one node at a time, and the other nodes forward its queries there. Every scheduled job runs exactly once, each stream consumer runs on one node, and live events reach every node. When a node stops, another node takes over its workspaces and streams. Settings → Cluster shows each node and what it holds. To enable it, set `cluster.enabled` and a shared `cluster.secret` (see [cluster mode](docs/REFERENCE.md#cluster-mode-horizontal-scale)).
+
 ## 🔒 Security model
 
 - **Two layers of sandboxing** — a Node-side filesystem jail *and* DuckDB's own `allowed_directories` / `enable_external_access` / `lock_configuration`, so even `SET` and `PRAGMA` can't loosen the box. `filesystem_mode: full` for a personal workstation, `sandboxed` for multi-tenant.
@@ -292,6 +296,7 @@ Fastify 5 (TypeScript strict)
         │
 EngineManager — one native DuckDB instance per workspace (LRU + idle TTL), jailed and locked;
                 databases in the data directory, any folder, or S3 / R2 / GCS / Azure (synced working copy)
+                cluster mode: one node holds each workspace (a lease), the others forward to it
         │
 Metadata (Drizzle) — SQLite by default, PostgreSQL via DATABASE_URL
 ```

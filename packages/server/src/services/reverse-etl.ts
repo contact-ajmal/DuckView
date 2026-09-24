@@ -730,7 +730,9 @@ export class ReverseEtlService {
     const due = await this.db.select().from(this.s.reverseSyncs).where(and(eq(this.s.reverseSyncs.enabled, true), isNotNull(this.s.reverseSyncs.next_run_at), lte(this.s.reverseSyncs.next_run_at, now)));
     const ran: string[] = [];
     for (const r of due) {
-      await this.db.update(this.s.reverseSyncs).set({ next_run_at: nextRunAt(r.schedule, now) }).where(eq(this.s.reverseSyncs.id, r.id));
+      // Claimed atomically: with several nodes (cluster mode) only the one whose update lands runs it.
+      const claimed = await this.db.update(this.s.reverseSyncs).set({ next_run_at: nextRunAt(r.schedule, now) }).where(and(eq(this.s.reverseSyncs.id, r.id), eq(this.s.reverseSyncs.next_run_at, r.next_run_at!))).returning({ id: this.s.reverseSyncs.id });
+      if (!claimed.length) continue;
       try {
         await this.run(r.id, 'schedule');
         ran.push(r.id);

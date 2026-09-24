@@ -57,16 +57,35 @@ export async function createMetadataStore(url: string): Promise<MetadataStore> {
   if (dialect === 'sqlite') {
     if (target !== ':memory:') fs.mkdirSync(path.dirname(path.resolve(target)), { recursive: true });
     const sqlite = new Database(target);
-    sqlite.pragma('journal_mode = WAL');
-    sqlite.pragma('foreign_keys = ON');
+    // Wait for the lock first: several processes may open the same file at once (cluster nodes starting together).
     sqlite.pragma('busy_timeout = 5000');
+    // Switching a new file to WAL does not wait for the lock: retry while another process sets it up.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        sqlite.pragma('journal_mode = WAL');
+        break;
+      } catch (err) {
+        if (attempt >= 40 || !/database is locked/i.test((err as Error).message)) throw err;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100 + Math.random() * 150);
+      }
+    }
+    sqlite.pragma('foreign_keys = ON');
     const db = drizzleSqlite(sqlite, { schema: sqliteSchema });
     return {
       db,
       schema: sqliteSchema,
       dialect,
       async migrate() {
-        migrateSqlite(db, { migrationsFolder: migrationsFolder('sqlite') });
+        // Another process migrating the same file holds the write lock; its migrations are ours, so try again.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            migrateSqlite(db, { migrationsFolder: migrationsFolder('sqlite') });
+            return;
+          } catch (err) {
+            if (attempt >= 20 || !/database is locked|SQLITE_BUSY/i.test(String((err as Error).message) + String((err as { cause?: Error }).cause?.message ?? ''))) throw err;
+            await new Promise((r) => setTimeout(r, 250 + Math.random() * 250));
+          }
+        }
       },
       async ping() {
         try {
@@ -89,7 +108,15 @@ export async function createMetadataStore(url: string): Promise<MetadataStore> {
     schema: pgSchema as unknown as Schema,
     dialect,
     async migrate() {
-      await migratePg(pgDb, { migrationsFolder: migrationsFolder('pg') });
+      // One node migrates at a time (cluster nodes starting together): a session lock around the migrations.
+      const client = await pool.connect();
+      try {
+        await client.query('SELECT pg_advisory_lock(7418220114)');
+        await migratePg(pgDb, { migrationsFolder: migrationsFolder('pg') });
+      } finally {
+        await client.query('SELECT pg_advisory_unlock(7418220114)').catch(() => undefined);
+        client.release();
+      }
     },
     async ping() {
       try {

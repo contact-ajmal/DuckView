@@ -8,6 +8,7 @@
  *   duckview create-token --email --name [--scopes read,write,mcp] [--workspace] [--days]
  *   duckview config                     — print the effective (redacted) configuration
  */
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
@@ -88,6 +89,9 @@ program
       await appsServer.listen({ port: cfg.apps.port!, host: cfg.server.host });
       logger().info({ port: cfg.apps.port, public_url: cfg.apps.public_url ?? null }, 'Data apps listening on their own origin');
     }
+    // Cluster mode: other nodes reach this one at advertise_url (or, unset, this host's name and port).
+    const selfHost = cfg.server.host === '0.0.0.0' || cfg.server.host === '::' ? os.hostname() : cfg.server.host;
+    await ctx.startCluster(`http://${selfHost}:${cfg.server.port}`);
     logger().info({ port: cfg.server.port, host: cfg.server.host, dataDir: cfg.security.data_jail_directory, metadata: ctx.store.dialect, auth: cfg.auth.strategy, filesystemMode: cfg.security.filesystem_mode, externalAccess: cfg.security.enable_external_access || cfg.security.filesystem_mode === 'full', config: cfg.configPath }, 'DuckView Enterprise listening');
   });
 

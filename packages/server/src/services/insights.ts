@@ -464,7 +464,9 @@ export class InsightService {
     const due = await this.db.select().from(this.s.metricMonitors).where(and(eq(this.s.metricMonitors.enabled, true), isNotNull(this.s.metricMonitors.next_run_at), lte(this.s.metricMonitors.next_run_at, now)));
     const ran: string[] = [];
     for (const m of due) {
-      await this.db.update(this.s.metricMonitors).set({ next_run_at: nextRunAt(m.schedule, now) }).where(eq(this.s.metricMonitors.id, m.id));
+      // Claimed atomically: with several nodes (cluster mode) only the one whose update lands runs it.
+      const claimed = await this.db.update(this.s.metricMonitors).set({ next_run_at: nextRunAt(m.schedule, now) }).where(and(eq(this.s.metricMonitors.id, m.id), eq(this.s.metricMonitors.next_run_at, m.next_run_at!))).returning({ id: this.s.metricMonitors.id });
+      if (!claimed.length) continue;
       try {
         await this.run(m.id);
         ran.push(m.id);

@@ -1053,3 +1053,22 @@ export const orchestrationRuns = pgTable(
   },
   (t) => [index('orchestration_runs_user_idx').on(t.user_id, t.started_at)],
 );
+
+export const clusterNodes = pgTable('cluster_nodes', {
+  id: text('id').primaryKey(),
+  url: text('url').notNull(),
+  version: text('version').notNull(),
+  started_at: ts('started_at').notNull(),
+  heartbeat_at: ts('heartbeat_at').notNull(),
+});
+
+export const clusterLeases = pgTable(
+  'cluster_leases',
+  {
+    key: text('key').primaryKey(),
+    node_id: text('node_id').notNull(),
+    acquired_at: ts('acquired_at').notNull(),
+    expires_at: ts('expires_at').notNull(),
+  },
+  (t) => [index('cluster_leases_node_idx').on(t.node_id)],
+);

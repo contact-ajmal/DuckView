@@ -1641,3 +1641,27 @@ export const orchestrationRuns = sqliteTable(
   (t) => [index('orchestration_runs_user_idx').on(t.user_id, t.started_at)],
 );
 export type OrchestrationRun = typeof orchestrationRuns.$inferSelect;
+
+/** Cluster mode: the DuckView nodes serving one metadata store, and who holds what. */
+export const clusterNodes = sqliteTable('cluster_nodes', {
+  id: text('id').primaryKey(),
+  /** How the other nodes reach this one (internal URL). */
+  url: text('url').notNull(),
+  version: text('version').notNull(),
+  started_at: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+  heartbeat_at: integer('heartbeat_at', { mode: 'timestamp_ms' }).notNull(),
+});
+export type ClusterNode = typeof clusterNodes.$inferSelect;
+
+/** A lease: one node owns a workspace's DuckDB file (workspace:<id>) or runs a consumer (stream:<id>) until it expires. */
+export const clusterLeases = sqliteTable(
+  'cluster_leases',
+  {
+    key: text('key').primaryKey(),
+    node_id: text('node_id').notNull(),
+    acquired_at: integer('acquired_at', { mode: 'timestamp_ms' }).notNull(),
+    expires_at: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('cluster_leases_node_idx').on(t.node_id)],
+);
+export type ClusterLease = typeof clusterLeases.$inferSelect;

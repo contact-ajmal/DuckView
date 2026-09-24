@@ -1013,6 +1013,52 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'cluster') {
+    // This server runs alone: the page explains how to run several nodes.
+    await send('Page.navigate', { url: `${BASE}/#/settings/cluster` });
+    await waitFor(`!!document.querySelector('[data-testid="cluster-panel"]')`, 20000, 'cluster panel (single node)');
+    report.details.single = await evaluate(`document.querySelector('[data-testid="cluster-panel"]').dataset.cluster`);
+    // Two more nodes sharing a metadata store and a data directory, as a cluster.
+    const { spawn: spawnNode } = await import('node:child_process');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-e2e-cluster-'));
+    fs.mkdirSync(path.join(tmp, 'data'));
+    const cli = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../packages/server/dist/cli.js');
+    const nodes = [['e2e-node-1', 4291], ['e2e-node-2', 4292]].map(([id, p]) => ({ id, url: `http://127.0.0.1:${p}`, proc: spawnNode(process.execPath, [cli, 'serve'], { stdio: ['ignore', 'ignore', fs.openSync(path.join(tmp, `${id}.log`), 'a')], env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: String(p), HOST: '127.0.0.1', DUCKVIEW_DATA_DIR: path.join(tmp, 'data'), DUCKDB_TEMP_DIRECTORY: path.join(tmp, `spill-${id}`), DATABASE_URL: `sqlite://${path.join(tmp, 'meta.db')}`, JWT_SECRET: 'e2e-cluster-jwt-secret-0123456789', ENCRYPTION_KEY: 'cd'.repeat(32), DUCKVIEW_ADMIN_EMAIL: EMAIL, DUCKVIEW_ADMIN_PASSWORD: PASSWORD, DUCKVIEW__apps__enabled: 'false', DUCKVIEW__cluster__enabled: 'true', DUCKVIEW__cluster__node_id: id, DUCKVIEW__cluster__secret: 'e2e-cluster-secret-0123456789abcdef-0123', DUCKVIEW__cluster__advertise_url: `http://127.0.0.1:${p}`, DUCKVIEW__cluster__heartbeat_seconds: '2', LOG_LEVEL: 'warn' } }) }));
+    cleanup = async () => {
+      for (const n of nodes) n.proc.kill('SIGTERM');
+      await sleep(1500);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    };
+    const ready = async (n) => {
+      for (let i = 0; i < 120; i++) {
+        if ((await fetch(`${n.url}/readyz`).catch(() => null))?.ok) return;
+        await sleep(250);
+      }
+      throw new Error(`${n.id} did not start: ${fs.readFileSync(path.join(tmp, `${n.id}.log`), 'utf8').slice(-600)}`);
+    };
+    // One after the other: the first creates the metadata store.
+    await ready(nodes[0]);
+    await ready(nodes[1]);
+    const token = (await (await fetch(`${nodes[0].url}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: EMAIL, password: PASSWORD }) })).json()).token;
+    const on = async (n, method, url, body) => (await fetch(`${n.url}${url}`, { method, headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsc = (await on(nodes[0], 'POST', '/api/workspaces', { name: 'E2E cluster', active_db_path: 'cluster.duckdb' })).workspace ?? {};
+    const wsid = wsc.id;
+    await on(nodes[0], 'POST', `/api/workspaces/${wsid}/query`, { sql: "CREATE TABLE sales AS SELECT * FROM (VALUES ('EU', 12.5), ('US', 7.5), ('EU', 5.0)) t(region, amount)" });
+    // Node 2 has not opened the file: its query runs on node 1.
+    report.details.forwarded = (await on(nodes[1], 'POST', `/api/workspaces/${wsid}/query`, { sql: 'SELECT region, sum(amount) FROM sales GROUP BY 1 ORDER BY 1' })).rows;
+    // The page, served by node 2.
+    await send('Page.navigate', { url: `${nodes[1].url}/` });
+    await sleep(800);
+    await evaluate(`localStorage.setItem('duckview.session', ${JSON.stringify(token)}); 'ok'`);
+    await send('Page.reload');
+    await waitFor(`!!document.querySelector('nav[aria-label="Primary"]')`, 30000, 'signed in on node 2');
+    await evaluate(`location.hash = '#/settings/cluster'; 'ok'`);
+    await waitFor(`document.querySelectorAll('[data-testid="cluster-nodes"] tbody tr[data-alive="true"]').length === 2`, 30000, 'two live nodes listed');
+    report.details.nodes = await evaluate(`[...document.querySelectorAll('[data-testid="cluster-nodes"] tbody tr')].map(r => [r.dataset.node, r.cells[5].textContent])`);
+    report.details.header = await evaluate(`document.querySelector('[data-testid="cluster-panel"] p').textContent`);
+    report.details.wsPrefix = String(wsid).slice(0, 8);
+    report.details.charts = 1;
+  }
   else if (scenario === 'orchestration') {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
@@ -1812,6 +1858,13 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'cluster') {
+    if (d.single !== 'off') problems.push(`single node page: ${d.single}`);
+    if (JSON.stringify(d.forwarded) !== JSON.stringify([['EU', 17.5], ['US', 7.5]])) problems.push(`forwarded query: ${JSON.stringify(d.forwarded)}`);
+    const one = (d.nodes ?? []).find((n) => n[0] === 'e2e-node-1');
+    if (!one || !one[1].includes(`workspace ${d.wsPrefix}`)) problems.push(`nodes: ${JSON.stringify(d.nodes)}`);
+    if (!/2 of 2 nodes answering\. This page was served by e2e-node-2/.test(d.header ?? '')) problems.push(`header: ${d.header}`);
   }
   if (scenario === 'orchestration') {
     if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);

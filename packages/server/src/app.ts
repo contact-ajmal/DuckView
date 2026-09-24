@@ -39,6 +39,8 @@ import { a2aRoutes, a2aPublicRoutes } from './routes/a2a.js';
 import { streamRoutes, streamPushRoutes } from './routes/streams.js';
 import { pgwireRoutes } from './routes/pgwire.js';
 import { orchestrateRoutes } from './routes/orchestrate.js';
+import { clusterInternalRoutes, clusterAdminRoutes } from './routes/cluster.js';
+import { CLUSTER_HEADER } from './services/cluster.js';
 import { commentRoutes } from './routes/comments.js';
 import { revisionRoutes } from './routes/revisions.js';
 import { gitRoutes } from './routes/git.js';
@@ -80,7 +82,7 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
     global: true,
     max: cfg.server.rate_limit_per_minute,
     timeWindow: '1 minute',
-    allowList: (req) => req.url === '/healthz' || req.url === '/readyz' || req.url === '/metrics' || req.url.startsWith('/mcp') || req.url.startsWith('/scim/'),
+    allowList: (req) => req.url === '/healthz' || req.url === '/readyz' || req.url === '/metrics' || req.url.startsWith('/mcp') || req.url.startsWith('/scim/') || (req.url.startsWith('/internal/cluster/') && ctx.cluster.authorized(req.headers[CLUSTER_HEADER])),
   });
   await app.register(websocket, { options: { maxPayload: cfg.server.body_limit_bytes } });
   await app.register(multipart, { limits: { fileSize: cfg.security.max_upload_bytes, files: 20 } });
@@ -154,6 +156,8 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   await app.register(async (r) => streamPushRoutes(r, ctx));
   await app.register(async (r) => pgwireRoutes(r, ctx));
   await app.register(async (r) => orchestrateRoutes(r, ctx));
+  await app.register(async (r) => clusterInternalRoutes(r, ctx));
+  await app.register(async (r) => clusterAdminRoutes(r, ctx));
   await app.register(async (r) => commentRoutes(r, ctx));
   await app.register(async (r) => revisionRoutes(r, ctx));
   await app.register(async (r) => gitRoutes(r, ctx));

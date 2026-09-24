@@ -118,6 +118,14 @@ kubectl apply -k k8s/
 
 The Deployment ships liveness (`/healthz`), readiness/startup (`/readyz`), non-root + read-only rootfs, an `emptyDir` spill volume, a PVC for `/data`, `ClientIP` session affinity (keeps SSE streams pinned) and Prometheus scrape annotations (`k8s/servicemonitor.yaml` for the Operator).
 
+To run more than one replica, use [cluster mode](#cluster-mode-horizontal-scale):
+
+1. Point `DATABASE_URL` at PostgreSQL.
+2. Make the `/data` claim `ReadWriteMany`.
+3. Put `DUCKVIEW__cluster__enabled=true` and `DUCKVIEW__cluster__secret` in the Secret.
+4. Uncomment the `POD_IP` and `advertise_url` variables in `k8s/deployment.yaml`.
+5. Raise `replicas` and switch the strategy to `RollingUpdate`.
+
 ## Configuration
 
 `duckview.config.yaml` is loaded from `$DUCKVIEW_CONFIG`, `./duckview.config.yaml`, or `/etc/duckview/duckview.config.yaml`. Values may reference environment variables with `${VAR}` / `${VAR:-default}` (nesting allowed). Any key can also be overridden with `DUCKVIEW__<SECTION>__<KEY>` (e.g. `DUCKVIEW__DUCKDB__MAX_RESULT_ROWS=1000`), and well-known short names (`PORT`, `JWT_SECRET`, `ENCRYPTION_KEY`, `DUCKVIEW_DATA_DIR`, `DATABASE_URL`, `OIDC_*`, `DUCKDB_MEMORY_LIMIT`, …) are honoured. The effective, redacted config is available via `duckview config` and `GET /api/admin/config`.
@@ -809,6 +817,33 @@ Config (`streams`):
 - **Prefect:** `duckview.prefect` has tasks (`run_sync`, `run_dbt`, `run_quality_suite`, `run_reverse_sync`, `run_notebook`, `run_agent`, `run_sql_check`) and a `DuckViewCredentials` block.
 - Install with `pip install "duckview[airflow]"`, `[dagster]` or `[prefect]`.
 
+## Cluster mode (horizontal scale)
+
+**Several DuckView nodes behind one load balancer** (`services/cluster.ts`, `engine/remote.ts`, Settings → Cluster). The nodes share the metadata database (PostgreSQL) and the data directory (a ReadWriteMany volume). They coordinate through two tables:
+
+- **Nodes** (`cluster_nodes`): each node registers and heartbeats every `heartbeat_seconds`.
+- **Leases** (`cluster_leases`): each lease has a holder and an expiry. The holder renews its leases with every heartbeat, and a lease is taken with one atomic upsert.
+
+| What | How it is shared |
+|---|---|
+| A workspace's DuckDB engine | The lease `workspace:<id>` names the one node that opens the file. On any other node, the workspace's engine is a remote engine that forwards queries, streams (newline-delimited JSON), explains, profiles, exports and catalog calls to the holder over internal HTTP. Access policies and the sandbox apply on the node the request arrived at, and errors keep their status and kind. |
+| Scheduled work | Syncs, alerts, snapshots, quality suites, reverse syncs, dbt projects, metric monitors and agents: each due job is claimed with a conditional update on its `next_run_at`, so exactly one node runs it. Audit export sinks hold the lease `audit-sink:<id>`. |
+| Stream consumers | Kafka, Kinesis and Postgres CDC consumers hold the lease `stream:<id>`. Every node retries the streams nobody runs every `lease_seconds`. Editing or deleting a stream on another node first stops the consumer where it runs, and that node hands over the lease. |
+| Live events | Events are published on every node, so the live audit feed and MCP activity show the whole cluster. |
+| Engine settings | A change evicts the engine on every node. |
+
+- **Failover:** a stopped node releases its leases. A node that stops heartbeating loses them after `lease_seconds`, and the next request for one of its workspaces opens it elsewhere. An in-memory workspace (`:memory:`) starts empty on the new node; use persistent workspaces in a cluster.
+- **Sticky routing:** data apps and MCP SSE sessions keep state on the node they started on, so pin them with `ClientIP` affinity (the Service already does) or a cookie on the ingress. The UI, REST, MCP Streamable HTTP and the Postgres protocol can go to any node.
+- **Node-to-node calls** (`/internal/cluster/*`) need the shared `cluster.secret`. Without it, the routes answer 404. Keep them off the public ingress anyway.
+- **Configuration:**
+  - `cluster.enabled`
+  - `cluster.secret` (the same on every node, at least 32 characters)
+  - `cluster.advertise_url` (how the other nodes reach this one, e.g. `http://$(POD_IP):4200`; the default is the host name and port)
+  - `cluster.node_id` (the default is generated)
+  - `cluster.heartbeat_seconds` (10) and `cluster.lease_seconds` (30)
+  - `JWT_SECRET` and `ENCRYPTION_KEY` must also be the same on every node.
+- **Status:** `GET /api/admin/cluster` returns the nodes, their heartbeats and what each one holds.
+
 ## Governance
 
 **Catalog** (`#/governance/catalog`, `services/lineage.ts`): descriptions and tags (lower-case, e.g. `pii`, `finance`) on tables, views and columns, written by editors, read by every member (`GET /api/workspaces/:id/catalog/annotated`, `PUT /api/workspaces/:id/catalog/annotations {object_name, column_name?, description, tags}` — an empty description and no tags removes the note). Copilot's context carries the notes ("trust these over guesses from names"), and `inspect_schema` shows them next to the columns.
@@ -1005,6 +1040,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Connections | `GET /api/connections/types` · `GET/POST/DELETE /api/connections` |
 | Ops | `GET /api/system` · `GET /api/audit` · `GET/POST/PATCH/DELETE /api/admin/users` (`PATCH {role?, disabled?}`) · `GET /api/admin/scim` · `POST/DELETE /api/admin/scim/token` · `/scim/v2/{Users,Groups,ServiceProviderConfig,ResourceTypes,Schemas}` · `GET /api/admin/engines` · `POST /api/admin/engines/:id/evict` · `GET /api/admin/config` |
 | Transform | `GET /api/dbt/status` · `POST /api/admin/dbt/install` · `GET/POST /api/workspaces/:id/dbt/projects` · `GET/PATCH/DELETE /api/dbt/projects/:id` · `POST /api/dbt/projects/:id/runs` · `GET /api/dbt/projects/:id/runs` · `GET /api/dbt/runs/:id` · `GET/PUT /api/workspaces/:id/semantic` · `POST …/semantic/validate` · `POST …/semantic/query` · `GET …/semantic/dimensions` · `POST …/semantic/scaffold` |
+| Cluster | `GET /api/admin/cluster` (nodes, heartbeats, leases) · node-to-node, with the cluster secret: `POST /internal/cluster/{engine,stream,events,evict,streams/stop}` |
 | Probes | `GET /healthz` · `GET /readyz` · `GET /metrics` |
 
 Errors are uniform JSON: `{ error, message, request_id, challenge? }` — `403 SANDBOX_VIOLATION`, `403 FORBIDDEN` (role or scope too low), `404 NOT_FOUND` (also for workspaces the caller has no grant on), `409 APPROVAL_REQUIRED` (with the HITL challenge), `408 QUERY_TIMEOUT`, `400 SQL_ERROR` (DuckDB parser/binder errors), `429 RATE_LIMITED`.

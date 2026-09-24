@@ -150,7 +150,14 @@ export class AuthService {
     if ((await this.countUsers()) > 0) return null;
     const { email, password } = this.cfg.auth.bootstrap_admin;
     if (!email || !password) return null;
-    const u = await this.createLocalUser({ email, password, role: 'ADMIN', displayName: 'Administrator' });
+    let u: User;
+    try {
+      u = await this.createLocalUser({ email, password, role: 'ADMIN', displayName: 'Administrator' });
+    } catch (err) {
+      // Another node starting at the same time created it.
+      if (await this.findByEmail(email)) return null;
+      throw err;
+    }
     logger().warn({ email }, 'Bootstrap ADMIN user created from configuration');
     return u;
   }

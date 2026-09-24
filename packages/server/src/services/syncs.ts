@@ -342,7 +342,9 @@ export class DataSyncService {
     for (const sync of due) {
       if (this.running.has(sync.id)) continue;
       // Move next_run_at first so a slow run is not picked up again by the next tick.
-      await this.db.update(this.s.dataSyncs).set({ next_run_at: nextRunAt(sync.schedule, now) }).where(eq(this.s.dataSyncs.id, sync.id));
+      // Claimed atomically: with several nodes (cluster mode) only the one whose update lands runs it.
+      const claimed = await this.db.update(this.s.dataSyncs).set({ next_run_at: nextRunAt(sync.schedule, now) }).where(and(eq(this.s.dataSyncs.id, sync.id), eq(this.s.dataSyncs.next_run_at, sync.next_run_at!))).returning({ id: this.s.dataSyncs.id });
+      if (!claimed.length) continue;
       started.push(sync.id);
       void this.run(sync.id, 'schedule', null).catch((err) => logger().warn({ sync: sync.id, err: (err as Error).message }, 'Scheduled sync failed'));
     }

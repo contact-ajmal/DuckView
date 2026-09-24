@@ -70,6 +70,8 @@ const SETTLE_MS = 2000;
 
 export class AuditExportService {
   private ticker: NodeJS.Timeout | null = null;
+  /** Cluster mode: takes a lease per sink so one node exports each (the cursor is not shared work). */
+  lease: ((key: string) => Promise<boolean>) | null = null;
   private running = false;
   private emails = new Map<string, string | null>();
   /** Uploads a file to a bucket (the cloud service; replaceable in tests). */
@@ -253,6 +255,7 @@ export class AuditExportService {
       const sinks = await this.db.select().from(this.s.auditSinks).where(eq(this.s.auditSinks.enabled, true));
       for (const sink of sinks) {
         if (sink.retry_after && sink.retry_after > now) continue;
+        if (this.lease && !(await this.lease(`audit-sink:${sink.id}`))) continue;
         done[sink.id] = await this.drain(sink, now).catch(() => 0);
       }
     } finally {

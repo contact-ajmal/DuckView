@@ -5,8 +5,9 @@ metadata:
   namespace: duckview
   labels: { app.kubernetes.io/name: duckview }
 spec:
-  # DuckDB engines are process-local (in-memory workspaces live in the pod). Scale vertically first;
-  # for >1 replica use PostgreSQL metadata, a RWX data volume, and session affinity for /mcp/sse.
+  # One replica by default. For more, use cluster mode (docs/REFERENCE.md#cluster-mode-horizontal-scale):
+  # PostgreSQL metadata, a ReadWriteMany data volume, DUCKVIEW__cluster__enabled / __secret in the Secret,
+  # the POD_IP + advertise_url variables below, and strategy RollingUpdate.
   replicas: 1
   strategy:
     type: Recreate
@@ -45,6 +46,10 @@ spec:
             - { name: DUCKDB_MEMORY_LIMIT, value: "75%" }
             - { name: DUCKDB_EXTENSION_DIRECTORY, value: /app/duckdb-extensions }
             - { name: LOG_LEVEL, value: info }
+            # Cluster mode (more than one replica): how the other pods reach this one.
+            # - name: POD_IP
+            #   valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            # - { name: DUCKVIEW__cluster__advertise_url, value: "http://$(POD_IP):4200" }
           envFrom:
             - secretRef: { name: duckview-secrets }
           resources:

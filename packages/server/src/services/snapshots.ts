@@ -317,7 +317,9 @@ export class SnapshotService {
     const due = await this.db.select().from(this.s.snapshots).where(and(eq(this.s.snapshots.enabled, true), isNotNull(this.s.snapshots.next_run_at), lte(this.s.snapshots.next_run_at, now)));
     const ran: string[] = [];
     for (const s of due) {
-      await this.db.update(this.s.snapshots).set({ next_run_at: nextRunAt(s.schedule, now) }).where(eq(this.s.snapshots.id, s.id));
+      // Claimed atomically: with several nodes (cluster mode) only the one whose update lands runs it.
+      const claimed = await this.db.update(this.s.snapshots).set({ next_run_at: nextRunAt(s.schedule, now) }).where(and(eq(this.s.snapshots.id, s.id), eq(this.s.snapshots.next_run_at, s.next_run_at!))).returning({ id: this.s.snapshots.id });
+      if (!claimed.length) continue;
       try {
         await this.run(s.id, 'schedule');
         ran.push(s.id);

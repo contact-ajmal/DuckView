@@ -385,6 +385,25 @@ export const ConfigSchema = z.object({
       timeout_seconds: z.coerce.number().int().min(5).default(120),
     })
     .default({}),
+  /**
+   * Cluster mode: several DuckView nodes behind a load balancer, sharing the metadata store (Postgres) and the data
+   * directory (a shared volume). Each workspace's DuckDB file is opened by one node — the one holding its lease —
+   * and the others forward engine work to it; scheduled jobs run once; live events reach every node.
+   */
+  cluster: z
+    .object({
+      enabled: z.coerce.boolean().default(false),
+      /** This node's id (default: generated at start). */
+      node_id: z.string().default(''),
+      /** How the other nodes reach this one, e.g. http://10.0.0.5:4200 (a pod IP; not the public URL). */
+      advertise_url: z.string().default(''),
+      /** Shared secret for node-to-node calls; the same on every node, at least 32 characters. */
+      secret: z.string().default(''),
+      heartbeat_seconds: z.coerce.number().int().min(1).max(300).default(10),
+      /** A node that has not renewed its leases for this long loses them. */
+      lease_seconds: z.coerce.number().int().min(3).max(3600).default(30),
+    })
+    .default({}),
   /** The PostgreSQL wire protocol: BI tools and drivers connect to workspaces as if they were Postgres databases. */
   pgwire: z
     .object({

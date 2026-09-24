@@ -37,6 +37,7 @@ import type { CloudConnectionService } from './cloud.js';
 import type { DatabaseConnectionService } from './databases.js';
 import { badRequest, notFound, unauthorized } from './errors.js';
 import { sqlString } from '../engine/duckdb.js';
+import type { ClusterService } from './cluster.js';
 import { logger } from '../observability/logger.js';
 import { liveEvents } from '../observability/events.js';
 
@@ -175,6 +176,10 @@ interface Runner {
 
 export class StreamService {
   private runners = new Map<string, Runner>();
+  /** Cluster mode: each consumer holds the lease stream:<id>, so one node runs it; the others take over when it stops. */
+  cluster: ClusterService | null = null;
+  private takeover: NodeJS.Timeout | null = null;
+  private locks = new Map<string, Promise<unknown>>();
   /** Batches of a stream are written one after another. */
   private chains = new Map<string, Promise<unknown>>();
   /** Tests replace the Kinesis client. */
@@ -323,19 +328,25 @@ export class StreamService {
     if (patch.enabled !== undefined) set.enabled = patch.enabled;
     await this.db.update(this.s.streams).set(set).where(eq(this.s.streams.id, id));
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'stream.update', resource: `stream:${id}`, ip: p.ip });
-    const next = (await this.row(id))!;
-    await this.stopRunner(id);
-    if (next.enabled) await this.startRunner(next);
+    await this.locked(id, async () => {
+      const next = (await this.row(id))!;
+      await this.stopEverywhere(id);
+      if (next.enabled) await this.startRunner(next);
+      else await this.cluster?.release(`stream:${id}`);
+    });
     return this.toPublic((await this.row(id))!);
   }
 
   async remove(p: Principal, id: string): Promise<void> {
     requireWrite(p);
     const cur = await this.get(p, id, 'EDITOR');
-    await this.stopRunner(id);
-    // Change data capture: drop the replication slot, or Postgres keeps WAL for it forever.
-    if (cur.config.kind === 'postgres') await this.dropSlot(cur).catch((err) => logger().warn({ stream: id, err: (err as Error).message }, 'Could not drop the replication slot'));
-    await this.db.delete(this.s.streams).where(eq(this.s.streams.id, id));
+    await this.locked(id, async () => {
+      await this.stopEverywhere(id);
+      // Change data capture: drop the replication slot, or Postgres keeps WAL for it forever.
+      if (cur.config.kind === 'postgres') await this.dropSlot(cur).catch((err) => logger().warn({ stream: id, err: (err as Error).message }, 'Could not drop the replication slot'));
+      await this.db.delete(this.s.streams).where(eq(this.s.streams.id, id));
+      await this.cluster?.release(`stream:${id}`);
+    });
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'stream.delete', resource: `stream:${id}`, ip: p.ip });
   }
 
@@ -570,10 +581,64 @@ export class StreamService {
   async startAll(): Promise<void> {
     if (!this.cfg.streams.enabled || !this.cfg.streams.consumers_enabled) return;
     const rows = await this.db.select().from(this.s.streams).where(eq(this.s.streams.enabled, true));
-    for (const r of rows) await this.startRunner(r).catch((err) => logger().warn({ stream: r.id, err: (err as Error).message }, 'Stream could not start'));
+    for (const r of rows) {
+      if (this.runners.has(r.id)) continue;
+      // Read again under the stream's lock: it may have changed or gone since.
+      await this.locked(r.id, async () => {
+        const fresh = await this.row(r.id);
+        if (fresh?.enabled) await this.startRunner(fresh);
+      }).catch((err) => logger().warn({ stream: r.id, err: (err as Error).message }, 'Stream could not start'));
+    }
+    // Another node's consumers: start the ones whose node stopped (its lease expired).
+    if (this.cluster?.enabled && !this.takeover) {
+      this.takeover = setInterval(() => void this.startAll().catch(() => undefined), this.cfg.cluster.lease_seconds * 1000);
+      this.takeover.unref();
+    }
+  }
+
+  /** Runs one change to a stream's consumer at a time (edits, removal, takeover). */
+  private async locked<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(id) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(fn);
+    const tail = next.catch(() => undefined);
+    this.locks.set(id, tail);
+    void tail.then(() => {
+      if (this.locks.get(id) === tail) this.locks.delete(id);
+    });
+    return next;
+  }
+
+  /**
+   * Stops a consumer wherever it runs. In a cluster, the node holding its lease hands the lease to this node as it
+   * stops, so no other node starts it in between; the caller restarts it here or releases the lease.
+   */
+  private async stopEverywhere(id: string): Promise<void> {
+    if (this.cluster?.enabled && this.runners.has(id)) return this.stopRunner(id, { keepLease: true });
+    await this.stopRunner(id);
+    const node = this.cluster?.enabled ? await this.cluster.holder(`stream:${id}`) : null;
+    if (!node) return;
+    await this.cluster!.call(node.url, '/internal/cluster/streams/stop', { stream_id: id, to: this.cluster!.nodeId }).catch((err) => logger().warn({ stream: id, node: node.id, err: (err as Error).message }, 'Could not stop the stream on its node'));
+    await this.cluster!.acquire(`stream:${id}`);
+  }
+
+  /** Another node is changing the stream: stop its consumer here and hand it the lease. */
+  async stopLocal(id: string, to: string): Promise<void> {
+    await this.locked(id, async () => {
+      await this.stopRunner(id, { keepLease: true });
+      await this.cluster?.handover(`stream:${id}`, to);
+    });
+  }
+
+  /** This node lost the stream's lease to another node: stop without touching its status. */
+  lost(id: string): void {
+    const r = this.runners.get(id);
+    this.runners.delete(id);
+    if (r) void r.stop().catch(() => undefined);
   }
 
   async stopAll(): Promise<void> {
+    if (this.takeover) clearInterval(this.takeover);
+    this.takeover = null;
     await Promise.all([...this.runners.keys()].map((id) => this.stopRunner(id)));
     // Let batches being written finish before the engines close.
     await Promise.all([...this.chains.values()].map((c) => c.catch(() => undefined)));
@@ -589,16 +654,19 @@ export class StreamService {
       return;
     }
     if (!this.cfg.streams.enabled || !this.cfg.streams.consumers_enabled || this.runners.has(s.id)) return;
+    if (this.cluster?.enabled && !(await this.cluster.acquire(`stream:${s.id}`)).self) return;
     await this.setStatus(s.id, 'starting');
     const runner = s.kind === 'kafka' ? this.kafkaRunner(s) : s.kind === 'postgres' ? this.postgresRunner(s) : await this.kinesisRunner(s);
     this.runners.set(s.id, runner);
   }
 
-  private async stopRunner(id: string): Promise<void> {
+  private async stopRunner(id: string, opts: { keepLease?: boolean } = {}): Promise<void> {
     const r = this.runners.get(id);
     this.runners.delete(id);
     if (r) await r.stop().catch(() => undefined);
-    await this.setStatus(id, 'stopped');
+    if (!this.cluster?.enabled) return this.setStatus(id, 'stopped');
+    if (!opts.keepLease) await this.cluster.release(`stream:${id}`);
+    if (r) await this.setStatus(id, 'stopped');
   }
 
   private kafkaRunner(s: Stream): Runner {

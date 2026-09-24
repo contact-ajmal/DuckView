@@ -36,6 +36,7 @@ import { A2AService } from './services/a2a.js';
 import { StreamService } from './services/streams.js';
 import { PgWireServer } from './services/pgwire.js';
 import { OrchestrationService } from './services/orchestrate.js';
+import { ClusterService } from './services/cluster.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
 import { CommentService } from './services/comments.js';
@@ -95,6 +96,9 @@ export interface AppContext {
   streams: StreamService;
   pgwire: PgWireServer;
   orchestrate: OrchestrationService;
+  cluster: ClusterService;
+  /** Cluster mode: joins the cluster at this URL once the server listens (then starts stream consumers). */
+  startCluster(advertiseUrl: string): Promise<void>;
   reverse: ReverseEtlService;
   notebooks: NotebookService;
   comments: CommentService;
@@ -125,6 +129,14 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const cloud = new CloudConnectionService(store, cipher);
   const groups = new GroupService(store);
   const workspaces = new WorkspaceService(store, engines, connections, cloud, groups);
+  // Cluster mode: leases decide which node opens each workspace's DuckDB file (see services/cluster.ts).
+  const cluster = new ClusterService(cfg, store, '1.2.0');
+  workspaces.cluster = cluster;
+  engines.onEvicted = (id) => void cluster.release(`workspace:${id}`);
+  cluster.onLost = (key) => {
+    if (key.startsWith('workspace:')) engines.evict(key.slice('workspace:'.length));
+    else if (key.startsWith('stream:')) streams.lost(key.slice('stream:'.length));
+  };
   const lakehouse = new LakehouseService(cfg, store, cipher, engines);
   lakehouse.bind(workspaces, audit);
   const databases = new DatabaseConnectionService(store, cipher, engines, cfg);
@@ -239,7 +251,16 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
   await auth.bootstrapAdmin();
-  void streams.startAll().catch((err) => logger().warn({ err: (err as Error).message }, 'Streams could not start'));
+  streams.cluster = cluster;
+  auditExport.lease = cluster.enabled ? async (key) => (await cluster.acquire(key)).self : null;
+  const startStreams = () => void streams.startAll().catch((err) => logger().warn({ err: (err as Error).message }, 'Streams could not start'));
+  // In a cluster, consumers start once the node has joined (and can be reached at its URL).
+  if (!cluster.enabled) startStreams();
+  const startCluster = async (advertiseUrl: string) => {
+    if (!cluster.enabled) return;
+    await cluster.start(advertiseUrl);
+    startStreams();
+  };
   const orchestrate = new OrchestrationService(store);
   const pgwire = new PgWireServer(cfg, auth, workspaces, queries, audit);
   await pgwire.start().catch((err) => logger().error({ err: (err as Error).message }, 'The Postgres protocol listener could not start'));
@@ -289,6 +310,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     streams,
     pgwire,
     orchestrate,
+    cluster,
+    startCluster,
     reverse,
     notebooks,
     comments,
@@ -319,6 +342,9 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       await cloudSync.flush().catch(() => undefined);
       exportsSvc.close();
       engines.closeAll();
+      // Leases go only once this node has let go of the files, so the next holder can open them.
+      await engines.released().catch(() => undefined);
+      await cluster.stop().catch(() => undefined);
       await store.close();
     },
   };

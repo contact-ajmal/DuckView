@@ -7,6 +7,8 @@ import type { Workspace, SessionTab, EngineSettings, ChartConfig, WorkspaceFolde
 import { WORKSPACE_ROLES, MEMBER_SUBJECT_TYPES } from '../db/schema/sqlite.js';
 import { newId } from '../security/crypto.js';
 import { EngineManager, type WorkspaceEngine, type AttachSpec } from '../engine/duckdb.js';
+import { RemoteEngine } from '../engine/remote.js';
+import type { ClusterService } from './cluster.js';
 import type { ConnectionService } from './connections.js';
 import type { CloudConnectionService } from './cloud.js';
 import type { LakehouseService } from './lakehouse.js';
@@ -15,7 +17,7 @@ import type { Principal } from './principal.js';
 import { assertWorkspaceScope, isPlatformAdmin, maxWorkspaceRole, requireWorkspaceRole } from './principal.js';
 import { isCloudDbUri, parseCloudUri, type WorkspaceCloudSync } from './workspace-cloud.js';
 import { ensureWritableDir } from '../engine/sandbox.js';
-import { badRequest, forbidden, notFound } from './errors.js';
+import { badRequest, forbidden, notFound, HttpError } from './errors.js';
 import { isRemoteUri } from '../engine/sandbox.js';
 import { liveEvents } from '../observability/events.js';
 
@@ -58,6 +60,8 @@ export class WorkspaceService {
 
   /** Cloud-backed database sync (set by the context right after construction). */
   cloudSync: WorkspaceCloudSync | null = null;
+  /** Cluster mode (set by the context): leases decide which node opens a workspace. */
+  cluster: ClusterService | null = null;
 
   constructor(private readonly store: MetadataStore, private readonly engines: EngineManager, private readonly connections: ConnectionService, private readonly cloud: CloudConnectionService, private readonly groups: GroupService) {
     // A :memory: database loses every table when its engine is (re)created — idle eviction included — so
@@ -265,7 +269,7 @@ export class WorkspaceService {
     await this.db.delete(this.s.workspaceMembers).where(and(eq(this.s.workspaceMembers.workspace_id, id), eq(this.s.workspaceMembers.subject_type, 'user'), eq(this.s.workspaceMembers.subject_id, newOwnerId)));
     await this.db.insert(this.s.workspaceMembers).values({ id: newId(), workspace_id: id, subject_type: 'user', subject_id: w.user_id, role: 'OWNER', added_by: p.userId, created_at: new Date() });
     // Secrets and lakehouse catalogs are resolved from the owner — the engine must be rebuilt for the new one.
-    this.engines.evict(id);
+    this.evict(id);
     await this.bumpVersion(id, 'transferred', p.userId);
     return this.describe(p, id);
   }
@@ -321,6 +325,12 @@ export class WorkspaceService {
   }
 
   /** Raw row without an access check — for internal listeners. */
+  /** Closes a workspace's engine here and, in cluster mode, on the node holding it. */
+  evict(id: string): void {
+    this.engines.evict(id);
+    if (this.cluster?.enabled) void this.cluster.broadcast('/internal/cluster/evict', { workspace_id: id });
+  }
+
   async rowById(id: string): Promise<Workspace | null> {
     const rows = await this.db.select().from(this.s.workspaces).where(eq(this.s.workspaces.id, id)).limit(1);
     return rows[0] ?? null;
@@ -407,7 +417,7 @@ export class WorkspaceService {
     await this.db.update(this.s.workspaces).set(set).where(eq(this.s.workspaces.id, id));
     // Engine settings changed → the cached engine is stale; next query rebuilds it.
     if (set.active_db_path !== undefined || set.engine_settings !== undefined) {
-      this.engines.evict(id);
+      this.evict(id);
       await this.bumpVersion(id, 'settings_changed', p.userId);
     }
     return { ...w, ...set };
@@ -498,7 +508,7 @@ export class WorkspaceService {
 
   async remove(p: Principal, id: string): Promise<void> {
     await this.get(p, id, 'OWNER');
-    this.engines.evict(id);
+    this.evict(id);
     await this.db.delete(this.s.workspaces).where(eq(this.s.workspaces.id, id));
   }
 
@@ -549,7 +559,7 @@ export class WorkspaceService {
     }
     const cloud_sync: CloudSyncState | null = cloud ? { etag: null, synced_at: null, size_bytes: null, dirty: true, last_error: null } : null;
     await this.db.update(this.s.workspaces).set({ active_db_path: dbPath, cloud_connection_id: connectionId, cloud_sync, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
-    this.engines.evict(id);
+    this.evict(id);
     await this.bumpVersion(id, 'persisted', p.userId);
     // The file must exist before the first push; a cold workspace gets its file on the first engine start instead.
     const synced = cloud && copied ? await this.cloudSync!.push(id, 'persisted') : cloud_sync;
@@ -562,6 +572,35 @@ export class WorkspaceService {
    */
   async engine(p: Principal, workspaceId: string): Promise<{ workspace: WorkspaceAccess; engine: WorkspaceEngine; role: WorkspaceRole }> {
     const workspace = await this.get(p, workspaceId);
+    const engine = await this.engineFor(workspace);
+    const restriction = this.policies ? await this.policies.restrictionFor(p, workspace.id, workspace.role) : null;
+    return { workspace, engine: restriction ? this.policies!.guard(engine, restriction) : engine, role: workspace.role };
+  }
+
+  /**
+   * The workspace's engine: opened here, or — in cluster mode, when another node holds the workspace — a remote
+   * engine that forwards to that node.
+   */
+  private async engineFor(workspace: Workspace): Promise<WorkspaceEngine> {
+    if (this.cluster?.enabled) {
+      const holder = await this.cluster.acquire(`workspace:${workspace.id}`);
+      if (!holder.self) return new RemoteEngine(this.cluster, { id: holder.node.id, url: holder.node.url }, workspace.id, this.cluster.cfg, this.engines.jail) as unknown as WorkspaceEngine;
+    }
+    return this.openLocal(workspace);
+  }
+
+  /** The engine of a workspace this node holds (cluster calls from other nodes use it; no principal). */
+  async localEngine(workspaceId: string): Promise<WorkspaceEngine> {
+    const workspace = await this.rowById(workspaceId);
+    if (!workspace) throw notFound('Workspace');
+    if (this.cluster?.enabled) {
+      const holder = await this.cluster.acquire(`workspace:${workspaceId}`);
+      if (!holder.self) throw new HttpError(409, `Workspace ${workspaceId} is held by node ${holder.node.id}`, 'NOT_HOLDER');
+    }
+    return this.openLocal(workspace);
+  }
+
+  private async openLocal(workspace: Workspace): Promise<WorkspaceEngine> {
     // Workspace-linked data connections + every cloud storage connection the owner has configured.
     const lake = this.lakehouse ? await this.lakehouse.resolveEngineBits(workspace.user_id) : { secrets: [], attachments: [] };
     const dbs = this.databases ? await this.databases.resolveAttachments(workspace.user_id) : [];
@@ -572,9 +611,7 @@ export class WorkspaceService {
       if (!this.engines.peek(workspace.id)) await this.cloudSync.pull(workspace);
       dbPath = this.cloudSync.localPath(workspace.id);
     }
-    const engine = await this.engines.get({ workspaceId: workspace.id, dbPath, settings: workspace.engine_settings, secrets, attachments: [...lake.attachments, ...dbs] });
-    const restriction = this.policies ? await this.policies.restrictionFor(p, workspace.id, workspace.role) : null;
-    return { workspace, engine: restriction ? this.policies!.guard(engine, restriction) : engine, role: workspace.role };
+    return this.engines.get({ workspaceId: workspace.id, dbPath, settings: workspace.engine_settings, secrets, attachments: [...lake.attachments, ...dbs] });
   }
 
   // ---------- Tabs (per user, inside a possibly shared workspace) ----------

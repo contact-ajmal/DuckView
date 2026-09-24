@@ -817,7 +817,9 @@ export class DbtService {
     const started: string[] = [];
     for (const project of due) {
       if (this.running.has(project.id) || project.schedule.kind === 'manual') continue;
-      await this.db.update(this.s.dbtProjects).set({ next_run_at: nextRunAt(project.schedule, now) }).where(eq(this.s.dbtProjects.id, project.id));
+      // Claimed atomically: with several nodes (cluster mode) only the one whose update lands runs it.
+      const claimed = await this.db.update(this.s.dbtProjects).set({ next_run_at: nextRunAt(project.schedule, now) }).where(and(eq(this.s.dbtProjects.id, project.id), eq(this.s.dbtProjects.next_run_at, project.next_run_at!))).returning({ id: this.s.dbtProjects.id });
+      if (!claimed.length) continue;
       const author = await this.auth.findActive(project.user_id);
       if (!author) {
         logger().warn({ project: project.id }, 'Scheduled dbt run skipped: the author no longer exists or has been deactivated');

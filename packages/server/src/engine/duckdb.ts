@@ -1158,6 +1158,8 @@ export class EngineManager {
   }
   /** Fired after a fresh DuckDB instance is opened for a workspace (first use, restart, or after idle eviction). */
   onCreated: ((spec: EngineSpec) => void) | null = null;
+  /** Fired when a workspace's engine is closed here (cluster mode releases the workspace's lease). */
+  onEvicted: ((workspaceId: string) => void) | null = null;
 
   constructor(private readonly cfg: DuckViewConfig) {
     this.jail = cfg.security.filesystem_mode === 'full' ? new DataJail(path.parse(cfg.security.data_jail_directory).root, cfg.security.data_jail_directory) : new DataJail(cfg.security.data_jail_directory);
@@ -1216,7 +1218,13 @@ export class EngineManager {
       this.closing.set(workspaceId, e.whenReleased);
       this.engines.delete(workspaceId);
       metrics.engines.set(this.engines.size);
+      this.onEvicted?.(workspaceId);
     }
+  }
+
+  /** Resolves when every engine told to close has let go of its database file (bounded wait). */
+  async released(timeoutMs = 15_000): Promise<void> {
+    await Promise.race([Promise.all([...this.closing.values()]), new Promise<void>((r) => setTimeout(r, timeoutMs).unref())]);
   }
 
   private enforceCapacity() {

@@ -542,7 +542,9 @@ export class QualityService {
     const due = await this.db.select().from(this.s.qualitySuites).where(and(eq(this.s.qualitySuites.enabled, true), isNotNull(this.s.qualitySuites.next_run_at), lte(this.s.qualitySuites.next_run_at, now)));
     const ran: string[] = [];
     for (const suite of due) {
-      await this.db.update(this.s.qualitySuites).set({ next_run_at: nextRunAt(suite.schedule, now) }).where(eq(this.s.qualitySuites.id, suite.id));
+      // Claimed atomically: with several nodes (cluster mode) only the one whose update lands runs it.
+      const claimed = await this.db.update(this.s.qualitySuites).set({ next_run_at: nextRunAt(suite.schedule, now) }).where(and(eq(this.s.qualitySuites.id, suite.id), eq(this.s.qualitySuites.next_run_at, suite.next_run_at!))).returning({ id: this.s.qualitySuites.id });
+      if (!claimed.length) continue;
       try {
         await this.run(suite.id, 'schedule');
         ran.push(suite.id);
