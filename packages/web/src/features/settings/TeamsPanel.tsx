@@ -104,7 +104,7 @@ export function TeamsPanel() {
         actions={
           group && isAdmin ? (
             <div className="flex items-center gap-1">
-              <Button size="sm" variant="ghost" onClick={() => setRenaming({ open: true, id: group.id, name: group.name, description: group.description ?? '', external_id: group.external_id ?? '' })} title="Rename">
+              <Button size="sm" variant="ghost" onClick={() => setRenaming({ open: true, id: group.id, name: group.name, description: group.description ?? '', external_id: group.external_id ?? '' })} title="Rename" aria-label="Rename">
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
               <Button

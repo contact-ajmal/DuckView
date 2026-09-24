@@ -294,7 +294,7 @@ function ProjectView({ id }: { id: string }) {
           <HistoryButton label workspaceId={project.workspace_id} objectType="dbt" objectId={project.id} title={project.name} onRestored={() => void load()} />
           {canEdit && <Button size="sm" variant="ghost" onClick={() => setScheduling(true)}><CalendarClock className="h-3.5 w-3.5" /> Schedule</Button>}
           {canEdit && (
-            <Button size="sm" variant="ghost" onClick={async () => { if ((await confirmAction(`Delete the dbt project "${project.name}"? The tables it built stay.`))) void api.del(`/api/dbt/projects/${id}`).then(() => (location.hash = '#/transform/dbt')); }}>
+            <Button size="sm" variant="ghost" onClick={async () => { if ((await confirmAction(`Delete the dbt project "${project.name}"? The tables it built stay.`))) void api.del(`/api/dbt/projects/${id}`).then(() => (location.hash = '#/transform/dbt')); }} aria-label="Remove" title="Remove">
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           )}

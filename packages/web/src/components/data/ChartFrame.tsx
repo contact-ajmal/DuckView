@@ -26,7 +26,7 @@ export function ChartFrame({ title, meta, actions, leading, children, shape = 'c
         <header className="flex h-8 shrink-0 items-center gap-1.5 px-3">
           {leading}
           {title && <h3 className="truncate text-xs font-semibold text-zinc-200">{title}</h3>}
-          {meta && <span className="shrink-0 text-2xs text-zinc-600">{meta}</span>}
+          {meta && <span className="shrink-0 text-2xs text-zinc-500">{meta}</span>}
           {actions && <div className={cn('ml-auto flex items-center gap-0.5 transition-opacity duration-[var(--dur-fast)]', !actionsVisible && 'opacity-0 focus-within:opacity-100 group-hover/frame:opacity-100')}>{actions}</div>}
         </header>
       )}

@@ -185,8 +185,8 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
             </button>
             {locationMenu && (
               <div className="absolute left-0 top-6 z-20 w-full rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
-                <button onClick={() => void setUploadDir(null)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800', folders.upload_dir === folders.data_directory && 'text-accent-200')}><Database className="h-3 w-3" /> <span className="min-w-0 flex-1 truncate">Data directory</span><span className="truncate font-mono text-2xs text-zinc-600">{folders.data_directory}</span></button>
-                {folders.folders.map((f) => <button key={f.path} onClick={() => void setUploadDir(f.path)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800', folders.upload_dir === f.path && 'text-accent-200')}><Folder className="h-3 w-3" /> <span className="min-w-0 flex-1 truncate">{f.name}</span><span className="truncate font-mono text-2xs text-zinc-600">{f.path}</span></button>)}
+                <button onClick={() => void setUploadDir(null)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800', folders.upload_dir === folders.data_directory && 'text-accent-200')}><Database className="h-3 w-3" /> <span className="min-w-0 flex-1 truncate">Data directory</span><span className="truncate font-mono text-2xs text-zinc-500">{folders.data_directory}</span></button>
+                {folders.folders.map((f) => <button key={f.path} onClick={() => void setUploadDir(f.path)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800', folders.upload_dir === f.path && 'text-accent-200')}><Folder className="h-3 w-3" /> <span className="min-w-0 flex-1 truncate">{f.name}</span><span className="truncate font-mono text-2xs text-zinc-500">{f.path}</span></button>)}
                 <button onClick={() => { setLocationMenu(false); setPicker(true); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-accent-300 hover:bg-zinc-800"><FolderPlus className="h-3 w-3" /> Choose another folder on this computer…</button>
               </div>
             )}
@@ -217,22 +217,22 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
                     {isFolder ? (open ? <FolderOpen className="h-3.5 w-3.5 text-zinc-500" /> : <Folder className="h-3.5 w-3.5 text-zinc-500" />) : <Database className="h-3.5 w-3.5 text-zinc-500" />}
                     <span className="truncate text-xs font-medium text-zinc-300">{label}</span>
                     {isUploadDir && <span className="text-2xs text-zinc-500" title="Uploads land here">· uploads</span>}
-                    <span className="ml-auto font-mono text-2xs text-zinc-600">{items.length}{ws.catalog?.truncated_folders?.includes(root) ? '+' : ''}</span>
+                    <span className="ml-auto font-mono text-2xs text-zinc-500">{items.length}{ws.catalog?.truncated_folders?.includes(root) ? '+' : ''}</span>
                   </button>
-                  {isFolder && canWrite && <button onClick={() => void removeFolder(root)} className="rounded p-0.5 text-zinc-600 opacity-0 hover:text-red-300 group-hover/root:opacity-100" title="Remove folder from workspace"><X className="h-3 w-3" /></button>}
+                  {isFolder && canWrite && <button onClick={() => void removeFolder(root)} className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-red-300 group-hover/root:opacity-100" title="Remove folder from workspace"><X className="h-3 w-3" /></button>}
                 </div>
-                {open && isFolder && <div className="ml-5 truncate font-mono text-2xs text-zinc-600" title={root}>{root}</div>}
-                {open && items.length === 0 && <div className="ml-5 py-1 text-2xs text-zinc-600">No data files here yet{isFolder ? '' : ' — drop one above'}.</div>}
+                {open && isFolder && <div className="ml-5 truncate font-mono text-2xs text-zinc-500" title={root}>{root}</div>}
+                {open && items.length === 0 && <div className="ml-5 py-1 text-2xs text-zinc-500">No data files here yet{isFolder ? '' : ' — drop one above'}.</div>}
                 {open && items.map((f) => {
                   const display = f.root ? f.path.slice(f.root.length + 1) : f.path;
                   return (
-                    <div key={f.path} className={cn('group ml-3 flex items-center gap-2 rounded-md px-2 py-[5px]', target === f.path ? 'bg-zinc-800 text-zinc-50' : 'hover:bg-zinc-800/50')}>
+                    <div key={f.path} className={cn('group ml-3 flex items-center gap-2 rounded-md px-2 py-[5px]', target === f.path ? 'bg-zinc-800/70 text-zinc-50' : 'hover:bg-zinc-800/50')}>
                       {KIND_ICON(f.kind)}
                       <button className="flex min-w-0 flex-1 items-baseline gap-2 text-left" onClick={() => onSelect(f.path)} title={`${f.path} · ${f.kind} · ${formatBytes(f.size_bytes)}`}>
                         <span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-100">{display}</span>
-                        <span className="shrink-0 font-mono text-2xs text-zinc-600 group-hover:hidden">{formatBytes(f.size_bytes)}</span>
+                        <span className="shrink-0 font-mono text-2xs text-zinc-400 group-hover:hidden">{formatBytes(f.size_bytes)}</span>
                       </button>
-                      {canWrite && !f.root && <button className="rounded p-0.5 text-zinc-600 opacity-0 hover:text-red-300 group-hover:opacity-100" onClick={() => void removeFile(f)} title="Delete file"><Trash2 className="h-3 w-3" /></button>}
+                      {canWrite && !f.root && <button className="rounded p-0.5 text-zinc-500 opacity-0 hover:text-red-300 group-hover:opacity-100" onClick={() => void removeFile(f)} title="Delete file"><Trash2 className="h-3 w-3" /></button>}
                     </div>
                   );
                 })}
@@ -250,7 +250,7 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
                 {!collapsed.has('__tables') ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
                 <Table2 className="h-3.5 w-3.5 text-zinc-500" />
                 <span className="truncate text-xs font-medium text-zinc-300">Workspace tables</span>
-                <span className="ml-auto font-mono text-2xs text-zinc-600">{objects.length}</span>
+                <span className="ml-auto font-mono text-2xs text-zinc-500">{objects.length}</span>
               </button>
               {!collapsed.has('__tables') && objects.map((o) => {
                 const name = o.schema === 'main' ? o.name : `${o.schema}.${o.name}`;
@@ -258,7 +258,7 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
                   <button key={name} onClick={() => onSelect(name)} title={`${o.type.toLowerCase()} · ${o.column_count} columns${o.estimated_rows != null ? ` · ~${o.estimated_rows.toLocaleString()} rows` : ''}`} className={cn('ml-3 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-[5px] text-left', target === name ? 'bg-zinc-800 text-zinc-50' : 'hover:bg-zinc-800/50')}>
                     {o.type === 'VIEW' ? <Eye className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Table2 className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
                     <span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-100">{name}</span>
-                    {o.estimated_rows != null && <span className="shrink-0 font-mono text-2xs text-zinc-600">{o.estimated_rows.toLocaleString()}</span>}
+                    {o.estimated_rows != null && <span className="shrink-0 font-mono text-2xs text-zinc-500">{o.estimated_rows.toLocaleString()}</span>}
                   </button>
                 );
               })}
@@ -294,7 +294,7 @@ function SectionHeader({ icon, label, count, action, open, onToggle, hint }: { i
         {open ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
         <span className="text-zinc-500">{icon}</span>
         <span className="text-xs font-semibold text-zinc-300">{label}</span>
-        <span className="text-2xs tabular-nums text-zinc-600">{count}</span>
+        <span className="text-2xs tabular-nums text-zinc-500">{count}</span>
       </button>
       {action}
     </div>
@@ -354,7 +354,7 @@ function RemoteTree({ node, depth, target, onSelect, onImport, onQuery }: { node
       {open && (
         <div>
           {error && <div className="ml-6 rounded-md border border-red-900/60 bg-red-950/30 px-2 py-1 font-mono text-2xs text-red-200" style={{ marginLeft: 16 + depth * 12 }}>{error}</div>}
-          {!loading && !error && children?.length === 0 && <div className="py-1 text-2xs text-zinc-600" style={{ paddingLeft: 22 + depth * 12 }}>Nothing here.</div>}
+          {!loading && !error && children?.length === 0 && <div className="py-1 text-2xs text-zinc-500" style={{ paddingLeft: 22 + depth * 12 }}>Nothing here.</div>}
           {children?.map((c) => <RemoteTree key={c.id} node={c} depth={depth + 1} target={target} onSelect={onSelect} onImport={onImport} onQuery={onQuery} />)}
         </div>
       )}

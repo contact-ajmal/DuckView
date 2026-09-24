@@ -178,7 +178,7 @@ function DailyChart({ daily, money }: { daily: UsageReport['daily']; money: (n: 
         })}
         <line x1="0" x2="100" y1={h - 0.25} y2={h - 0.25} className="stroke-zinc-700" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
       </svg>
-      <div className="mt-1 flex justify-between text-2xs text-zinc-600">
+      <div className="mt-1 flex justify-between text-2xs text-zinc-500">
         <span>{daily[0]!.date}</span>
         <span>highest day {money(max)}</span>
         <span>{daily.at(-1)!.date}</span>
@@ -208,7 +208,7 @@ function Budgets({ budgets, money, isAdmin, onAdd, onRemove, workspaceName }: { 
                   <span className="font-medium text-zinc-200">{b.name}</span>
                   <span className="text-zinc-500">{b.workspace_id ? workspaceName(b.workspace_id) : 'Organisation'} · notifies at {b.thresholds.join(', ')}%{b.forecast ? ' of the forecast' : ''}</span>
                   <span className={cn('ml-auto tabular-nums', over ? 'text-red-300' : 'text-zinc-300')}>{money(b.spent)} of {money(b.amount)}</span>
-                  <button className="text-zinc-600 hover:text-zinc-300" aria-label={`Remove ${b.name}`} onClick={() => void onRemove(b.id)}><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button className="text-zinc-500 hover:text-zinc-300" aria-label={`Remove ${b.name}`} onClick={() => void onRemove(b.id)}><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
                 <div className="relative mt-1.5 h-1.5 rounded-full bg-zinc-800" title={`Forecast for the month: ${money(b.forecast_spend)}`}>
                   <div className={cn('h-full rounded-full', over ? 'bg-red-500' : pct >= Math.min(...b.thresholds) ? 'bg-amber-400' : 'bg-emerald-500')} style={{ width: `${pct}%` }} />
@@ -286,7 +286,7 @@ function BudgetForm({ isAdmin, onClose, onSaved, currency }: { isAdmin: boolean;
             <div className="max-h-32 space-y-1 overflow-auto">
               {channels.map((c) => (
                 <label key={c.id} className="flex items-center gap-2 text-zinc-300">
-                  <input type="checkbox" checked={picked.includes(c.id)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, c.id] : p.filter((x) => x !== c.id)))} /> {c.name} <span className="text-zinc-600">{c.type}</span>
+                  <input type="checkbox" checked={picked.includes(c.id)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, c.id] : p.filter((x) => x !== c.id)))} /> {c.name} <span className="text-zinc-500">{c.type}</span>
                 </label>
               ))}
             </div>

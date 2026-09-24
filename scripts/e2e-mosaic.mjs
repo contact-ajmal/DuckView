@@ -1204,6 +1204,9 @@ try {
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
     const before = new Set(((await (await authed(`/api/workspaces/${wsId}/tabs`)).json()).tabs ?? []).map((t) => t.id));
     cleanup = async () => {
+      // Leave the page first: an open workbench saves its tabs back.
+      await send('Page.navigate', { url: 'about:blank' });
+      await sleep(500);
       for (const t of (await (await authed(`/api/workspaces/${wsId}/tabs`)).json()).tabs ?? []) if (!before.has(t.id)) await authed(`/api/workspaces/${wsId}/tabs/${t.id}`, { method: 'DELETE' });
     };
     const key = async (k, modifiers = 0, code = k) => { await send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code, modifiers, windowsVirtualKeyCode: { Enter: 13, Escape: 27, s: 83 }[k], ...(k === 'Enter' && !modifiers ? { text: '\r' } : {}) }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, modifiers }); await sleep(200); };
@@ -1329,6 +1332,9 @@ try {
     const minted = await j('POST', '/api/tokens', { name: `e2e approvals ${Date.now()}`, scopes: ['read', 'write', 'mcp'] });
     const tabsBefore = new Set(((await j('GET', `/api/workspaces/${wsId}/tabs`)).tabs ?? []).map((t) => t.id));
     cleanup = async () => {
+      // Leave the page first: an open workbench saves its tabs back.
+      await send('Page.navigate', { url: 'about:blank' });
+      await sleep(500);
       await j('DELETE', `/api/tokens/${minted.record?.id ?? minted.token_id ?? minted.id}`);
       await j('POST', `/api/workspaces/${wsId}/query`, { sql: 'DROP TABLE IF EXISTS e2e_approval' });
       for (const t of (await j('GET', `/api/workspaces/${wsId}/tabs`)).tabs ?? []) if (!tabsBefore.has(t.id)) await j('DELETE', `/api/workspaces/${wsId}/tabs/${t.id}`);
@@ -1349,6 +1355,56 @@ try {
     await waitFor(`location.hash === '#/query' && document.querySelector('.cm-content')?.innerText.includes('DELETE FROM e2e_approval')`, 10000, 'SQL tab with the held statement');
     // Nothing ran on the agent's behalf.
     report.details.rows = (await j('POST', `/api/workspaces/${wsId}/query`, { sql: 'SELECT count(*) FROM e2e_approval' })).rows?.[0]?.[0];
+    report.details.charts = 1;
+  }
+  else if (scenario === 'visual-qa') {
+    // Every main page, in a dark and a light theme and at laptop width: screenshots, plus an accessibility audit —
+    // controls without a name, fields without a label, text below WCAG AA contrast, content wider than the window.
+    const audit = `(() => {
+      const cv = document.createElement('canvas'); cv.width = cv.height = 1; const cx = cv.getContext('2d', { willReadFrequently: true });
+      const rgba = (c) => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = '#000'; cx.fillStyle = c; cx.fillRect(0, 0, 1, 1); const d = cx.getImageData(0, 0, 1, 1).data; let al = 1; const four = /^rgba\\(([^,]+),([^,]+),([^,]+),([^)]+)\\)/.exec(c); const slash = /\\/\\s*([0-9.]+%?)\\s*\\)\\s*$/.exec(c); if (four) al = parseFloat(four[4]); else if (slash) al = slash[1].endsWith('%') ? parseFloat(slash[1]) / 100 : parseFloat(slash[1]); if (c === 'transparent') al = 0; return [d[0], d[1], d[2], al]; };
+      const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+      const vis = (el) => { const r = el.getBoundingClientRect(); if (r.width < 1 || r.height < 1 || r.bottom < 0 || r.top > innerHeight) return false; const cs = getComputedStyle(el); return cs.visibility !== 'hidden' && cs.display !== 'none'; };
+      const opacity = (el) => { let o = 1; for (let e = el; e && e !== document.documentElement; e = e.parentElement) o *= parseFloat(getComputedStyle(e).opacity); return o; };
+      const bgOf = (el) => { const layers = []; for (let e = el; e; e = e.parentElement) { const c = rgba(getComputedStyle(e).backgroundColor); if (c[3] > 0) { layers.push(c); if (c[3] >= 0.99) break; } } let out = rgba(getComputedStyle(document.body).backgroundColor); for (const c of layers.reverse()) out = [0, 1, 2].map((i) => c[i] * c[3] + out[i] * (1 - c[3])).concat(1); return out; };
+      const name = (el) => (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '').trim();
+      const unnamed = [...document.querySelectorAll('button, a[href], [role=button], [role=tab], [role=menuitem]')].filter(vis).filter((el) => !name(el) && !el.closest('[aria-hidden=true]')).map((el) => el.outerHTML.slice(0, 140));
+      const labelled = (el) => el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || (el.id && document.querySelector('label[for="' + CSS.escape(el.id) + '"]')) || el.closest('label') || el.getAttribute('title');
+      const unlabeled = [...document.querySelectorAll('input:not([type=hidden]), select, textarea')].filter((el) => vis(el) && !el.closest('.cm-editor')).filter((el) => !labelled(el)).map((el) => el.outerHTML.slice(0, 140));
+      const texts = [...document.querySelectorAll('body *')].filter((el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim().length > 1) && vis(el) && !el.closest('svg, .cm-editor, [aria-hidden=true], canvas') && opacity(el) > 0.99).slice(0, 800);
+      const low = [];
+      for (const el of texts) {
+        const cs = getComputedStyle(el); const fg = rgba(cs.color); const bg = bgOf(el);
+        const f = [0, 1, 2].map((i) => fg[i] * fg[3] + bg[i] * (1 - fg[3]));
+        const l1 = lum(f), l2 = lum(bg); const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+        const size = parseFloat(cs.fontSize); const large = size >= 24 || (size >= 18.66 && parseInt(cs.fontWeight) >= 700);
+        if (ratio < (large ? 3 : 4.5)) low.push({ text: el.textContent.trim().slice(0, 40), ratio: Math.round(ratio * 100) / 100, cls: String(el.className).slice(0, 80) });
+      }
+      return { unnamed, unlabeled, contrast: { checked: texts.length, low: low.length, worst: low.sort((a, b) => a.ratio - b.ratio).slice(0, 6) }, overflow: document.documentElement.scrollWidth > innerWidth + 1 };
+    })()`;
+    const pages = ['#/', '#/data', '#/query', '#/dashboards', '#/apps', '#/agents', '#/connections', '#/transform/metrics', '#/governance/catalog', '#/templates', '#/settings/usage', '#/settings/users'];
+    const runs = [{ theme: 'midnight', width: 1440 }, { theme: 'daylight', width: 1440 }, { theme: 'midnight', width: 1024 }];
+    const dir = out.replace(/\.png$/, '');
+    fs.mkdirSync(dir, { recursive: true });
+    const results = [];
+    cleanup = async () => { await evaluate(`localStorage.removeItem('duckview.theme'); 'ok'`); await send('Emulation.clearDeviceMetricsOverride'); };
+    for (const r of runs) {
+      await send('Emulation.setDeviceMetricsOverride', { width: r.width, height: 1000, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`localStorage.setItem('duckview.theme', JSON.stringify({ themeId: '${r.theme}' })); 'ok'`);
+      await send('Page.reload', {});
+      await waitFor(`!!document.querySelector('nav[aria-label="Primary"]')`, 30000, 'shell');
+      for (const pg of pages) {
+        await evaluate(`location.hash = '${pg}'; 'ok'`);
+        await sleep(pg === '#/data' || pg === '#/query' ? 3500 : 2200);
+        const res = await evaluate(audit);
+        results.push({ theme: r.theme, width: r.width, page: pg, unnamed: res.unnamed.length, unlabeled: res.unlabeled.length, low: res.contrast.low, overflow: res.overflow, examples: { unnamed: res.unnamed.slice(0, 2), unlabeled: res.unlabeled.slice(0, 2), contrast: res.contrast.worst.slice(0, 3) } });
+        const shot = await send('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(`${dir}/${r.theme}-${r.width}-${pg.replace(/[#/]+/g, '_').replace(/^_|_$/g, '') || 'home'}.png`, Buffer.from(shot.result.data, 'base64'));
+      }
+    }
+    report.details.pages = results.map((x) => `${x.theme}@${x.width} ${x.page}: ${x.unnamed} unnamed · ${x.unlabeled} unlabeled · ${x.low} low-contrast${x.overflow ? ' · OVERFLOW' : ''}`);
+    report.details.problems = results.filter((x) => x.unnamed || x.unlabeled || x.low || x.overflow).map((x) => ({ at: `${x.theme}@${x.width} ${x.page}`, ...x.examples }));
+    report.details.screenshots = dir;
     report.details.charts = 1;
   }
   else if (scenario === 'orchestration') {
@@ -2210,6 +2266,10 @@ try {
     if (!/wants to change data in e2e_approval/.test(d.inbox ?? '')) problems.push(`inbox: ${d.inbox}`);
     if (!/wants to change data in e2e_approval/.test(d.card ?? '') || !/DELETE/.test(d.card ?? '')) problems.push(`card: ${d.card}`);
     if (d.rows !== 5) problems.push(`the held DELETE ran (${d.rows} rows)`);
+  }
+  if (scenario === 'visual-qa') {
+    const bad = (d.pages ?? []).filter((l) => !/: 0 unnamed · 0 unlabeled · 0 low-contrast$/.test(l));
+    if (bad.length) problems.push(`accessibility: ${bad.join('; ')}`);
   }
   if (scenario === 'orchestration') {
     if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);

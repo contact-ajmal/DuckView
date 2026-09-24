@@ -67,16 +67,16 @@ export function Badge({ children, tone = 'neutral', className }: { children: Rea
   const tones: Record<BadgeTone, string> = {
     neutral: 'bg-zinc-900 text-zinc-400',
     accent: 'bg-accent-500/15 text-accent-300',
-    ok: 'bg-emerald-500/12 text-emerald-400',
-    warn: 'bg-amber-500/12 text-amber-400',
-    error: 'bg-red-500/12 text-red-400',
-    info: 'bg-sky-500/12 text-sky-400',
+    ok: 'bg-emerald-500/12 text-emerald-300',
+    warn: 'bg-amber-500/12 text-amber-300',
+    error: 'bg-red-500/12 text-red-300',
+    info: 'bg-sky-500/12 text-sky-300',
     zinc: 'bg-zinc-900 text-zinc-400',
     violet: 'bg-accent-500/15 text-accent-300',
-    green: 'bg-emerald-500/12 text-emerald-400',
-    amber: 'bg-amber-500/12 text-amber-400',
-    red: 'bg-red-500/12 text-red-400',
-    blue: 'bg-sky-500/12 text-sky-400',
+    green: 'bg-emerald-500/12 text-emerald-300',
+    amber: 'bg-amber-500/12 text-amber-300',
+    red: 'bg-red-500/12 text-red-300',
+    blue: 'bg-sky-500/12 text-sky-300',
   };
   return <span className={cn('inline-flex items-center rounded px-1.5 py-[3px] text-2xs font-medium leading-none', tones[tone], className)}>{children}</span>;
 }
@@ -120,7 +120,7 @@ export function Tabs<T extends string>({ tabs, value, onChange, className, size 
           className={cn('-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 font-medium transition-colors duration-[var(--dur-fast)]', size === 'sm' ? 'py-1.5 text-xs' : 'py-2 text-body', value === t.id ? 'border-accent-500 text-zinc-50' : 'border-transparent text-zinc-500 hover:text-zinc-200')}
         >
           {t.label}
-          {t.count != null && <span className="text-2xs tabular-nums text-zinc-600">{t.count}</span>}
+          {t.count != null && <span className="text-2xs tabular-nums text-zinc-500">{t.count}</span>}
         </button>
       ))}
     </div>
@@ -181,7 +181,7 @@ export function MenuItem({ icon, children, onClick, hint, danger, active }: { ic
     <button role="menuitem" onClick={onClick} className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors focus:outline-none', danger ? 'text-red-400 hover:bg-red-500/10 focus-visible:bg-red-500/10' : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-50 focus-visible:bg-zinc-900 focus-visible:text-zinc-50', active && 'bg-zinc-900 text-zinc-50')}>
       {icon && <span className="flex w-4 shrink-0 justify-center text-zinc-500">{icon}</span>}
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {hint && <span className="shrink-0 text-2xs text-zinc-600">{hint}</span>}
+      {hint && <span className="shrink-0 text-2xs text-zinc-500">{hint}</span>}
     </button>
   );
 }
@@ -272,7 +272,7 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
 export function Empty({ title, hint, icon, action }: { title: string; hint?: string; icon?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-      {icon && <div className="text-zinc-600 [&_svg]:h-6 [&_svg]:w-6">{icon}</div>}
+      {icon && <div className="text-zinc-500 [&_svg]:h-6 [&_svg]:w-6">{icon}</div>}
       <div className="text-body font-medium text-zinc-200">{title}</div>
       {hint && <div className="max-w-sm text-xs leading-relaxed text-zinc-500">{hint}</div>}
       {action && <div className="mt-2">{action}</div>}

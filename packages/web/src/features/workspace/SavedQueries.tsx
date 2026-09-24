@@ -34,7 +34,7 @@ export function SavedQueriesTree({ queries, onOpen, onRun, onDelete, onHistory }
                 {open ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
                 {open ? <FolderOpen className="h-3.5 w-3.5 text-amber-300/80" /> : <Folder className="h-3.5 w-3.5 text-amber-300/80" />}
                 <span className="truncate font-mono">{folder}</span>
-                <span className="ml-auto font-mono text-2xs text-zinc-600">{items.length}</span>
+                <span className="ml-auto font-mono text-2xs text-zinc-500">{items.length}</span>
               </button>
             )}
             {open &&

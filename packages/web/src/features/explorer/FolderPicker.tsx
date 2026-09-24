@@ -46,8 +46,8 @@ export function FolderPicker({ open, workspaceId, onClose, onPick }: { open: boo
     <Modal open={open} onClose={onClose} title="Add folder to workspace" width="max-w-xl">
       <div className="space-y-3">
         <div className="flex items-center gap-1.5">
-          <Button size="sm" variant="ghost" onClick={() => void load()} title="Home"><Home className="h-3.5 w-3.5" /></Button>
-          <Button size="sm" variant="ghost" disabled={!state?.parent} onClick={() => state?.parent && void load(state.parent)} title="Up one level"><ChevronUp className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => void load()} title="Home" aria-label="Home"><Home className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" variant="ghost" disabled={!state?.parent} onClick={() => state?.parent && void load(state.parent)} title="Up one level" aria-label="Up one level"><ChevronUp className="h-3.5 w-3.5" /></Button>
           <form className="flex min-w-0 flex-1 gap-1.5" onSubmit={(e) => { e.preventDefault(); void load(manual); }}>
             <Input value={manual} onChange={(e) => setManual(e.target.value)} className="h-8 font-mono text-xs" placeholder="/absolute/path" />
             <Button size="sm" type="submit">Go</Button>

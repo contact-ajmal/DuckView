@@ -13,7 +13,7 @@ export function HideButton({ id, className }: { id: string; className?: string }
         e.stopPropagation();
         hide(id);
       }}
-      className={cn('rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-200', className)}
+      className={cn('rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200', className)}
       title={`Hide ${label} (restore from Layout in the header or Settings)`}
       aria-label={`Hide ${label}`}
     >
@@ -72,7 +72,7 @@ export function LayoutMenu({ currentPage }: { currentPage: LayoutPage | null }) 
               </button>
             </>
           )}
-          <p className="mt-2 border-t border-zinc-800 px-2 pt-2 text-2xs text-zinc-600">Full list under Settings → Layout.</p>
+          <p className="mt-2 border-t border-zinc-800 px-2 pt-2 text-2xs text-zinc-500">Full list under Settings → Layout.</p>
         </div>
       )}
     </div>

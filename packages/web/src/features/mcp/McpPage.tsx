@@ -127,7 +127,7 @@ export function McpPage() {
       <>
         <div className="flex items-center gap-1.5">
           {f.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : f.kind === 'session' ? <Radio className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Activity className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
-          <span className={cn('truncate text-xs text-zinc-100', f.kind !== 'tool' && 'font-mono')}>{f.title}</span>
+          <span className={cn('truncate text-xs text-zinc-100', (f.kind === 'audit' || f.kind === 'session') && 'font-mono')}>{f.title}</span>
           {f.effect === 'write' && <Badge tone="warn">changes data</Badge>}
         </div>
         {f.detail && <div className="mt-0.5 truncate font-mono text-2xs text-zinc-500" title={f.detail}>{f.detail}</div>}
@@ -292,7 +292,7 @@ export function McpPage() {
                     reason={f.reason ?? 'The change was held until a person approves it.'}
                     statements={sql ? [{ verb: (/^\s*(\w+)/.exec(sql)?.[1] ?? 'SQL').toUpperCase(), preview: sql.replace(/\s+/g, ' ').slice(0, 300), destructive: true }] : undefined}
                   >
-                    {sql && <Button size="sm" className="mt-2" onClick={() => { void useWorkspace.getState().addTab({ title: `From ${f.agent ?? 'an agent'}`, sql }); location.hash = '#/query'; }}>Run it myself in SQL</Button>}
+                    {sql && <Button size="sm" className="mt-2" onClick={() => { void useWorkspace.getState().addTab({ title: f.agent && f.agent !== 'An agent' ? `From ${f.agent}` : 'From an agent', sql }); location.hash = '#/query'; }}>Run it myself in SQL</Button>}
                   </ApprovalCard>
                 );
               })}

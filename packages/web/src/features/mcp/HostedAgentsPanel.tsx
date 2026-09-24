@@ -161,7 +161,7 @@ export function HostedAgentsPanel() {
                     </label>
                   )}
                   {canEdit && <Button size="sm" variant="ghost" onClick={() => setDraft(draftOf(agent))}><Pencil className="h-3.5 w-3.5" /> Edit</Button>}
-                  {canEdit && <Button size="sm" variant="ghost" onClick={() => void act('delete', async () => { await api.del(`/api/hosted-agents/${agent.id}`); setSelected(null); await load(); })} title="Delete the agent and its runs"><Trash2 className="h-3.5 w-3.5" /></Button>}
+                  {canEdit && <Button size="sm" variant="ghost" onClick={() => void act('delete', async () => { await api.del(`/api/hosted-agents/${agent.id}`); setSelected(null); await load(); })} title="Delete the agent and its runs" aria-label="Delete the agent and its runs"><Trash2 className="h-3.5 w-3.5" /></Button>}
                 </div>
                 {canEdit && (
                   <div className="flex gap-2">

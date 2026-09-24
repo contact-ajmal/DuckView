@@ -60,7 +60,7 @@ export function InboxBell() {
                   <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs text-zinc-300"><b className="font-semibold text-zinc-100">{h.agent}</b> wants to {h.text}</span>
-                    <span className="mt-0.5 block text-2xs text-zinc-600">{timeAgo(h.at)}</span>
+                    <span className="mt-0.5 block text-2xs text-zinc-500">{timeAgo(h.at)}</span>
                   </span>
                 </button>
               ))}
@@ -70,11 +70,11 @@ export function InboxBell() {
             <div className="max-h-[420px] overflow-auto">
               {items.map((i) => (
                 <button key={i.id} role="menuitem" onClick={() => { close(); void open(i); }} className={cn('flex w-full gap-2.5 rounded-md px-2 py-2 text-left hover:bg-zinc-900', !i.read && 'bg-accent-500/5')} data-inbox={i.kind}>
-                  <span className={cn('mt-0.5 shrink-0', i.read ? 'text-zinc-600' : 'text-accent-400')}>{i.kind === 'mention' ? <AtSign className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}</span>
+                  <span className={cn('mt-0.5 shrink-0', i.read ? 'text-zinc-500' : 'text-accent-400')}>{i.kind === 'mention' ? <AtSign className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs text-zinc-300"><b className="font-semibold text-zinc-100">{i.actor?.name ?? 'Someone'}</b> {i.kind === 'mention' ? 'mentioned you' : 'replied'} on <b className="font-medium text-zinc-100">{i.target_label}</b>{i.comment.anchor && i.comment.target_type === 'table' ? ` · ${i.comment.anchor}` : ''}</span>
                     <span className="mt-0.5 line-clamp-2 block text-xs text-zinc-500">{i.comment.body}</span>
-                    <span className="mt-0.5 block text-2xs text-zinc-600">{i.workspace} · {timeAgo(i.created_at)}</span>
+                    <span className="mt-0.5 block text-2xs text-zinc-500">{i.workspace} · {timeAgo(i.created_at)}</span>
                   </span>
                   {!i.read && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500" aria-label="unread" />}
                 </button>

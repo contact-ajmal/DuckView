@@ -62,7 +62,7 @@ export function ChannelsPanel({ workspaceId }: { workspaceId: string }) {
       {secretShown && (
         <div className="rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
           Signing secret — copy it now, it is not shown again: <code className="select-all font-mono text-amber-100">{secretShown}</code>
-          <Button size="sm" variant="ghost" onClick={() => void navigator.clipboard?.writeText(secretShown)}><Copy className="h-3 w-3" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => void navigator.clipboard?.writeText(secretShown)} aria-label="Copy" title="Copy"><Copy className="h-3 w-3" /></Button>
           <button className="ml-2 text-zinc-400 hover:text-zinc-200" onClick={() => setSecretShown(null)}>×</button>
         </div>
       )}
@@ -80,12 +80,12 @@ export function ChannelsPanel({ workspaceId }: { workspaceId: string }) {
                 {c.last_status && <Badge tone={c.last_status === 'ok' ? 'green' : 'red'} className="ml-auto">{c.last_status === 'ok' ? 'delivered' : 'failed'}</Badge>}
               </div>
               <div className="mt-1 truncate font-mono text-2xs text-zinc-500">{c.hint ?? '—'}</div>
-              <div className="mt-1 text-2xs text-zinc-600">{c.last_sent_at ? `last sent ${timeAgo(c.last_sent_at)}` : 'nothing sent yet'}{c.last_error ? <span className="text-red-300"> · {c.last_error}</span> : null}</div>
+              <div className="mt-1 text-2xs text-zinc-500">{c.last_sent_at ? `last sent ${timeAgo(c.last_sent_at)}` : 'nothing sent yet'}{c.last_error ? <span className="text-red-300"> · {c.last_error}</span> : null}</div>
               <div className="mt-2 flex items-center gap-1">
                 <Button size="sm" variant="secondary" disabled={!mayEdit(c)} loading={busy === `test:${c.id}`} onClick={() => void test(c)} title="Send a test message"><Send className="h-3.5 w-3.5" /> Test</Button>
-                <Button size="sm" variant="ghost" onClick={() => void api.get<{ deliveries: NotificationDelivery[] }>(`/api/channels/${c.id}/deliveries`).then((r) => setHistory({ channel: c, rows: r.deliveries }))} title="Recent deliveries"><History className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" onClick={() => void api.get<{ deliveries: NotificationDelivery[] }>(`/api/channels/${c.id}/deliveries`).then((r) => setHistory({ channel: c, rows: r.deliveries }))} title="Recent deliveries" aria-label="Recent deliveries"><History className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="ghost" disabled={!mayEdit(c)} onClick={() => void act(`toggle:${c.id}`, () => api.patch(`/api/channels/${c.id}`, { enabled: !c.enabled }))}>{c.enabled ? 'Disable' : 'Enable'}</Button>
-                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!mayEdit(c)} onClick={async () => { if ((await confirmAction(`Delete the channel "${c.name}"? Alerts that use it stop delivering there.`))) void act(`del:${c.id}`, () => api.del(`/api/channels/${c.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!mayEdit(c)} onClick={async () => { if ((await confirmAction(`Delete the channel "${c.name}"? Alerts that use it stop delivering there.`))) void act(`del:${c.id}`, () => api.del(`/api/channels/${c.id}`)); }} aria-label="Remove" title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           ))}

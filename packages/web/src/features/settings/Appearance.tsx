@@ -57,7 +57,7 @@ export function AppearanceSettings() {
                       {active && <span className="inline-flex items-center gap-1 rounded-full bg-accent-600/20 px-1.5 py-0.5 text-2xs text-accent-100"><Check className="h-3 w-3" /> active</span>}
                     </div>
                     <p className="mt-0.5 text-2xs text-zinc-500">{t.description}</p>
-                    <p className="mt-1 font-mono text-2xs text-zinc-600">{t.fonts.sans.split(',')[0]!.replace(/"/g, '')} · {t.fonts.mono.split(',')[0]!.replace(/"/g, '')}</p>
+                    <p className="mt-1 font-mono text-2xs text-zinc-500">{t.fonts.sans.split(',')[0]!.replace(/"/g, '')} · {t.fonts.mono.split(',')[0]!.replace(/"/g, '')}</p>
                   </button>
                 );
               })}

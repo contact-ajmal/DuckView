@@ -218,10 +218,10 @@ function TemplateDrawer({ id, onClose, onChanged }: { id: string; onClose: () =>
                           {tables.filter((x) => x !== tbl.name).map((x) => <option key={x} value={x}>{x}</option>)}
                         </Select>
                       </div>
-                      <div className={cn('mt-0.5 pl-[7.5rem]', !c ? 'text-zinc-600' : c.exists && !c.missing_columns.length ? 'text-emerald-300' : c.exists ? 'text-red-300' : sample && c.has_sample ? 'text-zinc-400' : 'text-red-300')}>
+                      <div className={cn('mt-0.5 pl-[7.5rem]', !c ? 'text-zinc-500' : c.exists && !c.missing_columns.length ? 'text-emerald-300' : c.exists ? 'text-red-300' : sample && c.has_sample ? 'text-zinc-400' : 'text-red-300')}>
                         {!c ? 'Checking…' : c.exists ? (c.missing_columns.length ? `Missing ${c.missing_columns.join(', ')}` : 'Has every column it uses') : c.has_sample ? (sample ? `Will be created with sample data` : 'Not in this workspace') : 'Not in this workspace'}
                       </div>
-                      <div className="pl-[7.5rem] text-2xs text-zinc-600">{tbl.columns.map((x) => x.name).join(', ')}</div>
+                      <div className="pl-[7.5rem] text-2xs text-zinc-500">{tbl.columns.map((x) => x.name).join(', ')}</div>
                     </div>
                   );
                 })}

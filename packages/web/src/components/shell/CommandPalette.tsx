@@ -155,7 +155,7 @@ export function CommandPalette() {
                 >
                   <span className="shrink-0 text-zinc-500">{c.icon}</span>
                   <span className="min-w-0 flex-1 truncate">{c.label}</span>
-                  {c.hint && <span className="max-w-[40%] shrink-0 truncate text-2xs text-zinc-600">{c.hint}</span>}
+                  {c.hint && <span className="max-w-[40%] shrink-0 truncate text-2xs text-zinc-500">{c.hint}</span>}
                   {i === sel && <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
                 </button>
               </div>

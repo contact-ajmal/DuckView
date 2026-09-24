@@ -18,7 +18,7 @@ function Distribution({ d }: { d: NonNullable<OverviewColumn['distribution']> })
       <ul className="space-y-1" aria-label="Most common values">
         {bins.map((b) => (
           <li key={b.label} className="grid grid-cols-[minmax(0,1fr)_7rem_4rem] items-center gap-2 text-xs">
-            <span className="truncate font-mono text-zinc-300" title={b.label}>{b.label === '' ? <em className="text-zinc-600">empty</em> : b.label}</span>
+            <span className="truncate font-mono text-zinc-300" title={b.label}>{b.label === '' ? <em className="text-zinc-500">empty</em> : b.label}</span>
             <span className="h-1.5 rounded-full bg-zinc-800"><span className="block h-full rounded-full bg-[color:var(--series-1)]" style={{ width: `${(b.count / max) * 100}%` }} /></span>
             <span className="text-right tabular-nums text-zinc-400">{b.count.toLocaleString()}</span>
           </li>

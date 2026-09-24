@@ -237,7 +237,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
           {node.kind === 'connection' && <span className="font-mono text-2xs text-zinc-500">{node.provider}</span>}
           {node.kind === 'lakehouse' && <span className="rounded border border-fuchsia-900 bg-fuchsia-950/40 px-1 font-mono text-2xs text-fuchsia-300" title={node.lakehouse?.attached ? `attached as ${node.lakehouse.alias}` : 'remote SQL'}>{node.provider === 'AWS_GLUE' ? 'GLUE' : node.provider === 'AWS_S3_TABLES' ? 'S3T' : node.provider === 'DATABRICKS' ? 'DBX' : 'IRC'}</span>}
           {node.kind === 'lh-table' && node.lakehouse?.engine === 'remote' && <span className="rounded border border-amber-900 bg-amber-950/40 px-1 font-mono text-2xs text-amber-300" title="Runs on the SQL warehouse">remote</span>}
-          {node.kind === 'lh-table' && node.lakehouse?.format && node.lakehouse.engine !== 'remote' && <span className="font-mono text-2xs text-zinc-600">{node.lakehouse.format.toLowerCase()}</span>}
+          {node.kind === 'lh-table' && node.lakehouse?.format && node.lakehouse.engine !== 'remote' && <span className="font-mono text-2xs text-zinc-500">{node.lakehouse.format.toLowerCase()}</span>}
           {node.size != null && <span className="font-mono text-2xs text-zinc-500">{formatBytes(node.size)}</span>}
           {node.kind === 'cloud-root' && (
             <button
@@ -280,7 +280,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
           <div>
             {node.error && <div className="truncate px-2 py-1 text-2xs text-red-300" style={{ paddingLeft: 22 + depth * 14 }} title={node.error}>{node.error}</div>}
             {node.loaded && node.children!.length === 0 && !node.error && (
-              <div className="px-2 py-1 text-2xs text-zinc-600" style={{ paddingLeft: 22 + depth * 14 }}>
+              <div className="px-2 py-1 text-2xs text-zinc-500" style={{ paddingLeft: 22 + depth * 14 }}>
                 {node.kind === 'cloud-root' ? (
                   <button className="text-zinc-500 hover:text-zinc-200" onClick={actions.onAddConnection}>
                     + connect S3 / R2 / GCS / Azure
@@ -346,7 +346,7 @@ export function Explorer({ workspaceId, actions, refreshKey = 0, selected, readO
     <div ref={ref} className="flex h-full flex-col">
       <div className="flex items-center gap-1.5 border-b border-zinc-800 px-2 py-1.5">
         <Search className="h-3 w-3 text-zinc-500" />
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter files…" className="h-6 min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none" />
+        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter files…" aria-label="Filter files" className="h-6 min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none" />
         {!readOnly && <button onClick={actions.onAddFolder} className="rounded p-1 text-zinc-500 hover:text-accent-300" title={mode === 'full' ? 'Add folder to workspace…' : 'Add a folder inside the data directory'}><FolderPlus className="h-3.5 w-3.5" /></button>}
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-1">

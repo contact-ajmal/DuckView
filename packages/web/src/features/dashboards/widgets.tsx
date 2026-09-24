@@ -224,7 +224,7 @@ export function TableWidget({ data, config }: { data: WidgetData; config: Widget
               <tr key={i} className="border-t border-zinc-800/60">
                 {r.map((v, j) => (
                   <td key={j} className={cn('max-w-[220px] truncate px-2 py-1', typeof v === 'number' ? 'text-right tabular-nums text-sky-200' : 'text-zinc-300')} title={v == null ? 'NULL' : String(v)}>
-                    {v == null ? <span className="text-zinc-600">NULL</span> : typeof v === 'object' ? JSON.stringify(v) : typeof v === 'number' ? v.toLocaleString() : String(v)}
+                    {v == null ? <span className="text-zinc-500">NULL</span> : typeof v === 'object' ? JSON.stringify(v) : typeof v === 'number' ? v.toLocaleString() : String(v)}
                   </td>
                 ))}
               </tr>
@@ -259,11 +259,11 @@ export function WidgetBody({ dashboardId, widget, tick, workspaceId, version }: 
   if (widget.widget_type !== 'KPI' && data.rows.length === 0) return <div className="flex h-full items-center justify-center px-4 text-center text-xs text-zinc-500">The query returned no rows.</div>;
   return (
     <div className="relative h-full">
-      {loading && <RefreshCw className="absolute right-2 top-1 z-10 h-3 w-3 animate-spin text-zinc-600" />}
+      {loading && <RefreshCw className="absolute right-2 top-1 z-10 h-3 w-3 animate-spin text-zinc-500" />}
       {widget.widget_type === 'KPI' && <KpiWidget data={data} config={widget.chart_config} />}
       {widget.widget_type === 'CHART' && <div className="h-full p-2"><ChartWidget data={data} config={widget.chart_config} /></div>}
       {widget.widget_type === 'TABLE' && <TableWidget data={data} config={widget.chart_config} />}
-      {at && (widget.refresh_interval_sec > 0 || fromCache) && <div className="absolute bottom-1 right-2 font-mono text-2xs text-zinc-600">{fromCache ? 'cached · ' : ''}computed {new Date(at).toLocaleTimeString()}</div>}
+      {at && (widget.refresh_interval_sec > 0 || fromCache) && <div className="absolute bottom-1 right-2 font-mono text-2xs text-zinc-500">{fromCache ? 'cached · ' : ''}computed {new Date(at).toLocaleTimeString()}</div>}
     </div>
   );
 }

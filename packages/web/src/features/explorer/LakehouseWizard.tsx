@@ -276,7 +276,7 @@ export function LakehouseWizard({ open, onClose, onCreated, initial, initialProv
               {credentialFields.map((f) => (
                 <div key={f.key} className={cn(f.key === 'token' && 'col-span-2')}>
                   <Label>
-                    {f.label} {f.optional && <span className="normal-case text-zinc-600">(optional)</span>}
+                    {f.label} {f.optional && <span className="normal-case text-zinc-500">(optional)</span>}
                   </Label>
                   <Input type={f.secret ? 'password' : 'text'} value={creds[f.key] ?? ''} onChange={(e) => setCreds({ ...creds, [f.key]: e.target.value })} className="font-mono" autoComplete="off" placeholder={initial ? '(unchanged)' : ''} />
                 </div>

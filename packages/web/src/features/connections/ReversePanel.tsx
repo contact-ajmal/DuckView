@@ -132,7 +132,7 @@ export function ReversePanel({ workspaceId, databases, clouds, lakes }: { worksp
               <div className={cn('grid cursor-pointer grid-cols-[minmax(0,1.2fr)_minmax(0,1.6fr)_90px_minmax(0,1.4fr)_104px] items-center gap-3 px-1 py-2 hover:bg-zinc-900/60 @max-3xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_104px]', !s.enabled && 'opacity-60')} onClick={() => setOpen(open === s.id ? null : s.id)}>
                 <span className="flex min-w-0 items-center gap-2"><StatusDot tone={runTone(s.last_run?.status)} /><span className="truncate text-body text-zinc-100">{s.name}</span></span>
                 <span className="truncate font-mono text-xs text-zinc-400" title={describe(s.destination)}>{describe(s.destination)}</span>
-                <span className="text-xs text-zinc-400 @max-3xl:hidden">{s.mode}{s.key_columns.length ? <span className="text-zinc-600"> · {s.key_columns.join(', ')}</span> : null}</span>
+                <span className="text-xs text-zinc-400 @max-3xl:hidden">{s.mode}{s.key_columns.length ? <span className="text-zinc-500"> · {s.key_columns.join(', ')}</span> : null}</span>
                 <span className={cn('truncate text-xs @max-3xl:hidden', s.last_run?.status === 'error' ? 'text-red-300' : 'text-zinc-500')} title={s.last_run?.error ?? s.last_run?.summary ?? ''} data-testid="reverse-last-run">{s.last_run ? `${s.last_run.status === 'error' ? s.last_run.error : s.last_run.summary ?? s.last_run.status} · ${timeAgo(s.last_run.finished_at ?? s.last_run.started_at)}` : `never run · ${every(s.schedule)}`}</span>
                 <span className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                   <Button size="sm" disabled={!canEdit} loading={busy === `run:${s.id}`} onClick={() => void act(`run:${s.id}`, async () => { setOpen(s.id); await api.post(`/api/reverse-syncs/${s.id}/run`, {}); })} data-testid="run-reverse"><Play className="h-3.5 w-3.5" /> Run</Button>
@@ -160,7 +160,7 @@ export function ReversePanel({ workspaceId, databases, clouds, lakes }: { worksp
                           <StatusDot tone={runTone(r.status)} />
                           <span className="w-36 shrink-0 text-zinc-500">{new Date(r.started_at).toLocaleString()}</span>
                           <span className={cn('min-w-0 flex-1 truncate', r.status === 'error' ? 'text-red-300' : 'text-zinc-300')}>{r.status === 'error' ? r.error : r.summary ?? r.status}</span>
-                          <span className="shrink-0 text-zinc-600">{r.triggered_by}{r.duration_ms != null ? ` · ${(r.duration_ms / 1000).toFixed(1)} s` : ''}</span>
+                          <span className="shrink-0 text-zinc-500">{r.triggered_by}{r.duration_ms != null ? ` · ${(r.duration_ms / 1000).toFixed(1)} s` : ''}</span>
                         </div>
                       ))}
                     </div>
@@ -216,7 +216,7 @@ function ReverseEditor({ workspaceId, draft, setDraft, databases, clouds, lakes,
     <Modal open onClose={() => setDraft(null)} title={draft.id ? 'Edit reverse sync' : 'New reverse sync'} width="max-w-2xl">
       <div className="space-y-4 text-xs" data-testid="reverse-editor">
         <div><Label>Name</Label><Input autoFocus={!draft.name} value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder="Customer scores to CRM" data-testid="reverse-name" /></div>
-        <div><Label>Rows to send <span className="text-zinc-600">(one read-only SELECT; your access policies apply)</span></Label><textarea value={draft.sql} onChange={(e) => set({ sql: e.target.value })} spellCheck={false} rows={4} data-testid="reverse-sql" className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" /></div>
+        <div><Label>Rows to send <span className="text-zinc-500">(one read-only SELECT; your access policies apply)</span></Label><textarea value={draft.sql} onChange={(e) => set({ sql: e.target.value })} spellCheck={false} rows={4} data-testid="reverse-sql" className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" /></div>
 
         <div>
           <Label>Send to</Label>

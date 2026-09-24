@@ -198,7 +198,7 @@ function ServerProviderCard({ cfg, reload }: { cfg: CopilotConfig; reload: () =>
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="secondary" onClick={() => void runTest()} loading={test.state === 'busy'} disabled={!canSave}><PlugZap className="h-3.5 w-3.5" /> Test connection</Button>
           <Button size="sm" variant="primary" onClick={() => void save()} loading={saving} disabled={!canSave}><Save className="h-3.5 w-3.5" /> Save for everyone</Button>
-          {source === 'settings' && <Button size="sm" variant="danger" onClick={() => void remove()} title="Remove the stored provider and key"><Trash2 className="h-3.5 w-3.5" /></Button>}
+          {source === 'settings' && <Button size="sm" variant="danger" onClick={() => void remove()} title="Remove the stored provider and key" aria-label="Remove the stored provider and key"><Trash2 className="h-3.5 w-3.5" /></Button>}
           {test.state === 'ok' && <span className="inline-flex items-center gap-1 text-2xs text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {test.message}</span>}
           {test.state === 'error' && <span className="text-2xs text-red-300">{test.message}</span>}
           {saved && test.state !== 'error' && <span className="inline-flex items-center gap-1 text-2xs text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> {saved}</span>}
@@ -281,7 +281,7 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/60">
       <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-2.5">
         <h3 className="text-xs font-semibold text-zinc-400">Usage {report.scope === 'all' ? '· everyone' : '· you'}</h3>
-        <span className="inline-flex items-center gap-1 text-2xs text-zinc-500"><Activity className={cn('h-3 w-3', report.active.length ? 'text-emerald-400' : 'text-zinc-600')} /> {report.active.length} active</span>
+        <span className="inline-flex items-center gap-1 text-2xs text-zinc-500"><Activity className={cn('h-3 w-3', report.active.length ? 'text-emerald-400' : 'text-zinc-500')} /> {report.active.length} active</span>
         <Select value={days} onChange={(e) => setDays(Number(e.target.value))} className="ml-auto h-7 text-2xs">
           <option value={7}>last 7 days</option>
           <option value={30}>last 30 days</option>
@@ -292,7 +292,7 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
         <div>
           <div className="mb-1.5 text-2xs font-semibold text-zinc-500">Sessions running now</div>
           {report.active.length === 0 ? (
-            <p className="text-2xs text-zinc-600">No Copilot request is in flight.</p>
+            <p className="text-2xs text-zinc-500">No Copilot request is in flight.</p>
           ) : (
             <ul className="divide-y divide-zinc-800 rounded-lg border border-zinc-800">
               {report.active.map((a) => (
@@ -321,13 +321,13 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
                 <div key={d.day} className="flex-1 rounded-t bg-accent-500/70" style={{ height: `${Math.max(4, (100 * (d.input_tokens + d.output_tokens)) / maxDay)}%` }} title={`${d.day}: ${fmtTokens(d.input_tokens + d.output_tokens)} tokens · ${d.requests} requests`} />
               ))}
             </div>
-            <div className="mt-0.5 flex justify-between font-mono text-2xs text-zinc-600"><span>{report.by_day[0]!.day}</span><span>{report.by_day.at(-1)!.day}</span></div>
+            <div className="mt-0.5 flex justify-between font-mono text-2xs text-zinc-500"><span>{report.by_day[0]!.day}</span><span>{report.by_day.at(-1)!.day}</span></div>
           </div>
         )}
         <div className={cn('grid gap-4', report.scope === 'all' ? 'lg:grid-cols-2' : '')}>
           <div>
             <div className="mb-1.5 flex items-center gap-1 text-2xs font-semibold text-zinc-500"><Gauge className="h-3 w-3" /> By model</div>
-            {report.by_model.length === 0 ? <p className="text-2xs text-zinc-600">Nothing yet.</p> : (
+            {report.by_model.length === 0 ? <p className="text-2xs text-zinc-500">Nothing yet.</p> : (
               <DataTable
                 label="Usage by model"
                 rows={report.by_model}
@@ -344,7 +344,7 @@ function UsageCard({ cfg }: { cfg: CopilotConfig }) {
           {report.scope === 'all' && (
             <div>
               <div className="mb-1.5 flex items-center gap-1 text-2xs font-semibold text-zinc-500"><Users className="h-3 w-3" /> By person</div>
-              {report.by_user.length === 0 ? <p className="text-2xs text-zinc-600">Nothing yet.</p> : (
+              {report.by_user.length === 0 ? <p className="text-2xs text-zinc-500">Nothing yet.</p> : (
                 <DataTable
                   label="Usage by person"
                   rows={report.by_user}

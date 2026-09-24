@@ -38,7 +38,7 @@ export function ThemeMenu() {
           <a href="#/settings/appearance" onClick={() => setOpen(false)} className="mt-1 flex items-center gap-1.5 rounded-md border-t border-zinc-800 px-2 py-2 text-xs text-accent-300 hover:bg-zinc-800">
             <SlidersHorizontal className="h-3.5 w-3.5" /> Fonts, size & all options…
           </a>
-          <div className="px-2 pb-1 text-2xs text-zinc-600"><Palette className="mr-1 inline h-3 w-3" />Settings → Appearance</div>
+          <div className="px-2 pb-1 text-2xs text-zinc-500"><Palette className="mr-1 inline h-3 w-3" />Settings → Appearance</div>
         </div>
       )}
     </div>

@@ -50,7 +50,7 @@ function Diff({ from, to }: { from: string; to: string }) {
   return (
     <pre className="overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950 py-1 font-mono text-xs leading-[1.55]" data-testid="revision-diff">
       {rows.map((r, i) => r.kind === 'fold' ? (
-        <div key={i} className="px-2 text-zinc-600">⋯ {r.n} unchanged line{r.n === 1 ? '' : 's'}</div>
+        <div key={i} className="px-2 text-zinc-500">⋯ {r.n} unchanged line{r.n === 1 ? '' : 's'}</div>
       ) : (
         <div key={i} className={cn('whitespace-pre px-2', r.kind === 'add' && 'bg-emerald-500/10 text-emerald-300', r.kind === 'del' && 'bg-red-500/10 text-red-300', r.kind === 'same' && 'text-zinc-400')}>{r.kind === 'add' ? '+ ' : r.kind === 'del' ? '- ' : '  '}{r.text || ' '}</div>
       ))}
@@ -101,7 +101,7 @@ export function HistoryDrawer({ open, onClose, workspaceId, objectType, objectId
           {canEdit && (
             <form className="mb-2 flex gap-1 px-2" onSubmit={(e) => { e.preventDefault(); void act(async () => { await api.post(`/api/workspaces/${workspaceId}/revisions`, { object_type: objectType, object_id: objectId, message: name }); setName(''); await load(); }); }}>
               <Input uiSize="sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name this version" aria-label="Name this version" />
-              <Button size="sm" type="submit" disabled={!name.trim() || busy} title="Save the current state as a named version"><Bookmark className="h-3.5 w-3.5" /></Button>
+              <Button size="sm" type="submit" disabled={!name.trim() || busy} title="Save the current state as a named version" aria-label="Save the current state as a named version"><Bookmark className="h-3.5 w-3.5" /></Button>
             </form>
           )}
           {rows === null ? <div className="p-3"><Spinner /></div> : rows.length === 0 ? <p className="px-3 py-4 text-xs text-zinc-500">No versions yet — they are kept from the next save.</p> : rows.map((r, i) => (

@@ -114,7 +114,7 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
               <div className="mt-2 flex items-center gap-1">
                 <Button size="sm" variant="ghost" onClick={() => setDraft({ id: p.id, name: p.name, description: p.description ?? '', table: p.table_name, filter: p.row_filter ?? '', masks: p.column_masks, roles: p.applies_to.roles ?? [], users: p.applies_to.users ?? [], groups: p.applies_to.groups ?? [], all: !!p.applies_to.all, embeds: !!p.applies_to.embeds })}><Pencil className="h-3.5 w-3.5" /> Edit</Button>
                 <Button size="sm" variant="ghost" onClick={() => void act(`t:${p.id}`, () => api.patch(`/api/policies/${p.id}`, { enabled: !p.enabled }))}>{p.enabled ? 'Turn off' : 'Turn on'}</Button>
-                <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={async () => { if ((await confirmAction(`Delete the policy "${p.name}"? The people it restricts will see the whole table.`))) void act(`d:${p.id}`, () => api.del(`/api/policies/${p.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={async () => { if ((await confirmAction(`Delete the policy "${p.name}"? The people it restricts will see the whole table.`))) void act(`d:${p.id}`, () => api.del(`/api/policies/${p.id}`)); }} aria-label="Remove" title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           ))}
@@ -128,7 +128,7 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
               <div><Label>Table</Label><Select className="w-full" value={draft.table} onChange={(e) => setDraft({ ...draft, table: e.target.value, masks: {} })}><option value="">Pick a table…</option>{objects.map((o) => <option key={`${o.schema}.${o.name}`} value={tableName(o)}>{tableName(o)} {o.type === 'VIEW' ? '(view)' : ''}</option>)}</Select></div>
               <div><Label>Name</Label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="EU sales only" /></div>
             </div>
-            <div><Label>Row filter <span className="normal-case text-zinc-600">(SQL; empty: every row)</span></Label><textarea value={draft.filter} onChange={(e) => setDraft({ ...draft, filter: e.target.value })} rows={2} spellCheck={false} placeholder="region = 'EU'  ·  owner_email = {{user.email}}  ·  list_contains({{user.groups}}, team)" className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" /><p className="mt-0.5 text-2xs text-zinc-500">Placeholders: <code>{'{{user.email}}'}</code> <code>{'{{user.id}}'}</code> <code>{'{{user.role}}'}</code> <code>{'{{user.groups}}'}</code> (a list of team names).</p></div>
+            <div><Label>Row filter <span className="normal-case text-zinc-500">(SQL; empty: every row)</span></Label><textarea value={draft.filter} onChange={(e) => setDraft({ ...draft, filter: e.target.value })} rows={2} spellCheck={false} placeholder="region = 'EU'  ·  owner_email = {{user.email}}  ·  list_contains({{user.groups}}, team)" className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" /><p className="mt-0.5 text-2xs text-zinc-500">Placeholders: <code>{'{{user.email}}'}</code> <code>{'{{user.id}}'}</code> <code>{'{{user.role}}'}</code> <code>{'{{user.groups}}'}</code> (a list of team names).</p></div>
             {columns.length > 0 && (
               <div>
                 <Label>Columns</Label>
@@ -158,7 +158,7 @@ export function PoliciesPanel({ workspaceId, isOwner }: { workspaceId: string; i
                 </div>
               )}
             </div>
-            <div><Label>Description <span className="normal-case text-zinc-600">(shown to the people it restricts)</span></Label><Input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="Customer PII is limited to your own region" /></div>
+            <div><Label>Description <span className="normal-case text-zinc-500">(shown to the people it restricts)</span></Label><Input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="Customer PII is limited to your own region" /></div>
             {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}
             <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setDraft(null)}>Cancel</Button><Button variant="primary" loading={busy === 'save'} disabled={!draft.table || (!draft.filter.trim() && !Object.keys(draft.masks).length)} onClick={() => void save()}>{draft.id ? 'Save' : 'Create policy'}</Button></div>
           </div>

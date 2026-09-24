@@ -421,7 +421,7 @@ export function CopilotDrawer() {
             </button>
           </div>
           <div className="max-h-40 overflow-auto">
-            {cp.conversations.length === 0 && <div className="px-1 py-1 text-zinc-600">No conversations yet.</div>}
+            {cp.conversations.length === 0 && <div className="px-1 py-1 text-zinc-500">No conversations yet.</div>}
             {cp.conversations.map((c) => (
               <button key={c.id} onClick={() => wsId && void cp.openConversation(wsId, c.id).then(() => setShowConvs(false))} className={cn('flex w-full items-center justify-between rounded px-2 py-1 text-left hover:bg-zinc-800', c.id === cp.conversationId && 'bg-zinc-800')}>
                 <span className="truncate text-zinc-200">{c.title || 'Untitled'}</span>
@@ -512,7 +512,7 @@ export function CopilotDrawer() {
               {cfg.providers.find((p) => p.id === cp.settings.provider)?.keyRequired && (
                 <div>
                   <Label>
-                    API key <span className="normal-case text-zinc-600">(kept in this browser only)</span>
+                    API key <span className="normal-case text-zinc-500">(kept in this browser only)</span>
                     {cfg.providers.find((p) => p.id === cp.settings.provider)?.keyUrl && <a href={cfg.providers.find((p) => p.id === cp.settings.provider)!.keyUrl!} target="_blank" rel="noreferrer" className="ml-1 normal-case text-accent-300 hover:underline">get one ↗</a>}
                   </Label>
                   <Input type="password" value={cp.settings.apiKey} onChange={(e) => cp.setSettings({ apiKey: e.target.value })} className="h-8 font-mono text-xs" autoComplete="off" placeholder={`${cfg.providers.find((p) => p.id === cp.settings.provider)?.keyPrefix ?? ''}…`} />
@@ -520,7 +520,7 @@ export function CopilotDrawer() {
               )}
               {cp.settings.provider !== 'anthropic' && (
                 <div>
-                  <Label>Base URL {cfg.providers.find((p) => p.id === cp.settings.provider)?.baseUrl ? <span className="normal-case text-zinc-600">(optional override)</span> : ''}</Label>
+                  <Label>Base URL {cfg.providers.find((p) => p.id === cp.settings.provider)?.baseUrl ? <span className="normal-case text-zinc-500">(optional override)</span> : ''}</Label>
                   <Input value={cp.settings.baseUrl} onChange={(e) => cp.setSettings({ baseUrl: e.target.value })} className="h-8 font-mono text-xs" placeholder={cfg.providers.find((p) => p.id === cp.settings.provider)?.baseUrl ?? 'https://api.example.com/v1'} />
                 </div>
               )}
@@ -624,16 +624,14 @@ export function CopilotDrawer() {
             className="min-h-[40px] flex-1 resize-none rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none disabled:opacity-50"
           />
           {cp.streaming ? (
-            <Button variant="danger" size="sm" onClick={cp.cancel} title="Stop">
-              <Square className="h-3.5 w-3.5" />
-            </Button>
+            <Button variant="danger" size="sm" onClick={cp.cancel} title="Stop" aria-label="Stop"><Square className="h-3.5 w-3.5" /></Button>
           ) : (
-            <Button variant="primary" size="sm" onClick={() => submit()} disabled={!ready || !input.trim()} title="Send">
+            <Button variant="primary" size="sm" onClick={() => submit()} disabled={!ready || !input.trim()} title="Send" aria-label="Send">
               <Send className="h-3.5 w-3.5" />
             </Button>
           )}
         </div>
-        <div className="mt-1 flex items-center gap-1 text-2xs text-zinc-600">
+        <div className="mt-1 flex items-center gap-1 text-2xs text-zinc-500">
           <ChevronDown className="h-3 w-3" /> context: schema of all tables, data files, buckets{cp.targets.length ? `, SUMMARIZE of ${cp.targets.join(', ')}` : ''}, active SQL
         </div>
       </div>

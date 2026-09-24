@@ -6,7 +6,7 @@ import { cn } from '../../components/ui';
 const ROW_H = 26;
 
 function cell(v: unknown): { text: string; cls: string } {
-  if (v === null || v === undefined) return { text: 'NULL', cls: 'text-zinc-600 italic' };
+  if (v === null || v === undefined) return { text: 'NULL', cls: 'text-zinc-500 italic' };
   if (typeof v === 'number') return { text: Number.isInteger(v) ? v.toLocaleString() : String(v), cls: 'text-right tabular-nums text-zinc-100' };
   if (typeof v === 'bigint') return { text: v.toLocaleString(), cls: 'text-right tabular-nums text-zinc-100' };
   if (typeof v === 'boolean') return { text: v ? 'true' : 'false', cls: 'text-zinc-300' };
@@ -97,7 +97,7 @@ export function ResultsGrid({ columns, rows, filter = '', onVisibleRows }: { col
     <div ref={scroller} className="h-full overflow-auto font-mono text-xs" onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)} role="grid" aria-rowcount={total} aria-colcount={columns.length}>
       <div style={{ minWidth: totalWidth }}>
         <div className="sticky top-0 z-10 flex border-b border-zinc-800 bg-zinc-900" style={{ height: ROW_H + 10 }} role="row">
-          <div className="shrink-0 border-r border-zinc-800/70 px-2 py-1.5 text-right text-zinc-600" style={{ width: gutter }}>#</div>
+          <div className="shrink-0 border-r border-zinc-800/70 px-2 py-1.5 text-right text-zinc-500" style={{ width: gutter }}>#</div>
           {columns.map((c, i) => (
             <div
               key={i}
@@ -122,7 +122,7 @@ export function ResultsGrid({ columns, rows, filter = '', onVisibleRows }: { col
             const idx = start + vi;
             return (
               <div key={idx} role="row" className="absolute left-0 right-0 flex border-b border-zinc-800/50 hover:bg-zinc-900" style={{ top: idx * ROW_H, height: ROW_H }}>
-                <div className="shrink-0 border-r border-zinc-800/50 px-2 text-right leading-[26px] text-zinc-600" style={{ width: gutter }}>{idx + 1}</div>
+                <div className="shrink-0 border-r border-zinc-800/50 px-2 text-right leading-[26px] text-zinc-500" style={{ width: gutter }}>{idx + 1}</div>
                 {columns.map((_c, i) => {
                   const { text, cls } = cell(r[i]);
                   return (

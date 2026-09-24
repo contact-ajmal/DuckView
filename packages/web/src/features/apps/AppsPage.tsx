@@ -152,7 +152,7 @@ function Gallery() {
         <Modal open={creating} onClose={() => setCreating(false)} title="New data app" width="max-w-lg">
           <div className="space-y-3">
             <div><Label>Name</Label><Input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Sales explorer" /></div>
-            <div><Label>Description <span className="normal-case text-zinc-600">(optional)</span></Label><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What the app shows and for whom" /></div>
+            <div><Label>Description <span className="normal-case text-zinc-500">(optional)</span></Label><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What the app shows and for whom" /></div>
             <div>
               <Label>Start from</Label>
               <div className="mb-2 grid grid-cols-3 gap-1 rounded-md border border-zinc-800 p-0.5 text-xs">
@@ -349,22 +349,22 @@ function AppEditor({ id }: { id: string }) {
         <span className="text-2xs text-zinc-500">{app.execution === 'browser' ? 'Python runs in each viewer\'s browser' : app.last_started_at ? `started ${timeAgo(app.last_started_at)}` : 'never started'}{app.last_error ? <span className="text-red-300"> · {app.last_error}</span> : null}</span>
         <div className="ml-auto flex items-center gap-1">
           <Button size="sm" variant="ghost" onClick={() => void draft()} loading={drafting} disabled={!canEdit || !cp.config?.can_use || app.kind !== 'streamlit'} title={app.kind !== 'streamlit' ? 'Draft writes Streamlit apps; ask Copilot (next button) about Dash or Gradio code' : cp.config?.can_use ? 'Let Copilot write app.py for a goal (checked before it lands in the editor)' : 'Configure Copilot under Settings → Copilot first'}><Wand2 className="h-3.5 w-3.5" /> Draft</Button>
-          <Button size="sm" variant="ghost" onClick={askCopilot} title="Ask Copilot about this app"><Bot className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" variant="ghost" onClick={askCopilot} title="Ask Copilot about this app" aria-label="Ask Copilot about this app"><Bot className="h-3.5 w-3.5" /></Button>
           <Button size="sm" variant="ghost" onClick={() => void runCheck()} title="Static check: compiles, imports streamlit, no tokens"><CheckCircle2 className={cn('h-3.5 w-3.5', check?.ok ? 'text-emerald-400' : check ? 'text-red-300' : '')} /> Check</Button>
           <Button size="sm" variant="secondary" onClick={() => void save()} loading={busy === 'save'} disabled={!canEdit || !dirty} title="Save (⌘S) — a running app restarts"><Save className="h-3.5 w-3.5" /> Save</Button>
           {app.execution === 'browser' ? (
-            <Button size="sm" variant="ghost" onClick={() => setPreviewKey((k) => k + 1)} title="Reload the preview (the app runs in your browser)"><RotateCw className="h-3.5 w-3.5" /></Button>
+            <Button size="sm" variant="ghost" onClick={() => setPreviewKey((k) => k + 1)} title="Reload the preview (the app runs in your browser)" aria-label="Reload the preview (the app runs in your browser)"><RotateCw className="h-3.5 w-3.5" /></Button>
           ) : status === 'running' || status === 'starting' || status === 'installing' ? (
             <>
-              <Button size="sm" variant="ghost" onClick={() => void action('restart')} loading={busy === 'restart'} title="Restart"><RotateCw className="h-3.5 w-3.5" /></Button>
+              <Button size="sm" variant="ghost" onClick={() => void action('restart')} loading={busy === 'restart'} title="Restart" aria-label="Restart"><RotateCw className="h-3.5 w-3.5" /></Button>
               <Button size="sm" variant="ghost" onClick={() => void action('stop')} loading={busy === 'stop'} title="Stop"><Square className="h-3.5 w-3.5" /> Stop</Button>
             </>
           ) : (
             <Button size="sm" variant="primary" onClick={() => void action('start')} loading={busy === 'start'} title="Start"><Play className="h-3.5 w-3.5" /> Run</Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => void openAppInTab(id).catch((e) => setError((e as Error).message))} title="Open in a new tab"><ExternalLink className="h-3.5 w-3.5" /></Button>
-          <Button size="sm" variant="ghost" onClick={() => setShowLogs((v) => !v)} title="Logs" className={showLogs ? 'text-accent-300' : ''}><ScrollText className="h-3.5 w-3.5" /></Button>
-          {isAdmin && app.execution !== 'browser' && <Button size="sm" variant="ghost" className={app.always_on ? 'text-accent-300' : ''} onClick={async () => { try { setApp((await api.post<{ app: DataApp }>(`/api/apps/${id}/always-on`, { on: !app.always_on })).app); } catch (e) { setError((e as Error).message); } }} title={app.always_on ? 'Always on: starts with the server, never stopped for idleness, restarted after a crash — click to let it scale to zero' : 'Keep always on (administrators): starts with the server, never idles out, restarts after a crash'}><Pin className="h-3.5 w-3.5" /></Button>}
+          <Button size="sm" variant="ghost" onClick={() => void openAppInTab(id).catch((e) => setError((e as Error).message))} title="Open in a new tab" aria-label="Open in a new tab"><ExternalLink className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => setShowLogs((v) => !v)} title="Logs" className={showLogs ? 'text-accent-300' : ''} aria-label="Logs"><ScrollText className="h-3.5 w-3.5" /></Button>
+          {isAdmin && app.execution !== 'browser' && <Button size="sm" variant="ghost" className={app.always_on ? 'text-accent-300' : ''} onClick={async () => { try { setApp((await api.post<{ app: DataApp }>(`/api/apps/${id}/always-on`, { on: !app.always_on })).app); } catch (e) { setError((e as Error).message); } }} title={app.always_on ? 'Always on: starts with the server, never stopped for idleness, restarted after a crash — click to let it scale to zero' : 'Keep always on (administrators): starts with the server, never idles out, restarts after a crash'} aria-label={app.always_on ? 'Always on: starts with the server, never stopped for idleness, restarted after a crash — click to let it scale to zero' : 'Keep always on (administrators): starts with the server, never idles out, restarts after a crash'}><Pin className="h-3.5 w-3.5" /></Button>}
           <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setPublishing(true)} title="Share beyond the workspace"><Globe className="h-3.5 w-3.5" /> Publish</Button>
         </div>
       </div>
@@ -375,7 +375,7 @@ function AppEditor({ id }: { id: string }) {
         <div className="flex min-h-0 flex-col border-r border-zinc-800">
           <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1 text-2xs">
             {Object.keys(files).map((f) => <button key={f} onClick={() => setActive(f)} className={cn('rounded px-2 py-0.5 font-mono', active === f ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200')}>{f}</button>)}
-            <span className="ml-auto text-zinc-600">Python · ⌘S saves and {app.execution === 'browser' ? 'reloads' : 'restarts'}</span>
+            <span className="ml-auto text-zinc-500">Python · ⌘S saves and {app.execution === 'browser' ? 'reloads' : 'restarts'}</span>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             <CodeMirror value={files[active] ?? ''} height="100%" theme={kind === 'dark' ? oneDark : 'light'} extensions={extensions} onChange={(v) => setFiles((f) => ({ ...f, [active]: v }))} editable={canEdit} basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true, autocompletion: false }} className="h-full text-xs" />
@@ -444,7 +444,7 @@ function PublishDialog({ open, app, isAdmin, onClose, onChanged }: { open: boole
             <span><span className="block text-body text-zinc-100">{label}</span><span className="text-2xs text-zinc-500">{hint}</span></span>
           </button>
         ))}
-        {needsReview && <div><Label>Note for the reviewer <span className="normal-case text-zinc-600">(optional)</span></Label><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Who it is for, what data it shows" /></div>}
+        {needsReview && <div><Label>Note for the reviewer <span className="normal-case text-zinc-500">(optional)</span></Label><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Who it is for, what data it shows" /></div>}
         {msg && <div className={cn('rounded-md border px-3 py-2', msg.ok ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-200' : 'border-red-900 bg-red-950/50 text-red-200')}>{msg.text}</div>}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>{msg?.ok ? 'Close' : 'Cancel'}</Button>

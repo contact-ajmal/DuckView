@@ -77,7 +77,7 @@ export function SchemaPanel({ workspaceId, target, remoteConnectionId, onQuery, 
               rows={columns}
               rowKey={(c) => c.name}
               columns={[
-                { key: 'c0', header: '#', cell: (c) => <span className="text-zinc-600">{columns.indexOf(c) + 1}</span> },
+                { key: 'c0', header: '#', cell: (c) => <span className="text-zinc-500">{columns.indexOf(c) + 1}</span> },
                 { key: 'column', header: 'column', sortValue: (c) => c.name, cell: (c) => <span className="text-zinc-100">{c.name}</span> },
                 { key: 'type', header: 'type', cell: (c) => <><TypePill type={c.type} /></> },
                 { key: 'nullable', header: 'nullable', align: 'right', cell: (c) => <span className="text-zinc-400">{c.nullable ? 'yes' : 'no'}</span> },

@@ -41,7 +41,7 @@ export function IntegrationsPanel({ isAdmin }: { isAdmin: boolean }) {
         </ol>
         <div className="grid max-w-2xl gap-3 md:grid-cols-2">
           <div><Label>Client id</Label><Input value={clientId} onChange={(e) => setClientId(e.target.value)} className="font-mono" placeholder="1234567890-abc.apps.googleusercontent.com" spellCheck={false} /></div>
-          <div><Label>Client secret {google?.configured && <span className="normal-case text-zinc-600">(stored · leave empty to keep)</span>}</Label><Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={google?.configured ? '••••••••' : 'GOCSPX-…'} autoComplete="off" /></div>
+          <div><Label>Client secret {google?.configured && <span className="normal-case text-zinc-500">(stored · leave empty to keep)</span>}</Label><Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={google?.configured ? '••••••••' : 'GOCSPX-…'} autoComplete="off" /></div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button variant="primary" size="sm" loading={busy} disabled={!clientId.trim() || (!google?.configured && !secret.trim())} onClick={() => void save()}><KeyRound className="h-3.5 w-3.5" /> Save</Button>
@@ -82,8 +82,8 @@ function SmtpCard() {
       <div className="grid max-w-2xl gap-3 md:grid-cols-3">
         <div className="md:col-span-2"><Label>Host</Label><Input value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })} className="font-mono" placeholder="smtp.example.com" /></div>
         <div><Label>Port</Label><Input value={f.port} onChange={(e) => setF({ ...f, port: e.target.value })} className="font-mono" /></div>
-        <div><Label>User <span className="normal-case text-zinc-600">(optional)</span></Label><Input value={f.user} onChange={(e) => setF({ ...f, user: e.target.value })} autoComplete="off" /></div>
-        <div><Label>Password {info?.password_set && <span className="normal-case text-zinc-600">(stored)</span>}</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} placeholder={info?.password_set ? '••••••••' : ''} autoComplete="off" /></div>
+        <div><Label>User <span className="normal-case text-zinc-500">(optional)</span></Label><Input value={f.user} onChange={(e) => setF({ ...f, user: e.target.value })} autoComplete="off" /></div>
+        <div><Label>Password {info?.password_set && <span className="normal-case text-zinc-500">(stored)</span>}</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} placeholder={info?.password_set ? '••••••••' : ''} autoComplete="off" /></div>
         <div><Label>From</Label><Input value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} placeholder="DuckView <alerts@example.com>" /></div>
       </div>
       <label className="mt-2 flex items-center gap-2 text-xs text-zinc-400"><input type="checkbox" className="accent-accent-500" checked={f.secure} onChange={(e) => setF({ ...f, secure: e.target.checked })} /> TLS from the start (port 465) — otherwise STARTTLS when the server offers it</label>

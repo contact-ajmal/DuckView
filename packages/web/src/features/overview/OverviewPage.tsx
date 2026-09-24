@@ -31,7 +31,7 @@ function Distribution({ col }: { col: OverviewColumn }) {
   const d = col.distribution;
   if (!d) {
     const highCard = col.approx_unique != null && col.approx_unique > 100;
-    return <div className="flex h-28 items-center justify-center px-3 text-center font-mono text-2xs text-zinc-600">{highCard ? `≈${col.approx_unique!.toLocaleString()} distinct · too many values to bucket` : 'no distribution'}</div>;
+    return <div className="flex h-28 items-center justify-center px-3 text-center font-mono text-2xs text-zinc-500">{highCard ? `≈${col.approx_unique!.toLocaleString()} distinct · too many values to bucket` : 'no distribution'}</div>;
   }
   const labels = d.kind === 'categories' ? [...d.bins.map((b) => b.label), ...(d.other > 0 ? ['Other'] : [])] : d.bins.map((b) => b.label);
   const data = d.kind === 'categories' ? [...d.bins.map((b) => b.count), ...(d.other > 0 ? [d.other] : [])] : d.bins.map((b) => b.count);
@@ -335,7 +335,7 @@ export function OverviewPage() {
                   rowKey={(c) => c.name}
                   onRowClick={(c) => setColumnDetail(c.name)}
                   columns={[
-                    { key: 'c0', header: '#', width: 'w-10', cell: (c) => <span className="text-zinc-600">{overview.columns.indexOf(c) + 1}</span> },
+                    { key: 'c0', header: '#', width: 'w-10', cell: (c) => <span className="text-zinc-500">{overview.columns.indexOf(c) + 1}</span> },
                     { key: 'column', header: 'Column', sortValue: (c) => c.name, cell: (c) => <><button className="text-zinc-100 hover:text-accent-300" onClick={() => openInQuery(`SELECT ${quoteIdent(c.name)}, count(*) AS n FROM ${relation} GROUP BY 1 ORDER BY 2 DESC LIMIT 20;`)} title="Value counts in SQL">
                             {c.name}
                           </button></> },

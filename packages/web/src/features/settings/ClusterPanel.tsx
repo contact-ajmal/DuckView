@@ -70,7 +70,7 @@ export function ClusterPanel() {
           { key: 'address', header: 'Address', truncate: true, sortValue: (n) => n.url, cell: (n) => <span className="truncate font-mono text-zinc-400">{n.url}</span> },
           { key: 'version', header: 'Version', width: 'w-20', sortValue: (n) => n.version, cell: (n) => <span className="text-zinc-400">{n.version}</span> },
           { key: 'last_heartbeat', header: 'Last heartbeat', width: 'w-28', cell: (n) => <>{timeAgo(n.heartbeat_at)}</> },
-          { key: 'holds', header: 'Holds', cell: (n) => <span className="text-zinc-400">{n.leases.length ? n.leases.map(leaseLabel).join(', ') : <span className="text-zinc-600">nothing</span>}</span> },
+          { key: 'holds', header: 'Holds', cell: (n) => <span className="text-zinc-400">{n.leases.length ? n.leases.map(leaseLabel).join(', ') : <span className="text-zinc-500">nothing</span>}</span> },
         ]}
       />
       <p className="text-zinc-500">A node that stops answering for a lease period loses what it holds; the next request for one of its workspaces opens it on another node.</p>

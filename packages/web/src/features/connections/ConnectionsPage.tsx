@@ -166,8 +166,8 @@ export function ConnectionsPage() {
                   actions={<>
                     <Button size="sm" variant="ghost" onClick={() => void testDb(c)} title="Test the connection"><RefreshCw className="h-3.5 w-3.5" /> Test</Button>
                     <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'sync', edit: null })} disabled={!wsId || !canEdit} title="Schedule a load from this database"><Clock className="h-3.5 w-3.5" /> Sync</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'database', source: sources.find((s) => s.backend.family === 'database' && s.backend.engine === c.engine) ?? null, edit: c })} title="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"? Syncs reading from it will fail.`))) { await api.del(`/api/database-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'database', source: sources.find((s) => s.backend.family === 'database' && s.backend.engine === c.engine) ?? null, edit: c })} title="Settings" aria-label="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"? Syncs reading from it will fail.`))) { await api.del(`/api/database-connections/${c.id}`); await load(); } }} title="Remove" aria-label="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </>} />
               ))}
             </Section>
@@ -179,8 +179,8 @@ export function ConnectionsPage() {
                   actions={<>
                     <Button size="sm" variant="ghost" onClick={() => void testConnector(c)} title="Test the connection"><RefreshCw className="h-3.5 w-3.5" /> Test</Button>
                     <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'sync', edit: null, connectorId: c.id })} disabled={!wsId || !canEdit} title="Schedule a load from this connection"><Clock className="h-3.5 w-3.5" /> Sync</Button>
-                    <Button size="sm" variant="ghost" onClick={() => { const k = connectorCatalog.find((x) => x.id === c.connector); if (k) setWizard({ kind: 'connector', source: sources.find((s) => s.backend.family === 'connector' && s.backend.connector === c.connector) ?? null, connector: k, edit: c }); }} title="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"? Syncs reading from it will fail.`))) { await api.del(`/api/connector-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => { const k = connectorCatalog.find((x) => x.id === c.connector); if (k) setWizard({ kind: 'connector', source: sources.find((s) => s.backend.family === 'connector' && s.backend.connector === c.connector) ?? null, connector: k, edit: c }); }} title="Settings" aria-label="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"? Syncs reading from it will fail.`))) { await api.del(`/api/connector-connections/${c.id}`); await load(); } }} title="Remove" aria-label="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </>} />
               ))}
             </Section>
@@ -191,8 +191,8 @@ export function ConnectionsPage() {
                 <Row key={c.id} title={c.name} badge={<Badge>{c.provider.toLowerCase().replace('_', ' ')}</Badge>} status={c.status} onOpen={() => setWizard({ kind: 'lakehouse', provider: c.provider, edit: c })} sub={<><code className="font-mono">{c.alias}</code> · {c.example_sql}{c.last_tested_at ? ` · tested ${timeAgo(c.last_tested_at)}` : ''}{c.last_error ? <span className="text-red-300"> · {c.last_error}</span> : null}{testing[c.id] ? <span className="text-zinc-400"> · {testing[c.id]}</span> : null}</>}
                   actions={<>
                     <Button size="sm" variant="ghost" onClick={() => void testLake(c)}><RefreshCw className="h-3.5 w-3.5" /> Test</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'lakehouse', provider: c.provider, edit: c })} title="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"?`))) { await api.del(`/api/lakehouse/${c.id}`); await load(); } }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'lakehouse', provider: c.provider, edit: c })} title="Settings" aria-label="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"?`))) { await api.del(`/api/lakehouse/${c.id}`); await load(); } }} aria-label="Remove" title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </>} />
               ))}
             </Section>
@@ -202,15 +202,15 @@ export function ConnectionsPage() {
               {configured.cloud.map((c) => (
                 <Row key={c.id} title={c.name} badge={<Badge>{c.provider}</Badge>} status="ok" onOpen={() => setWizard({ kind: 'cloud', provider: c.provider, edit: c })} sub={<>{c.uri_scheme}://{c.bucket ?? '<bucket>'}/… · {c.fields.join(', ')}{c.region ? ` · ${c.region}` : ''}{c.endpoint_url ? ` · ${c.endpoint_url}` : ''}</>}
                   actions={<>
-                    <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'cloud', provider: c.provider, edit: c })} title="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"?`))) { await api.del(`/api/cloud-connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'cloud', provider: c.provider, edit: c })} title="Settings" aria-label="Settings"><Pencil className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"?`))) { await api.del(`/api/cloud-connections/${c.id}`); await load(); } }} title="Remove" aria-label="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </>} />
               ))}
             </Section>
           )}
           {configured.http.length > 0 && (
             <Section title="HTTP credentials" icon={FAMILY_ICON.web} hint="Tokens applied to https:// reads and URL syncs.">
-              {configured.http.map((c) => <Row key={c.id} title={c.name} badge={<Badge>HTTP</Badge>} status="ok" sub={<>{c.fields.join(', ')}</>} actions={<Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"?`))) { await api.del(`/api/connections/${c.id}`); await load(); } }} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>} />)}
+              {configured.http.map((c) => <Row key={c.id} title={c.name} badge={<Badge>HTTP</Badge>} status="ok" sub={<>{c.fields.join(', ')}</>} actions={<Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Remove "${c.name}"?`))) { await api.del(`/api/connections/${c.id}`); await load(); } }} title="Remove" aria-label="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>} />)}
             </Section>
           )}
         </div>
@@ -234,9 +234,9 @@ export function ConnectionsPage() {
                           {s.status === 'planned' && <Badge>planned</Badge>}
                         </div>
                         <div className="truncate text-xs text-zinc-500">{s.blurb}</div>
-                        <div className="mt-0.5 truncate text-2xs text-zinc-600">{[s.capabilities.attach && 'attach', s.capabilities.browse && 'browse', s.capabilities.remote_sql && 'remote SQL', s.capabilities.sync && 'sync'].filter(Boolean).join(' · ')}{' · '}{s.auth === 'keys' ? 'access keys' : s.auth === 'token' ? 'token' : s.auth === 'password' ? 'password' : s.auth === 'file' ? 'file' : s.auth === 'connection_string' ? 'connection string' : s.auth === 'oauth' ? (s.backend.family === 'connector' && connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector)?.auth.kind === 'google' ? 'Google account' : 'OAuth') : 'no auth'}</div>
+                        <div className="mt-0.5 truncate text-2xs text-zinc-500">{[s.capabilities.attach && 'attach', s.capabilities.browse && 'browse', s.capabilities.remote_sql && 'remote SQL', s.capabilities.sync && 'sync'].filter(Boolean).join(' · ')}{' · '}{s.auth === 'keys' ? 'access keys' : s.auth === 'token' ? 'token' : s.auth === 'password' ? 'password' : s.auth === 'file' ? 'file' : s.auth === 'connection_string' ? 'connection string' : s.auth === 'oauth' ? (s.backend.family === 'connector' && connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector)?.auth.kind === 'google' ? 'Google account' : 'OAuth') : 'no auth'}</div>
                       </div>
-                      {s.status !== 'planned' && <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600 group-hover:text-zinc-200" />}
+                      {s.status !== 'planned' && <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500 group-hover:text-zinc-200" />}
                     </button>
                   ))}
                 </div>
@@ -276,16 +276,16 @@ export function ConnectionsPage() {
                     <div className="flex items-center gap-1">
                       <Button size="sm" variant="secondary" onClick={() => void runSync(s)} loading={busy === s.id} disabled={!canEdit} title="Run now"><Play className="h-3.5 w-3.5" /> Run</Button>
                       <Button size="sm" variant="ghost" onClick={async () => { await api.patch(`/api/syncs/${s.id}`, { enabled: !s.enabled }); await load(); }} disabled={!canEdit} title={s.enabled ? 'Pause' : 'Resume'}>{s.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}</Button>
-                      <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'sync', edit: s })} disabled={!canEdit} title="Edit"><Pencil className="h-3.5 w-3.5" /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => void toggleRuns(s)} title="Run history"><Clock className="h-3.5 w-3.5" /></Button>
-                      <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Delete sync "${s.name}"? The target table stays.`))) { await api.del(`/api/syncs/${s.id}`); await load(); } }} disabled={!canEdit} title="Delete"><Trash2 className="h-3.5 w-3.5" /></Button>
+                      <Button size="sm" variant="ghost" onClick={() => setWizard({ kind: 'sync', edit: s })} disabled={!canEdit} title="Edit" aria-label="Edit"><Pencil className="h-3.5 w-3.5" /></Button>
+                      <Button size="sm" variant="ghost" onClick={() => void toggleRuns(s)} title="Run history" aria-label="Run history"><Clock className="h-3.5 w-3.5" /></Button>
+                      <Button size="sm" variant="ghost" className="text-red-300" onClick={async () => { if ((await confirmAction(`Delete sync "${s.name}"? The target table stays.`))) { await api.del(`/api/syncs/${s.id}`); await load(); } }} disabled={!canEdit} title="Delete" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
                   </div>
                   <div className="mt-1 font-mono text-2xs text-zinc-500">{describeSource(s, configured?.databases ?? [], configured?.connectors ?? [])}</div>
                   {s.last_run?.error && <div className="mt-1 rounded-md border border-red-900/60 bg-red-950/30 px-2 py-1 font-mono text-2xs text-red-200">{s.last_run.error}</div>}
                   {runs[s.id] && (
                     <ul className="mt-2 divide-y divide-zinc-800/60 rounded-md border border-zinc-800 text-2xs">
-                      {runs[s.id]!.length === 0 && <li className="px-2 py-1 text-zinc-600">No runs yet.</li>}
+                      {runs[s.id]!.length === 0 && <li className="px-2 py-1 text-zinc-500">No runs yet.</li>}
                       {runs[s.id]!.map((r) => <li key={r.id} className="flex flex-wrap items-center gap-2 px-2 py-1 font-mono"><StatusDot status={r.status} /><span className="text-zinc-400">{new Date(r.started_at).toLocaleString()}</span><Badge>{r.triggered_by}</Badge><span className={r.status === 'error' ? 'text-red-300' : 'text-zinc-300'}>{r.status === 'ok' ? `${(r.rows ?? 0).toLocaleString()} rows · ${((r.duration_ms ?? 0) / 1000).toFixed(1)} s` : r.status === 'running' ? 'running…' : r.error}</span></li>)}
                     </ul>
                   )}

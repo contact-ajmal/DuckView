@@ -215,12 +215,12 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
                 )}
               </div>
               {connMode === 'sql' ? (
-                <div><Label>Remote SQL <span className="normal-case text-zinc-600">(runs on {conn?.connector_label})</span></Label><textarea value={remoteSql} onChange={(e) => setRemoteSql(e.target.value)} rows={4} spellCheck={false} className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-100 focus:border-accent-500 focus:outline-none" placeholder="SELECT * FROM ANALYTICS.PUBLIC.ORDERS WHERE order_date >= dateadd(day, -30, current_date)" /></div>
+                <div><Label>Remote SQL <span className="normal-case text-zinc-500">(runs on {conn?.connector_label})</span></Label><textarea value={remoteSql} onChange={(e) => setRemoteSql(e.target.value)} rows={4} spellCheck={false} className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-100 focus:border-accent-500 focus:outline-none" placeholder="SELECT * FROM ANALYTICS.PUBLIC.ORDERS WHERE order_date >= dateadd(day, -30, current_date)" /></div>
               ) : (
                 <div className="rounded-md border border-zinc-800">
                   <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800 px-2 py-1 text-2xs">
                     <button className={cn('hover:text-zinc-100', connPath.length ? 'text-accent-300' : 'text-zinc-400')} onClick={() => { setConnPath([]); }}>{conn?.connector_label ?? 'root'}</button>
-                    {connPath.map((p, i) => <span key={i} className="flex items-center gap-1"><ChevronRight className="h-3 w-3 text-zinc-600" /><button className={cn('hover:text-zinc-100', i < connPath.length - 1 ? 'text-accent-300' : 'text-zinc-300')} onClick={() => setConnPath(connPath.slice(0, i + 1))}>{p}</button></span>)}
+                    {connPath.map((p, i) => <span key={i} className="flex items-center gap-1"><ChevronRight className="h-3 w-3 text-zinc-500" /><button className={cn('hover:text-zinc-100', i < connPath.length - 1 ? 'text-accent-300' : 'text-zinc-300')} onClick={() => setConnPath(connPath.slice(0, i + 1))}>{p}</button></span>)}
                     {connBusy && <Loader2 className="ml-auto h-3 w-3 animate-spin text-zinc-500" />}
                     {resource && !connBusy && <span className="ml-auto truncate font-mono text-accent-300" title={JSON.stringify(resource)}>✓ {describeResource(resource)}</span>}
                   </div>
@@ -231,9 +231,9 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
                         <button type="button" onClick={() => { if (e.path) { setConnPath(e.path); } else if (e.resource) { setResource(e.resource); setPreview(null); } }} className={cn('flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-zinc-800/60', resource && e.resource && JSON.stringify(resource) === JSON.stringify(e.resource) ? 'bg-accent-500/10 text-accent-200' : 'text-zinc-300')}>
                           {e.path ? <Folder className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : /file|sheet|report/.test(e.type) ? <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Table2 className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
                           <span className="truncate">{e.name}</span>
-                          <span className="text-2xs text-zinc-600">{e.type}</span>
+                          <span className="text-2xs text-zinc-500">{e.type}</span>
                           {e.hint && <span className="ml-auto truncate text-2xs text-zinc-500">{e.hint}</span>}
-                          {e.path && <ChevronRight className="h-3 w-3 shrink-0 text-zinc-600" />}
+                          {e.path && <ChevronRight className="h-3 w-3 shrink-0 text-zinc-500" />}
                         </button>
                       </li>
                     ))}
@@ -279,7 +279,7 @@ export function SyncEditor({ open, workspaceId, initial, initialConnectorId, ini
         <div className="space-y-3">
           <div>
             <div className="flex items-center justify-between">
-              <Label>Transformation <span className="normal-case text-zinc-600">(optional · SELECT over {'{{raw}}'})</span></Label>
+              <Label>Transformation <span className="normal-case text-zinc-500">(optional · SELECT over {'{{raw}}'})</span></Label>
               <button onClick={() => void draft()} disabled={!source || busy !== null || !cp.config?.can_use} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-2xs text-accent-300 hover:underline disabled:opacity-40" title={cp.config?.can_use ? 'Let Copilot draft the transformation from the previewed columns' : 'Configure Copilot under Settings → Copilot first'}>
                 {busy === 'draft' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />} Draft with Copilot
               </button>

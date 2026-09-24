@@ -78,7 +78,7 @@ export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNew
           align="left"
           width="w-80"
           trigger={(open, toggle) => (
-            <button onClick={toggle} aria-expanded={open} data-testid="workspace-switcher" className="flex min-w-0 max-w-[16rem] items-center gap-1.5 rounded-md px-2 py-1 font-medium text-zinc-100 hover:bg-zinc-900">
+            <button onClick={toggle} aria-expanded={open} data-testid="workspace-switcher" className="flex min-w-0 max-w-[9rem] items-center gap-1.5 rounded-md px-2 py-1 font-medium text-zinc-100 hover:bg-zinc-900 xl:max-w-[16rem]">
               <span className="truncate">{active?.name ?? 'Workspace'}</span>
               {active?.shared && (active.role === 'VIEWER' ? <Eye className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Users className="h-3.5 w-3.5 shrink-0 text-zinc-500" />)}
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
@@ -130,7 +130,7 @@ export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNew
           )}
         </Menu>
         <span className="text-zinc-700">/</span>
-        <a href={section.hash} className="truncate rounded-md px-1.5 py-1 text-zinc-400 hover:text-zinc-100">{section.label}</a>
+        <a href={section.hash} className="shrink-0 whitespace-nowrap rounded-md px-1.5 py-1 text-zinc-400 hover:text-zinc-100">{section.label}</a>
         {route.crumb && (
           <>
             <span className="text-zinc-700">/</span>

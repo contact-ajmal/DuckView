@@ -125,7 +125,7 @@ function Composer({ people, placeholder, onSubmit, autoFocus, initial = '', subm
       )}
       <InlineError error={error} className="mt-1" />
       <div className="mt-1.5 flex items-center justify-end gap-2">
-        <span className="mr-auto text-2xs text-zinc-600">@ to mention · ⌘/Ctrl+Enter to send</span>
+        <span className="mr-auto text-2xs text-zinc-500">@ to mention · ⌘/Ctrl+Enter to send</span>
         {onCancel && <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>}
         <Button size="sm" variant="primary" loading={busy} disabled={!text.trim()} onClick={() => void submit()} data-testid="comment-submit">{submitLabel}</Button>
       </div>

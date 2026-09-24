@@ -90,7 +90,7 @@ export function EmbedPanel({ workspaceId }: { workspaceId: string }) {
         )}
         <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); void act('create', async () => { setCreated(await api.post<{ key: EmbedKey; secret: string }>(`/api/workspaces/${workspaceId}/embed/keys`, { name: form.name, allowed_origins: form.origins.split(/[\s,]+/).filter(Boolean) })); setForm({ name: '', origins: '' }); await load(); }); }}>
           <div className="w-52"><Label>Name</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Customer portal" data-testid="embed-key-name" /></div>
-          <div className="min-w-64 flex-1"><Label>Sites that may show it <span className="text-zinc-600">(origins; empty = any)</span></Label><Input className="font-mono" value={form.origins} onChange={(e) => setForm({ ...form, origins: e.target.value })} placeholder="https://app.example.com" /></div>
+          <div className="min-w-64 flex-1"><Label>Sites that may show it <span className="text-zinc-500">(origins; empty = any)</span></Label><Input className="font-mono" value={form.origins} onChange={(e) => setForm({ ...form, origins: e.target.value })} placeholder="https://app.example.com" /></div>
           <Button type="submit" variant="primary" disabled={!form.name.trim()} loading={busy === 'create'} data-testid="embed-key-create"><Plus className="h-3.5 w-3.5" /> Create key</Button>
         </form>
         {created && (
@@ -108,8 +108,8 @@ export function EmbedPanel({ workspaceId }: { workspaceId: string }) {
         <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)]">
           <div><Label>Key</Label><Select value={trial.key_id} onChange={(e) => setTrial({ ...trial, key_id: e.target.value })} className="w-full"><option value="">Choose…</option>{(keys ?? []).filter((k) => !k.revoked_at).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</Select></div>
           <div><Label>Show</Label><Select value={trial.resource} onChange={(e) => setTrial({ ...trial, resource: e.target.value })} className="w-full" data-testid="embed-resource"><option value="">Choose a dashboard or notebook…</option><optgroup label="Dashboards">{dashboards.map((d) => <option key={d.id} value={`dashboard:${d.id}`}>{d.name}</option>)}</optgroup><optgroup label="Notebooks">{notebooks.map((n) => <option key={n.id} value={`notebook:${n.id}`}>{n.title}</option>)}</optgroup></Select></div>
-          <div><Label>Attributes <span className="text-zinc-600">(JSON)</span></Label><Input className="font-mono" value={trial.attrs} onChange={(e) => setTrial({ ...trial, attrs: e.target.value })} /></div>
-          <div><Label>Notebook inputs <span className="text-zinc-600">(JSON)</span></Label><Input className="font-mono" value={trial.params} onChange={(e) => setTrial({ ...trial, params: e.target.value })} /></div>
+          <div><Label>Attributes <span className="text-zinc-500">(JSON)</span></Label><Input className="font-mono" value={trial.attrs} onChange={(e) => setTrial({ ...trial, attrs: e.target.value })} /></div>
+          <div><Label>Notebook inputs <span className="text-zinc-500">(JSON)</span></Label><Input className="font-mono" value={trial.params} onChange={(e) => setTrial({ ...trial, params: e.target.value })} /></div>
         </div>
         <Button disabled={!trial.key_id || !trial.resource} loading={busy === 'sign'} data-testid="embed-sign" onClick={() => void act('sign', async () => {
           const [type, id] = trial.resource.split(':');

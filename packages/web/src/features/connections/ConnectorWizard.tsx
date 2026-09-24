@@ -94,7 +94,7 @@ export function ConnectorWizard({ open, source, connector, initial, googleConfig
               {fields.map((f) => (
                 <div key={f.key} className={cn(f.kind === 'boolean' ? 'flex items-center gap-2 pt-5' : '', f.kind === 'secret' && f.key === 'service_account_key' ? 'md:col-span-2' : '')}>
                   {f.kind === 'boolean' ? (
-                    <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={!!values[f.key]} onChange={(e) => setValues({ ...values, [f.key]: e.target.checked })} /> {f.label}{f.hint && <span className="text-zinc-600"> — {f.hint}</span>}</label>
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={!!values[f.key]} onChange={(e) => setValues({ ...values, [f.key]: e.target.checked })} /> {f.label}{f.hint && <span className="text-zinc-500"> — {f.hint}</span>}</label>
                   ) : f.key === 'service_account_key' ? (
                     <>
                       <Label>{f.label}</Label>
@@ -103,7 +103,7 @@ export function ConnectorWizard({ open, source, connector, initial, googleConfig
                     </>
                   ) : (
                     <>
-                      <Label>{f.label}{f.required ? '' : <span className="normal-case text-zinc-600"> (optional)</span>}</Label>
+                      <Label>{f.label}{f.required ? '' : <span className="normal-case text-zinc-500"> (optional)</span>}</Label>
                       <Input type={f.kind === 'secret' ? 'password' : f.kind === 'number' ? 'number' : 'text'} value={String(values[f.key] ?? '')} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} placeholder={f.kind === 'secret' && initial?.credential_fields.includes(f.key) ? 'unchanged' : f.placeholder} className={f.kind === 'url' || f.kind === 'path' ? 'font-mono' : ''} autoComplete="off" spellCheck={false} />
                       {f.hint && <p className="mt-0.5 text-2xs text-zinc-500">{f.hint}</p>}
                     </>

@@ -209,7 +209,7 @@ function DashboardCanvas({ id }: { id: string }) {
             <div className="min-w-0">
               <h1 className="flex items-center gap-2 truncate text-title font-semibold text-zinc-50">
                 {dash.name}
-                {canWrite && <button onClick={() => setRenaming(true)} className="text-zinc-600 hover:text-zinc-200" title="Rename" aria-label="Rename dashboard"><Pencil className="h-3.5 w-3.5" /></button>}
+                {canWrite && <button onClick={() => setRenaming(true)} className="text-zinc-500 hover:text-zinc-200" title="Rename" aria-label="Rename dashboard"><Pencil className="h-3.5 w-3.5" /></button>}
               </h1>
               {dash.description && <p className="truncate text-xs text-zinc-500">{dash.description}</p>}
             </div>

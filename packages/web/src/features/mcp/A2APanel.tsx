@@ -102,8 +102,8 @@ export function A2APanel({ refreshKey }: { refreshKey?: number }) {
                       <p className="text-zinc-400">{String(r.card.description ?? '')}</p>
                       <p className="mt-1 flex flex-wrap gap-1">{(r.card.skills ?? []).slice(0, 8).map((s) => <Badge key={s.id}>{s.name}</Badge>)}</p>
                     </div>
-                    <Button size="sm" variant="ghost" loading={busy === `refresh:${r.id}`} onClick={() => void act(`refresh:${r.id}`, async () => { await api.post(`/api/a2a/remotes/${r.id}/refresh`, {}); await load(); })} title="Read the agent card again"><RefreshCw className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" onClick={() => void act(`del:${r.id}`, async () => { await api.del(`/api/a2a/remotes/${r.id}`); await load(); })} title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" loading={busy === `refresh:${r.id}`} onClick={() => void act(`refresh:${r.id}`, async () => { await api.post(`/api/a2a/remotes/${r.id}/refresh`, {}); await load(); })} title="Read the agent card again" aria-label="Read the agent card again"><RefreshCw className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => void act(`del:${r.id}`, async () => { await api.del(`/api/a2a/remotes/${r.id}`); await load(); })} title="Remove" aria-label="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </div>
                   <div className="flex gap-2">
                     <Input value={cur.text} onChange={(e) => setAsks((a) => ({ ...a, [r.id]: { ...cur, text: e.target.value } }))} onKeyDown={(e) => e.key === 'Enter' && cur.text.trim() && void ask(r)} placeholder={r.card.skills?.[0]?.examples?.[0] ?? `Ask ${r.name}…`} className="min-w-0 flex-1" data-testid="a2a-ask-input" />

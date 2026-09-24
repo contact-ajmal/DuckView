@@ -65,7 +65,7 @@ export function ProfilePanel({ profile, loading, onProfile, defaultTarget, prove
                 header: k === 'approx_unique' ? 'Distinct' : k === 'avg' ? 'Mean' : k === 'std' ? 'Std dev' : k.toUpperCase().startsWith('Q') ? k.toUpperCase() : k[0]!.toUpperCase() + k.slice(1),
                 truncate: true,
                 sortValue: (r: Record<string, unknown>) => (r[k] == null ? null : Number.isFinite(Number(r[k])) ? Number(r[k]) : String(r[k])),
-                cell: (r: Record<string, unknown>) => (r[k] == null ? <span className="text-zinc-600">—</span> : <span className="font-mono text-zinc-300" title={String(r[k])}>{String(r[k])}</span>),
+                cell: (r: Record<string, unknown>) => (r[k] == null ? <span className="text-zinc-500">—</span> : <span className="font-mono text-zinc-300" title={String(r[k])}>{String(r[k])}</span>),
               })),
             ]}
           />

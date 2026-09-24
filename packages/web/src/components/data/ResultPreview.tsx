@@ -28,7 +28,7 @@ export function ResultPreview({ columns, rows, limit = 200, className, maxHeight
             {cols.map((c) => (
               <th key={c.name} scope="col" className="whitespace-nowrap px-2 py-1 font-normal text-zinc-400">
                 {c.name}
-                {showTypes && c.type && <span className="ml-1 text-zinc-600">{c.type.toLowerCase()}</span>}
+                {showTypes && c.type && <span className="ml-1 text-zinc-500">{c.type.toLowerCase()}</span>}
               </th>
             ))}
           </tr>
@@ -37,7 +37,7 @@ export function ResultPreview({ columns, rows, limit = 200, className, maxHeight
           {rows.slice(0, limit).map((r, i) => (
             <tr key={i} className="border-t border-zinc-800/70">
               {cellsOf(r).map((v, j) => (
-                <td key={j} title={typeof v === 'string' && v.length > 40 ? v : undefined} className={cn('max-w-[16rem] truncate whitespace-nowrap px-2 py-1', v == null ? 'italic text-zinc-600' : typeof v === 'number' || typeof v === 'bigint' ? 'text-right tabular-nums text-zinc-200' : 'text-zinc-300')}>
+                <td key={j} title={typeof v === 'string' && v.length > 40 ? v : undefined} className={cn('max-w-[16rem] truncate whitespace-nowrap px-2 py-1', v == null ? 'italic text-zinc-500' : typeof v === 'number' || typeof v === 'bigint' ? 'text-right tabular-nums text-zinc-200' : 'text-zinc-300')}>
                   {fmt(v)}
                 </td>
               ))}

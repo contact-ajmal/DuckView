@@ -62,7 +62,7 @@ export function GitPanel({ workspaceId }: { workspaceId: string }) {
         <form className="grid max-w-3xl gap-3 md:grid-cols-[minmax(0,1fr)_140px]" onSubmit={(e) => { e.preventDefault(); void act('save', async () => { await api.put(`/api/workspaces/${workspaceId}/git`, { repo_url: form.repo_url, branch: form.branch, path: form.path, ...(form.token || !git ? { token: form.token || null } : {}) }); setEditing(false); }); }}>
           <div><Label>Repository (HTTPS)</Label><Input className="font-mono" value={form.repo_url} onChange={(e) => setForm({ ...form, repo_url: e.target.value })} placeholder="https://github.com/acme/analytics.git" disabled={!canManage} data-testid="git-url" /></div>
           <div><Label>Branch</Label><Input className="font-mono" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} disabled={!canManage} /></div>
-          <div><Label>Folder in the repository <span className="text-zinc-600">(optional)</span></Label><Input className="font-mono" value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value })} placeholder="duckview" disabled={!canManage} data-testid="git-path" /></div>
+          <div><Label>Folder in the repository <span className="text-zinc-500">(optional)</span></Label><Input className="font-mono" value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value })} placeholder="duckview" disabled={!canManage} data-testid="git-path" /></div>
           <div><Label>Access token</Label><Input type="password" className="font-mono" value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} placeholder={git?.has_token ? 'kept (type to replace)' : 'ghp_… / glpat-…'} disabled={!canManage} /></div>
           <div className="flex items-center gap-2 md:col-span-2">
             <Button type="submit" variant="primary" disabled={!canManage || !form.repo_url.trim()} loading={busy === 'save'} data-testid="git-save"><GitBranch className="h-3.5 w-3.5" /> {git ? 'Save' : 'Connect'}</Button>
@@ -82,7 +82,7 @@ export function GitPanel({ workspaceId }: { workspaceId: string }) {
       {git && !editing && canEdit && (
         <div className="grid max-w-5xl gap-5 lg:grid-cols-2">
           <section className="space-y-2">
-            <div className="flex items-center gap-2"><h2 className="text-body font-semibold text-zinc-100">Push</h2><Button size="sm" variant="ghost" className="ml-auto" onClick={() => void act('status', refreshStatus)} loading={busy === 'status'} title="Check again"><RefreshCw className="h-3.5 w-3.5" /></Button></div>
+            <div className="flex items-center gap-2"><h2 className="text-body font-semibold text-zinc-100">Push</h2><Button size="sm" variant="ghost" className="ml-auto" onClick={() => void act('status', refreshStatus)} loading={busy === 'status'} title="Check again" aria-label="Check again"><RefreshCw className="h-3.5 w-3.5" /></Button></div>
             {!status ? <Spinner /> : (
               <>
                 {status.needs_pull && <p className="rounded-md border border-amber-900/60 bg-amber-950/30 px-2.5 py-1.5 text-amber-200">The repository has commits this workspace has not pulled ({short(status.remote_sha)}). Pull first, then push.</p>}

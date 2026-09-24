@@ -277,7 +277,7 @@ function NewAgentModal({ open, onClose, workspaces, frameworks, onCreated }: { o
         </div>
         <p className="text-2xs text-zinc-500">{frameworks?.[form.framework]?.blurb}</p>
         <div>
-          <Label>Description <span className="normal-case text-zinc-600">(optional)</span></Label>
+          <Label>Description <span className="normal-case text-zinc-500">(optional)</span></Label>
           <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What this agent is for" />
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -331,14 +331,14 @@ function NewAgentModal({ open, onClose, workspaces, frameworks, onCreated }: { o
                     <Input value={form.config.runtime_arn ?? ''} onChange={(e) => cfg({ runtime_arn: e.target.value })} placeholder="arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/my_agent-abc123" className="font-mono" />
                   </div>
                   <div>
-                    <Label>Endpoint qualifier <span className="normal-case text-zinc-600">(optional)</span></Label>
+                    <Label>Endpoint qualifier <span className="normal-case text-zinc-500">(optional)</span></Label>
                     <Input value={form.config.qualifier ?? ''} onChange={(e) => cfg({ qualifier: e.target.value })} placeholder="DEFAULT" className="font-mono" />
                   </div>
                 </>
               )}
               {form.framework === 'agentcore_gateway' && (
                 <div>
-                  <Label>Gateway URL <span className="normal-case text-zinc-600">(optional)</span></Label>
+                  <Label>Gateway URL <span className="normal-case text-zinc-500">(optional)</span></Label>
                   <Input value={form.config.gateway_url ?? ''} onChange={(e) => cfg({ gateway_url: e.target.value })} placeholder="https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp" className="font-mono" />
                 </div>
               )}

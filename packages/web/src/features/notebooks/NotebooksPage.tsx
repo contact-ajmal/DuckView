@@ -306,7 +306,7 @@ function NotebookView({ id, workspaceId }: { id: string; workspaceId: string }) 
         ))}
         {nb.cells.length === 0 && canEdit && <AddBar always onAdd={(t) => addCell(t, null)} />}
         {comments && <CommentsPanel open onClose={() => setComments(null)} workspaceId={workspaceId} targetType="notebook" targetId={id} targetLabel={nb.title} anchor={comments.anchor} focusThread={comments.focus} anchorLabel={(a) => nb.cells.find((x) => x.id === a)?.name ?? (nb.cells.find((x) => x.id === a)?.type === 'markdown' ? 'text cell' : 'a deleted cell')} />}
-        <p className="mt-6 text-center text-xs text-zinc-600">{names.size ? `Query a cell above by its name — ${[...names].slice(0, 3).map((n) => `SELECT * FROM ${n}`).join(', ')} · {{ name }} uses an input.` : ''}</p>
+        <p className="mt-6 text-center text-xs text-zinc-500">{names.size ? `Query a cell above by its name — ${[...names].slice(0, 3).map((n) => `SELECT * FROM ${n}`).join(', ')} · {{ name }} uses an input.` : ''}</p>
       </div>
     </div>
   );
@@ -338,7 +338,7 @@ function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFo
   return (
     <section className={cn('group/cell relative rounded-lg border px-3 py-2 transition-colors', focused ? 'border-zinc-700 bg-zinc-900/30' : 'border-transparent hover:border-zinc-800')} onFocusCapture={onFocus} onMouseDown={onFocus} data-cell={cell.name ?? cell.id} data-cell-type={cell.type}>
       <div className="mb-1 flex h-6 items-center gap-2 text-xs text-zinc-500">
-        <span className="text-zinc-600">{icon}</span>
+        <span className="text-zinc-500">{icon}</span>
         {cell.type !== 'markdown' ? (
           <input value={cell.name ?? ''} readOnly={!canEdit} onChange={(e) => onChange({ name: e.target.value.replace(/[^\w]/g, '_') })} aria-label="Cell name" className={cn('w-40 rounded bg-transparent px-1 font-mono text-xs outline-none hover:bg-zinc-900 focus:bg-zinc-900', duplicateName ? 'text-red-300' : 'text-zinc-300')} title={cell.type === 'sql' ? 'Later cells query this result by its name' : 'Use it in SQL as {{ name }}'} />
         ) : <span>Text</span>}
@@ -371,7 +371,7 @@ function CellView({ cell, focused, canEdit, running, schema, duplicateName, onFo
           )}
           {canEdit && <Select uiSize="sm" value={cell.input.kind} onChange={(e) => onChange({ input: { ...cell.input!, kind: e.target.value as 'text' } })} aria-label="Input kind"><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="select">List</option></Select>}
           {canEdit && cell.input.kind === 'select' && <Input uiSize="sm" className="min-w-40 flex-1 font-mono" value={(cell.input.options ?? []).join(', ')} onChange={(e) => onChange({ input: { ...cell.input!, options: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) } })} placeholder="options, comma separated" aria-label="Options" />}
-          <span className="text-zinc-600">Use as <code className="font-mono text-zinc-400">{`{{ ${cell.name} }}`}</code></span>
+          <span className="text-zinc-500">Use as <code className="font-mono text-zinc-400">{`{{ ${cell.name} }}`}</code></span>
         </div>
       )}
 
@@ -399,7 +399,7 @@ function Output({ cell, onChange }: { cell: NotebookCell; canEdit: boolean; onCh
       <div className="mb-1 flex items-center gap-1 text-xs">
         <button onClick={() => onChange({ view: 'table' })} className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5', view === 'table' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-200')}><Table2 className="h-3 w-3" /> Table</button>
         <button onClick={() => onChange({ view: 'chart', chart })} className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5', view === 'chart' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-200')} data-testid="view-chart"><BarChart3 className="h-3 w-3" /> Chart</button>
-        {o.truncated && <span className="ml-2 text-zinc-600">First {o.rows.length.toLocaleString()} of {o.row_count.toLocaleString()} rows kept</span>}
+        {o.truncated && <span className="ml-2 text-zinc-500">First {o.rows.length.toLocaleString()} of {o.row_count.toLocaleString()} rows kept</span>}
       </div>
       {view === 'table' ? (
         <div className="max-h-[360px] overflow-hidden rounded-md border border-zinc-800" style={{ height: Math.min(360, 34 + o.rows.length * 28) }}>

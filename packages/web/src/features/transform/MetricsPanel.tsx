@@ -193,7 +193,7 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
                 <input type="checkbox" className="mt-0.5" checked={picked.includes(m.name)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, m.name] : p.filter((x) => x !== m.name)))} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1 text-zinc-200">{m.label ?? m.name} {sourceBadge(m.source)}{m.error && <Badge tone="error">error</Badge>}</span>
-                  <span className="block truncate font-mono text-2xs text-zinc-500">{m.name} · {m.type === 'simple' ? m.measure : m.type === 'ratio' ? `${m.numerator} / ${m.denominator}` : m.expr}</span>
+                  <span className="block truncate font-mono text-2xs text-zinc-400">{m.name} · {m.type === 'simple' ? m.measure : m.type === 'ratio' ? `${m.numerator} / ${m.denominator}` : m.expr}</span>
                 </span>
               </label>
             ))}
@@ -209,14 +209,14 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
               </span>
             ))}
           </div>
-          <Select value="" onChange={(e) => e.target.value && setGroupBy((g) => [...g, e.target.value])} className="mt-1 h-7 text-xs" data-testid="metrics-groupby">
+          <Select aria-label="Add a dimension to group by" value="" onChange={(e) => e.target.value && setGroupBy((g) => [...g, e.target.value])} className="mt-1 h-7 text-xs" data-testid="metrics-groupby">
             <option value="">Add a dimension…</option>
             {dims.filter((d) => !groupBy.includes(d.name)).map((d) => <option key={d.name} value={d.name}>{d.name}{d.type === 'time' ? ' (time)' : ''}</option>)}
           </Select>
           {groupBy.some((g) => typeOf(g) === 'time') && (
             <div className="mt-1 flex items-center gap-1.5 text-zinc-500">
               grain
-              <Select value={grain} onChange={(e) => setGrain(e.target.value as (typeof GRAINS)[number])} className="h-7 w-28 text-xs" data-testid="metrics-grain">
+              <Select aria-label="Time grain" value={grain} onChange={(e) => setGrain(e.target.value as (typeof GRAINS)[number])} className="h-7 w-28 text-xs" data-testid="metrics-grain">
                 {GRAINS.map((g) => <option key={g} value={g}>{g}</option>)}
               </Select>
             </div>
@@ -229,7 +229,7 @@ function Explorer({ workspaceId, layer, onDefine }: { workspaceId: string; layer
           </div>
           {filters.map((f, i) => (
             <div key={i} className="mb-1 flex items-center gap-1">
-              <Select value={f.dimension} onChange={(e) => setFilters((all) => all.map((x, k) => (k === i ? { ...x, dimension: e.target.value } : x)))} className="h-7 min-w-0 flex-1 text-xs">
+              <Select aria-label="Filter on" value={f.dimension} onChange={(e) => setFilters((all) => all.map((x, k) => (k === i ? { ...x, dimension: e.target.value } : x)))} className="h-7 min-w-0 flex-1 text-xs">
                 {dims.map((d) => <option key={d.name} value={d.name}>{d.name}</option>)}
               </Select>
               <Select value={f.op} onChange={(e) => setFilters((all) => all.map((x, k) => (k === i ? { ...x, op: e.target.value as Filter['op'] } : x)))} className="h-7 w-20 text-xs">
@@ -330,7 +330,7 @@ function Definitions({ workspaceId, layer, onSaved }: { workspaceId: string; lay
                 <option value="">Pick a table…</option>
                 {tables.map((t) => <option key={t} value={t}>{t}</option>)}
               </Select>
-              <Button size="sm" disabled={!table} onClick={() => void scaffold()} data-testid="metrics-scaffold"><Wand2 className="h-3.5 w-3.5" /></Button>
+              <Button size="sm" disabled={!table} onClick={() => void scaffold()} data-testid="metrics-scaffold" aria-label="Generate metrics from the table" title="Generate metrics from the table"><Wand2 className="h-3.5 w-3.5" /></Button>
             </div>
             <p className="text-2xs text-zinc-500">Entities from id columns, time and categorical dimensions, a count and a sum per number. Review, then Save.</p>
           </div>

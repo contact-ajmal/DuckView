@@ -205,9 +205,9 @@ export function MonitorsPanel({ workspaceId, layer }: { workspaceId: string; lay
                 {!m.enabled && <Badge>paused</Badge>}
                 <span className="ml-auto flex items-center gap-1">
                   {m.last_run && <span className="text-zinc-500" title={m.last_run.summary}>{timeAgo(m.last_run.finished_at)}</span>}
-                  {canEdit && <Button size="sm" variant="ghost" loading={busy === `run:${m.id}`} onClick={() => void act(`run:${m.id}`, async () => { await api.post(`/api/monitors/${m.id}/run`, {}); await load(); })} title="Check now" data-testid="monitor-run"><Play className="h-3.5 w-3.5" /></Button>}
+                  {canEdit && <Button size="sm" variant="ghost" loading={busy === `run:${m.id}`} onClick={() => void act(`run:${m.id}`, async () => { await api.post(`/api/monitors/${m.id}/run`, {}); await load(); })} title="Check now" data-testid="monitor-run" aria-label="Check now"><Play className="h-3.5 w-3.5" /></Button>}
                   {canEdit && <Button size="sm" variant="ghost" onClick={() => void act(`pause:${m.id}`, async () => { await api.patch(`/api/monitors/${m.id}`, { enabled: !m.enabled }); await load(); })}>{m.enabled ? 'Pause' : 'Resume'}</Button>}
-                  {canEdit && <Button size="sm" variant="ghost" onClick={() => void act(`del:${m.id}`, async () => { await api.del(`/api/monitors/${m.id}`); await load(); })} title="Delete the monitor and what it found" data-testid="monitor-delete"><Trash2 className="h-3.5 w-3.5" /></Button>}
+                  {canEdit && <Button size="sm" variant="ghost" onClick={() => void act(`del:${m.id}`, async () => { await api.del(`/api/monitors/${m.id}`); await load(); })} title="Delete the monitor and what it found" data-testid="monitor-delete" aria-label="Delete the monitor and what it found"><Trash2 className="h-3.5 w-3.5" /></Button>}
                 </span>
                 {m.last_run && <p className={cn('basis-full pl-4', m.last_run.status === 'error' ? 'text-red-300' : 'text-zinc-400')}>{m.last_run.summary}</p>}
               </li>

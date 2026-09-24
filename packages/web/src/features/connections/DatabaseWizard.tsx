@@ -54,14 +54,14 @@ export function DatabaseWizard({ open, source, initial, onClose, onSaved }: { op
           <>
             <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Name</Label><Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Production Postgres" /></div>
-              <div><Label>Alias <span className="normal-case text-zinc-600">(SQL prefix)</span></Label><Input value={alias} onChange={(e) => setAlias(e.target.value)} className="font-mono" placeholder={suggestedAlias} /></div>
+              <div><Label>Alias <span className="normal-case text-zinc-500">(SQL prefix)</span></Label><Input value={alias} onChange={(e) => setAlias(e.target.value)} className="font-mono" placeholder={suggestedAlias} /></div>
               {fields.map((f) => (
                 <div key={f.key} className={f.kind === 'boolean' ? 'flex items-center gap-2 pt-5' : ''}>
                   {f.kind === 'boolean' ? (
-                    <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={values[f.key] !== false && values[f.key] !== undefined ? !!values[f.key] : false} onChange={(e) => setValues({ ...values, [f.key]: e.target.checked })} /> {f.label}{f.hint && <span className="text-zinc-600"> — {f.hint}</span>}</label>
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300"><input type="checkbox" className="accent-accent-500" checked={values[f.key] !== false && values[f.key] !== undefined ? !!values[f.key] : false} onChange={(e) => setValues({ ...values, [f.key]: e.target.checked })} /> {f.label}{f.hint && <span className="text-zinc-500"> — {f.hint}</span>}</label>
                   ) : (
                     <>
-                      <Label>{f.label}{f.required ? '' : <span className="normal-case text-zinc-600"> (optional)</span>}</Label>
+                      <Label>{f.label}{f.required ? '' : <span className="normal-case text-zinc-500"> (optional)</span>}</Label>
                       <Input type={f.kind === 'secret' ? 'password' : f.kind === 'number' ? 'number' : 'text'} value={String(values[f.key] ?? '')} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} placeholder={f.kind === 'secret' && initial?.has_password ? 'unchanged' : f.placeholder} className={f.kind === 'path' || f.kind === 'url' ? 'font-mono' : ''} autoComplete="off" />
                       {f.hint && <p className="mt-0.5 text-2xs text-zinc-500">{f.hint}</p>}
                     </>

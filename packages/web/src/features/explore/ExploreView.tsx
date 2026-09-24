@@ -119,10 +119,10 @@ export function ExploreView({ workspaceId, source, className }: { workspaceId: s
       <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-1.5 text-2xs text-zinc-400">
         <Sparkles className="h-3.5 w-3.5 text-accent-300" />
         <span className="truncate font-mono text-zinc-200">{source.label ?? source.target}</span>
-        <span className="text-zinc-600">·</span>
+        <span className="text-zinc-500">·</span>
         <span>brush a chart to cross-filter · click a bar to toggle · double-click to clear</span>
         {state === 'loading' && <Loader2 className="ml-1 h-3.5 w-3.5 animate-spin text-accent-300" />}
-        {skipped.length > 0 && state === 'ready' && <span className="ml-auto text-zinc-600" title={skipped.map((c) => `${c.name} (${c.type})`).join(', ')}>{skipped.length} column{skipped.length === 1 ? '' : 's'} not charted</span>}
+        {skipped.length > 0 && state === 'ready' && <span className="ml-auto text-zinc-500" title={skipped.map((c) => `${c.name} (${c.type})`).join(', ')}>{skipped.length} column{skipped.length === 1 ? '' : 's'} not charted</span>}
         <button onClick={() => setNonce((n) => n + 1)} className="rounded p-1 text-zinc-500 hover:text-zinc-200" title="Rebuild">
           <RefreshCw className="h-3.5 w-3.5" />
         </button>

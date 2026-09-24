@@ -88,13 +88,13 @@ export function SnapshotsPanel({ workspaceId }: { workspaceId: string }) {
               </div>
               <div className="mt-1 text-2xs text-zinc-500">{s.target.kind} “{names.get(targetId(s.target)) ?? '?'}” · {every(s.schedule)} · {s.width}px</div>
               <div className="mt-1 flex flex-wrap gap-1 text-2xs">{s.channel_ids.length ? s.channel_ids.map((id) => byId.get(id)).filter(Boolean).map((c) => <span key={c!.id} className="inline-flex items-center gap-1 rounded border border-zinc-800 px-1.5 py-0.5 text-zinc-300">{CHANNEL_META[c!.type].icon}{c!.name}</span>) : <span className="text-amber-300">no channels</span>}</div>
-              <div className="mt-1 text-2xs text-zinc-600">{s.last_run_at ? `last ${timeAgo(s.last_run_at)}` : 'never sent'}{s.next_run_at ? ` · next ${new Date(s.next_run_at).toLocaleString()}` : ''}{s.last_error ? <span className="text-red-300"> · {s.last_error}</span> : null}</div>
+              <div className="mt-1 text-2xs text-zinc-500">{s.last_run_at ? `last ${timeAgo(s.last_run_at)}` : 'never sent'}{s.next_run_at ? ` · next ${new Date(s.next_run_at).toLocaleString()}` : ''}{s.last_error ? <span className="text-red-300"> · {s.last_error}</span> : null}</div>
               <div className="mt-2 flex items-center gap-1">
                 <Button size="sm" variant="secondary" disabled={!canEdit} loading={busy === `run:${s.id}`} onClick={() => void sendNow(s)} title="Render and send now"><Send className="h-3.5 w-3.5" /> Send now</Button>
-                <Button size="sm" variant="ghost" onClick={() => void openRuns(s)} title="Recent renders"><History className="h-3.5 w-3.5" /></Button>
-                <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => setDraft({ ...blank(), id: s.id, name: s.name, kind: s.target.kind, target: targetId(s.target), format: s.format, width: String(s.width), scheduleKind: s.schedule.kind, ...(s.schedule.kind === 'cron' ? { cron: s.schedule.expression, timezone: s.schedule.timezone ?? '' } : s.schedule.kind === 'interval' ? { minutes: String(s.schedule.minutes) } : {}), channel_ids: s.channel_ids })}><Pencil className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" onClick={() => void openRuns(s)} title="Recent renders" aria-label="Recent renders"><History className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => setDraft({ ...blank(), id: s.id, name: s.name, kind: s.target.kind, target: targetId(s.target), format: s.format, width: String(s.width), scheduleKind: s.schedule.kind, ...(s.schedule.kind === 'cron' ? { cron: s.schedule.expression, timezone: s.schedule.timezone ?? '' } : s.schedule.kind === 'interval' ? { minutes: String(s.schedule.minutes) } : {}), channel_ids: s.channel_ids })} aria-label="Edit" title="Edit"><Pencil className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => void act(`t:${s.id}`, () => api.patch(`/api/snapshots/${s.id}`, { enabled: !s.enabled }))}>{s.enabled ? 'Pause' : 'Resume'}</Button>
-                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!canEdit} onClick={async () => { if ((await confirmAction(`Delete the snapshot "${s.name}"?`))) void act(`d:${s.id}`, () => api.del(`/api/snapshots/${s.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!canEdit} onClick={async () => { if ((await confirmAction(`Delete the snapshot "${s.name}"?`))) void act(`d:${s.id}`, () => api.del(`/api/snapshots/${s.id}`)); }} aria-label="Remove" title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           ))}
@@ -109,7 +109,7 @@ export function SnapshotsPanel({ workspaceId }: { workspaceId: string }) {
               <div className="min-w-0 flex-1"><Label>{draft.kind === 'dashboard' ? 'Dashboard' : 'App'}</Label><Select className="w-full" value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })}><option value="">Pick one…</option>{(draft.kind === 'dashboard' ? dashboards : apps).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></div>
             </div>
             <div className="flex flex-wrap items-end gap-2">
-              <div className="min-w-0 flex-1"><Label>Name <span className="normal-case text-zinc-600">(default: its name)</span></Label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Monday numbers" /></div>
+              <div className="min-w-0 flex-1"><Label>Name <span className="normal-case text-zinc-500">(default: its name)</span></Label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Monday numbers" /></div>
               <div><Label>Format</Label><Select value={draft.format} onChange={(e) => setDraft({ ...draft, format: e.target.value as Draft['format'] })}><option value="png">PNG image</option><option value="pdf">PDF (and a PNG)</option></Select></div>
               <div><Label>Width</Label><Input className="w-24 font-mono" value={draft.width} onChange={(e) => setDraft({ ...draft, width: e.target.value })} /></div>
             </div>
@@ -145,7 +145,7 @@ export function SnapshotsPanel({ workspaceId }: { workspaceId: string }) {
             <div key={r.id} className="flex items-start gap-2 border-b border-zinc-800/60 py-1.5">
               <Badge tone={r.status === 'ok' ? 'green' : 'red'}>{r.status}</Badge>
               <div className="min-w-0 flex-1"><div className="text-zinc-300">{timeAgo(r.created_at)} · {r.triggered_by}{r.bytes ? ` · ${Math.round(r.bytes / 1024)} KB` : ''}{r.duration_ms !== null ? ` · ${(r.duration_ms / 1000).toFixed(1)} s` : ''} · {r.delivered} channel{r.delivered === 1 ? '' : 's'}</div>{r.error && <div className="font-mono text-2xs text-red-300">{r.error}</div>}</div>
-              {r.file && <Button size="sm" variant="ghost" onClick={() => void authedBlobUrl(`/api/snapshots/${r.snapshot_id}/runs/${r.id}/file`).then((u) => window.open(u, '_blank'))} title="Open the file"><FileDown className="h-3.5 w-3.5" /></Button>}
+              {r.file && <Button size="sm" variant="ghost" onClick={() => void authedBlobUrl(`/api/snapshots/${r.snapshot_id}/runs/${r.id}/file`).then((u) => window.open(u, '_blank'))} title="Open the file" aria-label="Open the file"><FileDown className="h-3.5 w-3.5" /></Button>}
             </div>
           ))}
         </div>

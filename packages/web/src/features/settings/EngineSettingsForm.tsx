@@ -219,7 +219,7 @@ export function EngineSettingsForm({ workspace, sys, live, connections, onSaved 
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <Label>Database <span className="normal-case text-zinc-600">(advanced — switching files does not move tables)</span></Label>
+            <Label>Database <span className="normal-case text-zinc-500">(advanced — switching files does not move tables)</span></Label>
             <Input value={dbPath} onChange={(e) => setDbPath(e.target.value)} className="font-mono" placeholder=":memory: | warehouse.duckdb | md:my_db" />
           </div>
           <div>

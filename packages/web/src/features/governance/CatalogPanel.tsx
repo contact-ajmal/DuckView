@@ -28,13 +28,13 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
   const editor = (object: string, column: string | null, description: string | null, tags: string[]) =>
     edit && edit.object === object && edit.column === column ? (
       <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        <Input autoFocus className="h-7 min-w-64 flex-1 text-xs" value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder={column ? 'What this column holds (units, meaning)' : 'What this table is, where it comes from, what one row means'} onKeyDown={(e) => { if (e.key === 'Enter') void save(); }} />
-        <Input className="h-7 w-44 text-xs" value={edit.tags} onChange={(e) => setEdit({ ...edit, tags: e.target.value })} placeholder="tags: pii, finance" />
+        <Input aria-label="Description" autoFocus className="h-7 min-w-64 flex-1 text-xs" value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} placeholder={column ? 'What this column holds (units, meaning)' : 'What this table is, where it comes from, what one row means'} onKeyDown={(e) => { if (e.key === 'Enter') void save(); }} />
+        <Input aria-label="Tags" className="h-7 w-44 text-xs" value={edit.tags} onChange={(e) => setEdit({ ...edit, tags: e.target.value })} placeholder="tags: pii, finance" />
         <Button size="sm" variant="primary" onClick={() => void save()}>Save</Button>
         <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>Cancel</Button>
       </div>
     ) : (
-      <button disabled={!canEdit} onClick={() => setEdit({ object, column, description: description ?? '', tags: tags.join(', ') })} className={cn('text-left text-2xs', description ? 'text-zinc-300' : 'italic text-zinc-600', canEdit && 'hover:text-zinc-100')}>
+      <button disabled={!canEdit} onClick={() => setEdit({ object, column, description: description ?? '', tags: tags.join(', ') })} className={cn('text-left text-2xs', description ? 'text-zinc-300' : 'italic text-zinc-500', canEdit && 'hover:text-zinc-100')}>
         {description || (canEdit ? 'Add a description…' : 'No description')}
         {tags.map((t) => <Badge key={t} tone={t === 'pii' ? 'red' : 'blue'} className="ml-1.5">{t}</Badge>)}
       </button>
@@ -44,7 +44,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
     <div className="space-y-3 text-xs">
       <div className="flex items-center justify-between gap-2">
         <p className="text-zinc-500">What the tables and columns mean. Copilot and agents are given these notes, so write what a newcomer would need; tag sensitive columns (<code>pii</code>).</p>
-        <Input className="h-7 w-56" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name, text or tag" />
+        <Input aria-label="Filter the catalog" className="h-7 w-56" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name, text or tag" />
       </div>
       {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}
       {shown.length === 0 ? <div className="border-y border-zinc-800 py-12"><Empty icon={<BookOpen className="h-10 w-10" />} title="No tables" hint="Tables and views of the workspace appear here." /></div> : (
@@ -56,9 +56,9 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
             return (
               <div key={name} className="p-2.5">
                 <div className="flex items-start gap-2">
-                  <button onClick={() => setOpen(expanded ? null : name)} className="mt-0.5 text-zinc-500 hover:text-zinc-200">{expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button>
+                  <button onClick={() => setOpen(expanded ? null : name)} aria-expanded={expanded} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${name}`} className="mt-0.5 text-zinc-500 hover:text-zinc-200">{expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2"><span className="font-mono text-zinc-100">{name}</span><span className="text-2xs text-zinc-600">{o.type.toLowerCase()} · {o.column_count} columns{o.estimated_rows !== null ? ` · ${o.estimated_rows.toLocaleString()} rows` : ''}{described ? ` · ${described} described` : ''}</span></div>
+                    <div className="flex items-center gap-2"><span className="font-mono text-zinc-100">{name}</span><span className="text-2xs text-zinc-500">{o.type.toLowerCase()} · {o.column_count} columns{o.estimated_rows !== null ? ` · ${o.estimated_rows.toLocaleString()} rows` : ''}{described ? ` · ${described} described` : ''}</span></div>
                     {editor(name, null, o.description, o.tags)}
                   </div>
                 </div>
@@ -66,8 +66,8 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
                   <div className="ml-6 mt-2 space-y-1 border-l border-zinc-800 pl-3">
                     {o.columns.map((c) => (
                       <div key={c.name} className="flex items-start gap-2">
-                        <Tag className="mt-0.5 h-3 w-3 shrink-0 text-zinc-600" />
-                        <span className="w-40 shrink-0 truncate font-mono text-zinc-300" title={c.type}>{c.name} <span className="text-zinc-600">{c.type.toLowerCase()}</span></span>
+                        <Tag className="mt-0.5 h-3 w-3 shrink-0 text-zinc-500" />
+                        <span className="w-40 shrink-0 truncate font-mono text-zinc-300" title={c.type}>{c.name} <span className="text-zinc-500">{c.type.toLowerCase()}</span></span>
                         <div className="min-w-0 flex-1">{editor(name, c.name, c.description, c.tags)}</div>
                       </div>
                     ))}

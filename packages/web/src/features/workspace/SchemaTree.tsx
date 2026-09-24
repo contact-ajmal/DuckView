@@ -85,7 +85,7 @@ export function SchemaTree({ catalog, loading, onInsert, onSnippet }: { catalog:
       {(objects.length + files.length > 8 || q) && (
         <div className="mb-2 flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950 px-2">
           <Search className="h-3 w-3 text-zinc-500" />
-          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter…" className="h-6 min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none" />
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter…" aria-label="Filter tables and views" className="h-6 min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none" />
           {loading && <Spinner className="h-3 w-3" />}
         </div>
       )}
@@ -105,7 +105,7 @@ export function SchemaTree({ catalog, loading, onInsert, onSnippet }: { catalog:
           </button>
         </div>
       ))}
-      {objects.length === 0 && files.length === 0 && <div className="px-1 py-2 text-2xs text-zinc-600">Nothing yet — drop a file on the Overview page or CREATE TABLE here.</div>}
+      {objects.length === 0 && files.length === 0 && <div className="px-1 py-2 text-2xs text-zinc-500">Nothing yet — drop a file on the Overview page or CREATE TABLE here.</div>}
     </div>
   );
 }

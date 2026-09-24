@@ -102,7 +102,7 @@ export function CloudWizard({ open, onClose, onCreated, initialProvider, initial
                 <Cloud className="h-4 w-4 text-sky-300" /> {PROVIDER_META[p].title}
               </div>
               <div className="mt-1 text-2xs text-zinc-500">{PROVIDER_META[p].blurb}</div>
-              <div className="mt-1 font-mono text-2xs text-zinc-600">{specs?.[p].uri ?? ''}://bucket/path</div>
+              <div className="mt-1 font-mono text-2xs text-zinc-500">{specs?.[p].uri ?? ''}://bucket/path</div>
             </button>
           ))}
           <div className="col-span-2 flex justify-end">
@@ -121,7 +121,7 @@ export function CloudWizard({ open, onClose, onCreated, initialProvider, initial
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={`${provider.toLowerCase()}-prod`} />
             </div>
             <div>
-              <Label>Default bucket {provider === 'AZURE' ? '(container)' : ''} <span className="normal-case text-zinc-600">(optional)</span></Label>
+              <Label>Default bucket {provider === 'AZURE' ? '(container)' : ''} <span className="normal-case text-zinc-500">(optional)</span></Label>
               <Input value={bucket} onChange={(e) => setBucket(e.target.value)} placeholder="my-data-lake" className="font-mono" />
             </div>
             {provider === 'S3' && (
@@ -131,7 +131,7 @@ export function CloudWizard({ open, onClose, onCreated, initialProvider, initial
                   <Input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="us-east-1" className="font-mono" />
                 </div>
                 <div>
-                  <Label>Endpoint URL <span className="normal-case text-zinc-600">(MinIO / R2-via-S3 / Ceph)</span></Label>
+                  <Label>Endpoint URL <span className="normal-case text-zinc-500">(MinIO / R2-via-S3 / Ceph)</span></Label>
                   <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://minio.internal:9000" className="font-mono" />
                 </div>
               </>
@@ -140,7 +140,7 @@ export function CloudWizard({ open, onClose, onCreated, initialProvider, initial
           {[...spec.required, ...spec.optional].map((f) => (
             <div key={f}>
               <Label>
-                {LABELS[f] ?? f} {spec.optional.includes(f) && <span className="normal-case text-zinc-600">(optional)</span>}
+                {LABELS[f] ?? f} {spec.optional.includes(f) && <span className="normal-case text-zinc-500">(optional)</span>}
               </Label>
               <Input type={/secret|token|connection_string/.test(f) ? 'password' : 'text'} value={creds[f] ?? ''} onChange={(e) => setCreds({ ...creds, [f]: e.target.value })} className="font-mono" autoComplete="off" placeholder={initial?.fields.includes(f) ? 'unchanged' : undefined} />
             </div>

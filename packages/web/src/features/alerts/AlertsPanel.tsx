@@ -90,10 +90,10 @@ export function AlertsPanel({ workspaceId }: { workspaceId: string }) {
               </div>
               <div className="mt-2 flex items-center gap-1">
                 <Button size="sm" variant="secondary" disabled={!canEdit} loading={busy === `run:${a.id}`} onClick={() => void act(`run:${a.id}`, () => api.post(`/api/alerts/${a.id}/run`, {}))} title="Check now (notifies if the state changes)"><Play className="h-3.5 w-3.5" /> Check now</Button>
-                <Button size="sm" variant="ghost" onClick={() => void api.get<{ events: AlertEventRow[] }>(`/api/alerts/${a.id}/events`).then((r) => setHistory({ alert: a, rows: r.events }))} title="History"><History className="h-3.5 w-3.5" /></Button>
-                <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => { setPreview(null); setDraft(fromAlert(a)); }} title="Edit"><Pencil className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" onClick={() => void api.get<{ events: AlertEventRow[] }>(`/api/alerts/${a.id}/events`).then((r) => setHistory({ alert: a, rows: r.events }))} title="History" aria-label="History"><History className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => { setPreview(null); setDraft(fromAlert(a)); }} title="Edit" aria-label="Edit"><Pencil className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => void act(`toggle:${a.id}`, () => api.patch(`/api/alerts/${a.id}`, { enabled: !a.enabled }))}>{a.enabled ? 'Pause' : 'Resume'}</Button>
-                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!canEdit} onClick={async () => { if ((await confirmAction(`Delete the alert "${a.name}"?`))) void act(`del:${a.id}`, () => api.del(`/api/alerts/${a.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="ghost" className="ml-auto text-red-300" disabled={!canEdit} onClick={async () => { if ((await confirmAction(`Delete the alert "${a.name}"?`))) void act(`del:${a.id}`, () => api.del(`/api/alerts/${a.id}`)); }} aria-label="Remove" title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           ))}
@@ -105,14 +105,14 @@ export function AlertsPanel({ workspaceId }: { workspaceId: string }) {
           <div className="space-y-3 text-xs">
             <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Name</Label><Input autoFocus value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Orders below plan" /></div>
-              <div><Label>Description <span className="normal-case text-zinc-600">(in the message)</span></Label><Input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="What to do when it fires" /></div>
+              <div><Label>Description <span className="normal-case text-zinc-500">(in the message)</span></Label><Input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="What to do when it fires" /></div>
             </div>
-            <div><Label>Query <span className="normal-case text-zinc-600">(read-only, one statement)</span></Label><textarea value={draft.sql} onChange={(e) => setDraft({ ...draft, sql: e.target.value })} spellCheck={false} rows={5} className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" /></div>
+            <div><Label>Query <span className="normal-case text-zinc-500">(read-only, one statement)</span></Label><textarea value={draft.sql} onChange={(e) => setDraft({ ...draft, sql: e.target.value })} spellCheck={false} rows={5} className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 focus:border-accent-500 focus:outline-none" /></div>
             <div className="flex flex-wrap items-end gap-2">
               <div><Label>Alert when</Label><Select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as Draft['kind'] })}><option value="threshold">a value crosses a threshold</option><option value="rows">the query returns rows</option><option value="no_rows">the query returns no rows</option></Select></div>
               {draft.kind === 'threshold' && (
                 <>
-                  <div><Label>Column <span className="normal-case text-zinc-600">(first row)</span></Label><Input className="w-40 font-mono" value={draft.column} onChange={(e) => setDraft({ ...draft, column: e.target.value })} /></div>
+                  <div><Label>Column <span className="normal-case text-zinc-500">(first row)</span></Label><Input className="w-40 font-mono" value={draft.column} onChange={(e) => setDraft({ ...draft, column: e.target.value })} /></div>
                   <div><Label>is</Label><Select value={draft.op} onChange={(e) => setDraft({ ...draft, op: e.target.value as Draft['op'] })}>{(['>', '>=', '<', '<=', '=', '!='] as const).map((o) => <option key={o} value={o}>{o}</option>)}</Select></div>
                   <div><Label>Value</Label><Input className="w-28 font-mono" value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value })} /></div>
                 </>

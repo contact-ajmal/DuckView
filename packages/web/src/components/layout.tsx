@@ -85,10 +85,10 @@ export function KvRows({ rows }: { rows: { k: string; v: ReactNode; sub?: ReactN
 /** Column types read as quiet monospace text; only the family is hinted by colour. */
 export function typeTone(type: string): string {
   const t = type.toUpperCase();
-  if (/INT|DOUBLE|FLOAT|DECIMAL|REAL|HUGEINT|NUMERIC/.test(t)) return 'text-sky-500';
-  if (/DATE|TIME|INTERVAL/.test(t)) return 'text-emerald-500';
-  if (t === 'BOOLEAN') return 'text-fuchsia-500';
-  if (/STRUCT|MAP|LIST|\[\]|JSON|UNION/.test(t)) return 'text-fuchsia-500';
+  if (/INT|DOUBLE|FLOAT|DECIMAL|REAL|HUGEINT|NUMERIC/.test(t)) return 'text-sky-300';
+  if (/DATE|TIME|INTERVAL/.test(t)) return 'text-emerald-300';
+  if (t === 'BOOLEAN') return 'text-fuchsia-300';
+  if (/STRUCT|MAP|LIST|\[\]|JSON|UNION/.test(t)) return 'text-fuchsia-300';
   return 'text-zinc-500';
 }
 

@@ -74,7 +74,7 @@ export function AuditPanel({ isAdmin }: { isAdmin: boolean }) {
                   <div className="mt-2 flex gap-1">
                     <Button size="sm" variant="secondary" loading={busy === `t:${s.id}`} onClick={() => void act(`t:${s.id}`, async () => { const r = await api.post<{ ok: boolean; error: string | null }>(`/api/admin/audit-sinks/${s.id}/test`, {}); if (!r.ok) throw new Error(`${s.name}: ${r.error}`); })}><Send className="h-3.5 w-3.5" /> Test</Button>
                     <Button size="sm" variant="ghost" onClick={() => void act(`e:${s.id}`, () => api.patch(`/api/admin/audit-sinks/${s.id}`, { enabled: !s.enabled }))}>{s.enabled ? 'Pause' : 'Resume'}</Button>
-                    <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={async () => { if ((await confirmAction(`Stop streaming to "${s.name}"?`))) void act(`d:${s.id}`, () => api.del(`/api/admin/audit-sinks/${s.id}`)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" className="ml-auto text-red-300" onClick={async () => { if ((await confirmAction(`Stop streaming to "${s.name}"?`))) void act(`d:${s.id}`, () => api.del(`/api/admin/audit-sinks/${s.id}`)); }} aria-label="Remove" title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </div>
                 </div>
               ))}

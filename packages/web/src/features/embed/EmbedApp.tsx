@@ -43,7 +43,7 @@ export function EmbedApp() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200" data-testid="embed">
       {view.type === 'dashboard' ? <EmbedDashboard d={view.dashboard} /> : <EmbedNotebook nb={view.notebook} />}
-      <div className="px-4 pb-3 text-right text-2xs text-zinc-600">Made with DuckView</div>
+      <div className="px-4 pb-3 text-right text-2xs text-zinc-500">Made with DuckView</div>
     </div>
   );
 }

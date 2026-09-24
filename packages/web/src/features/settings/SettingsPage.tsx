@@ -149,7 +149,7 @@ export function SettingsPage() {
           );
         })}
         {sys && (
-          <div className="mt-auto px-2 pt-3 text-2xs leading-relaxed text-zinc-600">
+          <div className="mt-auto px-2 pt-3 text-2xs leading-relaxed text-zinc-500">
             DuckDB {sys.duckdb.version} · {sys.server.metadata_dialect}
             <br />
             DuckView {sys.server.version} · up {Math.round(sys.server.uptime_s / 60)} min
@@ -255,7 +255,7 @@ export function SettingsPage() {
                       { key: 'ceiling', header: 'ceiling', cell: (e) => <span className="text-zinc-400">{formatBytes(e.memory_limit_bytes)}</span> },
                       { key: 'spill', header: 'spill', cell: (e) => <span className="text-zinc-400">{formatBytes(e.temporary_storage_bytes)}</span> },
                       { key: 'threads', header: 'threads', sortValue: (e) => e.threads, cell: (e) => <span className="text-zinc-400">{e.threads}</span> },
-                      { key: 'active', header: 'active', cell: (e) => <><Activity className={`h-3.5 w-3.5 ${e.active_queries ? 'text-emerald-400' : 'text-zinc-600'}`} /></> },
+                      { key: 'active', header: 'active', cell: (e) => <><Activity className={`h-3.5 w-3.5 ${e.active_queries ? 'text-emerald-400' : 'text-zinc-500'}`} /></> },
                       { key: 'c7', header: '', align: 'right', cell: (e) => <><Button size="sm" variant="ghost" onClick={() => api.post(`/api/admin/engines/${e.workspaceId}/evict`)}>Evict</Button></> },
                     ]}
                   />
@@ -310,7 +310,7 @@ export function SettingsPage() {
                         <button className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200" title="Edit" onClick={() => setLakeWizard({ open: true, edit: c })}>
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
-                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" title="Delete" onClick={async () => { if ((await confirmAction(`Delete lakehouse connection "${c.name}"? The catalog is detached from your engines.`))) { await api.del(`/api/lakehouse-connections/${c.id}`); await refresh(); } }}>
+                        <button aria-label="Delete" className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" title="Delete" onClick={async () => { if ((await confirmAction(`Delete lakehouse connection "${c.name}"? The catalog is detached from your engines.`))) { await api.del(`/api/lakehouse-connections/${c.id}`); await refresh(); } }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -336,7 +336,7 @@ export function SettingsPage() {
                           {testing[c.id] && <div className="truncate font-mono text-2xs text-amber-200">{testing[c.id]}</div>}
                         </div>
                         <Button size="sm" variant="ghost" onClick={async () => { setTesting({ ...testing, [c.id]: 'testing…' }); try { const r = await api.post<{ message: string }>(`/api/cloud-connections/${c.id}/test`); setTesting({ ...testing, [c.id]: r.message }); } catch (e) { setTesting({ ...testing, [c.id]: (e as Error).message }); } }}>Test</Button>
-                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete cloud connection "${c.name}"?`))) { await api.del(`/api/cloud-connections/${c.id}`); await refresh(); } }}>
+                        <button aria-label="Delete" title="Delete" className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete cloud connection "${c.name}"?`))) { await api.del(`/api/cloud-connections/${c.id}`); await refresh(); } }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -361,7 +361,7 @@ export function SettingsPage() {
                           <div className="text-zinc-200">{c.name}</div>
                           <div className="font-mono text-2xs text-zinc-500">{c.fields.join(', ')}</div>
                         </div>
-                        <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete connection "${c.name}"?`))) { await api.del(`/api/connections/${c.id}`); await refresh(); } }}>
+                        <button aria-label="Delete" title="Delete" className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete connection "${c.name}"?`))) { await api.del(`/api/connections/${c.id}`); await refresh(); } }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -425,7 +425,7 @@ export function SettingsPage() {
                   { key: 'user', header: 'User', sortValue: (u) => u.email, cell: (u) => <><div className="text-zinc-200">{u.display_name ?? u.email}</div><div className="text-2xs text-zinc-500">{u.email}</div></> },
                   { key: 'provider', header: 'Provider', sortValue: (u) => u.auth_provider, cell: (u) => <span className="text-zinc-400">{u.auth_provider}</span> },
                   { key: 'created', header: 'Created', cell: (u) => <span className="text-zinc-400">{timeAgo(u.created_at)}</span> },
-                  { key: 'role', header: 'Role', cell: (u) => <><Select value={u.role} disabled={u.id === auth.user?.id} className="h-7 text-xs" onChange={async (e) => { await api.patch(`/api/admin/users/${u.id}`, { role: e.target.value }); await refresh(); }}>
+                  { key: 'role', header: 'Role', cell: (u) => <><Select aria-label={`Role of ${u.email}`} value={u.role} disabled={u.id === auth.user?.id} className="h-7 text-xs" onChange={async (e) => { await api.patch(`/api/admin/users/${u.id}`, { role: e.target.value }); await refresh(); }}>
                           {['ADMIN', 'USER', 'READ_ONLY'].map((r) => <option key={r} value={r}>{r}</option>)}
                         </Select></> },
                   { key: 'status', header: 'Status', cell: (u) => <>{u.id === auth.user?.id ? (
@@ -447,7 +447,7 @@ export function SettingsPage() {
                           </button>
                         )}</> },
                   { key: 'c5', header: '', align: 'right', sortValue: (u) => u.email, cell: (u) => <>{u.id !== auth.user?.id && (
-                          <button className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete ${u.email}? Their workspaces and tokens are removed.`))) { await api.del(`/api/admin/users/${u.id}`); await refresh(); } }}>
+                          <button aria-label="Delete" title="Delete" className="rounded p-1 text-zinc-500 hover:bg-red-950 hover:text-red-300" onClick={async () => { if ((await confirmAction(`Delete ${u.email}? Their workspaces and tokens are removed.`))) { await api.del(`/api/admin/users/${u.id}`); await refresh(); } }}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         )}</> },
@@ -462,15 +462,15 @@ export function SettingsPage() {
         <div className="space-y-3">
           <div>
             <Label>Email</Label>
-            <Input type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+            <Input aria-label="Email" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
           </div>
           <div>
             <Label>Password</Label>
-            <Input type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
+            <Input aria-label="Password" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
           </div>
           <div>
             <Label>Role</Label>
-            <Select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value as User['role'] })} className="w-full">
+            <Select aria-label="Role" value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value as User['role'] })} className="w-full">
               {['ADMIN', 'USER', 'READ_ONLY'].map((r) => (
                 <option key={r} value={r}>
                   {r}
@@ -521,7 +521,7 @@ export function SettingsPage() {
           {[...(connTypes[newConn.type]?.required ?? []), ...(connTypes[newConn.type]?.optional ?? [])].map((f) => (
             <div key={f}>
               <Label>
-                {f} {connTypes[newConn.type]?.required.includes(f) ? '' : <span className="normal-case text-zinc-600">(optional)</span>}
+                {f} {connTypes[newConn.type]?.required.includes(f) ? '' : <span className="normal-case text-zinc-500">(optional)</span>}
               </Label>
               <Input type={/secret|token|password/.test(f) ? 'password' : 'text'} value={newConn.creds[f] ?? ''} onChange={(e) => setNewConn({ ...newConn, creds: { ...newConn.creds, [f]: e.target.value } })} className="font-mono" autoComplete="off" />
             </div>
