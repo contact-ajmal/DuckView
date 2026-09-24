@@ -7,7 +7,7 @@ import type { AuditLog } from '../db/schema/sqlite.js';
 
 export type LiveEvent =
   | { type: 'audit'; event: AuditLog }
-  | { type: 'mcp_tool'; at: string; user_id: string; user: string; tool: string; status: 'ok' | 'error' | 'approval_required'; duration_ms: number; workspace_id: string | null; args: Record<string, unknown>; summary: string; via?: 'mcp' | 'rest'; agent?: { id: string; name: string; framework: string } | null }
+  | { type: 'mcp_tool'; at: string; user_id: string; user: string; tool: string; title?: string; effect?: 'read' | 'write'; reason?: string; status: 'ok' | 'error' | 'approval_required'; duration_ms: number; workspace_id: string | null; args: Record<string, unknown>; summary: string; via?: 'mcp' | 'rest'; agent?: { id: string; name: string; framework: string } | null }
   | { type: 'mcp_session'; at: string; user_id: string; user: string; action: 'connect' | 'disconnect'; transport: string; session_id: string }
   | { type: 'query'; at: string; user_id: string; actor: 'USER' | 'AGENT' | 'SYSTEM'; workspace_id: string; status: 'started' | 'done' | 'error'; sql: string; duration_ms?: number }
   /** The workspace's data epoch moved (mutation, upload, folder change, engine restart): clients drop cached results for it. */

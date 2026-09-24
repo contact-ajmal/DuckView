@@ -88,13 +88,16 @@ export function resolveWorkspace(env: ToolEnv, id?: string | null): string {
 export async function runTool(env: ToolEnv, tool: ToolDef, args: Record<string, unknown>): Promise<ToolResult> {
   const stop = metrics.mcpToolDuration.startTimer({ tool: tool.name });
   const started = performance.now();
-  const publish = (status: 'ok' | 'error' | 'approval_required') =>
+  const publish = (status: 'ok' | 'error' | 'approval_required', reason?: string) =>
     liveEvents.publish({
       type: 'mcp_tool',
       at: new Date().toISOString(),
       user_id: env.principal.userId,
       user: env.principal.email,
       tool: tool.name,
+      title: tool.title,
+      effect: tool.annotations?.readOnlyHint ? 'read' : 'write',
+      ...(reason ? { reason: reason.slice(0, 500) } : {}),
       status,
       duration_ms: Math.round(performance.now() - started),
       workspace_id: (typeof args.workspace_id === 'string' ? args.workspace_id : null) ?? env.defaultWorkspaceId ?? env.principal.workspaceScope ?? null,
@@ -117,7 +120,7 @@ export async function runTool(env: ToolEnv, tool: ToolDef, args: Record<string, 
     const r = errorResult(err);
     const status = err instanceof HitlBlocked ? 'approval_required' : 'error';
     metrics.mcpToolCalls.inc({ tool: tool.name, status });
-    publish(status);
+    publish(status, err instanceof HitlBlocked ? err.challenge.reason : (err as Error).message);
     if (env.agent) env.ctx.agents?.touch(env.agent.id, status);
     return r;
   } finally {

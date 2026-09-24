@@ -4,15 +4,17 @@ import { DataTable, type Column } from '../../components/data';
 import { api, timeAgo, type ApiToken, type McpSession, type AuditEvent, type Workspace, type AgentRecord, type AgentFramework, type FrameworkMeta } from '../../api/client';
 import { AgentsCard, FrameworksCard } from './AgentsPanel';
 import { subscribeLiveEvents, type LiveEvent } from '../../lib/liveEvents';
-import { Button, CopyButton, Input, Label, Modal, Select, StatusDot, Tabs, cn, confirmAction, Empty } from '../../components/ui';
+import { Button, CopyButton, Input, Label, Modal, Select, StatusDot, Tabs, cn, confirmAction, Empty, Badge } from '../../components/ui';
 import { HostedAgentsPanel } from './HostedAgentsPanel';
 import { useAuth } from '../../store/auth';
 import { PageHeader } from '../../components/layout';
 import { useLayout } from '../../store/layout';
+import { ApprovalCard, describeIntent, describeTool, sqlOf } from '../../components/ai';
+import { useWorkspace } from '../../store/workspace';
 
 interface McpInfo { transports: { sse: string; streamable_http: string; stdio: string }; tools: string[]; resources: string[]; prompts: string[]; limits: { default_page_size: number; max_page_size: number; max_cell_chars: number }; hitl_enabled: boolean; snippets: Record<string, string> }
 
-type Feed = { id: string; at: string; kind: 'tool' | 'query' | 'audit' | 'session'; title: string; detail?: string; status: string; user?: string; ms?: number; agent?: string; via?: string };
+type Feed = { id: string; at: string; kind: 'tool' | 'query' | 'audit' | 'session'; title: string; detail?: string; status: string; user?: string; ms?: number; agent?: string; via?: string; tool?: string; args?: Record<string, unknown>; effect?: 'read' | 'write'; reason?: string; workspaceId?: string | null };
 
 const SNIPPETS: { id: string; label: string; file: string }[] = [
   { id: 'claude_desktop', label: 'Claude Desktop', file: 'claude_desktop_config.json' },
@@ -22,12 +24,17 @@ const SNIPPETS: { id: string; label: string; file: string }[] = [
 ];
 
 function toFeed(e: LiveEvent): Feed | null {
-  if (e.type === 'mcp_tool') return { id: `${e.at}-${Math.random()}`, at: e.at, kind: 'tool', title: e.tool, detail: e.summary, status: e.status, user: e.user, ms: e.duration_ms, agent: e.agent?.name, via: e.via };
+  if (e.type === 'mcp_tool') return { id: `${e.at}-${Math.random()}`, at: e.at, kind: 'tool', title: describeTool(e.tool, e.args, e.title), detail: `${e.tool}${e.summary ? ` · ${e.summary}` : ''}`, status: e.status, user: e.user, ms: e.duration_ms, agent: e.agent?.name, via: e.via, tool: e.tool, args: e.args, effect: e.effect, reason: e.reason, workspaceId: e.workspace_id };
   if (e.type === 'mcp_session') return { id: `${e.at}-${e.session_id}`, at: e.at, kind: 'session', title: `${e.action} · ${e.transport}`, status: e.action === 'connect' ? 'ok' : 'info', user: e.user };
   if (e.type === 'audit') {
     const a = e.event;
     if (a.action.startsWith('mcp.')) return null; // sessions already shown
     const isQuery = a.action.startsWith('query.') || a.action.startsWith('dataset.');
+    // A statement an agent ran (or tried to): in words, with its SQL, like a tool call.
+    if (isQuery && a.query_text) {
+      const args = { sql: a.query_text };
+      return { id: a.id, at: a.timestamp, kind: 'query', title: describeTool('execute_query', args), detail: a.query_text, status: a.status, ms: a.duration_ms ?? undefined, agent: a.actor_type === 'AGENT' ? 'An agent' : undefined, user: a.actor_type === 'AGENT' ? undefined : a.actor_type.toLowerCase(), tool: 'execute_query', args, effect: /^\s*(insert|update|delete|create|drop|alter|copy|merge)/i.test(a.query_text) ? 'write' : 'read', reason: a.error ?? undefined };
+    }
     return { id: a.id, at: a.timestamp, kind: isQuery ? 'query' : 'audit', title: `${a.actor_type === 'AGENT' ? 'agent' : a.actor_type.toLowerCase()} · ${a.action}`, detail: a.query_text ?? a.resource ?? undefined, status: a.status, ms: a.duration_ms ?? undefined };
   }
   return null;
@@ -106,7 +113,9 @@ export function McpPage() {
   const snippetText = info ? (info.snippets[snippet] ?? '').replace(/<TOKEN>/g, lastToken ?? '<TOKEN>') : '';
   const visible = feed.filter((f) => filter === 'all' || f.kind === filter || (filter === 'audit' && f.kind === 'session'));
 
-  const approvals = feed.filter((f) => f.status === 'approval_required' || f.status === 'blocked');
+  const approvals = feed
+    .filter((f) => f.status === 'approval_required' || f.status === 'blocked')
+    .filter((f, i, all) => all.findIndex((g) => (g.args?.sql ?? g.title) === (f.args?.sql ?? f.title) && Math.abs(Date.parse(g.at) - Date.parse(f.at)) < 10_000) === i);
   const feedColumns: Column<Feed>[] = [
     { key: 'agent', header: 'Agent', width: 'w-36', truncate: true, sortValue: (f) => f.agent ?? f.user ?? '', cell: (f) => (
       <>
@@ -118,7 +127,8 @@ export function McpPage() {
       <>
         <div className="flex items-center gap-1.5">
           {f.kind === 'tool' ? <Wrench className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : f.kind === 'session' ? <Radio className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Activity className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
-          <span className="truncate font-mono text-xs text-zinc-100">{f.title}</span>
+          <span className={cn('truncate text-xs text-zinc-100', f.kind !== 'tool' && 'font-mono')}>{f.title}</span>
+          {f.effect === 'write' && <Badge tone="warn">changes data</Badge>}
         </div>
         {f.detail && <div className="mt-0.5 truncate font-mono text-2xs text-zinc-500" title={f.detail}>{f.detail}</div>}
       </>
@@ -267,8 +277,27 @@ export function McpPage() {
 
       {aiTab === 'approvals' && (
         <section className="space-y-3">
-          <p className="max-w-3xl text-xs text-zinc-500">An agent that tries to change data (mutating SQL, dbt builds, publishing an app) gets an approval challenge instead. Show it to a person; if they approve, the agent repeats the call with <code className="font-mono">dry_run: false</code>.</p>
-          {feedTable(approvals, 'Nothing is waiting for approval.')}
+          <p className="max-w-3xl text-xs text-zinc-500">When an agent tries to change data (SQL that writes, dbt builds, publishing an app), the change is held until a person agrees in the agent's own client (Claude Desktop, Cursor …), which then repeats the call. You can also run a held statement yourself: it opens in a SQL tab and runs after you approve it there.</p>
+          {approvals.length === 0 ? (
+            <Empty title="Nothing is waiting for approval" hint="When an agent tries to change data, the change is held here until a person agrees in the agent's own client." />
+          ) : (
+            <div className="space-y-3" data-testid="approvals">
+              {approvals.map((f) => {
+                const sql = f.args ? sqlOf(f.args) : null;
+                return (
+                  <ApprovalCard
+                    key={f.id}
+                    title={`${f.agent ?? f.user ?? 'An agent'} wants to ${f.tool ? describeIntent(f.tool, f.args ?? {}) : f.title.charAt(0).toLowerCase() + f.title.slice(1)}`}
+                    requester={`${f.via === 'rest' ? 'REST' : 'MCP'} · ${timeAgo(f.at)}`}
+                    reason={f.reason ?? 'The change was held until a person approves it.'}
+                    statements={sql ? [{ verb: (/^\s*(\w+)/.exec(sql)?.[1] ?? 'SQL').toUpperCase(), preview: sql.replace(/\s+/g, ' ').slice(0, 300), destructive: true }] : undefined}
+                  >
+                    {sql && <Button size="sm" className="mt-2" onClick={() => { void useWorkspace.getState().addTab({ title: `From ${f.agent ?? 'an agent'}`, sql }); location.hash = '#/query'; }}>Run it myself in SQL</Button>}
+                  </ApprovalCard>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
       <Modal open={creating} onClose={() => setCreating(false)} title="Create API token">

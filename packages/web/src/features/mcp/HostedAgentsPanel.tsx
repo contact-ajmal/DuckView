@@ -8,6 +8,7 @@ import { byokBody } from '../../store/copilot';
 import { Badge, Button, Input, Label, Select, cn } from '../../components/ui';
 import { CHANNEL_META } from '../alerts/ChannelsPanel';
 import { A2APanel } from './A2APanel';
+import { TaskTimeline } from '../../components/ai';
 
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const SCHEDULES: { id: string; label: string; make: () => SyncSchedule }[] = [
@@ -184,19 +185,13 @@ export function HostedAgentsPanel() {
                     </ul>
                     {run && (
                       <div className="min-w-0 space-y-2" data-testid="hosted-run-view" data-status={run.status}>
-                        {run.steps.length > 0 && (
-                          <ol className="space-y-1 border-l border-zinc-800 pl-3" data-testid="hosted-steps">
-                            {run.steps.map((s, i) => (
-                              <li key={i} className="text-zinc-400">
-                                <span className={cn('inline-flex items-center gap-1 font-mono', s.ok ? 'text-zinc-200' : 'text-red-300')}><Wrench className="h-3 w-3" />{s.tool}</span>
-                                <span className="ml-1.5 font-mono text-2xs text-zinc-500">{JSON.stringify(s.arguments).slice(0, 140)}</span>
-                                <span className="block truncate text-2xs">{s.summary}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        )}
-                        {run.status === 'running' && <p className="flex items-center gap-1.5 text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Working… {run.steps.length ? `${run.steps.length} tool${run.steps.length === 1 ? '' : 's'} used` : ''}</p>}
-                        {run.status === 'failed' && <p className="rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-red-200">{run.error}</p>}
+                        <TaskTimeline
+                          testid="hosted-steps"
+                          goal={run.input}
+                          state={run.status === 'running' ? (run.steps.length ? 'running' : 'planning') : run.status === 'failed' ? 'failed' : 'done'}
+                          error={run.error}
+                          steps={run.steps.map((st) => ({ tool: st.tool, args: st.arguments, status: st.ok ? 'ok' : 'error', summary: st.summary, durationMs: st.duration_ms, effect: st.tool === 'execute_query' && /^\s*(insert|update|delete|create|drop|alter)/i.test(String(st.arguments.sql ?? '')) ? 'write' : 'read' }))}
+                        />
                         {run.output && <div className={MD} data-testid="hosted-output"><ReactMarkdown remarkPlugins={[remarkGfm]}>{run.output}</ReactMarkdown></div>}
                         {run.finished_at && <p className="text-2xs text-zinc-500">{run.model ?? ''} · {run.input_tokens + run.output_tokens} tokens · {Math.round((Date.parse(run.finished_at) - Date.parse(run.started_at)) / 100) / 10} s{run.notified ? ` · sent to ${run.notified} channel${run.notified === 1 ? '' : 's'}` : ''}</p>}
                       </div>

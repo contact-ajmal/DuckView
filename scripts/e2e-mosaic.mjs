@@ -1321,6 +1321,36 @@ try {
     report.details.fromPalette = prompts.length > n && JSON.stringify(prompts.at(-1).messages.at(-1)).includes('how many widgets are here');
     report.details.charts = 1;
   }
+  else if (scenario === 'agent-approvals') {
+    // An agent tries to change data: the call is held, the owner hears about it, and can run it themselves.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    await j('POST', `/api/workspaces/${wsId}/query`, { sql: 'CREATE OR REPLACE TABLE e2e_approval AS SELECT range AS id FROM range(5)' });
+    const minted = await j('POST', '/api/tokens', { name: `e2e approvals ${Date.now()}`, scopes: ['read', 'write', 'mcp'] });
+    const tabsBefore = new Set(((await j('GET', `/api/workspaces/${wsId}/tabs`)).tabs ?? []).map((t) => t.id));
+    cleanup = async () => {
+      await j('DELETE', `/api/tokens/${minted.record?.id ?? minted.token_id ?? minted.id}`);
+      await j('POST', `/api/workspaces/${wsId}/query`, { sql: 'DROP TABLE IF EXISTS e2e_approval' });
+      for (const t of (await j('GET', `/api/workspaces/${wsId}/tabs`)).tabs ?? []) if (!tabsBefore.has(t.id)) await j('DELETE', `/api/workspaces/${wsId}/tabs/${t.id}`);
+    };
+    await evaluate(`location.hash = '#/'; 'ok'`);
+    await sleep(1500);
+    const held = await (await fetch(`${BASE}/api/agent/v1/tools/execute_query`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${minted.token}` }, body: JSON.stringify({ sql: 'DELETE FROM e2e_approval WHERE id = 1', workspace_id: wsId }) })).json();
+    report.details.held = held.structured?.status ?? held.text?.slice(0, 40);
+    await waitFor(`Number(document.querySelector('[data-testid="inbox-unread"]')?.textContent ?? 0) >= 1`, 10000, 'inbox badge');
+    await evaluate(`document.querySelector('[data-testid="inbox-bell"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-inbox="approval"]')`, 5000, 'approval in the inbox');
+    report.details.inbox = await evaluate(`document.querySelector('[data-inbox="approval"]').innerText.split('\\n')[0]`);
+    await evaluate(`document.querySelector('[data-inbox="approval"]').click(); 'ok'`);
+    await waitFor(`location.hash === '#/agents/approvals' && !!document.querySelector('[data-testid="approvals"] [data-testid="approval-card"]')`, 10000, 'approval card');
+    report.details.card = await evaluate(`document.querySelector('[data-testid="approvals"] [data-testid="approval-card"]').innerText.split('\\n').slice(0, 4).join(' | ')`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_approval.png'), Buffer.from(shot.result.data, 'base64')); }
+    await clickButton('Run it myself in SQL');
+    await waitFor(`location.hash === '#/query' && document.querySelector('.cm-content')?.innerText.includes('DELETE FROM e2e_approval')`, 10000, 'SQL tab with the held statement');
+    // Nothing ran on the agent's behalf.
+    report.details.rows = (await j('POST', `/api/workspaces/${wsId}/query`, { sql: 'SELECT count(*) FROM e2e_approval' })).rows?.[0]?.[0];
+    report.details.charts = 1;
+  }
   else if (scenario === 'orchestration') {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
@@ -1726,7 +1756,8 @@ try {
     await evaluate(`document.querySelector('[data-testid="hosted-run"]').click(); true`);
     await waitFor(`document.querySelector('[data-testid="hosted-run-view"]')?.dataset.status === 'completed'`, 60000, 'run finished');
     await sleep(300);
-    report.details.steps = await evaluate(`[...document.querySelectorAll('[data-testid="hosted-steps"] li')].map(li => li.querySelector('span').innerText.trim())`);
+    report.details.steps = await evaluate(`[...document.querySelectorAll('[data-testid="hosted-steps"] li[data-tool]')].map(li => li.dataset.tool)`);
+    report.details.stepSentences = await evaluate(`[...document.querySelectorAll('[data-testid="hosted-steps"] [data-testid="tool-sentence"]')].map(s => s.textContent)`);
     report.details.output = await evaluate(`document.querySelector('[data-testid="hosted-output"]')?.innerText ?? ''`);
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_run.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
@@ -2174,6 +2205,12 @@ try {
     if (d.withoutPage !== false) problems.push('the removed page still went to the AI');
     if (!d.fromPalette) problems.push('⌘K did not ask the AI');
   }
+  if (scenario === 'agent-approvals') {
+    if (d.held !== 'approval_required') problems.push(`held: ${d.held}`);
+    if (!/wants to change data in e2e_approval/.test(d.inbox ?? '')) problems.push(`inbox: ${d.inbox}`);
+    if (!/wants to change data in e2e_approval/.test(d.card ?? '') || !/DELETE/.test(d.card ?? '')) problems.push(`card: ${d.card}`);
+    if (d.rows !== 5) problems.push(`the held DELETE ran (${d.rows} rows)`);
+  }
   if (scenario === 'orchestration') {
     if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);
     if (d.python !== 'failed: 1 row (expected none)') problems.push(`python: ${d.python}`);
@@ -2223,6 +2260,7 @@ try {
   if (scenario === 'hosted-agents') {
     if ((d.templates ?? 0) < 7) problems.push(`marketplace: ${d.templates} templates`);
     if (JSON.stringify(d.steps) !== JSON.stringify(['execute_query'])) problems.push(`steps: ${JSON.stringify(d.steps)}`);
+    if (!/^Ran a query on /.test(d.stepSentences?.[0] ?? '')) problems.push(`step in words: ${JSON.stringify(d.stepSentences)}`);
     if (!/There are 37 orders in e2e_agent_orders/.test(d.output ?? '')) problems.push(`output: ${d.output}`);
   }
   if (scenario === 'insights') {

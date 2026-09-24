@@ -2,7 +2,7 @@ import { getToken } from '../api/client';
 
 export type LiveEvent =
   | { type: 'audit'; event: { id: string; user_id: string | null; actor_type: string; action: string; resource: string | null; query_text: string | null; duration_ms: number | null; ip_address: string | null; status: string; error: string | null; timestamp: string } }
-  | { type: 'mcp_tool'; at: string; user_id: string; user: string; tool: string; status: 'ok' | 'error' | 'approval_required'; duration_ms: number; workspace_id: string | null; args: Record<string, unknown>; summary: string; via?: 'mcp' | 'rest'; agent?: { id: string; name: string; framework: string } | null }
+  | { type: 'mcp_tool'; at: string; user_id: string; user: string; tool: string; title?: string; effect?: 'read' | 'write'; reason?: string; status: 'ok' | 'error' | 'approval_required'; duration_ms: number; workspace_id: string | null; args: Record<string, unknown>; summary: string; via?: 'mcp' | 'rest'; agent?: { id: string; name: string; framework: string } | null }
   | { type: 'mcp_session'; at: string; user_id: string; user: string; action: 'connect' | 'disconnect'; transport: string; session_id: string }
   | { type: 'workspace'; at: string; user_id: string | null; workspace_id: string; data_version: number; reason: string }
   | { type: 'sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; rows: number | null; duration_ms: number | null; error: string | null }
