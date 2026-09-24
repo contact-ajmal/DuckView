@@ -1469,3 +1469,64 @@ export const insights = sqliteTable(
   (t) => [uniqueIndex('insights_key_idx').on(t.key), index('insights_workspace_idx').on(t.workspace_id, t.created_at)],
 );
 export type Insight = typeof insights.$inferSelect;
+
+/** Hosted agents: agents DuckView runs itself — instructions, read-only tools, a schedule — often from a template. */
+export const HOSTED_RUN_STATUSES = ['running', 'completed', 'failed'] as const;
+export type HostedRunStatus = (typeof HOSTED_RUN_STATUSES)[number];
+export interface HostedAgentLastRun { run_id: string; status: HostedRunStatus; summary: string; finished_at: string | null }
+export interface HostedAgentStep { tool: string; arguments: Record<string, unknown>; ok: boolean; summary: string; duration_ms: number }
+
+export const hostedAgents = sqliteTable(
+  'hosted_agents',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Runs as this user, read-only. */
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** The marketplace template it was installed from. */
+    template: text('template'),
+    instructions: text('instructions').notNull(),
+    /** What a run is asked to do when nobody gives it a task (scheduled runs). */
+    task: text('task').notNull(),
+    tools: text('tools', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    max_steps: integer('max_steps').notNull().default(8),
+    schedule: text('schedule', { mode: 'json' }).$type<SyncSchedule>().notNull().default({ kind: 'manual' }),
+    channel_ids: text('channel_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** Other agents may call it over A2A (with a DuckView token of someone who can see the workspace). */
+    published: integer('published', { mode: 'boolean' }).notNull().default(false),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    last_run: text('last_run', { mode: 'json' }).$type<HostedAgentLastRun | null>(),
+    next_run_at: integer('next_run_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('hosted_agents_workspace_idx').on(t.workspace_id), index('hosted_agents_next_run_idx').on(t.next_run_at)],
+);
+export type HostedAgent = typeof hostedAgents.$inferSelect;
+
+export const hostedAgentRuns = sqliteTable(
+  'hosted_agent_runs',
+  {
+    id: text('id').primaryKey(),
+    agent_id: text('agent_id').notNull().references(() => hostedAgents.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    status: text('status', { enum: HOSTED_RUN_STATUSES }).notNull(),
+    /** manual | schedule | a2a | agent */
+    triggered_by: text('triggered_by').notNull(),
+    actor_id: text('actor_id'),
+    input: text('input').notNull(),
+    output: text('output'),
+    steps: text('steps', { mode: 'json' }).$type<HostedAgentStep[]>().notNull().default([]),
+    error: text('error'),
+    model: text('model'),
+    input_tokens: integer('input_tokens').notNull().default(0),
+    output_tokens: integer('output_tokens').notNull().default(0),
+    notified: integer('notified').notNull().default(0),
+    started_at: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+    finished_at: integer('finished_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => [index('hosted_agent_runs_agent_idx').on(t.agent_id, t.started_at)],
+);
+export type HostedAgentRun = typeof hostedAgentRuns.$inferSelect;

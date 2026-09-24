@@ -57,6 +57,8 @@
  * opens it in the Metrics explorer, and asks the explorer's question box (the answer applied to the controls).
  * The insights scenario checks every metric for an unusual latest day in Transform → Metrics → Monitors, creates a
  * monitor that explains the drop by region, and finds the insight on the monitor feed and on Home.
+ * The hosted-agents scenario installs "Data analyst" from the agent marketplace (AI → DuckView agents) and runs it
+ * with a question: the (mock) model asks for SQL, gets the result and answers; the steps and the report show.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -988,6 +990,56 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'hosted-agents') {
+    const http = await import('node:http');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const beforeIds = new Set(((await j('GET', `/api/workspaces/${wsId}/hosted-agents`)).agents ?? []).map((a) => a.id));
+    // The model: asks for one query, then answers from its result.
+    const llm = http.createServer((req, res) => {
+      let b = '';
+      req.on('data', (d) => (b += d));
+      req.on('end', () => {
+        if (!req.url.includes('chat/completions')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"models":[],"data":[]}'); return; }
+        const body = JSON.parse(b);
+        const last = String((body.messages ?? []).at(-1)?.content ?? '');
+        const answer = last.startsWith('Result of execute_query')
+          ? `There are **${/\b(\d+)\b/.exec(last.split('\n').slice(1).join('\n'))?.[1] ?? '?'} orders** in e2e_agent_orders, counted with SQL.`
+          : 'I will count them.\n```tool\n{"name": "execute_query", "arguments": {"sql": "SELECT count(*) AS n FROM e2e_agent_orders"}}\n```';
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        for (const piece of answer.match(/[\s\S]{1,40}/g)) res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: { content: piece }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 20 } })}\n\n`);
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    await new Promise((r) => llm.listen(0, '127.0.0.1', r));
+    cleanup = async () => {
+      llm.close();
+      await evaluate(`localStorage.removeItem('duckview.copilot.settings'); true`).catch(() => undefined);
+      for (const a of (await j('GET', `/api/workspaces/${wsId}/hosted-agents`)).agents ?? []) if (!beforeIds.has(a.id)) await j('DELETE', `/api/hosted-agents/${a.id}`);
+      await q('DROP TABLE IF EXISTS e2e_agent_orders');
+    };
+    const made = await q('CREATE OR REPLACE TABLE e2e_agent_orders AS SELECT range AS id FROM range(37)');
+    if (made.error) throw new Error(`table not created: ${made.message}`);
+    await evaluate(`localStorage.setItem('duckview.copilot.settings', JSON.stringify({ provider: 'ollama', model: 'mock', apiKey: '', baseUrl: 'http://127.0.0.1:${llm.address().port}' })); true`);
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await send('Page.reload', {});
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app reloaded');
+    await evaluate(`location.hash = '#/mcp/hosted'; true`);
+    await waitFor(`!!document.querySelector('[data-template="data-analyst"] [data-testid="template-install"]')`, 20000, 'marketplace');
+    report.details.templates = await evaluate(`document.querySelectorAll('[data-testid="marketplace"] [data-template]').length`);
+    await evaluate(`document.querySelector('[data-template="data-analyst"] [data-testid="template-install"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="hosted-detail"] [data-testid="hosted-run"]') && document.querySelector('[data-testid="hosted-detail"] h3')?.innerText === 'Data analyst'`, 15000, 'installed');
+    await setField('[data-testid="hosted-input"]', 'How many orders are in e2e_agent_orders?');
+    await evaluate(`document.querySelector('[data-testid="hosted-run"]').click(); true`);
+    await waitFor(`document.querySelector('[data-testid="hosted-run-view"]')?.dataset.status === 'completed'`, 60000, 'run finished');
+    await sleep(300);
+    report.details.steps = await evaluate(`[...document.querySelectorAll('[data-testid="hosted-steps"] li')].map(li => li.querySelector('span').innerText.trim())`);
+    report.details.output = await evaluate(`document.querySelector('[data-testid="hosted-output"]')?.innerText ?? ''`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_run.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'insights') {
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -1377,6 +1429,11 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'hosted-agents') {
+    if ((d.templates ?? 0) < 7) problems.push(`marketplace: ${d.templates} templates`);
+    if (JSON.stringify(d.steps) !== JSON.stringify(['execute_query'])) problems.push(`steps: ${JSON.stringify(d.steps)}`);
+    if (!/There are 37 orders in e2e_agent_orders/.test(d.output ?? '')) problems.push(`output: ${d.output}`);
   }
   if (scenario === 'insights') {
     if (!(d.scan ?? []).some((t) => /^E2E revenue was 120 on .* — 60% below the usual 300/.test(t))) problems.push(`scan: ${JSON.stringify(d.scan)}`);

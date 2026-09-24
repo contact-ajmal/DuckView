@@ -26,6 +26,7 @@ export type LiveEvent =
   /** A data quality suite ran. */
   | { type: 'quality'; at: string; workspace_id: string; suite_id: string; status: 'pass' | 'warn' | 'fail' | 'error'; changed: boolean }
   | { type: 'insight'; at: string; workspace_id: string; monitor_id: string; count: number }
+  | { type: 'hosted_agent'; at: string; workspace_id: string; agent_id: string; run_id: string; status: 'running' | 'completed' | 'failed'; step: number }
   /** A dbt run started or finished. */
   | { type: 'dbt'; at: string; workspace_id: string; project_id: string; run_id: string; status: 'running' | 'ok' | 'error'; summary: string | null }
   /** A user was deactivated or reactivated: their open event streams close. */

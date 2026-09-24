@@ -31,6 +31,7 @@ import { DbtService } from './services/dbt.js';
 import { SemanticService } from './services/semantic.js';
 import { QualityService } from './services/quality.js';
 import { InsightService } from './services/insights.js';
+import { HostedAgentService } from './services/hosted-agents.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
 import { CommentService } from './services/comments.js';
@@ -85,6 +86,7 @@ export interface AppContext {
   semantic: SemanticService;
   quality: QualityService;
   insights: InsightService;
+  hostedAgents: HostedAgentService;
   reverse: ReverseEtlService;
   notebooks: NotebookService;
   comments: CommentService;
@@ -184,6 +186,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   copilot.quality = quality;
   const insights = new InsightService(store, workspaces, semantic, auth, notifications, audit);
   copilot.insights = insights;
+  const hostedAgents = new HostedAgentService(cfg, store, workspaces, auth, notifications, audit);
+  hostedAgents.model = copilot;
   const reverse = new ReverseEtlService(store, cfg, cipher, engines, workspaces, databases, cloud, auth, notifications, audit);
   copilot.reverse = reverse;
   const notebooks = new NotebookService(store, workspaces, queries, audit);
@@ -218,6 +222,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     dbt.startScheduler();
     quality.start();
     insights.start();
+    hostedAgents.start();
     reverse.start();
   }
   // Pre-aggregates are only valid for the epoch they were built in.
@@ -264,6 +269,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     semantic,
     quality,
     insights,
+    hostedAgents,
     reverse,
     notebooks,
     comments,
@@ -285,6 +291,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       dbt.stop();
       quality.stop();
       insights.stop();
+      hostedAgents.stop();
       reverse.stop();
       await apps.shutdown().catch(() => undefined);
       await agents.flush();
@@ -295,5 +302,6 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     },
   };
   agents.bind(ctx);
+  hostedAgents.bind(ctx);
   return ctx;
 }

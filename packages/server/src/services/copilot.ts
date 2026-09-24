@@ -274,6 +274,15 @@ export class CopilotService {
     return { provider, byok, secrets: [apiKey], instance: this.providers(provider, { apiKey, baseUrl, model, region, agentId, agentAliasId, runtimeArn, aws: this.aws }) };
   }
 
+  /**
+   * The model for a hosted agent's run: the server's provider — or, for a run a person starts, their own key when
+   * personal keys are allowed (used for that run only, never stored). Scheduled runs never get a personal key.
+   */
+  async serverModel(byok?: Pick<CopilotRequest, 'provider' | 'model' | 'apiKey' | 'baseUrl' | 'region'> | null) {
+    const { instance, provider } = await this.resolveProvider({ workspaceId: '', message: '', ...(byok ?? {}) });
+    return { instance, provider };
+  }
+
   async listModels(req: { provider: ProviderId; apiKey?: string; baseUrl?: string; region?: string; agentId?: string; agentAliasId?: string; runtimeArn?: string }): Promise<string[]> {
     const { instance, secrets } = await this.resolveProvider({ workspaceId: '', message: '', ...req });
     try {

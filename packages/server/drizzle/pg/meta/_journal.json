@@ -239,6 +239,13 @@
       "when": 1790202766529,
       "tag": "0033_metric_monitors",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790237959519,
+      "tag": "0034_hosted_agents",
+      "breakpoints": true
     }
   ]
 }

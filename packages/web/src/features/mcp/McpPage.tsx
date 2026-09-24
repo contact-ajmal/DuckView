@@ -4,6 +4,7 @@ import { api, timeAgo, type ApiToken, type McpSession, type AuditEvent, type Wor
 import { AgentsCard, FrameworksCard } from './AgentsPanel';
 import { subscribeLiveEvents, type LiveEvent } from '../../lib/liveEvents';
 import { Button, CopyButton, Input, Label, Modal, Select, StatusDot, Tabs, cn } from '../../components/ui';
+import { HostedAgentsPanel } from './HostedAgentsPanel';
 import { useAuth } from '../../store/auth';
 import { PageHeader } from '../../components/layout';
 import { useLayout } from '../../store/layout';
@@ -31,11 +32,14 @@ function toFeed(e: LiveEvent): Feed | null {
   return null;
 }
 
-type AiTab = 'agents' | 'tools' | 'mcp' | 'activity' | 'approvals';
+type AiTab = 'hosted' | 'agents' | 'tools' | 'mcp' | 'activity' | 'approvals';
 
 export function McpPage() {
   const auth = useAuth();
-  const [aiTab, setAiTab] = useState<AiTab>(() => (['agents', 'tools', 'mcp', 'activity', 'approvals'].includes(location.hash.split('/')[2] ?? '') ? (location.hash.split('/')[2] as AiTab) : 'agents'));
+  const [aiTab, setAiTab] = useState<AiTab>(() => {
+    const t = (location.hash.split('/')[2] ?? '').split('?')[0]!;
+    return ['hosted', 'agents', 'tools', 'mcp', 'activity', 'approvals'].includes(t) ? (t as AiTab) : 'agents';
+  });
   const [info, setInfo] = useState<McpInfo | null>(null);
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [sessions, setSessions] = useState<McpSession[]>([]);
@@ -161,13 +165,16 @@ export function McpPage() {
         value={aiTab}
         onChange={(t) => { setAiTab(t); history.replaceState(null, '', `#/mcp/${t}`); }}
         tabs={[
-          { id: 'agents', label: 'Agents', count: agents.length },
+          { id: 'hosted', label: 'DuckView agents' },
+          { id: 'agents', label: 'Connected agents', count: agents.length },
           { id: 'tools', label: 'Tools', count: info?.tools.length },
           { id: 'mcp', label: 'MCP clients', count: sessions.length },
           { id: 'activity', label: 'Activity' },
           { id: 'approvals', label: 'Approvals', count: approvals.length },
         ]}
       />
+
+      {aiTab === 'hosted' && <HostedAgentsPanel />}
 
       {aiTab === 'agents' && (
         <div className="space-y-6">

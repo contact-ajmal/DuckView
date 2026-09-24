@@ -607,6 +607,50 @@ API:
 
 Agents: `detect_anomalies`, `list_insights`, `create_metric_monitor` (with `run_now`).
 
+## DuckView agents and the agent marketplace
+
+**Agents that DuckView runs itself** (`services/hosted-agents.ts`, AI → DuckView agents). A hosted agent has instructions, a task for scheduled runs, the tools it may use, a limit on tool calls per run, a schedule and channels for its reports.
+
+The **marketplace** (`agent/templates.ts`, `GET /api/agent-templates`) has ready-made agents, installed into a workspace with one click and editable afterwards:
+
+| Agent | Does | Default schedule |
+| --- | --- | --- |
+| Anomaly investigator | finds unusual metrics and breaks each change down | every morning |
+| Weekly business review | the headline metrics for last week against the week before and the 4-week average | Mondays |
+| Data quality auditor | failing checks, important tables without checks, the checks to add | every morning |
+| Pipeline watcher | failed syncs, dbt runs, quality checks, alerts and reverse syncs | every morning |
+| Catalog writer | table and column descriptions drafted from profiles | when asked |
+| dbt reviewer | failing models and tests, slow models, models without tests or docs | Mondays |
+| Data analyst | answers questions with the metrics or SQL | when asked |
+
+**How a run works.** A run is a loop over the model that works with every provider DuckView supports:
+
+1. The model gets the instructions and a list of its tools with their arguments.
+2. It asks for one tool at a time with a fenced block:
+
+   ````
+   ```tool
+   {"name": "execute_query", "arguments": {"sql": "SELECT …"}}
+   ```
+   ````
+
+3. DuckView runs the tool from the same registry as MCP and sends the result back.
+4. A reply without a tool block is the answer.
+
+When the tool-call limit is reached, the agent is asked to answer with what it has.
+
+- **Safety:** hosted agents get **read-only tools only**, plus `execute_query`, which runs read-only. A run acts as the agent's owner with the read scope only, is pinned to the agent's workspace (a `workspace_id` in the arguments is ignored), and runs under the owner's access policies.
+- **Model:** scheduled runs use the server's model. A person who starts a run may use their own key when personal keys are allowed; it is used for that run only and never stored.
+- **Records:** every step is kept (tool, arguments, a one-line result), along with the answer, the model and the tokens used. A report from a scheduled or manual run goes to the agent's channels.
+
+API:
+
+- `GET/POST /api/workspaces/:id/hosted-agents` (`{template}` installs one)
+- `GET/PATCH/DELETE /api/hosted-agents/:id`
+- `POST /api/hosted-agents/:id/run {input?, wait?}`
+- `GET /api/hosted-agent-runs/:id`
+- `GET /api/hosted-agent-tools`
+
 ## Governance
 
 **Catalog** (`#/governance/catalog`, `services/lineage.ts`): descriptions and tags (lower-case, e.g. `pii`, `finance`) on tables, views and columns, written by editors, read by every member (`GET /api/workspaces/:id/catalog/annotated`, `PUT /api/workspaces/:id/catalog/annotations {object_name, column_name?, description, tags}` — an empty description and no tags removes the note). Copilot's context carries the notes ("trust these over guesses from names"), and `inspect_schema` shows them next to the columns.
