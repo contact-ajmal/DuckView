@@ -156,6 +156,11 @@ export class CloudConnectionService {
     if (r.length === 0) throw notFound('Cloud connection');
   }
 
+  /** The URI scheme DuckDB reads this connection's buckets with (s3, r2, gcs, az). */
+  uriScheme(c: CloudConnection): string {
+    return CLOUD_FIELDS[c.provider].uri;
+  }
+
   /** AWS credentials of one of the user's S3 connections (for AWS APIs such as Kinesis). */
   async awsCredentials(userId: string, id: string): Promise<{ accessKeyId: string; secretAccessKey: string; sessionToken?: string; region: string | null }> {
     const c = (await this.db.select().from(this.s.cloudConnections).where(and(eq(this.s.cloudConnections.id, id), eq(this.s.cloudConnections.user_id, userId))).limit(1))[0];

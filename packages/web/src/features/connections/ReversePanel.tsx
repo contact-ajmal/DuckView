@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowUpRight, Eye, MoreHorizontal, Pause, Pencil, Play, Plus, Send, Trash2, X } from 'lucide-react';
-import { api, timeAgo, type CloudConnection, type DatabaseConnection, type NotificationChannel, type ReverseDestination, type ReverseMode, type ReversePlan, type ReverseRun, type ReverseSync, type SyncSchedule } from '../../api/client';
+import { api, timeAgo, type CloudConnection, type DatabaseConnection, type LakehouseConnection, type NotificationChannel, type ReverseDestination, type ReverseMode, type ReversePlan, type ReverseRun, type ReverseSync, type SyncSchedule } from '../../api/client';
 import { useWorkspaceAccess } from '../../store/workspace';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, StatusDot, cn } from '../../components/ui';
@@ -43,8 +43,12 @@ interface Draft {
   minutes: string;
   cron: string;
   channel_ids: string[];
+  /** Iceberg: the lakehouse connection, namespace, and where the files go when the catalog does not vend credentials. */
+  lake_id: string;
+  namespace: string;
+  storage_connection_id: string;
 }
-const blank = (sql = '', name = ''): Draft => ({ id: null, name, sql, kind: 'database', connection_id: '', schema: '', table: '', format: 'parquet', path: 'exports/', cloud_connection_id: '', bucket: '', url: 'https://', batch_size: '500', payload: 'object', headers: [{ name: 'Authorization', value: '' }], keptHeaders: [], headersEdited: false, mode: 'replace', keys: '', scheduleKind: 'manual', minutes: '60', cron: '0 6 * * *', channel_ids: [] });
+const blank = (sql = '', name = ''): Draft => ({ id: null, name, sql, kind: 'database', connection_id: '', schema: '', table: '', format: 'parquet', path: 'exports/', cloud_connection_id: '', bucket: '', url: 'https://', batch_size: '500', payload: 'object', headers: [{ name: 'Authorization', value: '' }], keptHeaders: [], headersEdited: false, mode: 'replace', keys: '', scheduleKind: 'manual', minutes: '60', cron: '0 6 * * *', channel_ids: [], lake_id: '', namespace: '', storage_connection_id: '' });
 const fromSync = (s: ReverseSync): Draft => {
   const d = s.destination;
   return {
@@ -52,14 +56,16 @@ const fromSync = (s: ReverseSync): Draft => {
     ...(d.kind === 'database' ? { connection_id: d.connection_id, schema: d.schema ?? '', table: d.table } : {}),
     ...(d.kind === 'file' ? { format: d.format, path: d.path, cloud_connection_id: d.cloud_connection_id ?? '', bucket: d.bucket ?? '' } : {}),
     ...(d.kind === 'http' ? { url: d.url, batch_size: String(d.batch_size ?? 500), payload: d.payload ?? 'object' } : {}),
+    ...(d.kind === 'iceberg' ? { lake_id: d.connection_id, namespace: d.namespace, table: d.table, storage_connection_id: d.storage_connection_id ?? '' } : {}),
+    ...(d.kind === 'delta' ? { path: d.path, cloud_connection_id: d.cloud_connection_id ?? '', bucket: d.bucket ?? '' } : {}),
     headers: [], keptHeaders: s.header_names,
     scheduleKind: s.schedule.kind, minutes: s.schedule.kind === 'interval' ? String(s.schedule.minutes) : '60', cron: s.schedule.kind === 'cron' ? s.schedule.expression : '0 6 * * *',
   };
 };
-const destinationOf = (d: Draft): ReverseDestination => (d.kind === 'database' ? { kind: 'database', connection_id: d.connection_id, schema: d.schema.trim() || null, table: d.table.trim() } : d.kind === 'file' ? { kind: 'file', format: d.format, path: d.path.trim(), cloud_connection_id: d.cloud_connection_id || null, bucket: d.bucket.trim() || null } : { kind: 'http', url: d.url.trim(), batch_size: Number(d.batch_size) || 500, payload: d.payload });
+const destinationOf = (d: Draft): ReverseDestination => (d.kind === 'iceberg' ? { kind: 'iceberg', connection_id: d.lake_id, namespace: d.namespace.trim(), table: d.table.trim(), storage_connection_id: d.storage_connection_id || null } : d.kind === 'delta' ? { kind: 'delta', path: d.path.trim(), cloud_connection_id: d.cloud_connection_id || null, bucket: d.bucket.trim() || null } : d.kind === 'database' ? { kind: 'database', connection_id: d.connection_id, schema: d.schema.trim() || null, table: d.table.trim() } : d.kind === 'file' ? { kind: 'file', format: d.format, path: d.path.trim(), cloud_connection_id: d.cloud_connection_id || null, bucket: d.bucket.trim() || null } : { kind: 'http', url: d.url.trim(), batch_size: Number(d.batch_size) || 500, payload: d.payload });
 
 /** Connections › Reverse ETL: query results sent out — to a database table, files, or an HTTP API. */
-export function ReversePanel({ workspaceId, databases, clouds }: { workspaceId: string; databases: DatabaseConnection[]; clouds: CloudConnection[] }) {
+export function ReversePanel({ workspaceId, databases, clouds, lakes }: { workspaceId: string; databases: DatabaseConnection[]; clouds: CloudConnection[]; lakes: LakehouseConnection[] }) {
   const { canEdit } = useWorkspaceAccess();
   const [syncs, setSyncs] = useState<ReverseSync[] | null>(null);
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
@@ -104,12 +110,12 @@ export function ReversePanel({ workspaceId, databases, clouds }: { workspaceId: 
     }
   };
   const dbName = (id: string) => databases.find((d) => d.id === id)?.name ?? 'database';
-  const describe = (d: ReverseDestination) => (d.kind === 'database' ? `${dbName(d.connection_id)} → ${d.schema ? `${d.schema}.` : ''}${d.table}` : d.kind === 'file' ? `${d.format} · ${d.cloud_connection_id ? `${d.bucket}/` : ''}${d.path}` : d.url.replace(/^https?:\/\//, 'POST '));
+  const describe = (d: ReverseDestination) => (d.kind === 'iceberg' ? `Iceberg ${lakes.find((l) => l.id === d.connection_id)?.name ?? 'catalog'} → ${d.namespace}.${d.table}` : d.kind === 'delta' ? `Delta · ${d.cloud_connection_id ? `${d.bucket}/` : ''}${d.path}` : d.kind === 'database' ? `${dbName(d.connection_id)} → ${d.schema ? `${d.schema}.` : ''}${d.table}` : d.kind === 'file' ? `${d.format} · ${d.cloud_connection_id ? `${d.bucket}/` : ''}${d.path}` : d.url.replace(/^https?:\/\//, 'POST '));
 
   return (
     <div className="space-y-3" data-testid="reverse-panel">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs text-zinc-500">Query results sent out of this workspace — into a database table, as files, or to an API — by hand or on a schedule. Upsert and mirror send only what changed.</p>
+        <p className="text-xs text-zinc-500">Query results sent out of this workspace — into a database table, an Iceberg or Delta Lake table, files, or an API — by hand or on a schedule. Upsert and mirror send only what changed.</p>
         <Button className="ml-auto" size="sm" variant="primary" disabled={!canEdit} onClick={() => setDraft({ ...blank(), connection_id: databases.find((d) => d.config.read_only === false && d.engine !== 'duckdb')?.id ?? '' })} data-testid="new-reverse-sync"><Plus className="h-3.5 w-3.5" /> New reverse sync</Button>
       </div>
       {error && !draft && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-xs text-red-200">{error}</div>}
@@ -182,18 +188,18 @@ export function ReversePanel({ workspaceId, databases, clouds }: { workspaceId: 
         )}
       </Modal>
 
-      {draft && <ReverseEditor workspaceId={workspaceId} draft={draft} setDraft={setDraft} databases={databases} clouds={clouds} channels={channels} onSaved={(id) => { setDraft(null); setOpen(id); void load(); }} />}
+      {draft && <ReverseEditor workspaceId={workspaceId} draft={draft} setDraft={setDraft} databases={databases} clouds={clouds} lakes={lakes.filter((l) => l.provider !== 'DATABRICKS')} channels={channels} onSaved={(id) => { setDraft(null); setOpen(id); void load(); }} />}
     </div>
   );
 }
 
-function ReverseEditor({ workspaceId, draft, setDraft, databases, clouds, channels, onSaved }: { workspaceId: string; draft: Draft; setDraft: (d: Draft | null) => void; databases: DatabaseConnection[]; clouds: CloudConnection[]; channels: NotificationChannel[]; onSaved: (id: string) => void }) {
+function ReverseEditor({ workspaceId, draft, setDraft, databases, clouds, lakes, channels, onSaved }: { workspaceId: string; draft: Draft; setDraft: (d: Draft | null) => void; databases: DatabaseConnection[]; clouds: CloudConnection[]; lakes: LakehouseConnection[]; channels: NotificationChannel[]; onSaved: (id: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const writable = databases.filter((d) => d.config.read_only === false && d.engine !== 'duckdb');
   const set = (p: Partial<Draft>) => setDraft({ ...draft, ...p });
   const keyed = draft.mode === 'upsert' || draft.mode === 'mirror';
-  const modes = MODES.filter((m) => draft.kind !== 'file' || m.id === 'replace' || m.id === 'append');
+  const modes = MODES.filter((m) => (draft.kind !== 'file' && draft.kind !== 'delta') || m.id === 'replace' || m.id === 'append');
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -208,7 +214,7 @@ function ReverseEditor({ workspaceId, draft, setDraft, databases, clouds, channe
       setBusy(false);
     }
   };
-  const ready = draft.name.trim() && draft.sql.trim() && (draft.kind === 'database' ? draft.connection_id && draft.table.trim() : draft.kind === 'file' ? draft.path.trim() : /^https?:\/\/./.test(draft.url)) && (!keyed || draft.keys.trim());
+  const ready = draft.name.trim() && draft.sql.trim() && (draft.kind === 'database' ? draft.connection_id && draft.table.trim() : draft.kind === 'iceberg' ? draft.lake_id && draft.namespace.trim() && draft.table.trim() : draft.kind === 'file' || draft.kind === 'delta' ? draft.path.trim() : /^https?:\/\/./.test(draft.url)) && (!keyed || draft.keys.trim());
 
   return (
     <Modal open onClose={() => setDraft(null)} title={draft.id ? 'Edit reverse sync' : 'New reverse sync'} width="max-w-2xl">
@@ -219,8 +225,8 @@ function ReverseEditor({ workspaceId, draft, setDraft, databases, clouds, channe
         <div>
           <Label>Send to</Label>
           <div role="radiogroup" className="mb-2 inline-flex rounded-md border border-zinc-800 p-0.5">
-            {([['database', 'Database table'], ['file', 'Files'], ['http', 'HTTP API']] as const).map(([k, l]) => (
-              <button key={k} role="radio" aria-checked={draft.kind === k} onClick={() => set({ kind: k, mode: k === 'file' && keyed ? 'replace' : draft.mode })} data-kind={k} className={cn('rounded px-2.5 py-1 text-xs', draft.kind === k ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-100')}>{l}</button>
+            {([['database', 'Database table'], ['iceberg', 'Iceberg table'], ['delta', 'Delta table'], ['file', 'Files'], ['http', 'HTTP API']] as const).map(([k, l]) => (
+              <button key={k} role="radio" aria-checked={draft.kind === k} onClick={() => set({ kind: k, mode: (k === 'file' || k === 'delta') && keyed ? 'replace' : draft.mode })} data-kind={k} className={cn('rounded px-2.5 py-1 text-xs', draft.kind === k ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-100')}>{l}</button>
             ))}
           </div>
           {draft.kind === 'database' && (
@@ -231,6 +237,28 @@ function ReverseEditor({ workspaceId, draft, setDraft, databases, clouds, channe
                 <Input className="min-w-40 flex-1 font-mono" value={draft.table} onChange={(e) => set({ table: e.target.value })} placeholder="table (created if missing)" aria-label="Table" data-testid="reverse-table" />
               </div>
             )
+          )}
+          {draft.kind === 'iceberg' && (
+            lakes.length === 0 ? <p className="text-zinc-500">No Iceberg catalog yet. Add an Iceberg REST catalog, AWS Glue or S3 Tables connection <a className="text-accent-300 hover:underline" href="#/connections/catalog">under Add a source</a>.</p> : (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  <Select value={draft.lake_id} onChange={(e) => set({ lake_id: e.target.value })} aria-label="Catalog" data-testid="reverse-lake"><option value="">Choose a catalog…</option>{lakes.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.provider.replace(/_/g, ' ').toLowerCase()})</option>)}</Select>
+                  <Input className="w-40 font-mono" value={draft.namespace} onChange={(e) => set({ namespace: e.target.value })} placeholder="namespace" aria-label="Namespace" data-testid="reverse-namespace" />
+                  <Input className="min-w-40 flex-1 font-mono" value={draft.table} onChange={(e) => set({ table: e.target.value })} placeholder="table (created if missing)" aria-label="Table" data-testid="reverse-iceberg-table" />
+                </div>
+                <div className="flex items-center gap-2 text-zinc-500">
+                  <span>Data files written with</span>
+                  <Select value={draft.storage_connection_id} onChange={(e) => set({ storage_connection_id: e.target.value })} aria-label="Storage credentials"><option value="">the catalog's credentials</option>{clouds.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.provider})</option>)}</Select>
+                </div>
+              </div>
+            )
+          )}
+          {draft.kind === 'delta' && (
+            <div className="flex flex-wrap gap-2">
+              <Select value={draft.cloud_connection_id} onChange={(e) => set({ cloud_connection_id: e.target.value, bucket: clouds.find((c) => c.id === e.target.value)?.bucket ?? '' })} aria-label="Where"><option value="">Data directory</option>{clouds.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.provider})</option>)}</Select>
+              {draft.cloud_connection_id && <Input className="w-36 font-mono" value={draft.bucket} onChange={(e) => set({ bucket: e.target.value })} placeholder="bucket" aria-label="Bucket" />}
+              <Input className="min-w-48 flex-1 font-mono" value={draft.path} onChange={(e) => set({ path: e.target.value })} placeholder="lake/orders (the table's folder)" aria-label="Table folder" data-testid="reverse-delta-path" />
+            </div>
           )}
           {draft.kind === 'file' && (
             <div className="flex flex-wrap gap-2">

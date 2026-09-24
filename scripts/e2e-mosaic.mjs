@@ -71,6 +71,9 @@
  * The saas-sources scenario finds the GitHub, Jira, Zendesk, Shopify, Intercom, Linear, Pipedrive and Mailchimp
  * sources in Connections → Add a source and opens their forms (the vendor APIs themselves are covered by server
  * tests against mocks).
+ * The lake-write scenario sends query results to a Delta Lake table in the data directory (created, then read back
+ * with delta_scan) and — with an Iceberg REST catalog at E2E_ICEBERG (default http://localhost:8181, MinIO at
+ * localhost:9000) — to an Iceberg table, both from the reverse ETL editor.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -1002,6 +1005,76 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'lake-write') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const dataDir = (await (await fetch(`${BASE}/readyz`)).json()).checks?.data_directory?.detail;
+    const deltaRel = `lake/e2e_orders_${Date.now()}`;
+    const iceberg = process.env.E2E_ICEBERG ?? 'http://localhost:8181';
+    const icebergUp = await fetch(`${iceberg}/v1/config`).then((r) => r.ok, () => false);
+    const made = { lake: null, cloud: null };
+    cleanup = async () => {
+      for (const x of (await j('GET', `/api/workspaces/${wsId}/reverse-syncs`)).syncs ?? []) if (x.name.startsWith('E2E lake')) await j('DELETE', `/api/reverse-syncs/${x.id}`);
+      if (made.lake) await j('DELETE', `/api/lakehouse-connections/${made.lake}`);
+      if (made.cloud) await j('DELETE', `/api/cloud-connections/${made.cloud}`);
+      await q('DROP TABLE IF EXISTS e2e_lake_orders');
+      if (dataDir) fs.rmSync(`${dataDir}/${deltaRel}`, { recursive: true, force: true });
+    };
+    const created = await q("CREATE OR REPLACE TABLE e2e_lake_orders AS SELECT * FROM (VALUES (1, 'EU', 120.5, TIMESTAMP '2026-09-01 10:00:00'), (2, 'US', 80.0, TIMESTAMP '2026-09-02 12:00:00'), (3, 'EU', 45.25, TIMESTAMP '2026-09-03 08:30:00')) t(id, region, amount, placed_at)");
+    if (created.error) throw new Error(created.message);
+    if (icebergUp) {
+      made.lake = (await j('POST', '/api/lakehouse-connections', { name: 'E2E lake catalog', provider: 'ICEBERG_REST', alias: 'e2e_ice', config: { endpoint: iceberg, auth: 'none', warehouse: '' }, credentials: {} })).connection?.id ?? null;
+      made.cloud = (await j('POST', '/api/cloud-connections', { name: 'E2E lake storage', provider: 'S3', endpoint_url: process.env.E2E_ICEBERG_S3 ?? 'http://localhost:9000', region: 'us-east-1', bucket: 'warehouse', credentials: { access_key_id: 'admin', secret_access_key: 'password' } })).connection?.id ?? null;
+    }
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app');
+    await evaluate(`location.hash = '#/connections/reverse'; true`);
+    await waitFor(`!!document.querySelector('[data-testid="new-reverse-sync"]')`, 20000, 'reverse tab');
+    const setVal = (sel, v) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); const proto = el.tagName === 'SELECT' ? HTMLSelectElement.prototype : el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${JSON.stringify(v)}); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); return true; })()`);
+    const lastRun = (name) => `document.querySelector('[data-reverse="${name}"] [data-testid="reverse-last-run"]')?.innerText ?? ''`;
+    // 1. Delta Lake, in the data directory.
+    await evaluate(`document.querySelector('[data-testid="new-reverse-sync"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="reverse-editor"]')`, 5000, 'editor');
+    await setVal('[data-testid="reverse-name"]', 'E2E lake Delta');
+    await setVal('[data-testid="reverse-sql"]', 'SELECT * FROM e2e_lake_orders');
+    await evaluate(`document.querySelector('[data-kind="delta"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="reverse-delta-path"]')`, 5000, 'delta fields');
+    await setVal('[data-testid="reverse-delta-path"]', deltaRel);
+    await evaluate(`document.querySelector('[data-testid="save-reverse"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-reverse="E2E lake Delta"]')`, 15000, 'delta sync listed');
+    await evaluate(`document.querySelector('[data-reverse="E2E lake Delta"] [data-testid="run-reverse"]').click(); true`);
+    await waitFor(`/rows written/.test(${lastRun('E2E lake Delta')})`, 30000, 'delta run');
+    report.details.delta = await evaluate(lastRun('E2E lake Delta'));
+    const scanned = await q(`SELECT count(*)::INTEGER AS n, sum(amount)::DOUBLE AS total FROM delta_scan('${dataDir}/${deltaRel}')`);
+    report.details.deltaRead = scanned.rows ?? scanned.message;
+    // 2. Apache Iceberg, through the lakehouse connection.
+    if (icebergUp && made.lake) {
+      const ns = `e2e_${Date.now()}`;
+      await send('Page.reload', {});
+      await waitFor(`!!document.querySelector('[data-testid="new-reverse-sync"]')`, 20000, 'reverse tab again');
+      await evaluate(`document.querySelector('[data-testid="new-reverse-sync"]').click(); true`);
+      await waitFor(`!!document.querySelector('[data-testid="reverse-editor"]')`, 5000, 'editor');
+      await setVal('[data-testid="reverse-name"]', 'E2E lake Iceberg');
+      await setVal('[data-testid="reverse-sql"]', 'SELECT * FROM e2e_lake_orders');
+      await evaluate(`document.querySelector('[data-kind="iceberg"]').click(); true`);
+      await waitFor(`!!document.querySelector('[data-testid="reverse-lake"] option[value="${made.lake}"]')`, 5000, 'catalog listed');
+      await setVal('[data-testid="reverse-lake"]', made.lake);
+      await setVal('[data-testid="reverse-namespace"]', ns);
+      await setVal('[data-testid="reverse-iceberg-table"]', 'orders');
+      await setVal('select[aria-label="Storage credentials"]', made.cloud);
+      await evaluate(`document.querySelector('[data-testid="save-reverse"]').click(); true`);
+      await waitFor(`!!document.querySelector('[data-reverse="E2E lake Iceberg"]')`, 15000, 'iceberg sync listed');
+      await evaluate(`document.querySelector('[data-reverse="E2E lake Iceberg"] [data-testid="run-reverse"]').click(); true`);
+      await waitFor(`/rows written|error|failed/i.test(${lastRun('E2E lake Iceberg')})`, 60000, 'iceberg run');
+      report.details.iceberg = await evaluate(lastRun('E2E lake Iceberg'));
+      const read = await q(`SELECT count(*)::INTEGER AS n FROM e2e_ice.${ns}.orders`);
+      report.details.icebergRead = read.rows ?? read.message;
+    } else report.details.iceberg = `skipped: no Iceberg catalog at ${iceberg}`;
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_lake.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'saas-sources') {
     const ids = ['github', 'jira', 'zendesk', 'shopify', 'intercom', 'linear', 'pipedrive', 'mailchimp'];
     await send('Page.navigate', { url: `${BASE}/#/` });
@@ -1655,6 +1728,14 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'lake-write') {
+    if (!/3 rows written — created lake\/e2e_orders_\d+ \(version 0\)/.test(d.delta ?? '')) problems.push(`delta: ${d.delta}`);
+    if (JSON.stringify(d.deltaRead) !== JSON.stringify([[3, 245.75]])) problems.push(`delta read: ${JSON.stringify(d.deltaRead)}`);
+    if (!String(d.iceberg ?? '').startsWith('skipped')) {
+      if (!/3 rows written — created e2e_\d+\.orders/.test(d.iceberg ?? '')) problems.push(`iceberg: ${d.iceberg}`);
+      if (JSON.stringify(d.icebergRead) !== JSON.stringify([[3]])) problems.push(`iceberg read: ${JSON.stringify(d.icebergRead)}`);
+    }
   }
   if (scenario === 'saas-sources') {
     if ((d.cards ?? []).length !== 8) problems.push(`cards: ${JSON.stringify(d.cards)}`);

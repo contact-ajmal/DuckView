@@ -297,7 +297,7 @@ export function ConnectionsPage() {
       )}
 
       {tab === 'streams' && wsId && configured && <StreamsPanel key={wsId} workspaceId={wsId} clouds={configured.cloud} databases={configured.databases} />}
-      {tab === 'reverse' && wsId && configured && <ReversePanel key={wsId} workspaceId={wsId} databases={configured.databases} clouds={configured.cloud} />}
+      {tab === 'reverse' && wsId && configured && <ReversePanel key={wsId} workspaceId={wsId} databases={configured.databases} clouds={configured.cloud} lakes={configured.lakehouse} />}
 
       <CloudWizard open={wizard?.kind === 'cloud'} initialProvider={wizard?.kind === 'cloud' ? wizard.provider : null} initial={wizard?.kind === 'cloud' ? wizard.edit : null} onClose={closeWizard} onCreated={markSaved} />
       <HttpWizard open={wizard?.kind === 'http'} onClose={closeWizard} onSaved={markSaved} />

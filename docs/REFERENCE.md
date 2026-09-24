@@ -461,6 +461,8 @@ API: `GET/POST /api/workspaces/:id/quality/suites` (the list includes `dbt_tests
 | Destination | What happens |
 |---|---|
 | **Database table** — a Postgres, MySQL or SQLite connection of yours with *read-only* turned off | The table is created from the result when missing. DuckDB files are not a destination: they take one writer at a time, and the workspace engines may have them attached. |
+| **Iceberg table** — a table of an Iceberg REST catalog, AWS Glue or S3 Tables (a lakehouse connection) | Created from the result when missing (namespace too); every mode, each run one Iceberg transaction. Data files are written with the catalog's vended credentials or, for catalogs that do not vend them, a cloud connection chosen as *storage*. |
+| **Delta Lake table** — a table folder in the data directory or a cloud bucket | *replace* writes a new version whose commit removes every earlier file; *append* adds a version through DuckDB's delta extension. DuckView writes the creating commit itself (protocol, schema, the data file), since DuckDB appends to Delta tables but does not create them. |
 | **Files** — Parquet, CSV or JSON, in the data directory or a cloud bucket (S3, R2, GCS, Azure) | *replace* overwrites the file; *append* writes a new file per run (`{date}` / `{run}` in the path, or a timestamp before the extension). |
 | **HTTP API** — JSON POSTed in batches (`batch_size`, default 500) | Body `object` (`{sync, sync_id, run_id, mode, op: upsert\|delete, batch, batches, rows}`), `array` or `ndjson`; headers (Authorization, API keys) stored encrypted and never returned; an `Idempotency-Key` per batch; any non-2xx fails the run. |
 
@@ -470,6 +472,8 @@ API: `GET/POST /api/workspaces/:id/quality/suites` (the list includes `dbt_tests
 | `append` | the whole result, added |
 | `upsert` | rows new or changed since the last successful run, matched on `key_columns` (deleted and re-inserted by key in a database) |
 | `mirror` | upsert, plus the keys that disappeared: deleted from the table, or sent as `op: "delete"` batches (`_deleted: true` for array / ndjson) |
+
+**Open table formats** (`services/lake-write.ts`): columns are cast to what the format stores. Unsigned and 128-bit integers widen to what the format has; JSON and intervals become text. For Delta, lists and structs become JSON text, UUIDs and times become text, and naive timestamps are taken as UTC. A Delta commit in the data directory is created only if its version does not exist yet, so two writers cannot both write the same version.
 
 **How a run works**: the query runs as the sync's author through the workspace engine — read-only, with their access policies (row filters, masks) — and is staged as Parquet; a scratch DuckDB instance attaches the destination and delivers it. Change detection keeps the keys and a hash of every row delivered (`.duckview/reverse/<id>/state.parquet`), replaced only after a successful delivery, so a failed run is retried in full next time (at-least-once for APIs). Keys must be unique and not null. Changing the query, destination, mode or keys starts change detection over, and whoever edits them becomes who it runs as (their connections must fit). Runs are kept 90 days; a failing run, and the first success after it, go to the sync's notification channels (`reverse_sync.failed` / `reverse_sync.recovered`). **Preview next run** shows how many rows would be sent and deleted, with a sample, without sending anything.
 

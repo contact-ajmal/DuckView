@@ -20,6 +20,8 @@ const Destination = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('database'), connection_id: z.string().max(64), schema: z.string().max(128).nullable().optional(), table: z.string().min(1).max(128) }),
   z.object({ kind: z.literal('file'), format: z.enum(['parquet', 'csv', 'json']), path: z.string().min(1).max(1024), cloud_connection_id: z.string().max(64).nullable().optional(), bucket: z.string().max(255).nullable().optional() }),
   z.object({ kind: z.literal('http'), url: z.string().min(1).max(2048), batch_size: z.number().int().min(1).max(10_000).optional(), payload: z.enum(['array', 'object', 'ndjson']).optional() }),
+  z.object({ kind: z.literal('iceberg'), connection_id: z.string().max(64), namespace: z.string().min(1).max(255), table: z.string().min(1).max(128), storage_connection_id: z.string().max(64).nullable().optional() }),
+  z.object({ kind: z.literal('delta'), path: z.string().min(1).max(1024), cloud_connection_id: z.string().max(64).nullable().optional(), bucket: z.string().max(255).nullable().optional() }),
 ]);
 const Body = z.object({
   name: z.string().min(1).max(120),

@@ -329,6 +329,12 @@ export class LakehouseService {
     return out;
   }
 
+  /** One connection's secrets and attachment, for a scratch engine that writes to the catalog (reverse ETL). */
+  async engineBitsFor(userId: string, id: string): Promise<{ connection: LakehouseConnection; secrets: SecretSpec[]; attachments: AttachSpec[] }> {
+    const c = await this.getOwned(userId, id);
+    return { connection: c, ...lakehouseEngineBits(c, this.decrypt(c)) };
+  }
+
   private databricks(c: LakehouseConnection): DatabricksClient {
     const creds = this.decrypt(c);
     return new DatabricksClient(c.config.host ?? '', c.config.databricks_auth === 'oauth_m2m' ? { client_id: creds.client_id, client_secret: creds.client_secret } : { token: creds.token }, { timeoutMs: this.cfg.lakehouse.statement_timeout_seconds * 1000, pollIntervalMs: this.cfg.lakehouse.poll_interval_ms });

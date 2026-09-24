@@ -1167,7 +1167,11 @@ export type ReverseDestination =
   /** A file per run or one file replaced: local (relative to the data directory) or in a cloud bucket. */
   | { kind: 'file'; format: 'parquet' | 'csv' | 'json'; path: string; cloud_connection_id?: string | null; bucket?: string | null }
   /** JSON batches POSTed to a URL; headers are stored encrypted. */
-  | { kind: 'http'; url: string; batch_size?: number; payload?: 'array' | 'object' | 'ndjson' };
+  | { kind: 'http'; url: string; batch_size?: number; payload?: 'array' | 'object' | 'ndjson' }
+  /** A table of an Iceberg catalog (a lakehouse connection); storage credentials from a cloud connection when the catalog does not vend them. */
+  | { kind: 'iceberg'; connection_id: string; namespace: string; table: string; storage_connection_id?: string | null }
+  /** A Delta Lake table: a directory, local (relative to the data directory) or in a cloud bucket. */
+  | { kind: 'delta'; path: string; cloud_connection_id?: string | null; bucket?: string | null };
 export interface ReverseLastRun { run_id: string; status: (typeof REVERSE_RUN_STATUSES)[number]; started_at: string; finished_at: string | null; rows: number | null; error: string | null; summary: string | null }
 
 export const reverseSyncs = sqliteTable(

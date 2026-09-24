@@ -1,7 +1,8 @@
 /**
  * Reverse ETL: the rows of a query sent out of a workspace, on demand or on a schedule — into a table of a database
- * connection (Postgres, MySQL, SQLite — not DuckDB files, which take one writer), into Parquet / CSV / JSON files (local or in a cloud bucket), or as
- * JSON batches to an HTTP API.
+ * connection (Postgres, MySQL, SQLite — not DuckDB files, which take one writer), into an Apache Iceberg table of a
+ * lakehouse catalog or a Delta Lake table (see lake-write.ts), into Parquet / CSV / JSON files (local or in a cloud
+ * bucket), or as JSON batches to an HTTP API.
  *
  * A run: the query runs as the sync's author through the workspace engine (read-only, their access policies apply)
  * and is staged as Parquet; a scratch DuckDB instance reads it and delivers it.
@@ -25,12 +26,14 @@ import type { DuckViewConfig } from '../config/index.js';
 import { CredentialCipher, newId } from '../security/crypto.js';
 import { egressPost } from '../security/egress.js';
 import { analyzeSql } from '../engine/sql-guard.js';
-import { attachToSql, sqlString, type EngineManager } from '../engine/duckdb.js';
+import { attachToSql, secretToSql, sqlString, type EngineManager } from '../engine/duckdb.js';
+import { castFor, deltaCommit, deltaLogName, latestDeltaVersion, newDataFile } from './lake-write.js';
 import type { Principal } from './principal.js';
 import { requireWrite } from './principal.js';
 import type { WorkspaceService } from './workspaces.js';
 import type { DatabaseConnectionService } from './databases.js';
 import type { CloudConnectionService } from './cloud.js';
+import type { LakehouseService } from './lakehouse.js';
 import type { AuthService } from './auth.js';
 import type { AuditService } from './audit.js';
 import type { NotificationService } from './notifications.js';
@@ -75,6 +78,8 @@ const firstLine = (err: unknown) => ((err as Error).message ?? String(err)).spli
 export function describeDestination(d: ReverseDestination, names: { connection?: string | null } = {}): string {
   if (d.kind === 'database') return `${names.connection ?? 'database'} → ${d.schema ? `${d.schema}.` : ''}${d.table}`;
   if (d.kind === 'file') return `${d.format} file ${d.cloud_connection_id ? `${d.bucket ?? ''}/` : ''}${d.path}`;
+  if (d.kind === 'iceberg') return `Iceberg ${names.connection ?? 'catalog'} → ${d.namespace}.${d.table}`;
+  if (d.kind === 'delta') return `Delta table ${d.cloud_connection_id ? `${d.bucket ?? ''}/` : ''}${d.path}`;
   return `POST ${d.url}`;
 }
 
@@ -82,7 +87,7 @@ export class ReverseEtlService {
   private ticker: NodeJS.Timeout | null = null;
   private running = new Set<string>();
 
-  constructor(private readonly store: MetadataStore, private readonly cfg: DuckViewConfig, private readonly cipher: CredentialCipher, private readonly engines: EngineManager, private readonly workspaces: WorkspaceService, private readonly databases: DatabaseConnectionService, private readonly cloud: CloudConnectionService, private readonly auth: AuthService, private readonly notifications: NotificationService, private readonly audit: AuditService) {}
+  constructor(private readonly store: MetadataStore, private readonly cfg: DuckViewConfig, private readonly cipher: CredentialCipher, private readonly engines: EngineManager, private readonly workspaces: WorkspaceService, private readonly databases: DatabaseConnectionService, private readonly cloud: CloudConnectionService, private readonly lakehouse: LakehouseService, private readonly auth: AuthService, private readonly notifications: NotificationService, private readonly audit: AuditService) {}
   private get db() {
     return this.store.db;
   }
@@ -117,7 +122,7 @@ export class ReverseEtlService {
   }
 
   private async checkDestination(p: Principal, d: ReverseDestination | undefined, mode: ReverseMode, keys: string[]): Promise<ReverseDestination> {
-    if (!d || !['database', 'file', 'http'].includes(d.kind)) throw badRequest('destination.kind must be database, file or http');
+    if (!d || !['database', 'file', 'http', 'iceberg', 'delta'].includes(d.kind)) throw badRequest('destination.kind must be database, iceberg, delta, file or http');
     if ((mode === 'upsert' || mode === 'mirror') && !keys.length) throw badRequest(`${mode} needs key_columns: the columns that identify a row`);
     if (d.kind === 'database') {
       const c = await this.databases.getOwned(p.userId, d.connection_id).catch(() => {
@@ -145,6 +150,36 @@ export class ReverseEtlService {
       const resolved = this.engines.jail.resolve(d.path.trim()); // SandboxViolation outside the data directory
       if (resolved.relative.startsWith('.duckview')) throw badRequest('That folder is DuckView\'s own');
       return { kind: 'file', format: d.format, path: d.path.trim(), cloud_connection_id: null, bucket: null };
+    }
+    if (d.kind === 'iceberg') {
+      const lh = await this.lakehouse.getOwned(p.userId, d.connection_id).catch(() => {
+        throw badRequest('destination.connection_id is not one of your lakehouse connections');
+      });
+      if (lh.provider === 'DATABRICKS') throw badRequest('Writing goes through an Iceberg REST catalog, AWS Glue or S3 Tables; Databricks tables are written in Databricks');
+      const ident = /^[A-Za-z_][\w]*$/;
+      const namespace = (d.namespace ?? '').trim();
+      if (!namespace.split('.').every((x) => ident.test(x))) throw badRequest('destination.namespace must be a name like sales (or sales.eu)');
+      if (!ident.test((d.table ?? '').trim())) throw badRequest('destination.table must be a plain name');
+      if (d.storage_connection_id) await this.cloud.getOwned(p.userId, d.storage_connection_id).catch(() => {
+        throw badRequest('destination.storage_connection_id is not one of your cloud connections');
+      });
+      return { kind: 'iceberg', connection_id: lh.id, namespace, table: d.table.trim(), storage_connection_id: d.storage_connection_id || null };
+    }
+    if (d.kind === 'delta') {
+      if (mode === 'upsert' || mode === 'mirror') throw badRequest('A Delta table is replaced or appended to; upsert and mirror need a database or an Iceberg table');
+      const p0 = (d.path ?? '').trim().replace(/\/+$/, '');
+      if (!p0) throw badRequest('destination.path is required');
+      if (d.cloud_connection_id) {
+        const c = await this.cloud.getOwned(p.userId, d.cloud_connection_id).catch(() => {
+          throw badRequest('destination.cloud_connection_id is not one of your cloud connections');
+        });
+        const bucket = d.bucket?.trim() || c.bucket;
+        if (!bucket) throw badRequest('destination.bucket is required for this cloud connection');
+        return { kind: 'delta', path: p0.replace(/^\/+/, ''), cloud_connection_id: c.id, bucket };
+      }
+      const resolved = this.engines.jail.resolve(p0);
+      if (resolved.relative.startsWith('.duckview')) throw badRequest('That folder is DuckView\'s own');
+      return { kind: 'delta', path: p0, cloud_connection_id: null, bucket: null };
     }
     let url: URL;
     try {
@@ -343,6 +378,10 @@ export class ReverseEtlService {
   }
 
   private async destinationLabel(r: ReverseSync): Promise<string> {
+    if (r.destination.kind === 'iceberg') {
+      const lh = await this.lakehouse.getOwned(r.user_id, r.destination.connection_id).catch(() => null);
+      return describeDestination(r.destination, { connection: lh?.name });
+    }
     if (r.destination.kind !== 'database') return describeDestination(r.destination);
     const c = await this.databases.getOwned(r.user_id, r.destination.connection_id).catch(() => null);
     return describeDestination(r.destination, { connection: c?.name });
@@ -441,6 +480,8 @@ export class ReverseEtlService {
     const d = r.destination;
     if (d.kind === 'database') return this.toDatabase(conn, r, d, rel, info.columns, toSend, toDelete);
     if (d.kind === 'file') return this.toFile(conn, r, d, runId, toSend);
+    if (d.kind === 'iceberg') return this.toIceberg(conn, r, d, rel, info.columns, toSend, toDelete);
+    if (d.kind === 'delta') return this.toDelta(conn, r, d, runId);
     return this.toHttp(conn, r, d, rel, runId, toSend, toDelete);
   }
 
@@ -488,6 +529,143 @@ export class ReverseEtlService {
       throw err;
     }
     return { rows_sent: r.mode === 'append' ? await this.count(conn, 'src') : toSend, rows_deleted: rel.del ? toDelete : 0 };
+  }
+
+  private async loadExtension(conn: DuckDBConnection, ext: string): Promise<void> {
+    await conn.run(`LOAD ${ext}`).catch(async () => {
+      await conn.run(`INSTALL ${ext}`);
+      await conn.run(`LOAD ${ext}`);
+    });
+  }
+
+  /** src's columns as the format can store them. */
+  private async castSelect(conn: DuckDBConnection, format: 'iceberg' | 'delta'): Promise<{ select: string; columns: { name: string; type: string }[] }> {
+    const described = (await conn.runAndReadAll('SELECT column_name, column_type FROM (DESCRIBE src)')).getRowsJson() as string[][];
+    const cols = described.map(([name, type]) => ({ name: String(name), ...castFor(format, String(name), String(type)) }));
+    return { select: cols.map((c) => c.sql).join(', '), columns: cols.map((c) => ({ name: c.name, type: c.type })) };
+  }
+
+  private async toIceberg(conn: DuckDBConnection, r: ReverseSync, d: Extract<ReverseDestination, { kind: 'iceberg' }>, rel: { send: string; del: string | null }, columns: string[], toSend: number, toDelete: number) {
+    const bits = await this.lakehouse.engineBitsFor(r.user_id, d.connection_id).catch(() => {
+      throw new Error('The destination lakehouse connection no longer exists (or belongs to someone else)');
+    });
+    const attachment = bits.attachments[0];
+    if (!attachment) throw new Error('This lakehouse connection has no Iceberg catalog to write to');
+    for (const ext of attachment.extensions ?? ['httpfs', 'iceberg']) await this.loadExtension(conn, ext);
+    for (const sec of bits.secrets) {
+      const sql = secretToSql(sec);
+      if (sql) await conn.run(sql);
+    }
+    if (d.storage_connection_id) {
+      const c = await this.cloud.getOwned(r.user_id, d.storage_connection_id).catch(() => {
+        throw new Error('The storage cloud connection no longer exists');
+      });
+      const sql = secretToSql({ ...this.cloud.toSecret(c), name: 'dv_storage' });
+      if (sql) await conn.run(sql);
+    }
+    const alias = 'dv_ice';
+    await conn.run(attachToSql({ ...attachment, alias, options: Object.fromEntries(Object.entries(attachment.options).filter(([k]) => k.toLowerCase() !== 'read_only')) }, false));
+    const ns = d.namespace.split('.').map(qi).join('.');
+    const target = `${alias}.${ns}.${qi(d.table)}`;
+    await conn.run(`CREATE SCHEMA IF NOT EXISTS ${alias}.${ns}`);
+    const exists = Number((await conn.runAndReadAll(`SELECT count(*) FROM duckdb_tables() WHERE database_name = ${sqlString(alias)} AND schema_name = ${sqlString(d.namespace)} AND table_name = ${sqlString(d.table)}`)).getRowsJson()[0]?.[0] ?? 0) > 0;
+    const { select } = await this.castSelect(conn, 'iceberg');
+    const cols = columns.map(qi).join(', ');
+    const keyMatch = (from: string) => `(${r.key_columns.map(qi).join(', ')}) IN (SELECT ${r.key_columns.map(qi).join(', ')} FROM ${from})`;
+    if (!exists || r.mode === 'replace') {
+      if (exists) await conn.run(`DROP TABLE ${target}`);
+      await conn.run(`CREATE TABLE ${target} AS SELECT ${select} FROM src`);
+      return { rows_sent: await this.count(conn, 'src'), rows_deleted: 0, detail: exists ? `replaced ${d.namespace}.${d.table}` : `created ${d.namespace}.${d.table}` };
+    }
+    // One Iceberg transaction: readers see the old snapshot or the new one.
+    await conn.run('BEGIN TRANSACTION');
+    try {
+      if (r.mode === 'append') await conn.run(`INSERT INTO ${target} (${cols}) SELECT ${select} FROM src`);
+      else {
+        if (toSend) {
+          await conn.run(`DELETE FROM ${target} WHERE ${keyMatch(rel.send)}`);
+          await conn.run(`INSERT INTO ${target} (${cols}) SELECT ${select} FROM ${rel.send}`);
+        }
+        if (rel.del && toDelete) await conn.run(`DELETE FROM ${target} WHERE ${keyMatch(rel.del)}`);
+      }
+      await conn.run('COMMIT');
+    } catch (err) {
+      await conn.run('ROLLBACK').catch(() => undefined);
+      throw err;
+    }
+    return { rows_sent: r.mode === 'append' ? await this.count(conn, 'src') : toSend, rows_deleted: rel.del ? toDelete : 0 };
+  }
+
+  private async toDelta(conn: DuckDBConnection, r: ReverseSync, d: Extract<ReverseDestination, { kind: 'delta' }>, runId: string) {
+    await this.loadExtension(conn, 'delta');
+    const { select, columns } = await this.castSelect(conn, 'delta');
+    const rows = await this.count(conn, 'src');
+    // Where the table lives, and how to list its log and put a file there.
+    let location: string;
+    let listLog: () => Promise<string[]>;
+    let put: (rel: string, fromFile: string) => Promise<void>;
+    let putCommit: (name: string, body: string) => Promise<void>;
+    const local = !d.cloud_connection_id;
+    if (local) {
+      const root = this.engines.jail.resolve(d.path).absolute;
+      location = root;
+      fs.mkdirSync(path.join(root, '_delta_log'), { recursive: true });
+      listLog = async () => fs.readdirSync(path.join(root, '_delta_log'));
+      put = async (rel2, from) => void fs.renameSync(from, path.join(root, rel2));
+      // A commit file is created only if it does not exist: two writers cannot both write version N.
+      putCommit = async (name, body) => fs.writeFileSync(path.join(root, '_delta_log', name), body, { flag: 'wx' });
+    } else {
+      const c = await this.cloud.getOwned(r.user_id, d.cloud_connection_id!).catch(() => {
+        throw new Error('The destination cloud connection no longer exists (or belongs to someone else)');
+      });
+      const bucket = d.bucket ?? c.bucket ?? '';
+      const secret = secretToSql({ ...this.cloud.toSecret(c), name: 'dv_delta_storage' });
+      if (secret) await conn.run(secret);
+      await this.loadExtension(conn, 'httpfs');
+      const scheme = this.cloud.uriScheme(c);
+      location = `${scheme}://${bucket}/${d.path}`;
+      listLog = async () => {
+        const names: string[] = [];
+        let token: string | undefined;
+        do {
+          const page = await this.cloud.listObjects(c, bucket, `${d.path}/_delta_log/`, { continuationToken: token });
+          names.push(...page.entries.map((e) => e.name));
+          token = page.next_token ?? undefined;
+        } while (token);
+        return names;
+      };
+      put = async (rel2, from) => void (await this.cloud.uploadObject(c, bucket, `${d.path}/${rel2}`, from));
+      putCommit = async (name, body) => {
+        const tmp = path.join(this.dir(r.id), `commit-${runId}.json`);
+        fs.writeFileSync(tmp, body);
+        try {
+          await this.cloud.uploadObject(c, bucket, `${d.path}/_delta_log/${name}`, tmp);
+        } finally {
+          fs.rmSync(tmp, { force: true });
+        }
+      };
+    }
+    const latest = latestDeltaVersion(await listLog());
+    if (latest >= 0 && r.mode === 'append') {
+      // Remote tables attach read-only unless asked otherwise.
+      await conn.run(`ATTACH ${sqlString(location)} AS dv_delta (TYPE delta, READ_ONLY false)`);
+      await conn.run(`INSERT INTO dv_delta SELECT ${select} FROM src`);
+      return { rows_sent: rows, rows_deleted: 0, detail: `appended to ${d.path}` };
+    }
+    // A new table, or a replace: DuckView writes the commit.
+    const remove = latest >= 0 ? ((await conn.runAndReadAll(`SELECT data_file FROM delta_list_files(${sqlString(location)})`)).getRowsJson() as string[][]).map((x) => String(x[0]).replace(/^file:\/\//, '').slice(location.length).replace(/^\/+/, '')) : [];
+    const file = newDataFile();
+    const tmp = path.join(this.dir(r.id), `${runId}-${file}`);
+    await conn.run(`COPY (SELECT ${select} FROM src) TO ${sqlString(tmp)} (FORMAT parquet, COMPRESSION zstd)`);
+    const size = fs.statSync(tmp).size;
+    try {
+      await put(file, tmp);
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
+    const version = latest + 1;
+    await putCommit(deltaLogName(version), deltaCommit({ tableId: r.id, columns, create: latest < 0, replace: latest >= 0, remove, add: { path: file, size, rows } }));
+    return { rows_sent: rows, rows_deleted: 0, detail: `${latest < 0 ? 'created' : 'replaced'} ${d.path} (version ${version})` };
   }
 
   private async toFile(conn: DuckDBConnection, r: ReverseSync, d: Extract<ReverseDestination, { kind: 'file' }>, runId: string, toSend: number) {

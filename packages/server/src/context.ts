@@ -195,7 +195,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const hostedAgents = new HostedAgentService(cfg, store, workspaces, auth, notifications, audit);
   hostedAgents.model = copilot;
   const a2a = new A2AService(cfg, store, cipher, workspaces, hostedAgents, audit);
-  const reverse = new ReverseEtlService(store, cfg, cipher, engines, workspaces, databases, cloud, auth, notifications, audit);
+  const reverse = new ReverseEtlService(store, cfg, cipher, engines, workspaces, databases, cloud, lakehouse, auth, notifications, audit);
   copilot.reverse = reverse;
   const notebooks = new NotebookService(store, workspaces, queries, audit);
   copilot.notebooks = notebooks;
