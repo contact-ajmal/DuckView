@@ -33,6 +33,7 @@ import { QualityService } from './services/quality.js';
 import { InsightService } from './services/insights.js';
 import { HostedAgentService } from './services/hosted-agents.js';
 import { A2AService } from './services/a2a.js';
+import { StreamService } from './services/streams.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
 import { CommentService } from './services/comments.js';
@@ -89,6 +90,7 @@ export interface AppContext {
   insights: InsightService;
   hostedAgents: HostedAgentService;
   a2a: A2AService;
+  streams: StreamService;
   reverse: ReverseEtlService;
   notebooks: NotebookService;
   comments: CommentService;
@@ -158,6 +160,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const connectors = new ConnectorConnectionService(store, cipher, cfg);
   syncs.connectors = connectors;
   syncs.stageDir = path.join(engines.jail.baseDir, '.duckview', 'sync');
+  const streams = new StreamService(cfg, store, cipher, workspaces, queries, auth, cloud, audit);
+  streams.stageDir = path.join(engines.jail.baseDir, '.duckview', 'streams');
   if (cfg.duckdb.sync_scheduler_enabled) syncs.start();
   const notifications = new NotificationService(store, cfg, cipher, workspaces, audit);
   const alerts = new AlertService(store, cfg, workspaces, queries, auth, notifications, audit);
@@ -231,6 +235,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   // Pre-aggregates are only valid for the epoch they were built in.
   workspaces.onVersion((id) => void mosaic.dropSchema(id));
   await auth.bootstrapAdmin();
+  void streams.startAll().catch((err) => logger().warn({ err: (err as Error).message }, 'Streams could not start'));
   if (cfg.security.filesystem_mode === 'full') {
     logger().warn({ dataDir: cfg.security.data_jail_directory }, 'filesystem_mode=full: users can mount any local folder and DuckDB may read anywhere this process can. Set security.filesystem_mode=sandboxed for multi-tenant deployments.');
   }
@@ -274,6 +279,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     insights,
     hostedAgents,
     a2a,
+    streams,
     reverse,
     notebooks,
     comments,
@@ -289,6 +295,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     startedAt: new Date(),
     async shutdown() {
       syncs.stop();
+      await streams.stopAll().catch(() => undefined);
       alerts.stop();
       snapshots.stop();
       auditExport.stop();

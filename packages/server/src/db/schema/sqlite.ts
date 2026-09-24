@@ -1555,3 +1555,49 @@ export const a2aRemotes = sqliteTable(
   (t) => [index('a2a_remotes_user_idx').on(t.user_id)],
 );
 export type A2aRemote = typeof a2aRemotes.$inferSelect;
+
+/** Streams: Kafka topics, Kinesis streams and HTTP pushes appended continuously to a workspace table. */
+export const STREAM_KINDS = ['kafka', 'kinesis', 'http'] as const;
+export type StreamKind = (typeof STREAM_KINDS)[number];
+export const STREAM_FORMATS = ['json', 'text'] as const;
+export const STREAM_STATUSES = ['stopped', 'starting', 'running', 'error'] as const;
+export type StreamStatus = (typeof STREAM_STATUSES)[number];
+export type StreamConfig =
+  | { kind: 'kafka'; brokers: string[]; topic: string; group_id?: string | null; from_beginning?: boolean; ssl?: boolean; sasl_mechanism?: 'plain' | 'scram-sha-256' | 'scram-sha-512' | null; sasl_username?: string | null }
+  | { kind: 'kinesis'; stream: string; region: string; cloud_connection_id?: string | null; endpoint?: string | null; start?: 'LATEST' | 'TRIM_HORIZON' }
+  | { kind: 'http' };
+export interface StreamStats { rows_total: number; batches: number; last_batch_rows: number; last_batch_at: string | null; last_error: string | null; last_error_at: string | null }
+
+export const streams = sqliteTable(
+  'streams',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    kind: text('kind', { enum: STREAM_KINDS }).notNull(),
+    config: text('config', { mode: 'json' }).$type<StreamConfig>().notNull(),
+    /** AES-256-GCM JSON: { sasl_password } for Kafka; { key } for HTTP pushes (only its hash is compared). */
+    encrypted_secret: text('encrypted_secret'),
+    iv: text('iv'),
+    tag: text('tag'),
+    /** HTTP pushes: sha256 of the ingest key. */
+    key_hash: text('key_hash'),
+    format: text('format', { enum: STREAM_FORMATS }).notNull().default('json'),
+    target_schema: text('target_schema').notNull().default('main'),
+    target_table: text('target_table').notNull(),
+    /** Add _key, _partition, _offset, _timestamp and _ingested_at columns. */
+    include_metadata: integer('include_metadata', { mode: 'boolean' }).notNull().default(true),
+    batch_rows: integer('batch_rows').notNull().default(1000),
+    batch_seconds: integer('batch_seconds').notNull().default(5),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    status: text('status', { enum: STREAM_STATUSES }).notNull().default('stopped'),
+    stats: text('stats', { mode: 'json' }).$type<StreamStats>().notNull().default({ rows_total: 0, batches: 0, last_batch_rows: 0, last_batch_at: null, last_error: null, last_error_at: null }),
+    /** Where reading resumes: Kinesis shard → sequence number (Kafka keeps its offsets in the consumer group). */
+    checkpoints: text('checkpoints', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('streams_workspace_idx').on(t.workspace_id), uniqueIndex('streams_target_idx').on(t.workspace_id, t.target_schema, t.target_table)],
+);
+export type Stream = typeof streams.$inferSelect;

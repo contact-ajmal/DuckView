@@ -156,6 +156,15 @@ export class CloudConnectionService {
     if (r.length === 0) throw notFound('Cloud connection');
   }
 
+  /** AWS credentials of one of the user's S3 connections (for AWS APIs such as Kinesis). */
+  async awsCredentials(userId: string, id: string): Promise<{ accessKeyId: string; secretAccessKey: string; sessionToken?: string; region: string | null }> {
+    const c = (await this.db.select().from(this.s.cloudConnections).where(and(eq(this.s.cloudConnections.id, id), eq(this.s.cloudConnections.user_id, userId))).limit(1))[0];
+    if (!c) throw notFound('Cloud connection');
+    if (c.provider !== 'S3') throw badRequest('Use an AWS (S3) cloud connection for AWS credentials');
+    const creds = this.decrypt(c);
+    return { accessKeyId: creds.access_key_id!, secretAccessKey: creds.secret_access_key!, ...(creds.session_token ? { sessionToken: creds.session_token } : {}), region: c.region ?? null };
+  }
+
   /** DuckDB secrets for every cloud connection the user owns (applied at engine start). */
   async resolveSecrets(userId: string): Promise<SecretSpec[]> {
     const rows = await this.db.select().from(this.s.cloudConnections).where(eq(this.s.cloudConnections.user_id, userId));

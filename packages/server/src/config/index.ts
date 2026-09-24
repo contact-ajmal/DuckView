@@ -385,6 +385,18 @@ export const ConfigSchema = z.object({
       timeout_seconds: z.coerce.number().int().min(5).default(120),
     })
     .default({}),
+  /** Streams: Kafka topics, Kinesis streams and HTTP pushes appended continuously to workspace tables. */
+  streams: z
+    .object({
+      enabled: z.coerce.boolean().default(true),
+      /** Run the Kafka and Kinesis consumers in this process; turn off on replicas that should not consume. */
+      consumers_enabled: z.coerce.boolean().default(true),
+      /** The largest batch written at once (rows). */
+      max_batch_rows: z.coerce.number().int().min(1).max(1_000_000).default(50_000),
+      /** The largest HTTP push accepted (MB). */
+      max_push_mb: z.coerce.number().int().min(1).max(100).default(10),
+    })
+    .default({}),
   /** Agent2Agent (A2A): published DuckView agents answer other agents; people and agents ask remote A2A agents. */
   a2a: z
     .object({

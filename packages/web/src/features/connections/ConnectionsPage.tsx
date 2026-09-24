@@ -12,12 +12,13 @@ import { LakehouseWizard } from '../explorer/LakehouseWizard';
 import { DatabaseWizard } from './DatabaseWizard';
 import { SyncEditor } from './SyncEditor';
 import { ReversePanel } from './ReversePanel';
+import { StreamsPanel } from './StreamsPanel';
 import { ConnectorWizard } from './ConnectorWizard';
 import { HttpWizard } from './HttpWizard';
 
 const FAMILY_ICON: Record<SourceFamily, ReactNode> = { storage: <Cloud className="h-4 w-4" />, lakehouse: <Layers className="h-4 w-4" />, database: <Database className="h-4 w-4" />, web: <Globe className="h-4 w-4" />, warehouse: <Warehouse className="h-4 w-4" />, saas: <Boxes className="h-4 w-4" /> };
 
-type Tab = 'sources' | 'catalog' | 'syncs' | 'reverse';
+type Tab = 'sources' | 'catalog' | 'syncs' | 'streams' | 'reverse';
 
 /**
  * Connections: the catalog of source types, everything configured (storage, lakehouse, databases, HTTP), and the
@@ -151,7 +152,7 @@ export function ConnectionsPage() {
         description="Storage, databases, warehouses, SaaS apps and lakehouse catalogs — connected once, used by every workspace."
         actions={canEdit ? <Button variant="primary" onClick={() => go('catalog')}><Plus className="h-3.5 w-3.5" /> Add a source</Button> : undefined}
       />
-      <Tabs<Tab> value={tab} onChange={go} tabs={[{ id: 'sources', label: 'Configured', count: configuredCount }, { id: 'catalog', label: 'Add a source' }, { id: 'syncs', label: 'Syncs', count: syncs.length }, { id: 'reverse', label: 'Reverse ETL' }]} />
+      <Tabs<Tab> value={tab} onChange={go} tabs={[{ id: 'sources', label: 'Configured', count: configuredCount }, { id: 'catalog', label: 'Add a source' }, { id: 'syncs', label: 'Syncs', count: syncs.length }, { id: 'streams', label: 'Streams' }, { id: 'reverse', label: 'Reverse ETL' }]} />
 
       {notice && <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs', notice.tone === 'ok' ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-200' : 'border-red-900/60 bg-red-950/30 text-red-200')}>{notice.tone === 'ok' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}<span>{notice.text}</span><button className="ml-auto text-zinc-500 hover:text-zinc-200" onClick={() => setNotice(null)}>×</button></div>}
 
@@ -295,6 +296,7 @@ export function ConnectionsPage() {
         </div>
       )}
 
+      {tab === 'streams' && wsId && configured && <StreamsPanel key={wsId} workspaceId={wsId} clouds={configured.cloud} />}
       {tab === 'reverse' && wsId && configured && <ReversePanel key={wsId} workspaceId={wsId} databases={configured.databases} clouds={configured.cloud} />}
 
       <CloudWizard open={wizard?.kind === 'cloud'} initialProvider={wizard?.kind === 'cloud' ? wizard.provider : null} initial={wizard?.kind === 'cloud' ? wizard.edit : null} onClose={closeWizard} onCreated={markSaved} />

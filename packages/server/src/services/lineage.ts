@@ -230,6 +230,22 @@ export class LineageService {
       } else if (s.source.kind === 'sql') await reads(s.source.sql, id);
       if (s.transform_sql) await reads(s.transform_sql.replace(/\{\{\s*source\s*\}\}/g, 'source'), id);
     }
+    // Streams load tables continuously from a Kafka topic, a Kinesis stream or HTTP pushes.
+    const streams = await this.db.select().from(this.s.streams).where(eq(this.s.streams.workspace_id, workspaceId));
+    for (const st of streams) {
+      const id = `stream:${st.id}`;
+      const what = st.config.kind === 'kafka' ? `Kafka topic ${st.config.topic}` : st.config.kind === 'kinesis' ? `Kinesis stream ${st.config.stream}` : 'HTTP pushes';
+      nodes.set(id, { id, kind: 'sync', label: st.name, detail: `streaming · ${what}`, href: '#/connections' });
+      const target = `${st.target_schema !== 'main' ? `${st.target_schema}.` : ''}${st.target_table}`;
+      const tid = known.get(target.toLowerCase()) ?? `table:${target}`;
+      if (!nodes.has(tid)) nodes.set(tid, { id: tid, kind: 'table', label: target, detail: 'not created yet' });
+      edge(id, tid, 'loads');
+      if (st.config.kind !== 'http') {
+        const sid = `source:${st.config.kind}:${st.config.kind === 'kafka' ? `${st.config.brokers[0]}/${st.config.topic}` : `${st.config.region}/${st.config.stream}`}`;
+        if (!nodes.has(sid)) nodes.set(sid, { id: sid, kind: 'source', label: st.config.kind === 'kafka' ? st.config.topic : st.config.stream, detail: what });
+        edge(sid, id, 'reads');
+      }
+    }
     // dbt projects build models and seeds (from their last run), which read their upstream models and sources.
     if (this.dbt) {
       for (const { project, built } of await this.dbt.lineageOf(workspaceId)) {

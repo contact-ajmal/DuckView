@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (57 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (58 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -694,6 +694,39 @@ Config (`a2a`):
 - `enabled`
 - `allow_private_targets`: allows intranet agents and tests
 - `timeout_seconds`: how long a remote answer is waited for; default 180
+
+## Streams: Kafka, Kinesis and HTTP pushes
+
+**Events appended to a table as they arrive** (`services/streams.ts`, Connections → Streams). A stream reads from one of three sources:
+
+- **Kafka topic.** Any Kafka-compatible broker: Apache Kafka, Confluent, Redpanda, MSK. It uses brokers, a topic, an optional consumer group, the oldest or only new messages, TLS, and SASL PLAIN or SCRAM; the password is stored encrypted.
+- **Amazon Kinesis data stream.** Every shard, including new ones. Credentials come from an AWS cloud connection or the server's own (environment or instance role).
+- **HTTP pushes.** Your app POSTs to `/api/streams/:id/push` with the stream's key as `Authorization: Bearer dvs_…` or `x-duckview-key`. The body is a JSON object, an array of objects, or newline-delimited JSON; it answers `202 {accepted}`. The key is shown once, can be replaced, and only its hash is stored.
+
+**How messages are written.** Messages are written in micro-batches: for Kafka, what the broker returns within `batch_seconds`; for Kinesis, each poll; for HTTP, each request. The batch size is capped at `batch_rows`. Each batch is appended as the workspace's owner, like a sync:
+
+- **Columns:** a JSON object's fields become columns. Any other value goes in `value`, and text that is not JSON in `_raw`. Format `text` keeps each message whole in `value`.
+- **The first batch** creates the table, with types inferred from the data.
+- **Later batches** add new fields as columns and are inserted by name. A value that does not fit a column's type becomes NULL instead of stopping the stream.
+- **Metadata columns** (optional): `_key`, `_partition`, `_offset`, `_timestamp` and `_ingested_at`.
+
+**At least once.** Kafka offsets are committed, and Kinesis checkpoints (shard → sequence number) saved, only after a batch is written. A paused or restarted stream resumes where it stopped.
+
+Streams appear in lineage (topic → stream → table), on the live feed, and to agents through `list_streams`.
+
+API:
+
+- `GET/POST /api/workspaces/:id/streams`
+- `GET/PATCH/DELETE /api/streams/:id` (the GET includes the latest rows)
+- `POST /api/streams/test` (can DuckView reach the topic or stream?)
+- `POST /api/streams/:id/rotate-key`
+
+Config (`streams`):
+
+- `enabled`
+- `consumers_enabled`: turn off on replicas that should not consume
+- `max_batch_rows`
+- `max_push_mb`
 
 ## Governance
 

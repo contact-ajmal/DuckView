@@ -157,7 +157,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_STATUSES, type StreamConfig, type StreamStats } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -1000,4 +1000,33 @@ export const a2aRemotes = pgTable(
     updated_at: ts('updated_at').notNull(),
   },
   (t) => [index('a2a_remotes_user_idx').on(t.user_id)],
+);
+
+export const streams = pgTable(
+  'streams',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    kind: text('kind', { enum: STREAM_KINDS }).notNull(),
+    config: jsonb('config').$type<StreamConfig>().notNull(),
+    encrypted_secret: text('encrypted_secret'),
+    iv: text('iv'),
+    tag: text('tag'),
+    key_hash: text('key_hash'),
+    format: text('format', { enum: STREAM_FORMATS }).notNull().default('json'),
+    target_schema: text('target_schema').notNull().default('main'),
+    target_table: text('target_table').notNull(),
+    include_metadata: boolean('include_metadata').notNull().default(true),
+    batch_rows: integer('batch_rows').notNull().default(1000),
+    batch_seconds: integer('batch_seconds').notNull().default(5),
+    enabled: boolean('enabled').notNull().default(true),
+    status: text('status', { enum: STREAM_STATUSES }).notNull().default('stopped'),
+    stats: jsonb('stats').$type<StreamStats>().notNull().default({ rows_total: 0, batches: 0, last_batch_rows: 0, last_batch_at: null, last_error: null, last_error_at: null }),
+    checkpoints: jsonb('checkpoints').$type<Record<string, string>>().notNull().default({}),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('streams_workspace_idx').on(t.workspace_id), uniqueIndex('streams_target_idx').on(t.workspace_id, t.target_schema, t.target_table)],
 );

@@ -1294,6 +1294,21 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`Created monitor **${m.name}** (\`${m.id}\`) on ${m.metric} by ${m.grain}.${first}`)], structuredContent: { status: 'ok', monitor: m, findings } };
       },
     }),
+    // ---------------------------------------------------------------- streams
+    define({
+      name: 'list_streams',
+      title: 'List streams',
+      description: 'The workspace\'s streams — Kafka topics, Kinesis streams and HTTP pushes appended continuously to tables — with the table each writes to, status (running, error, paused), rows so far, the last batch and the last error. Query the tables with execute_query; new events keep arriving.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const streams = await env.ctx.streams.list(env.principal, ws);
+        const lines = streams.map((st) => `- **${st.name}** (\`${st.id}\`): ${st.config.kind === 'kafka' ? `Kafka topic ${st.config.topic}` : st.config.kind === 'kinesis' ? `Kinesis stream ${st.config.stream} (${st.config.region})` : 'HTTP pushes'} → ${st.target_schema === 'main' ? '' : `${st.target_schema}.`}${st.target_table} · ${st.enabled ? st.status : 'paused'} · ${st.stats.rows_total} rows${st.stats.last_batch_at ? `, last batch ${st.stats.last_batch_at}` : ''}${st.status === 'error' && st.stats.last_error ? ` · error: ${st.stats.last_error}` : ''}`);
+        return { content: [text(lines.length ? lines.join('\n') : 'No streams in this workspace. Add one under Connections → Streams.')], structuredContent: { status: 'ok', workspace_id: ws, streams: streams.map((st) => ({ id: st.id, name: st.name, kind: st.kind, target: `${st.target_schema}.${st.target_table}`, status: st.enabled ? st.status : 'paused', stats: st.stats })) } };
+      },
+    }),
+
     // ---------------------------------------------------------------- other agents
     define({
       name: 'list_agents',
@@ -1337,4 +1352,4 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams'] as const;

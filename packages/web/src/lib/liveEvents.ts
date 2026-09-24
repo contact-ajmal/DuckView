@@ -13,6 +13,7 @@ export type LiveEvent =
   | { type: 'reverse_sync'; at: string; workspace_id: string; sync_id: string; run_id: string; status: 'running' | 'ok' | 'error'; summary: string | null }
   | { type: 'quality'; at: string; workspace_id: string; suite_id: string; status: 'pass' | 'warn' | 'fail' | 'error'; changed: boolean }
   | { type: 'dbt'; at: string; workspace_id: string; project_id: string; run_id: string; status: 'running' | 'ok' | 'error'; summary: string | null }
+  | { type: 'stream'; at: string; workspace_id: string; stream_id: string; rows: number; rows_total: number; duration_ms: number; error: string | null }
   | { type: 'ready'; scope: string };
 
 /** Subscribes to /api/ws/events; reconnects with backoff. Returns an unsubscribe function. */

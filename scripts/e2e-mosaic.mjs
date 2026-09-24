@@ -62,6 +62,9 @@
  * The a2a scenario checks DuckView's Agent Card, publishes a hosted agent for other agents, registers a (mock)
  * remote A2A agent by its card with an auth header, and asks it a question from AI → DuckView agents.
  * (The server must allow private A2A targets: DUCKVIEW__a2a__allow_private_targets=true.)
+ * The streams scenario creates an HTTP push stream in Connections → Streams and pushes events to it with its key,
+ * then a Kafka stream (a Kafka-compatible broker at E2E_KAFKA, default localhost:19092 — e.g. a Redpanda
+ * container): test the connection, start it, and watch the rows arrive.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -993,6 +996,77 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'streams') {
+    const { createRequire } = await import('node:module');
+    const require = createRequire(new URL('../packages/server/package.json', import.meta.url));
+    const { Kafka, logLevel } = require('kafkajs');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    const before = new Set(((await j('GET', `/api/workspaces/${wsId}/streams`)).streams ?? []).map((x) => x.id));
+    cleanup = async () => {
+      for (const x of (await j('GET', `/api/workspaces/${wsId}/streams`)).streams ?? []) if (!before.has(x.id)) await j('DELETE', `/api/streams/${x.id}`);
+      await q('DROP TABLE IF EXISTS e2e_clicks');
+      await q('DROP TABLE IF EXISTS e2e_kafka_orders');
+    };
+    await q('DROP TABLE IF EXISTS e2e_clicks');
+    await q('DROP TABLE IF EXISTS e2e_kafka_orders');
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app');
+    await evaluate(`location.hash = '#/connections/streams'; true`);
+    await waitFor(`!!document.querySelector('[data-testid="stream-new"]')`, 20000, 'streams tab');
+    // 1. An HTTP push stream.
+    await evaluate(`document.querySelector('[data-testid="stream-new"]').click(); true`);
+    await evaluate(`document.querySelector('[data-testid="stream-kind-http"]').click(); true`);
+    await setField('[data-testid="stream-table"]', 'e2e_clicks');
+    await evaluate(`document.querySelector('[data-testid="stream-save"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="stream-key"]')`, 15000, 'push key shown');
+    const key = await evaluate(`document.querySelector('[data-testid="stream-key"]').innerText`);
+    const pushUrl = await evaluate(`document.querySelector('[data-testid="stream-push"] code').innerText`);
+    const pushed = await fetch(pushUrl, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify([{ page: '/home', ms: 120 }, { page: '/pricing', ms: 340 }, { page: '/docs', ms: 80 }]) });
+    report.details.push = pushed.status;
+    await waitFor(`[...document.querySelectorAll('[data-stream="e2e_clicks"] [data-testid="stream-rows"]')].some(e => e.innerText.startsWith('3 rows'))`, 15000, 'rows counted live');
+    await waitFor(`document.querySelectorAll('[data-stream="e2e_clicks"] [data-testid="stream-latest"] tbody tr').length === 3`, 10000, 'latest rows');
+    report.details.http = await evaluate(`document.querySelector('[data-stream="e2e_clicks"] [data-testid="stream-rows"]').innerText`);
+    report.details.wrongKey = (await fetch(pushUrl, { method: 'POST', headers: { authorization: 'Bearer dvs_nope', 'content-type': 'application/json' }, body: '[]' })).status;
+    // 2. A Kafka stream.
+    const brokers = (process.env.E2E_KAFKA ?? 'localhost:19092').split(',');
+    const topic = `e2e-orders-${Date.now()}`;
+    const kafka = new Kafka({ clientId: 'e2e', brokers, logLevel: logLevel.NOTHING, connectionTimeout: 3000, retry: { retries: 1 } });
+    let kafkaUp = true;
+    try {
+      const admin = kafka.admin();
+      await admin.connect();
+      await admin.createTopics({ topics: [{ topic, numPartitions: 1 }], waitForLeaders: true });
+      await admin.disconnect();
+      const producer = kafka.producer();
+      await producer.connect();
+      await producer.send({ topic, messages: [1, 2, 3, 4].map((i) => ({ key: `o${i}`, value: JSON.stringify({ order_id: i, amount: i * 25, status: i % 2 ? 'paid' : 'refunded' }) })) });
+      await producer.disconnect();
+    } catch (err) {
+      kafkaUp = false;
+      report.details.kafka = `skipped: no broker at ${brokers.join(',')} (${err.message})`;
+    }
+    if (kafkaUp) {
+      await evaluate(`document.querySelector('[data-testid="stream-new"]').click(); true`);
+      await evaluate(`document.querySelector('[data-testid="stream-kind-kafka"]').click(); true`);
+      await setField('[data-testid="stream-brokers"]', brokers.join(', '));
+      await setField('[data-testid="stream-topic"]', topic);
+      await setField('[data-testid="stream-table"]', 'e2e_kafka_orders');
+      await evaluate(`document.querySelector('[data-testid="stream-test"]').click(); true`);
+      await waitFor(`!!document.querySelector('[data-testid="stream-tested"]')`, 20000, 'connection tested');
+      report.details.tested = await evaluate(`document.querySelector('[data-testid="stream-tested"]').innerText`);
+      await evaluate(`document.querySelector('[data-testid="stream-save"]').click(); true`);
+      await waitFor(`[...document.querySelectorAll('[data-stream="e2e_kafka_orders"] [data-testid="stream-rows"]')].some(e => e.innerText.startsWith('4 rows'))`, 45000, 'kafka rows');
+      await waitFor(`document.querySelector('[data-stream="e2e_kafka_orders"] [data-testid="stream-status"]')?.innerText === 'running'`, 20000, 'kafka running');
+      report.details.kafka = await evaluate(`document.querySelector('[data-stream="e2e_kafka_orders"]').innerText.split('\\n').slice(0, 4).join(' | ')`);
+      const sums = await q('SELECT status, sum(amount)::INTEGER AS total FROM e2e_kafka_orders GROUP BY 1 ORDER BY 1');
+      report.details.sums = sums.rows;
+    }
+    await sleep(500);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_streams.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'a2a') {
     const http = await import('node:http');
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
@@ -1494,6 +1568,15 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'streams') {
+    if (d.push !== 202) problems.push(`push: ${d.push}`);
+    if (d.wrongKey !== 401) problems.push(`wrong key: ${d.wrongKey}`);
+    if (!/^3 rows/.test(d.http ?? '')) problems.push(`http: ${d.http}`);
+    if (!String(d.kafka ?? '').startsWith('skipped')) {
+      if (!/1 partition/.test(d.tested ?? '')) problems.push(`tested: ${d.tested}`);
+      if (JSON.stringify(d.sums) !== JSON.stringify([['paid', 100], ['refunded', 150]])) problems.push(`sums: ${JSON.stringify(d.sums)}`);
+    }
   }
   if (scenario === 'a2a') {
     if (d.card !== 'DuckView') problems.push(`card: ${d.card}`);
