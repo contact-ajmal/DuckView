@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Bar } from 'react-chartjs-2';
-import { UploadCloud, ArrowRight, ArrowUpRight, Search } from 'lucide-react';
+import { UploadCloud, ArrowRight, ArrowUpRight, Search, Network } from 'lucide-react';
 import { useCopilot } from '../../store/copilot';
 import { DataSourceBar } from './DataSourceBar';
 import '../../lib/chart';
@@ -15,11 +15,12 @@ import { ResultsGrid } from '../workspace/ResultsGrid';
 import { TypePill } from '../../components/layout';
 import { SplitPane } from '../../components/panes';
 import { useLayout } from '../../store/layout';
-import { Button, Empty, Spinner, Stat, Tabs, cn } from '../../components/ui';
+import { Button, Empty, Spinner, Stat, Tabs, cn, ErrorState, Skeleton } from '../../components/ui';
 import { quoteIdent } from '../workspace/SchemaTree';
 import { QualityChip } from '../transform/QualityChip';
 import { CommentsControl } from '../comments/CommentsPanel';
 import { DataTable } from '../../components/data';
+import { ColumnDetail } from './ColumnDetail';
 import { usePageObject } from '../../store/context';
 
 
@@ -89,12 +90,18 @@ export function OverviewPage() {
   // The selection lives in the store (persisted per workspace): moving to Query and back keeps the same dataset on
   // screen, and the profile only changes when a different file is picked (or its data actually changes).
   const target = wsId ? ws.overviewTarget[wsId] ?? null : null;
+  const [columnDetail, setColumnDetail] = useState<string | null>(null);
   usePageObject(target ? { kind: 'dataset', id: target, label: target.split('/').pop() ?? target } : null);
   const setTarget = (t: string | null) => wsId && ws.setOverviewTarget(wsId, t);
   // #/data?table=orders (links from comments and the inbox) opens that table.
   useEffect(() => {
-    const t = new URLSearchParams(location.hash.split('?')[1] ?? '').get('table');
-    if (t && wsId && t !== target) ws.setOverviewTarget(wsId, t);
+    const apply = () => {
+      const t = new URLSearchParams(location.hash.split('?')[1] ?? '').get('table');
+      if (t && wsId && t !== useWorkspace.getState().overviewTarget[wsId]) ws.setOverviewTarget(wsId, t);
+    };
+    apply();
+    window.addEventListener('hashchange', apply);
+    return () => window.removeEventListener('hashchange', apply);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId]);
 
@@ -104,8 +111,11 @@ export function OverviewPage() {
   const loading = ov.state === 'loading' || ov.state === 'restoring' || ov.state === 'revalidating';
   const error = ov.state === 'error' ? ov.error : null;
 
+  const checked = useRef<{ target: string; catalog: unknown } | null>(null);
   useEffect(() => {
     if (!ws.catalog || !wsId) return;
+    // The store, not this render: a link (?table=) may have set the target in the same commit.
+    const target = useWorkspace.getState().overviewTarget[wsId] ?? null;
     const first = ws.catalog.files[0]?.path ?? ws.catalog.objects[0]?.name ?? null;
     if (!target) {
       if (first) setTarget(first);
@@ -116,7 +126,16 @@ export function OverviewPage() {
     const isQuery = /^(select|with|from)\b/i.test(target);
     const isRemote = /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || /^[A-Za-z_][\w]*\.[A-Za-z_][\w]*\.[A-Za-z_][\w]*$/.test(target);
     const exists = isQuery || isRemote || ws.catalog.files.some((f) => f.path === target) || ws.catalog.objects.some((o) => o.name === target || `${o.schema}.${o.name}` === target);
-    if (!exists) setTarget(first);
+    if (exists) return;
+    // Not in the catalog: it may be newer than the catalog (a table just created, a link to it). Look once more first.
+    if (checked.current?.target !== target) {
+      checked.current = { target, catalog: ws.catalog };
+      void ws.loadCatalog(true);
+      return;
+    }
+    // Only once a newer catalog has arrived.
+    if (checked.current.catalog === ws.catalog) return;
+    setTarget(first);
   }, [ws.catalog, target, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onFiles = async (files: File[]) => {
@@ -206,11 +225,14 @@ export function OverviewPage() {
         {!target ? (
           <Empty icon={<UploadCloud />} title="Add a dataset to get started" hint="Drop a Parquet, CSV or JSON file on Sources, or connect a database or bucket. DuckView profiles it on the spot: size, types, nulls, distributions and a sample." action={<a href="#/connections" className="text-xs text-accent-300 hover:underline">Connect a source</a>} />
         ) : loading && !overview ? (
-          <div className="flex h-full items-center justify-center gap-2 text-body text-zinc-400">
-            <Spinner /> Profiling {target}…
+          <div className="space-y-6 px-5 pt-4" aria-busy="true" data-testid="dataset-loading">
+            <div className="flex items-center gap-2 text-xs text-zinc-400"><Spinner className="h-3.5 w-3.5" /> Profiling {target}: counting rows, reading types, measuring nulls…</div>
+            <Skeleton className="h-6 w-64" />
+            <div className="grid grid-cols-2 gap-8 border-b border-zinc-800 pb-5 @2xl:grid-cols-5">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} lines={2} />)}</div>
+            <div className="grid gap-8 @4xl:grid-cols-2"><Skeleton lines={6} /><Skeleton lines={6} /></div>
           </div>
         ) : error ? (
-          <div className="m-5 rounded-lg border border-red-500/30 bg-red-500/5 p-4 font-mono text-xs text-red-300">{error}</div>
+          <ErrorState error={error} onRetry={ov.refresh} title={`${target} could not be profiled`} />
         ) : overview ? (
           <>
             <div className="shrink-0 px-5 pt-4">
@@ -229,6 +251,7 @@ export function OverviewPage() {
                   {overview.kind === 'table' && ws.activeId && <QualityChip workspaceId={ws.activeId} relation={overview.target} />}
                   {overview.kind === 'table' && ws.activeId && <CommentsControl key={overview.target} workspaceId={ws.activeId} targetType="table" targetId={overview.target} targetLabel={overview.target} />}
                   <CacheChip state={ov.state} computedAt={ov.computedAt} fromCache={ov.fromCache} serverCached={ov.serverCached} onRefresh={ov.refresh} verb="profiled" />
+                  {overview.kind === 'table' && <Button size="sm" variant="ghost" onClick={() => (location.hash = `#/governance/lineage?focus=${encodeURIComponent(overview.target)}`)} title="Where this table comes from and what uses it"><Network className="h-3.5 w-3.5" /> Lineage</Button>}
                   <Button size="sm" variant="ghost" onClick={() => { if (target) cp.setTargets([target]); cp.toggle(true); }}><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
                   <Button size="sm" variant="primary" onClick={() => openInQuery(`SELECT * FROM ${relation} LIMIT 100;`)}>Open in SQL <ArrowRight className="h-3.5 w-3.5" /></Button>
                 </div>
@@ -269,7 +292,7 @@ export function OverviewPage() {
                         <ul className="divide-y divide-zinc-800/70 border-y border-zinc-800">
                           {attention.map((c) => (
                             <li key={c.name} className="flex items-center gap-3 py-1.5 text-xs">
-                              <span className="min-w-0 flex-1 truncate font-mono text-zinc-200">{c.name}</span>
+                              <button className="min-w-0 flex-1 truncate text-left font-mono text-zinc-200 hover:text-accent-300" onClick={() => setColumnDetail(c.name)} title="Column details">{c.name}</button>
                               <TypePill type={c.type} />
                               <span className="h-1.5 w-24 overflow-hidden rounded-full bg-zinc-800"><span className="block h-full rounded-full" style={{ width: `${Math.min(100, c.null_percentage)}%`, background: nullTone(c.null_percentage) }} /></span>
                               <span className="w-12 text-right tabular-nums text-zinc-400">{c.null_percentage.toFixed(c.null_percentage < 1 ? 1 : 0)}%</span>
@@ -283,7 +306,7 @@ export function OverviewPage() {
                       <ul className="grid grid-cols-2 gap-x-6 border-y border-zinc-800 py-1 text-xs @5xl:grid-cols-3">
                         {overview.columns.slice(0, 18).map((c) => (
                           <li key={c.name} className="flex min-w-0 items-center justify-between gap-2 py-1">
-                            <span className="truncate font-mono text-zinc-200">{c.name}</span>
+                            <button className="truncate text-left font-mono text-zinc-200 hover:text-accent-300" onClick={() => setColumnDetail(c.name)} title="Column details">{c.name}</button>
                             <TypePill type={c.type} />
                           </li>
                         ))}
@@ -310,6 +333,7 @@ export function OverviewPage() {
                   label="Columns"
                   rows={overview.columns}
                   rowKey={(c) => c.name}
+                  onRowClick={(c) => setColumnDetail(c.name)}
                   columns={[
                     { key: 'c0', header: '#', width: 'w-10', cell: (c) => <span className="text-zinc-600">{overview.columns.indexOf(c) + 1}</span> },
                     { key: 'column', header: 'Column', sortValue: (c) => c.name, cell: (c) => <><button className="text-zinc-100 hover:text-accent-300" onClick={() => openInQuery(`SELECT ${quoteIdent(c.name)}, count(*) AS n FROM ${relation} GROUP BY 1 ORDER BY 2 DESC LIMIT 20;`)} title="Value counts in SQL">
@@ -374,6 +398,16 @@ export function OverviewPage() {
             </div>
           </>
         ) : null}
+        {overview && (
+          <ColumnDetail
+            column={overview.columns.find((c) => c.name === columnDetail) ?? null}
+            rowCount={overview.row_count}
+            relation={relation}
+            onClose={() => setColumnDetail(null)}
+            onQuery={(q) => { setColumnDetail(null); openInQuery(q); }}
+            onAsk={(name) => { setColumnDetail(null); if (target && wsId) { cp.setTargets([target]); cp.toggle(true); void cp.send({ workspaceId: wsId, message: `What should I know about the column ${name} of ${relation}? Describe its values, anything unusual, and how it relates to the other columns.` }); } }}
+          />
+        )}
       </main>
       }
     />

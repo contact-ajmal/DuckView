@@ -1238,6 +1238,27 @@ try {
     await key('Escape');
     report.details.charts = 1;
   }
+  else if (scenario === 'data-explorer') {
+    // A dataset, then one of its columns in depth, then where the table comes from.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = async (sql) => (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) })).json();
+    await q("CREATE OR REPLACE TABLE e2e_explorer AS SELECT range AS id, (['north', 'south', 'south', 'east'])[1 + range % 4] AS region, CASE WHEN range % 10 = 0 THEN NULL ELSE range * 2.5 END AS amount FROM range(200)");
+    cleanup = async () => { await q('DROP TABLE IF EXISTS e2e_explorer'); };
+    await evaluate(`location.hash = '#/data?table=e2e_explorer'; 'ok'`);
+    await waitFor(`document.querySelector('[data-testid="dataset-name"]')?.textContent === 'e2e_explorer'`, 30000, 'dataset overview');
+    report.details.object = await evaluate(`document.querySelector('[data-testid="page-object"]')?.textContent`);
+    await waitFor(`[...document.querySelectorAll('[data-testid="dataset-overview"] button[title="Column details"]')].some(b => b.textContent === 'region')`, 10000, 'column list');
+    await evaluate(`[...document.querySelectorAll('[data-testid="dataset-overview"] button[title="Column details"]')].find(b => b.textContent === 'region').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="column-detail"]')`, 5000, 'column detail');
+    report.details.column = await evaluate(`({ stats: [...document.querySelectorAll('[data-testid="column-detail"] dt')].map(d => d.textContent), values: [...document.querySelectorAll('[data-testid="column-detail"] li span:first-child')].map(s => s.textContent).slice(0, 3) })`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_column.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`document.querySelector('[data-testid="column-detail"]').closest('[role=dialog]').querySelector('[aria-label="Close"]').click(); 'ok'`);
+    await waitFor(`!document.querySelector('[data-testid="column-detail"]')`, 3000, 'detail closed');
+    await clickButton('Lineage');
+    await waitFor(`location.hash.startsWith('#/governance/lineage?focus=e2e_explorer')`, 5000, 'lineage link');
+    report.details.lineageHash = await evaluate(`location.hash`);
+    report.details.charts = 1;
+  }
   else if (scenario === 'orchestration') {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
@@ -2079,6 +2100,11 @@ try {
     if (!/FROM nowhere_at_all/.test(d.selection ?? '')) problems.push(`go to line selected: ${JSON.stringify(d.selection)}`);
     if (d.saveFocus !== 'INPUT') problems.push(`save dialog focus: ${d.saveFocus}`);
     if ((d.shortcuts ?? []).length !== 6) problems.push(`shortcuts: ${JSON.stringify(d.shortcuts)}`);
+  }
+  if (scenario === 'data-explorer') {
+    if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);
+    if (JSON.stringify(d.column?.stats?.slice(0, 2)) !== JSON.stringify(['Missing', 'Distinct values'])) problems.push(`column stats: ${JSON.stringify(d.column)}`);
+    if (d.column?.values?.[0] !== 'south') problems.push(`most common value: ${JSON.stringify(d.column?.values)}`);
   }
   if (scenario === 'orchestration') {
     if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);
