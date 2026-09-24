@@ -1310,6 +1310,55 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
       },
     }),
 
+    // ---------------------------------------------------------------- usage & templates
+    define({
+      name: 'get_usage',
+      title: 'Usage and cost',
+      description: 'What DuckView was used for and what it cost over the last days: queries and compute time (people, agents, pipelines), AI tokens by model, storage, the cost of each at the configured rates, the busiest workspaces and people, the most expensive queries, and budgets with this month\'s spend and forecast. Administrators see the whole organisation; others their own usage.',
+      inputSchema: { days: z.number().int().min(1).max(366).optional().describe('default 30'), workspace_id: z.string().optional().describe('only this workspace') },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { days, workspace_id }) {
+        const r = await env.ctx.usage.report(env.principal, { days, workspace_id: workspace_id ?? null });
+        const budgets = await env.ctx.usage.listBudgets(env.principal, workspace_id ?? null).catch(() => []);
+        const money = (n: number) => `${n.toFixed(2)} ${r.currency}`;
+        const t = r.totals;
+        const lines = [
+          `**${r.scope === 'org' ? 'Organisation' : 'Your'} usage, last ${r.range.days} days** — ${money(t.cost.total)} (compute ${money(t.cost.compute)}, AI ${money(t.cost.ai)}, storage ${money(t.cost.storage)})`,
+          `- ${t.queries} queries (${t.errors} failed), ${(t.query_seconds / 3600).toFixed(2)} h of query time; ${t.pipeline_runs} pipeline runs, ${(t.pipeline_seconds / 3600).toFixed(2)} h`,
+          `- ${t.ai_turns} AI turns, ${t.ai_input_tokens + t.ai_output_tokens} tokens${t.byok_ai_cost ? ` (plus ${money(t.byok_ai_cost)} on people's own keys)` : ''}${t.unpriced_models.length ? `; no price for ${t.unpriced_models.join(', ')}` : ''}`,
+          `- storage ${(t.storage_bytes / 1e9).toFixed(3)} GB`,
+          ...(r.workspaces.length ? ['', '**Workspaces**', ...r.workspaces.slice(0, 8).map((w) => `- ${w.name}: ${money(w.cost.total)} · ${w.queries} queries · ${w.ai_tokens} AI tokens`)] : []),
+          ...(r.top_queries.length ? ['', '**Most expensive queries**', ...r.top_queries.slice(0, 5).map((q) => `- ${q.runs}× · ${q.total_seconds.toFixed(1)} s · ${money(q.cost)}: \`${q.sql.replace(/\s+/g, ' ').slice(0, 120)}\``)] : []),
+          ...(budgets.length ? ['', '**Budgets this month**', ...budgets.map((b) => `- ${b.name}: ${money(b.spent)} of ${money(b.amount)} (${b.percent}%), forecast ${money(b.forecast_spend)}`)] : []),
+        ];
+        return { content: [text(lines.join('\n'))], structuredContent: { status: 'ok', report: r, budgets } };
+      },
+    }),
+    define({
+      name: 'list_templates',
+      title: 'List templates',
+      description: 'Templates that install ready-made analytics into a workspace: saved queries, dashboards, notebooks, metrics and data quality checks for a subject (e-commerce sales, SaaS subscriptions, web analytics, support tickets, and those people in the organisation published). Each lists the tables it reads; install_template maps them to the workspace\'s tables or creates sample data.',
+      inputSchema: { q: z.string().max(200).optional().describe('words to search for') },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { q }) {
+        const list = await env.ctx.templates.list(env.principal, { q });
+        const lines = list.map((t) => `- **${t.name}** (\`${t.id}\`, ${t.category}${t.source === 'builtin' ? ', built in' : `, by ${t.author ?? 'someone'}`}${t.status !== 'published' ? `, ${t.status}` : ''}): ${t.description ?? ''} · reads ${t.contents.tables.join(', ') || 'no tables'} · ${t.contents.queries} queries, ${t.contents.dashboards} dashboards, ${t.contents.notebooks} notebooks, ${t.contents.metrics} metrics, ${t.contents.quality} quality suites${t.contents.sample_data ? ' · has sample data' : ''}`);
+        return { content: [text(lines.length ? lines.join('\n') : 'No templates match.')], structuredContent: { status: 'ok', templates: list } };
+      },
+    }),
+    define({
+      name: 'install_template',
+      title: 'Install a template',
+      description: 'Installs a template into the workspace: its saved queries, dashboards, notebooks, metrics and quality checks. table_map maps each table the template reads to one of the workspace ({"orders": "sales.orders"}; the same name by default); sample_data creates the template\'s example tables where they are missing. Everything is created or nothing is.',
+      inputSchema: { template_id: z.string(), table_map: z.record(z.string(), z.string()).optional(), sample_data: z.boolean().optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { template_id, table_map, sample_data, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const { install, created } = await env.ctx.templates.install(env.principal, template_id, { workspace_id: ws, table_map, sample_data });
+        return { content: [text(`Installed **${install.template_name}**: ${created.queries.length} saved queries, ${created.dashboards.length} dashboards, ${created.notebooks.length} notebooks, ${created.quality.length} quality suites${created.semantic ? ', metrics' : ''}${created.tables.length ? `; sample tables ${created.tables.join(', ')}` : ''}.`)], structuredContent: { status: 'ok', install } };
+      },
+    }),
+
     // ---------------------------------------------------------------- other agents
     define({
       name: 'list_agents',
@@ -1353,4 +1402,4 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template'] as const;

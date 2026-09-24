@@ -281,6 +281,13 @@
       "when": 1790258639927,
       "tag": "0039_cluster",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790266177692,
+      "tag": "0040_usage_templates",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Code2, GitBranch, Workflow, Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, Layers, Pencil, AppWindow, ScrollText, Server } from 'lucide-react';
+import { Code2, GitBranch, Workflow, Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, Layers, Pencil, AppWindow, ScrollText, Server, ReceiptText } from 'lucide-react';
 import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type CloudConnection, type CopilotConfig, type LakehouseConnection } from '../../api/client';
 import { Gauge } from '../../components/Gauge';
 import { PageHeader, SideCard, Panel, KvRows, Tag } from '../../components/layout';
@@ -25,10 +25,12 @@ import { EmbedPanel } from './EmbedPanel';
 import { PgWirePanel } from './PgWirePanel';
 import { OrchestrationPanel } from './OrchestrationPanel';
 import { ClusterPanel } from './ClusterPanel';
+import { UsagePanel } from './UsagePanel';
 
-type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients' | 'orchestration' | 'cluster';
+type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients' | 'orchestration' | 'cluster' | 'usage';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; group: string; admin?: boolean }[] = [
   { id: 'account', group: 'General', label: 'Account', blurb: 'Your password and identity', icon: <UserRound className="h-4 w-4" /> },
+  { id: 'usage', group: 'General', label: 'Usage & cost', blurb: 'Queries, AI and storage, what they cost, and monthly budgets', icon: <ReceiptText className="h-4 w-4" /> },
   { id: 'teams', group: 'General', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
   { id: 'appearance', group: 'Appearance', label: 'Theme & fonts', blurb: 'Themes, fonts and interface size', icon: <Palette className="h-4 w-4" /> },
   { id: 'layout', group: 'Appearance', label: 'Layout', blurb: 'Show or hide parts of the interface', icon: <LayoutTemplate className="h-4 w-4" /> },
@@ -168,6 +170,7 @@ export function SettingsPage() {
           {cat === 'embedding' && ws.activeId && <EmbedPanel key={ws.activeId} workspaceId={ws.activeId} />}
           {cat === 'sql-clients' && <PgWirePanel />}
           {cat === 'cluster' && isAdmin && <ClusterPanel />}
+          {cat === 'usage' && <UsagePanel />}
           {cat === 'orchestration' && ws.activeId && <OrchestrationPanel key={ws.activeId} workspaceId={ws.activeId} />}
 
           {cat === 'hardware' && (

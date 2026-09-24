@@ -12,6 +12,7 @@ import { McpPage } from './features/mcp/McpPage';
 import { DashboardsPage } from './features/dashboards/DashboardsPage';
 import { ConnectionsPage } from './features/connections/ConnectionsPage';
 import { AppsPage } from './features/apps/AppsPage';
+import { TemplatesPage } from './features/templates/TemplatesPage';
 import { AlertsPage } from './features/alerts/AlertsPage';
 import { GovernancePage } from './features/governance/GovernancePage';
 import { TransformPage } from './features/transform/TransformPage';
@@ -91,6 +92,7 @@ export default function App() {
             {page === 'transform' && <TransformPage />}
             {page === 'settings' && <SettingsPage />}
             {page === 'mcp' && <McpPage />}
+            {page === 'templates' && <TemplatesPage />}
           </main>
           <CopilotDrawer />
         </div>

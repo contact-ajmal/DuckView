@@ -1059,6 +1059,69 @@ try {
     report.details.wsPrefix = String(wsid).slice(0, 8);
     report.details.charts = 1;
   }
+  else if (scenario === 'usage-cost') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    // Some work to count.
+    for (let i = 0; i < 3; i++) await j('POST', `/api/workspaces/${wsId}/query`, { sql: 'SELECT sum(range) FROM range(2000000)' });
+    const api = await j('GET', '/api/usage?days=7');
+    report.details.apiQueries = api.totals?.queries;
+    const budgetName = `E2E budget ${Date.now()}`;
+    cleanup = async () => {
+      for (const b of (await j('GET', '/api/usage/budgets')).budgets ?? []) if (b.name.startsWith('E2E budget')) await j('DELETE', `/api/usage/budgets/${b.id}`);
+    };
+    await send('Page.navigate', { url: `${BASE}/#/settings/usage` });
+    await waitFor(`!!document.querySelector('[data-testid="usage-total"]')`, 30000, 'usage totals');
+    await waitFor(`document.querySelectorAll('[data-testid="usage-chart"] rect').length > 5`, 10000, 'daily chart');
+    report.details.total = await evaluate(`document.querySelector('[data-testid="usage-total"]').textContent`);
+    report.details.workspaceRows = await evaluate(`document.querySelectorAll('[data-testid="usage-workspaces"] tbody tr').length`);
+    // 7 days.
+    await evaluate(`[...document.querySelectorAll('[role=tab], button')].find(b => b.textContent.trim() === '7 days').click(); 'ok'`);
+    await waitFor(`document.querySelector('[data-testid="usage-panel"]').innerText.includes('last 7 days')`, 10000, '7-day range');
+    // A budget, through the form.
+    await clickButton('Add budget');
+    await waitFor(`!!document.querySelector('[data-testid="budget-form"]')`, 5000, 'budget form');
+    await setField('input[name="budget-name"]', budgetName);
+    await setField('input[name="budget-amount"]', '1');
+    await setField('input[name="budget-thresholds"]', '1, 100');
+    await clickButton('Add budget', 'last');
+    await waitFor(`!document.querySelector('[data-testid="budget-form"]') && !!document.querySelector('[data-budget="${budgetName}"]')`, 10000, 'budget listed');
+    report.details.budget = await evaluate(`document.querySelector('[data-budget="${budgetName}"]').innerText.replace(/\\s+/g, ' ')`);
+    const csv = await (await authed('/api/usage/export.csv?by=day&days=7')).text();
+    report.details.csvHeader = csv.split('\n')[0];
+    report.details.charts = 1;
+  }
+  else if (scenario === 'templates') {
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const remembered = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const tmp = (await j('POST', '/api/workspaces', { name: `E2E templates ${Date.now()}`, active_db_path: ':memory:' })).workspace;
+    cleanup = async () => {
+      await evaluate(`localStorage.setItem('duckview.workspace', ${JSON.stringify(remembered)}); 'ok'`);
+      await j('DELETE', `/api/workspaces/${tmp.id}`);
+    };
+    await evaluate(`localStorage.setItem('duckview.workspace', ${JSON.stringify(tmp.id)}); 'ok'`);
+    await send('Page.reload');
+    await waitFor(`!!document.querySelector('nav[aria-label="Primary"]')`, 30000, 'signed in');
+    await sleep(800);
+    await evaluate(`location.hash = '#/templates'; 'ok'`);
+    await waitFor(`document.querySelectorAll('[data-testid="template-grid"] [data-template]').length >= 4`, 30000, 'template gallery');
+    report.details.cards = await evaluate(`[...document.querySelectorAll('[data-testid="template-grid"] [data-template]')].map(b => b.dataset.template)`);
+    await evaluate(`document.querySelector('[data-template="E-commerce sales"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="template-drawer"]') && document.querySelector('[data-testid="template-drawer"]').innerText.includes('Will be created with sample data')`, 15000, 'table check');
+    report.details.drawer = await evaluate(`[...document.querySelectorAll('[data-testid="template-drawer"] [data-table]')].map(d => d.innerText.split('\\n').slice(0, 3).join(' | '))`);
+    await evaluate(`[...document.querySelectorAll('[data-testid="template-drawer"] button')].find(b => b.textContent.startsWith('Install into')).click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="template-installed"]')`, 60000, 'installed');
+    await clickButton('Open the dashboard');
+    await waitFor(`document.querySelectorAll('.react-grid-item').length === 7 && document.querySelectorAll('.react-grid-item canvas').length >= 3`, 40000, 'dashboard widgets rendered');
+    await sleep(1500);
+    report.details.widgets = await evaluate(`[...document.querySelectorAll('.react-grid-item')].map(w => w.innerText.split('\\n')[0])`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
+    const inst = await j('GET', `/api/workspaces/${tmp.id}/template-installs`);
+    report.details.installs = (inst.installs ?? []).map((i) => [i.template_name, i.objects.queries.length, i.objects.tables]);
+    await send('Page.navigate', { url: `${BASE}/#/templates` });
+    await waitFor(`!!document.querySelector('[data-testid="template-installs"]')`, 15000, 'installed list');
+    report.details.charts = 1;
+  }
   else if (scenario === 'orchestration') {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
@@ -1865,6 +1928,19 @@ try {
     const one = (d.nodes ?? []).find((n) => n[0] === 'e2e-node-1');
     if (!one || !one[1].includes(`workspace ${d.wsPrefix}`)) problems.push(`nodes: ${JSON.stringify(d.nodes)}`);
     if (!/2 of 2 nodes answering\. This page was served by e2e-node-2/.test(d.header ?? '')) problems.push(`header: ${d.header}`);
+  }
+  if (scenario === 'usage-cost') {
+    if (!(d.apiQueries >= 3)) problems.push(`api queries: ${d.apiQueries}`);
+    if (!/\d/.test(d.total ?? '')) problems.push(`total: ${d.total}`);
+    if (!(d.workspaceRows >= 1)) problems.push('no workspace rows');
+    if (!/E2E budget \d+ Organisation · notifies at 1, 100%/.test(d.budget ?? '')) problems.push(`budget: ${d.budget}`);
+    if (d.csvHeader !== 'date,queries,compute_seconds,ai_tokens,compute_cost,ai_cost,storage_cost,total_cost') problems.push(`csv: ${d.csvHeader}`);
+  }
+  if (scenario === 'templates') {
+    for (const n of ['E-commerce sales', 'SaaS subscriptions', 'Web analytics', 'Support tickets']) if (!(d.cards ?? []).includes(n)) problems.push(`missing card ${n}`);
+    if ((d.drawer ?? []).length !== 2) problems.push(`drawer: ${JSON.stringify(d.drawer)}`);
+    if (JSON.stringify(d.widgets) !== JSON.stringify(['Revenue (30 days)', 'Orders (30 days)', 'Average order value', 'Revenue by month', 'Revenue by region', 'Top customers', 'Refund rate'])) problems.push(`widgets: ${JSON.stringify(d.widgets)}`);
+    if (JSON.stringify(d.installs) !== JSON.stringify([['E-commerce sales', 5, ['orders', 'customers']]])) problems.push(`installs: ${JSON.stringify(d.installs)}`);
   }
   if (scenario === 'orchestration') {
     if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);

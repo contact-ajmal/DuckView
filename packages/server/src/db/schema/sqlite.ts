@@ -1665,3 +1665,83 @@ export const clusterLeases = sqliteTable(
   (t) => [index('cluster_leases_node_idx').on(t.node_id)],
 );
 export type ClusterLease = typeof clusterLeases.$inferSelect;
+
+/** A monthly spending limit for the organisation (workspace_id null) or one workspace, and whom to tell. */
+export const usageBudgets = sqliteTable(
+  'usage_budgets',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    workspace_id: text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Per calendar month, in cents of usage.currency. */
+    amount_cents: integer('amount_cents').notNull(),
+    /** Percentages of the amount that notify (actual spend, or the month-end forecast with forecast true). */
+    thresholds: text('thresholds', { mode: 'json' }).$type<number[]>().notNull().default([80, 100]),
+    forecast: integer('forecast', { mode: 'boolean' }).notNull().default(false),
+    channel_ids: text('channel_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** The month and thresholds already notified, e.g. "2026-09:80,100" (claimed atomically). */
+    notified: text('notified').notNull().default(''),
+    created_by: text('created_by').notNull(),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('usage_budgets_workspace_idx').on(t.workspace_id)],
+);
+export type UsageBudget = typeof usageBudgets.$inferSelect;
+
+export const TEMPLATE_STATUSES = ['private', 'pending', 'published'] as const;
+export type TemplateStatus = (typeof TEMPLATE_STATUSES)[number];
+/** What a template installs. SQL, YAML and relations name tables as {{table:<name>}}, mapped at install time. */
+export interface TemplateBody {
+  tables: { name: string; description?: string | null; columns: { name: string; type: string }[]; sample_sql?: string | null }[];
+  queries: { key: string; name: string; folder?: string | null; description?: string | null; sql: string }[];
+  dashboards: { name: string; description?: string | null; widgets: { title: string; widget_type: WidgetType; query?: string | null; sql?: string | null; chart_config?: WidgetChartConfig; w?: number; h?: number }[] }[];
+  notebooks: { title: string; cells: { type: NotebookCellType; name?: string | null; source: string; input?: NotebookCell['input'] }[] }[];
+  semantic?: string | null;
+  quality: { name: string; relation: string; checks: QualityCheck[] }[];
+}
+/** Templates people published (the built-in ones live in code: templates/builtin.ts). */
+export const templates = sqliteTable(
+  'templates',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    category: text('category').notNull().default('Other'),
+    tags: text('tags', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    author_id: text('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: TEMPLATE_STATUSES }).notNull(),
+    body: text('body', { mode: 'json' }).$type<TemplateBody>().notNull(),
+    installs: integer('installs').notNull().default(0),
+    reviewed_by: text('reviewed_by'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('templates_status_idx').on(t.status), index('templates_author_idx').on(t.author_id)],
+);
+export type Template = typeof templates.$inferSelect;
+
+/** What an install created, so it can be listed and removed. */
+export interface TemplateInstallObjects {
+  queries: string[];
+  dashboards: string[];
+  notebooks: string[];
+  quality: string[];
+  tables: string[];
+  semantic: boolean;
+}
+export const templateInstalls = sqliteTable(
+  'template_installs',
+  {
+    id: text('id').primaryKey(),
+    template_id: text('template_id').notNull(),
+    template_name: text('template_name').notNull(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull(),
+    table_map: text('table_map', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+    objects: text('objects', { mode: 'json' }).$type<TemplateInstallObjects>().notNull(),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('template_installs_ws_idx').on(t.workspace_id)],
+);
+export type TemplateInstall = typeof templateInstalls.$inferSelect;

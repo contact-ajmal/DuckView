@@ -40,7 +40,7 @@ A hardened, stateful, native-DuckDB data platform: multi-tenant SQL workspaces w
 │  Mosaic: exec-policed connector · materialised datasets · spec validation    │
 │  Data apps: runner (subprocess·docker·k8s) · review · cookie proxy /apps/:id │
 │  Copilot: 14 providers, keys write-only · usage per session and token       │
-│  Agent tools: one registry → MCP (58 tools · 4 resources · 6 prompts)        │
+│  Agent tools: one registry → MCP (61 tools · 4 resources · 6 prompts)        │
 │               + REST façade /api/agent/v1/tools + OpenAPI 3.0               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ EngineManager ─ one DuckDB instance per workspace (LRU + idle TTL)           │
@@ -817,6 +817,47 @@ Config (`streams`):
 - **Prefect:** `duckview.prefect` has tasks (`run_sync`, `run_dbt`, `run_quality_suite`, `run_reverse_sync`, `run_notebook`, `run_agent`, `run_sql_check`) and a `DuckViewCredentials` block.
 - Install with `pip install "duckview[airflow]"`, `[dagster]` or `[prefect]`.
 
+## Usage & cost
+
+**What DuckView was used for, and what it cost** (`services/usage.ts`, Settings → Usage & cost, the `get_usage` tool). Everything is priced at rates set in the `usage` section of the configuration.
+
+| Part | Counted from | Priced by |
+|---|---|---|
+| Compute | Query time from the audit log: the workbench, dashboards, Mosaic, notebooks, BI tools over the Postgres protocol, lakehouse queries and agents. Pipeline time: syncs, reverse syncs and dbt runs. | `usage.compute_per_hour` (0.40) per hour |
+| AI | DuckCopilot turns and DuckView agent runs, with their input and output tokens | Per million tokens by model id: built-in list prices, overridden and extended by `usage.model_prices` (a key matches every model whose id contains it; the longest match wins). Local models (Ollama, LM Studio) cost nothing. |
+| Storage | The size of each workspace's database file and its WAL | `usage.storage_per_gb_month` (0.023), for the days of the period |
+
+- **What you see:** administrators see the whole organisation, broken down by day, workspace, person, source (people, agents or pipelines), AI model and most expensive queries. Everyone else sees their own usage and the workspaces they own.
+- **Special cases:**
+  - AI turns paid with a person's own key (BYOK) are shown but not counted in the total.
+  - Models without a price are listed so you can add one.
+  - Usage by deleted people and deleted workspaces is combined into one row each.
+- **CSV export:** `GET /api/usage/export.csv?by=day|workspace|user`.
+- **Budgets:** each budget is a monthly amount, for the organisation (administrators) or one workspace (its owners).
+  - Each budget has thresholds (80% and 100% by default). With `forecast` set, it can alert on the month-end forecast instead of actual spend.
+  - It notifies notification channels once per threshold and month. Each notification is claimed atomically, so in a cluster only one node sends it.
+  - Budgets are checked every `usage.budget_check_minutes` (60).
+  - Changing a budget starts its notifications over.
+- **Currency:** `usage.currency` (USD) is used for display only; nothing is converted.
+
+## Templates
+
+**Ready-made analytics installed in one step** (`services/templates.ts`, Home → Templates, the `list_templates` and `install_template` tools). A template holds saved queries, grid dashboards, notebooks, semantic-layer metrics and data quality suites.
+
+- **Built in** (`templates/builtin.ts`): E-commerce sales (orders, customers), SaaS subscriptions (subscriptions), Web analytics (events) and Support tickets (tickets). Each comes with sample data.
+- **Tables:** a template refers to the tables it reads as `{{table:<name>}}`.
+  - Installing maps each one to a table of the workspace (`schema.table` allowed; the same name by default).
+  - `POST /api/templates/:id/check` reports which tables exist and which columns are missing.
+  - With `sample_data`, tables that are missing are created from the template's sample SQL. The sample SQL must be a single read-only SELECT.
+- **All or nothing:** a failed install removes what it had already created. Each install is recorded, and removing it deletes its queries, dashboards, notebooks and quality suites, and its sample tables with `drop_tables=1`. Metrics stay, because other things may use them.
+- **Metrics:** the template's semantic models and metrics are added to the workspace's. Where a name already exists, the workspace keeps its own.
+- **Publishing** (`POST /api/templates`):
+  - Choose dashboards, saved queries, notebooks, quality suites and the metrics of a workspace; the saved queries a dashboard uses come along.
+  - Tables the SQL reads after `FROM` or `JOIN`, the metrics' tables and the suites' relations become placeholders.
+  - Optionally include up to 500 sample rows of each table.
+  - A template is private unless published for everyone. An administrator's template is published at once; anyone else's waits for review (`POST /api/templates/:id/review {approve}`).
+- **Files:** `GET /api/templates/:id/export` gives a `.duckview-template.json` file, and `POST /api/templates/import` adds one as a private template.
+
 ## Cluster mode (horizontal scale)
 
 **Several DuckView nodes behind one load balancer** (`services/cluster.ts`, `engine/remote.ts`, Settings → Cluster). The nodes share the metadata database (PostgreSQL) and the data directory (a ReadWriteMany volume). They coordinate through two tables:
@@ -1040,6 +1081,8 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Connections | `GET /api/connections/types` · `GET/POST/DELETE /api/connections` |
 | Ops | `GET /api/system` · `GET /api/audit` · `GET/POST/PATCH/DELETE /api/admin/users` (`PATCH {role?, disabled?}`) · `GET /api/admin/scim` · `POST/DELETE /api/admin/scim/token` · `/scim/v2/{Users,Groups,ServiceProviderConfig,ResourceTypes,Schemas}` · `GET /api/admin/engines` · `POST /api/admin/engines/:id/evict` · `GET /api/admin/config` |
 | Transform | `GET /api/dbt/status` · `POST /api/admin/dbt/install` · `GET/POST /api/workspaces/:id/dbt/projects` · `GET/PATCH/DELETE /api/dbt/projects/:id` · `POST /api/dbt/projects/:id/runs` · `GET /api/dbt/projects/:id/runs` · `GET /api/dbt/runs/:id` · `GET/PUT /api/workspaces/:id/semantic` · `POST …/semantic/validate` · `POST …/semantic/query` · `GET …/semantic/dimensions` · `POST …/semantic/scaffold` |
+| Usage | `GET /api/usage?days&workspace_id&mine` · `GET /api/usage/export.csv?by=day\|workspace\|user` · `GET/POST /api/usage/budgets` · `PATCH/DELETE /api/usage/budgets/:id` |
+| Templates | `GET /api/templates` · `GET /api/templates/:id` · `POST /api/templates/:id/{check,install,review}` · `GET /api/workspaces/:id/template-installs` · `DELETE /api/template-installs/:id` · `POST /api/templates` (publish) · `PATCH/DELETE /api/templates/:id` · `GET /api/templates/:id/export` · `POST /api/templates/import` |
 | Cluster | `GET /api/admin/cluster` (nodes, heartbeats, leases) · node-to-node, with the cluster secret: `POST /internal/cluster/{engine,stream,events,evict,streams/stop}` |
 | Probes | `GET /healthz` · `GET /readyz` · `GET /metrics` |
 

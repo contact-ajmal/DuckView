@@ -157,7 +157,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats, ORCHESTRATION_KINDS, ORCHESTRATION_STATUSES } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats, ORCHESTRATION_KINDS, ORCHESTRATION_STATUSES, TEMPLATE_STATUSES, type TemplateBody, type TemplateInstallObjects } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -1071,4 +1071,56 @@ export const clusterLeases = pgTable(
     expires_at: ts('expires_at').notNull(),
   },
   (t) => [index('cluster_leases_node_idx').on(t.node_id)],
+);
+
+export const usageBudgets = pgTable(
+  'usage_budgets',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    workspace_id: text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
+    amount_cents: integer('amount_cents').notNull(),
+    thresholds: jsonb('thresholds').$type<number[]>().notNull().default([80, 100]),
+    forecast: boolean('forecast').notNull().default(false),
+    channel_ids: jsonb('channel_ids').$type<string[]>().notNull().default([]),
+    notified: text('notified').notNull().default(''),
+    created_by: text('created_by').notNull(),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('usage_budgets_workspace_idx').on(t.workspace_id)],
+);
+
+export const templates = pgTable(
+  'templates',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    category: text('category').notNull().default('Other'),
+    tags: jsonb('tags').$type<string[]>().notNull().default([]),
+    author_id: text('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: TEMPLATE_STATUSES }).notNull(),
+    body: jsonb('body').$type<TemplateBody>().notNull(),
+    installs: integer('installs').notNull().default(0),
+    reviewed_by: text('reviewed_by'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('templates_status_idx').on(t.status), index('templates_author_idx').on(t.author_id)],
+);
+
+export const templateInstalls = pgTable(
+  'template_installs',
+  {
+    id: text('id').primaryKey(),
+    template_id: text('template_id').notNull(),
+    template_name: text('template_name').notNull(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull(),
+    table_map: jsonb('table_map').$type<Record<string, string>>().notNull().default({}),
+    objects: jsonb('objects').$type<TemplateInstallObjects>().notNull(),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('template_installs_ws_idx').on(t.workspace_id)],
 );

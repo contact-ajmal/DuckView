@@ -404,6 +404,18 @@ export const ConfigSchema = z.object({
       lease_seconds: z.coerce.number().int().min(3).max(3600).default(30),
     })
     .default({}),
+  /** Usage & cost: the rates the usage dashboard prices activity with, and how often budgets are checked. */
+  usage: z
+    .object({
+      currency: z.string().min(1).max(8).default('USD'),
+      /** Per hour of query time on the engines (DuckView compute). */
+      compute_per_hour: z.coerce.number().min(0).default(0.4),
+      storage_per_gb_month: z.coerce.number().min(0).default(0.023),
+      /** Per million tokens, by model id (a key matches every model whose id contains it; the longest match wins). Added to the built-in list prices. */
+      model_prices: z.record(z.string(), z.object({ input: z.coerce.number().min(0), output: z.coerce.number().min(0) })).default({}),
+      budget_check_minutes: z.coerce.number().int().min(1).max(1440).default(60),
+    })
+    .default({}),
   /** The PostgreSQL wire protocol: BI tools and drivers connect to workspaces as if they were Postgres databases. */
   pgwire: z
     .object({

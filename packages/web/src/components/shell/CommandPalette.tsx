@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Search, CornerDownLeft, Table2, FileText, LayoutDashboard, Plus, Sparkles, Moon, Sun, Briefcase, ArrowRight, Upload, FileCode2 } from 'lucide-react';
+import { Search, CornerDownLeft, Table2, FileText, LayoutDashboard, Plus, Sparkles, Moon, Sun, Briefcase, ArrowRight, Upload, FileCode2, LayoutTemplate, ReceiptText } from 'lucide-react';
 import { SECTIONS, SUBPAGES } from '../../app/routes';
 import { useWorkspace } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
@@ -69,6 +69,8 @@ export function CommandPalette() {
       { id: 'new-notebook', group: 'Actions', label: 'New notebook', icon: <Plus className="h-4 w-4" />, keywords: 'analysis cells markdown', run: go('#/notebooks?new=1') },
       { id: 'new-dashboard', group: 'Actions', label: 'New dashboard', icon: <LayoutDashboard className="h-4 w-4" />, run: go('#/dashboards?new=1') },
       { id: 'upload', group: 'Actions', label: 'Add data files', icon: <Upload className="h-4 w-4" />, keywords: 'upload import csv parquet', run: go('#/data') },
+      { id: 'templates', group: 'Actions', label: 'Install a template', icon: <LayoutTemplate className="h-4 w-4" />, keywords: 'template marketplace gallery starter ecommerce saas', run: go('#/templates') },
+      { id: 'usage', group: 'Go to', label: 'Usage & cost', icon: <ReceiptText className="h-4 w-4" />, keywords: 'billing spend budget tokens', run: go('#/settings/usage') },
       { id: 'new-connection', group: 'Actions', label: 'Connect a source', icon: <Plus className="h-4 w-4" />, keywords: 'connection database warehouse s3', run: go('#/connections') },
     ];
     for (const s of SECTIONS) {

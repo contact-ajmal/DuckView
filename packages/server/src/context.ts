@@ -36,6 +36,8 @@ import { A2AService } from './services/a2a.js';
 import { StreamService } from './services/streams.js';
 import { PgWireServer } from './services/pgwire.js';
 import { OrchestrationService } from './services/orchestrate.js';
+import { UsageService } from './services/usage.js';
+import { TemplateService } from './services/templates.js';
 import { ClusterService } from './services/cluster.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
@@ -96,6 +98,8 @@ export interface AppContext {
   streams: StreamService;
   pgwire: PgWireServer;
   orchestrate: OrchestrationService;
+  usage: UsageService;
+  templates: TemplateService;
   cluster: ClusterService;
   /** Cluster mode: joins the cluster at this URL once the server listens (then starts stream consumers). */
   startCluster(advertiseUrl: string): Promise<void>;
@@ -262,6 +266,9 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     startStreams();
   };
   const orchestrate = new OrchestrationService(store);
+  const usage = new UsageService(cfg, store, workspaces, notifications, audit, engines.jail);
+  if (cfg.notifications.scheduler_enabled) usage.start();
+  const templates = new TemplateService(store);
   const pgwire = new PgWireServer(cfg, auth, workspaces, queries, audit);
   await pgwire.start().catch((err) => logger().error({ err: (err as Error).message }, 'The Postgres protocol listener could not start'));
   if (cfg.security.filesystem_mode === 'full') {
@@ -310,6 +317,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     streams,
     pgwire,
     orchestrate,
+    usage,
+    templates,
     cluster,
     startCluster,
     reverse,
@@ -332,6 +341,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       alerts.stop();
       snapshots.stop();
       auditExport.stop();
+      usage.stop();
       dbt.stop();
       quality.stop();
       insights.stop();
@@ -351,5 +361,6 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   agents.bind(ctx);
   hostedAgents.bind(ctx);
   orchestrate.bind(ctx);
+  templates.bind(ctx);
   return ctx;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { SquareTerminal, Database, LayoutDashboard, Sparkles, FileText, Table2, ArrowUpRight } from 'lucide-react';
+import { SquareTerminal, Database, LayoutDashboard, LayoutTemplate, Sparkles, FileText, Table2, ArrowUpRight } from 'lucide-react';
 import { api, formatBytes, timeAgo, storageKindOf, type Dashboard, type Insight, type SavedQuery, type SystemInfo } from '../../api/client';
 import { InsightCard } from '../transform/MonitorsPanel';
 import { useWorkspace } from '../../store/workspace';
@@ -122,6 +122,7 @@ export function HomePage({ onNewWorkspace }: { onNewWorkspace: () => void }) {
             <Button onClick={() => (location.hash = '#/data')}><Database className="h-3.5 w-3.5" /> Open data</Button>
             <Button onClick={() => (location.hash = '#/dashboards?new=1')}><LayoutDashboard className="h-3.5 w-3.5" /> Create dashboard</Button>
             <Button onClick={() => cp.toggle(true)}><Sparkles className="h-3.5 w-3.5" /> Ask AI</Button>
+            <Button onClick={() => (location.hash = '#/templates')}><LayoutTemplate className="h-3.5 w-3.5" /> Templates</Button>
           </div>
         </div>
 

@@ -7,7 +7,7 @@ import { House, Database, SquareTerminal, LayoutDashboard, AppWindow, Sparkles, 
 
 export type Section = 'home' | 'data' | 'sql' | 'dashboards' | 'apps' | 'ai' | 'connections' | 'settings';
 /** Which component renders the page. */
-export type Page = 'home' | 'data' | 'query' | 'notebooks' | 'transform' | 'governance' | 'dashboards' | 'alerts' | 'apps' | 'mcp' | 'connections' | 'settings';
+export type Page = 'home' | 'data' | 'query' | 'notebooks' | 'transform' | 'governance' | 'dashboards' | 'alerts' | 'apps' | 'mcp' | 'connections' | 'settings' | 'templates';
 
 export const SECTIONS: { id: Section; label: string; hash: string; icon: LucideIcon; hint: string }[] = [
   { id: 'home', label: 'Home', hash: '#/', icon: House, hint: 'Recent work and workspace status' },
@@ -74,6 +74,7 @@ export function parseRoute(hash = location.hash): Route {
   if (first === 'apps') return { section: 'apps', page: 'apps', sub: null, crumb: null };
   if (first === 'mcp' || first === 'agents') return { section: 'ai', page: 'mcp', sub: null, crumb: null };
   if (first === 'connections') return { section: 'connections', page: 'connections', sub: null, crumb: null };
+  if (first === 'templates') return { section: 'home', page: 'templates', sub: null, crumb: 'Templates' };
   if (first === 'settings') return { section: 'settings', page: 'settings', sub: null, crumb: null };
   return { section: 'home', page: 'home', sub: null, crumb: null };
 }
