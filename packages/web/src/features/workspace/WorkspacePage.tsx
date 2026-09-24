@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search, Send, XCircle, Keyboard } from 'lucide-react';
+import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search, Send, XCircle, Keyboard, Sparkles } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess, lakehouseEngine, engineConnectionId } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { fetchCached } from '../../lib/useCached';
@@ -548,6 +548,9 @@ export function WorkspacePage() {
                 <Input uiSize="sm" value={gridFilter} onChange={(e) => setGridFilter(e.target.value)} placeholder="Filter rows" aria-label="Filter result rows" className="h-[26px] w-40 rounded-md border border-zinc-800 bg-zinc-950 pl-6 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none" />
               </div>
               {gridFilter && <span className="text-xs tabular-nums text-zinc-500">{shownRows.length.toLocaleString()} of {result.rows.length.toLocaleString()}</span>}
+              <IconButton label="Ask AI about these results" onClick={() => { if (!wsId) return; cp.toggle(true); void cp.send({ workspaceId: wsId, message: 'What do these results show? Point out anything notable, and what to look at next.', action: 'explain', activeSql: sql, resultPreview: { columns: result.columns.map((c) => ({ name: c.name, type: c.type })), rows: result.rows.slice(0, 30), rowCount: result.rowCount } }); }} data-testid="ask-results">
+                <Sparkles className="h-3.5 w-3.5" />
+              </IconButton>
               <IconButton label={rowsCopied ? 'Copied' : 'Copy rows (tab-separated)'} onClick={() => { void navigator.clipboard.writeText(rowsToTsv(result.columns, shownRows)).then(() => { setRowsCopied(true); setTimeout(() => setRowsCopied(false), 1200); }); }}>
                 {rowsCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
               </IconButton>

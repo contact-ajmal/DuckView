@@ -39,6 +39,8 @@ export interface CopilotRequest {
   targets?: string[];
   /** The notebook open in the UI. */
   notebookId?: string | null;
+  /** What is on screen: the dataset, dashboard, query tab, app … the person is looking at (store/context.ts). */
+  page?: { kind: string; id?: string | null; label: string } | null;
   resultPreview?: { columns: { name: string; type: string }[]; rows: unknown[][]; rowCount?: number } | null;
   provider?: ProviderId;
   model?: string;
@@ -140,6 +142,7 @@ function renderContext(c: ChatContextSnapshot, cfg: DuckViewConfig): string {
   if (c.metrics) parts.push(`### Metrics defined in the semantic layer (compute these exactly as defined when asked; name the metric)\n${c.metrics.slice(0, 6000)}`);
   if (c.insights) parts.push(`### Unusual changes the metric monitors found lately (Transform → Metrics → Monitors; when asked what changed or why, start from these and break the metric down with duckview-metric blocks)\n${c.insights.slice(0, 3000)}`);
   if (c.quality) parts.push(`### Data quality checks (Data → Quality; when asked why data looks wrong, or before trusting a table, mention failing checks)\n${c.quality.slice(0, 4000)}`);
+  if (c.page) parts.push(`### On screen now (what "this", "here" and "it" usually mean)\n${c.page.slice(0, 5000)}`);
   if (c.notebook) parts.push(`### The notebook open on screen (answer with SQL that fits it: a new cell may query earlier cells by name; say which cell name to use)\n${c.notebook}`);
   if (c.reverse) parts.push(`### Reverse ETL: data this workspace sends out (Connections → Reverse ETL; a change to these queries changes what other systems receive)\n${c.reverse.slice(0, 3000)}`);
   if (c.dbt) parts.push(`### dbt projects of this workspace (Transform → dbt)\n${c.dbt.slice(0, 5000)}`);
@@ -341,6 +344,8 @@ export class CopilotService {
   builder: BuilderService | null = null;
   /** The notebook open in the UI, for prompts (set by the context). */
   notebooks: { promptSummary(p: Principal, id: string): Promise<string> } | null = null;
+  /** Describes the object on screen in words for the prompt (set by the context: dashboards, apps …). */
+  describePage: ((p: Principal, workspaceId: string, page: NonNullable<CopilotRequest['page']>) => Promise<string | null>) | null = null;
   /** Open comment threads, for prompts (set by the context). */
   comments: { promptSummary(workspaceId: string, targetType: 'notebook', targetId: string): Promise<string> } | null = null;
 
@@ -351,7 +356,7 @@ export class CopilotService {
     return threads ? `${nb}\nOpen comments on it (answer or address them when asked):\n${threads}` : nb;
   }
 
-  async buildContext(p: Principal, workspaceId: string, opts: { activeSql?: string | null; targets?: string[]; notebookId?: string | null } = {}): Promise<ChatContextSnapshot> {
+  async buildContext(p: Principal, workspaceId: string, opts: { activeSql?: string | null; targets?: string[]; notebookId?: string | null; page?: CopilotRequest['page'] } = {}): Promise<ChatContextSnapshot> {
     const { objects, files } = await this.queries.catalog(p, workspaceId);
     const conns = await this.cloud.list(p.userId);
     const snapshot: ChatContextSnapshot = {
@@ -367,6 +372,7 @@ export class CopilotService {
       reverse: (await this.reverse?.promptSummary(workspaceId).catch(() => '')) || undefined,
       insights: (await this.insights?.promptSummary(workspaceId).catch(() => '')) || undefined,
       notebook: (opts.notebookId && (await this.notebookContext(p, workspaceId, opts.notebookId))) || undefined,
+      page: opts.page ? (await this.describePage?.(p, workspaceId, opts.page).catch(() => null)) ?? `${opts.page.kind} "${opts.page.label}"` : undefined,
     };
     const targets = (opts.targets ?? []).filter(Boolean).slice(0, 3);
     if (targets.length) {
@@ -400,7 +406,9 @@ export class CopilotService {
     const conversationId = req.conversationId ?? newId();
     const started = performance.now();
 
-    const snapshot = await this.buildContext(p, req.workspaceId, { activeSql: req.activeSql, targets: req.targets, notebookId: req.notebookId });
+    // A dataset on screen is looked at in depth, like a picked target.
+    const targets = req.targets?.length ? req.targets : req.page?.kind === 'dataset' && req.page.id ? [req.page.id] : req.targets;
+    const snapshot = await this.buildContext(p, req.workspaceId, { activeSql: req.activeSql, targets, notebookId: req.notebookId, page: req.page });
     snapshot.provider = provider;
     snapshot.model = instance.model;
 

@@ -4,11 +4,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Bot, X, Send, Square, Settings2, Sparkles, Wrench, PlayCircle, FilePlus2, ArrowDownToLine, Trash2, History, ChevronDown, KeyRound, Loader2, LayoutDashboard, CheckCircle2, AlertTriangle, Workflow } from 'lucide-react';
 import { SaveDbtModelDialog, looksLikeDbtModel } from '../transform/SaveDbtModelDialog';
-import { useCopilot } from '../../store/copilot';
+import { useCopilot, pageKey } from '../../store/copilot';
 import { useWorkspace } from '../../store/workspace';
 import { api, type AgentRecord, type CopilotBuildBlock, type CopilotMetricBlock, type CopilotSpecBlock, type Dashboard } from '../../api/client';
 import { ChartWidget, type WidgetData } from '../dashboards/widgets';
 import { Button, Input, Label, Select, cn, toast } from '../../components/ui';
+import { usePageContext } from '../../store/context';
 
 export interface CopilotHost {
   /** What "insert" means here (the workbench: into the tab; a notebook: a new cell). */
@@ -211,6 +212,17 @@ function SqlBlock({ sql, onInsert, onNewTab, onRun, onDbt, busy }: { sql: string
   );
 }
 
+/** One thing the AI will look at, with a way to leave it out. */
+function ContextChip({ label, kind, onRemove, testid }: { label: string; kind: string; onRemove: () => void; testid?: string }) {
+  return (
+    <span className="inline-flex max-w-[16rem] items-center gap-1 rounded bg-zinc-900 py-0.5 pl-1.5 pr-0.5 text-2xs text-zinc-300" title={`${kind}: ${label}`} data-testid={testid}>
+      <span className="text-zinc-500">{kind}</span>
+      <span className="truncate font-mono">{label}</span>
+      <button aria-label={`Leave ${label} out`} className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200" onClick={onRemove}><X className="h-3 w-3" /></button>
+    </span>
+  );
+}
+
 export function CopilotDrawer() {
   const cp = useCopilot();
   const ws = useWorkspace();
@@ -224,6 +236,7 @@ export function CopilotDrawer() {
   const [running, setRunning] = useState<string | null>(null);
   const [invokable, setInvokable] = useState<AgentRecord[]>([]);
   const scroller = useRef<HTMLDivElement>(null);
+  const pageObject = usePageContext((c) => c.object);
   const dragging = useRef(false);
 
   useEffect(() => {
@@ -346,15 +359,6 @@ export function CopilotDrawer() {
     a: ({ children, href }: { children?: ReactNode; href?: string }) => <a href={href} className="text-accent-300 underline" target="_blank" rel="noreferrer">{children}</a>,
   };
 
-  // What the assistant is looking at: picked datasets, else the dataset or query or dashboard on screen.
-  const activeTab = ws.tabs.find((t) => t.id === ws.activeTabId);
-  const onScreen = location.hash.startsWith('#/data') || location.hash === '' || location.hash === '#/'
-    ? (wsId ? ws.overviewTarget[wsId] : null)
-    : location.hash.startsWith('#/query')
-      ? activeTab ? `${activeTab.title} (SQL)` : null
-      : location.hash.startsWith('#/dashboards/') ? 'this dashboard' : null;
-  const contextChips = cp.targets.length ? cp.targets : [...(onScreen ? [onScreen] : []), ws.workspaces.find((w) => w.id === wsId)?.name ?? 'workspace'];
-
   return (
     <aside className="relative flex h-full shrink-0 flex-col border-l border-zinc-800 bg-zinc-950" style={{ width: cp.width, maxWidth: '38vw', minWidth: 320 }} aria-label="DuckView AI">
       <div
@@ -397,15 +401,17 @@ export function CopilotDrawer() {
         </div>
       </header>
 
-      {/* What the assistant is looking at */}
+      {/* What the assistant is looking at: the object on screen, picked datasets, the workspace. */}
       <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-1.5 border-b border-zinc-800 px-3 py-1.5 text-xs" data-testid="ai-context">
         <span className="text-zinc-500">Context</span>
-        {contextChips.map((c) => (
-          <span key={c} className="inline-flex max-w-[14rem] items-center truncate rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-2xs text-zinc-300" title={c}>{c}</span>
+        {pageObject && cp.pageOff !== pageKey(pageObject) && (
+          <ContextChip label={pageObject.label} kind={pageObject.kind} onRemove={() => cp.setPageOff(pageKey(pageObject))} testid="ai-context-page" />
+        )}
+        {cp.targets.filter((t) => !(pageObject?.kind === 'dataset' && pageObject.id === t)).map((t) => (
+          <ContextChip key={t} label={t} kind="dataset" onRemove={() => cp.setTargets(cp.targets.filter((x) => x !== t))} />
         ))}
-        {cp.targets.length > 0 && <button className="text-2xs text-zinc-500 hover:text-zinc-200" onClick={() => cp.setTargets([])}>clear</button>}
+        <span className="inline-flex max-w-[12rem] items-center truncate rounded px-1.5 py-0.5 text-2xs text-zinc-500" title="The workspace's tables, files and metrics">{ws.workspaces.find((w) => w.id === wsId)?.name ?? 'workspace'}</span>
       </div>
-
       {showConvs && (
         <div className="border-b border-zinc-800 bg-zinc-900/60 p-2 text-xs">
           <div className="mb-1 flex items-center justify-between px-1 text-2xs font-semibold text-zinc-500">

@@ -180,6 +180,16 @@ describe('template marketplace', () => {
     expect((await api('DELETE', '/api/templates/builtin:saas', adminJwt)).status).toBe(403);
   });
 
+  it('tell the AI what is on screen: a dashboard with its widgets and their SQL', async () => {
+    const ws = (await ctx.workspaces.create(author, { name: 'On screen', active_db_path: ':memory:' })).id;
+    const { created } = await ctx.templates.install(author, 'builtin:ecommerce', { workspace_id: ws, sample_data: true });
+    const snap = await ctx.copilot.buildContext(author, ws, { page: { kind: 'dashboard', id: created.dashboards[0]!, label: 'Sales overview' } });
+    expect(snap.page).toMatch(/^Dashboard "Sales overview" — Revenue, orders and customers at a glance, with 7 widgets:/);
+    expect(snap.page).toContain('- chart "Revenue by region": SELECT region, sum(amount) AS revenue FROM orders');
+    const other = await ctx.copilot.buildContext(author, ws, { page: { kind: 'query', id: 'x', label: 'Query 3' } });
+    expect(other.page).toBe('The SQL tab "Query 3" (its SQL is below, when there is any)');
+  });
+
   it('are listed and installed by agents', async () => {
     const ws = (await ctx.workspaces.create(admin, { name: 'Agent built', active_db_path: ':memory:' })).id;
     const list = await api('POST', '/api/agent/v1/tools/list_templates', adminJwt, { q: 'subscriptions' });

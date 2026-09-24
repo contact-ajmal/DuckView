@@ -1259,6 +1259,68 @@ try {
     report.details.lineageHash = await evaluate(`location.hash`);
     report.details.charts = 1;
   }
+  else if (scenario === 'ai-context') {
+    // The AI sees what is on screen: a dashboard's widgets go with the question, unless the chip is removed.
+    const http = await import('node:http');
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const prompts = [];
+    const llm = http.createServer((req, res) => {
+      let b = '';
+      req.on('data', (d) => (b += d));
+      req.on('end', () => {
+        if (!req.url.includes('chat/completions')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"models":[],"data":[]}'); return; }
+        prompts.push(JSON.parse(b));
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: { content: 'The dashboard has one widget.' }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`);
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    await new Promise((r) => llm.listen(0, '127.0.0.1', r));
+    const dash = (await j('POST', `/api/workspaces/${wsId}/dashboards`, { name: `E2E AI context ${Date.now()}` })).dashboard;
+    await j('POST', `/api/dashboards/${dash.id}/widgets`, { title: 'Orders this week', widget_type: 'KPI', custom_sql: 'SELECT 42 AS orders', chart_config: { value: 'orders' } });
+    cleanup = async () => {
+      llm.close();
+      await evaluate(`localStorage.removeItem('duckview.copilot.settings'); true`).catch(() => undefined);
+      await j('DELETE', `/api/dashboards/${dash.id}`);
+    };
+    await evaluate(`localStorage.setItem('duckview.copilot.settings', JSON.stringify({ provider: 'ollama', model: 'mock', apiKey: '', baseUrl: 'http://127.0.0.1:${llm.address().port}' })); true`);
+    await send('Page.reload', {});
+    await waitFor(`!!document.querySelector('nav[aria-label="Primary"]')`, 30000, 'signed in');
+    await evaluate(`location.hash = '#/dashboards/${dash.id}'; 'ok'`);
+    await waitFor(`document.querySelector('[data-testid="page-object"]')?.textContent === ${JSON.stringify(dash.name)}`, 15000, 'dashboard open');
+    // ⌘J opens the assistant.
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'j', code: 'KeyJ', modifiers: 4, windowsVirtualKeyCode: 74 });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'j', code: 'KeyJ', modifiers: 4 });
+    await waitFor(`!!document.querySelector('aside[aria-label="DuckView AI"]')`, 5000, 'AI panel from ⌘J');
+    await waitFor(`!!document.querySelector('textarea[placeholder^="Ask about your data"]:not([disabled])')`, 15000, 'copilot ready');
+    report.details.chip = await evaluate(`document.querySelector('[data-testid="ai-context-page"]')?.textContent`);
+    const ask = async (text) => {
+      const before = prompts.length;
+      await setField('textarea[placeholder^="Ask about your data"]', text);
+      await evaluate(`document.querySelector('button[title="Send"]').click(); true`);
+      for (let i = 0; i < 100 && prompts.length === before; i++) await sleep(100);
+      await waitFor(`![...document.querySelectorAll('aside[aria-label="DuckView AI"] button')].some(b => b.title === 'Stop')`, 15000, 'answer finished');
+      const p = prompts.at(-1);
+      return (p?.messages ?? []).filter((m) => m.role === 'system').map((m) => m.content).join('\n');
+    };
+    const withPage = await ask('What does this show?');
+    report.details.withPage = { onScreen: withPage.includes('On screen now'), dashboard: withPage.includes(`Dashboard "${dash.name}"`), widget: withPage.includes('kpi "Orders this week": SELECT 42 AS orders') };
+    await evaluate(`document.querySelector('[data-testid="ai-context-page"] button').click(); true`);
+    const withoutPage = await ask('And in general?');
+    report.details.withoutPage = withoutPage.includes('On screen now');
+    // ⌘K: anything typed can be asked.
+    await evaluate(`document.querySelector('header button[aria-label="Search or run a command"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[role="dialog"] input')`, 5000, 'palette');
+    await setField('[role="dialog"] input', 'how many widgets are here');
+    await waitFor(`[...document.querySelectorAll('[role="dialog"] [role="option"], [role="dialog"] button')].some(b => b.textContent.includes('Ask AI: how many widgets are here'))`, 5000, 'ask entry');
+    const n = prompts.length;
+    await evaluate(`[...document.querySelectorAll('[role="dialog"] [role="option"], [role="dialog"] button')].find(b => b.textContent.includes('Ask AI: how many widgets are here')).click(); true`);
+    for (let i = 0; i < 100 && prompts.length === n; i++) await sleep(100);
+    report.details.fromPalette = prompts.length > n && JSON.stringify(prompts.at(-1).messages.at(-1)).includes('how many widgets are here');
+    report.details.charts = 1;
+  }
   else if (scenario === 'orchestration') {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
@@ -2105,6 +2167,12 @@ try {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);
     if (JSON.stringify(d.column?.stats?.slice(0, 2)) !== JSON.stringify(['Missing', 'Distinct values'])) problems.push(`column stats: ${JSON.stringify(d.column)}`);
     if (d.column?.values?.[0] !== 'south') problems.push(`most common value: ${JSON.stringify(d.column?.values)}`);
+  }
+  if (scenario === 'ai-context') {
+    if (!String(d.chip ?? '').includes('E2E AI context')) problems.push(`chip: ${d.chip}`);
+    if (!d.withPage?.onScreen || !d.withPage?.dashboard || !d.withPage?.widget) problems.push(`prompt with the page: ${JSON.stringify(d.withPage)}`);
+    if (d.withoutPage !== false) problems.push('the removed page still went to the AI');
+    if (!d.fromPalette) problems.push('⌘K did not ask the AI');
   }
   if (scenario === 'orchestration') {
     if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);

@@ -42,6 +42,17 @@ export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNew
   const section = sectionOf(route.section);
   const object = usePageContext((c) => c.object);
   const [navOpen, setNavOpen] = useState(false);
+  // ⌘J opens and closes the AI panel from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        useCopilot.getState().toggle();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const storage = active ? storageLabel(active) : null;
 
   return (
@@ -161,7 +172,7 @@ export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNew
           onClick={() => cp.toggle()}
           aria-pressed={cp.open}
           data-testid="ai-toggle"
-          title="DuckView AI — ask about the data you are looking at"
+          title="DuckView AI — ask about what is on screen (⌘J)"
           className={cn('inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-body font-medium transition-colors', cp.open ? 'bg-accent-500 text-[color:var(--accent-ink)]' : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-50')}
         >
           <Sparkles className="h-3.5 w-3.5" /> AI

@@ -322,6 +322,8 @@ export interface ChatContextSnapshot {
   summaries?: Record<string, { column: string; type: string; min: string | null; max: string | null; approx_unique: number | null; null_percentage: number }[]>;
   /** The workspace's catalog notes: descriptions and tags people wrote on tables and columns. */
   notes?: string;
+  /** The object on screen when the question was asked (a dashboard with its widgets, an app …). */
+  page?: string;
   /** The workspace's dbt projects: models, last run, failures. */
   dbt?: string;
   /** The semantic layer's metrics: definitions and dimensions. */

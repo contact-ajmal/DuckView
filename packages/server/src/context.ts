@@ -219,6 +219,25 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   copilot.reverse = reverse;
   const notebooks = new NotebookService(store, workspaces, queries, audit);
   copilot.notebooks = notebooks;
+  copilot.describePage = async (p, _ws, page) => {
+    if (page.kind === 'dashboard' && page.id) {
+      const d = await dashboards.get(p, page.id);
+      if (d.kind === 'mosaic') return `Mosaic dashboard "${d.name}"${d.description ? ` — ${d.description}` : ''}. Its spec:\n${JSON.stringify(d.spec).slice(0, 3500)}`;
+      const saved = d.widgets.some((w) => w.saved_query_id) ? await savedQueries.list(p, d.workspace_id) : [];
+      const lines = d.widgets.map((w) => {
+        const sql = w.custom_sql ?? saved.find((q) => q.id === w.saved_query_id)?.sql_text ?? null;
+        return `- ${w.widget_type.toLowerCase()} "${w.title}"${sql ? `: ${sql.replace(/\s+/g, ' ').slice(0, 400)}` : ''}`;
+      });
+      return `Dashboard "${d.name}"${d.description ? ` — ${d.description}` : ''}, with ${d.widgets.length} widgets:\n${lines.join('\n')}`;
+    }
+    if (page.kind === 'app' && page.id) {
+      const a = await apps.get(p, page.id);
+      return `Data app "${a.name}" (${a.kind})${a.description ? ` — ${a.description}` : ''}`;
+    }
+    if (page.kind === 'query') return `The SQL tab "${page.label}" (its SQL is below, when there is any)`;
+    if (page.kind === 'dataset') return `The dataset ${page.label} (profiled below)`;
+    return `${page.kind} "${page.label}"`;
+  };
   const comments = new CommentService(store, workspaces, notifications, audit);
   copilot.comments = comments;
   const revisions = new RevisionService(store, workspaces, audit);

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, copilotChat, type CopilotConfig, type ChatMsg, type CopilotSpecBlock, type CopilotBuildBlock, type CopilotMetricBlock, type CopilotProvider } from '../api/client';
+import { usePageContext } from './context';
 
 export interface CopilotSettings { provider: CopilotProvider | ''; model: string; apiKey: string; baseUrl: string; region?: string; agentId?: string; agentAliasId?: string; runtimeArn?: string }
 export interface LiveMessage { id: string; role: 'user' | 'assistant'; content: string; streaming?: boolean; error?: string; sqlBlocks?: string[]; specBlocks?: CopilotSpecBlock[]; buildBlocks?: CopilotBuildBlock[]; metricBlocks?: CopilotMetricBlock[]; meta?: { model?: string; provider?: string; tables?: number; files?: number; targets?: string[]; duration_ms?: number; input_tokens?: number; output_tokens?: number } }
@@ -25,6 +26,9 @@ interface CopilotState {
   messages: LiveMessage[];
   streaming: boolean;
   targets: string[];
+  /** Whether the object on screen (store/context.ts) goes with each question; off until the page changes. */
+  pageOff: string | null;
+  setPageOff(key: string | null): void;
   abort: AbortController | null;
   toggle(open?: boolean): void;
   setWidth(w: number): void;
@@ -37,6 +41,14 @@ interface CopilotState {
   cancel(): void;
   clear(workspaceId: string): Promise<void>;
 }
+
+/** The object on screen, unless the person took it out of the context. */
+export function pageForAi(off: string | null): { kind: string; id: string | null; label: string } | null {
+  const o = usePageContext.getState().object;
+  if (!o || off === pageKey(o)) return null;
+  return { kind: o.kind, id: o.id ?? null, label: o.label };
+}
+export const pageKey = (o: { kind: string; id?: string; label: string }) => `${o.kind}:${o.id ?? o.label}`;
 
 /** The model settings a person chose (bring-your-own key), for one-shot calls outside the chat. */
 export function byokBody(): Record<string, string | undefined> {
@@ -55,6 +67,10 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   messages: [],
   streaming: false,
   targets: [],
+  pageOff: null,
+  setPageOff(key) {
+    set({ pageOff: key });
+  },
   abort: null,
   toggle(open) {
     set({ open: open ?? !get().open });
@@ -111,7 +127,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     const upd = (patch: Partial<LiveMessage>) => set({ messages: get().messages.map((m) => (m.id === asstId ? { ...m, ...patch } : m)) });
     const byok = config?.allow_byok && settings.provider ? { provider: settings.provider, model: settings.model || undefined, api_key: settings.apiKey || undefined, base_url: settings.baseUrl || undefined, region: settings.region || undefined, agent_id: settings.agentId || undefined, agent_alias_id: settings.agentAliasId || undefined, runtime_arn: settings.runtimeArn || undefined } : {};
     try {
-      for await (const ev of copilotChat({ workspace_id: input.workspaceId, conversation_id: get().conversationId ?? undefined, message: input.message, action: input.action, active_sql: input.activeSql ?? null, error_message: input.errorMessage ?? null, result_preview: input.resultPreview ?? null, targets: input.targets ?? get().targets, notebook_id: /^#\/notebooks\/([\w-]+)/.exec(location.hash)?.[1] ?? null, ...byok }, abort.signal)) {
+      for await (const ev of copilotChat({ workspace_id: input.workspaceId, conversation_id: get().conversationId ?? undefined, message: input.message, action: input.action, active_sql: input.activeSql ?? null, error_message: input.errorMessage ?? null, result_preview: input.resultPreview ?? null, targets: input.targets ?? get().targets, notebook_id: /^#\/notebooks\/([\w-]+)/.exec(location.hash)?.[1] ?? null, page: pageForAi(get().pageOff), ...byok }, abort.signal)) {
         if (ev.type === 'context') {
           set({ conversationId: ev.conversation_id });
           upd({ meta: { model: ev.model, provider: ev.provider, tables: ev.tables, files: ev.files, targets: ev.targets } });

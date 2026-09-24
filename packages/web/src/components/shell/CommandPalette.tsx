@@ -99,8 +99,15 @@ export function CommandPalette() {
     const hits = commands.map((c) => ({ c, s: score(c) })).filter((x) => x.s >= 0);
     // Without a query, show actions and navigation only; datasets and the rest appear as you type.
     const base = terms.length ? hits : hits.filter((x) => x.c.group === 'Actions' || x.c.group === 'Go to');
-    return GROUP_ORDER.flatMap((g) => base.filter((x) => x.c.group === g).sort((a, b) => b.s - a.s).slice(0, terms.length ? 8 : 20).map((x) => x.c));
-  }, [commands, q]);
+    const found = GROUP_ORDER.flatMap((g) => base.filter((x) => x.c.group === g).sort((a, b) => b.s - a.s).slice(0, terms.length ? 8 : 20).map((x) => x.c));
+    // Anything typed can also go to the AI, with what is on screen as context.
+    if (q.trim().length > 2 && ws.activeId) {
+      const question = q.trim();
+      const ask: Command = { id: 'ask-ai-q', group: 'Actions', label: `Ask AI: ${question}`, icon: <Sparkles className="h-4 w-4" />, run: () => { cp.toggle(true); void cp.send({ workspaceId: ws.activeId!, message: question }); close(); } };
+      return found.length ? [...found, ask] : [ask];
+    }
+    return found;
+  }, [commands, q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setSel(0), [q]);
   useEffect(() => {
