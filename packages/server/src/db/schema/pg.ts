@@ -157,7 +157,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats, ORCHESTRATION_KINDS, ORCHESTRATION_STATUSES } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -1032,4 +1032,24 @@ export const streams = pgTable(
     updated_at: ts('updated_at').notNull(),
   },
   (t) => [index('streams_workspace_idx').on(t.workspace_id), uniqueIndex('streams_target_idx').on(t.workspace_id, t.target_schema, t.target_table)],
+);
+
+export const orchestrationRuns = pgTable(
+  'orchestration_runs',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id'),
+    kind: text('kind', { enum: ORCHESTRATION_KINDS }).notNull(),
+    target_id: text('target_id'),
+    label: text('label').notNull(),
+    status: text('status', { enum: ORCHESTRATION_STATUSES }).notNull(),
+    summary: text('summary'),
+    detail: jsonb('detail').$type<Record<string, unknown>>().notNull().default({}),
+    source: text('source').notNull().default('api'),
+    external_run_id: text('external_run_id'),
+    started_at: ts('started_at').notNull(),
+    finished_at: ts('finished_at'),
+  },
+  (t) => [index('orchestration_runs_user_idx').on(t.user_id, t.started_at)],
 );

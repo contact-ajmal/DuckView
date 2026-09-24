@@ -1614,3 +1614,30 @@ export const streams = sqliteTable(
   (t) => [index('streams_workspace_idx').on(t.workspace_id), uniqueIndex('streams_target_idx').on(t.workspace_id, t.target_schema, t.target_table)],
 );
 export type Stream = typeof streams.$inferSelect;
+
+/** Runs started by orchestrators (Airflow, Dagster, Prefect, cron, CI): one status to poll whatever was run. */
+export const ORCHESTRATION_KINDS = ['sync', 'dbt', 'quality', 'reverse_sync', 'notebook', 'alert', 'snapshot', 'agent', 'monitor', 'query'] as const;
+export type OrchestrationKind = (typeof ORCHESTRATION_KINDS)[number];
+export const ORCHESTRATION_STATUSES = ['running', 'succeeded', 'failed'] as const;
+export const orchestrationRuns = sqliteTable(
+  'orchestration_runs',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id'),
+    kind: text('kind', { enum: ORCHESTRATION_KINDS }).notNull(),
+    target_id: text('target_id'),
+    /** What ran, in words (the sync's name, the first line of the SQL …). */
+    label: text('label').notNull(),
+    status: text('status', { enum: ORCHESTRATION_STATUSES }).notNull(),
+    summary: text('summary'),
+    detail: text('detail', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    /** airflow | dagster | prefect | api … and the orchestrator's own run id. */
+    source: text('source').notNull().default('api'),
+    external_run_id: text('external_run_id'),
+    started_at: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+    finished_at: integer('finished_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => [index('orchestration_runs_user_idx').on(t.user_id, t.started_at)],
+);
+export type OrchestrationRun = typeof orchestrationRuns.$inferSelect;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Code2, GitBranch, Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, Layers, Pencil, AppWindow, ScrollText } from 'lucide-react';
+import { Code2, GitBranch, Workflow, Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, Layers, Pencil, AppWindow, ScrollText } from 'lucide-react';
 import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type CloudConnection, type CopilotConfig, type LakehouseConnection } from '../../api/client';
 import { Gauge } from '../../components/Gauge';
 import { PageHeader, SideCard, Panel, KvRows, Tag } from '../../components/layout';
@@ -23,8 +23,9 @@ import { ProvisioningPanel } from '../governance/ProvisioningPanel';
 import { GitPanel } from './GitPanel';
 import { EmbedPanel } from './EmbedPanel';
 import { PgWirePanel } from './PgWirePanel';
+import { OrchestrationPanel } from './OrchestrationPanel';
 
-type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients';
+type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients' | 'orchestration';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; group: string; admin?: boolean }[] = [
   { id: 'account', group: 'General', label: 'Account', blurb: 'Your password and identity', icon: <UserRound className="h-4 w-4" /> },
   { id: 'teams', group: 'General', label: 'Teams', blurb: 'Groups for sharing workspaces', icon: <Users className="h-4 w-4" /> },
@@ -39,6 +40,7 @@ const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.Reac
   { id: 'copilot', group: 'AI', label: 'AI assistant', blurb: 'The model DuckView AI uses, keys and usage', icon: <Bot className="h-4 w-4" /> },
   { id: 'engine', group: 'Data', label: 'Engine', blurb: 'Memory, threads, timeouts and storage of this workspace', icon: <Database className="h-4 w-4" /> },
   { id: 'sql-clients', group: 'Data', label: 'SQL clients & BI tools', blurb: 'Tableau, Power BI, Metabase, psql and drivers over the Postgres protocol', icon: <Database className="h-4 w-4" /> },
+  { id: 'orchestration', group: 'Data', label: 'Orchestration', blurb: 'Run syncs, dbt and checks from Airflow, Dagster, Prefect or any scheduler', icon: <Workflow className="h-4 w-4" /> },
   { id: 'git', group: 'Data', label: 'Git', blurb: 'Notebooks, queries, dashboards and models in a Git repository', icon: <GitBranch className="h-4 w-4" /> },
   { id: 'hardware', group: 'Data', label: 'Resources', blurb: 'Live memory, CPU, disk and warm engines', icon: <Cpu className="h-4 w-4" /> },
   { id: 'apps', group: 'Advanced', label: 'Data apps', blurb: 'App runtime, running apps and publish requests', icon: <AppWindow className="h-4 w-4" />, admin: true },
@@ -163,6 +165,7 @@ export function SettingsPage() {
 
           {cat === 'embedding' && ws.activeId && <EmbedPanel key={ws.activeId} workspaceId={ws.activeId} />}
           {cat === 'sql-clients' && <PgWirePanel />}
+          {cat === 'orchestration' && ws.activeId && <OrchestrationPanel key={ws.activeId} workspaceId={ws.activeId} />}
 
           {cat === 'hardware' && (
             <div className="space-y-5">

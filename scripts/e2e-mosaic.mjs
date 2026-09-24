@@ -76,6 +76,8 @@
  * localhost:9000) — to an Iceberg table, both from the reverse ETL editor.
  * The pgwire scenario opens Settings → SQL clients & BI tools and connects over the Postgres protocol with psql and
  * node-postgres (the server must run with DUCKVIEW__pgwire__enabled=true).
+ * The orchestration scenario mints a write token, starts a sync over the orchestration API as Airflow would and a
+ * failing SQL check through the Python SDK, then finds both runs in Settings → Orchestration.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -243,6 +245,10 @@ try {
   } else if (scenario === 'workbench-explore') {
     await send('Page.navigate', { url: `${BASE}/#/query` });
     await waitFor(`[...document.querySelectorAll('[role=tab]')].some(b => b.textContent.trim() === 'Explore')`, 40000, 'workbench loaded');
+    // Explore works on the active tab's query: give it one, whatever the tabs held before.
+    await waitFor(`!!document.querySelector('.cm-content')`, 20000, 'editor');
+    await evaluate(`(() => { const el = document.querySelector('.cm-content'); el.focus(); document.execCommand('selectAll'); document.execCommand('insertText', false, "SELECT * FROM 'green_tripdata_2026-02.parquet'"); return true; })()`);
+    await sleep(500);
     await evaluate(`[...document.querySelectorAll('[role=tab]')].find(b => b.textContent.trim() === 'Explore').click(); 'clicked'`);
     await waitFor(`document.querySelectorAll('.mosaic-cell svg').length > 0 || !!document.querySelector('.mosaic-explore .text-red-200')`, 60000, 'explore rendered or errored');
     await sleep(2000);
@@ -1007,6 +1013,42 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_dashboard.png'), Buffer.from(shot.result.data, 'base64')); }
     report.details.charts = 1;
   }
+  else if (scenario === 'orchestration') {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    await q("CREATE OR REPLACE TABLE e2e_orch_raw AS SELECT * FROM (VALUES (1, 10.0), (2, -5.0)) t(id, amount)");
+    const sync = (await j('POST', `/api/workspaces/${wsId}/syncs`, { name: 'E2E orchestrated sync', source: { kind: 'sql', sql: 'SELECT * FROM e2e_orch_raw' }, target_table: 'e2e_orch_stg' })).sync;
+    const minted = await j('POST', '/api/tokens', { name: 'E2E orchestrator', scopes: ['read', 'write'] });
+    cleanup = async () => {
+      if (sync?.id) await j('DELETE', `/api/syncs/${sync.id}`);
+      if (minted?.record?.id) await j('DELETE', `/api/tokens/${minted.record.id}`);
+      await q('DROP TABLE IF EXISTS e2e_orch_raw');
+      await q('DROP TABLE IF EXISTS e2e_orch_stg');
+    };
+    // As Airflow would: start, then long-poll.
+    const as = (method, url, body) => fetch(`${BASE}${url}`, { method, headers: { authorization: `Bearer ${minted.token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
+    const started = await as('POST', '/api/orchestrate/runs', { kind: 'sync', id: sync.id, source: 'airflow', external_run_id: 'scheduled__e2e' });
+    const done = await as('GET', `/api/orchestrate/runs/${started.run.id}?wait=30`);
+    report.details.airflow = `${done.run.status}: ${done.run.summary}`;
+    // The Python SDK: a SQL check that finds bad rows fails.
+    try {
+      await promisify(execFile)('python3', ['-c', "import sys; sys.path.insert(0, 'packages/sdk-python'); from duckview.orchestrate import run, RunFailed\ntry:\n    run('query', sys.argv[1], sql='SELECT * FROM e2e_orch_raw WHERE amount < 0', fail_if='rows')\n    print('passed')\nexcept RunFailed as e:\n    print('failed:', e.run['summary'])", wsId], { env: { ...process.env, DUCKVIEW_URL: BASE, DUCKVIEW_TOKEN: minted.token } }).then(({ stdout }) => (report.details.python = stdout.trim()));
+    } catch (err) {
+      report.details.python = `error: ${err.stderr ?? err.message}`;
+    }
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitFor(`!!document.querySelector('[data-testid="ai-toggle"]')`, 20000, 'app');
+    await evaluate(`location.hash = '#/settings/orchestration'; true`);
+    await waitFor(`document.querySelectorAll('[data-testid="orchestration-runs"] tbody tr').length >= 2`, 20000, 'runs listed');
+    report.details.rows = await evaluate(`[...document.querySelectorAll('[data-testid="orchestration-runs"] tbody tr')].slice(0, 2).map(r => r.dataset.runStatus + ' | ' + [...r.querySelectorAll('td')].slice(1, 5).map(td => td.innerText.trim()).join(' | '))`);
+    report.details.snippet = await evaluate(`document.querySelector('[data-testid="orchestration-snippet"]').innerText.includes(${JSON.stringify(sync.id)})`);
+    await sleep(300);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_orchestration.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'pgwire') {
     const { createRequire } = await import('node:module');
     const { execFile } = await import('node:child_process');
@@ -1060,6 +1102,8 @@ try {
       if (made.cloud) await j('DELETE', `/api/cloud-connections/${made.cloud}`);
       await q('DROP TABLE IF EXISTS e2e_lake_orders');
       if (dataDir) fs.rmSync(`${dataDir}/${deltaRel}`, { recursive: true, force: true });
+      // The parent folder too, when this left it empty.
+      if (dataDir) try { fs.rmdirSync(`${dataDir}/lake`); } catch { /* not empty, or gone */ }
     };
     const created = await q("CREATE OR REPLACE TABLE e2e_lake_orders AS SELECT * FROM (VALUES (1, 'EU', 120.5, TIMESTAMP '2026-09-01 10:00:00'), (2, 'US', 80.0, TIMESTAMP '2026-09-02 12:00:00'), (3, 'EU', 45.25, TIMESTAMP '2026-09-03 08:30:00')) t(id, region, amount, placed_at)");
     if (created.error) throw new Error(created.message);
@@ -1768,6 +1812,12 @@ try {
     if (!d.saved?.includes('total_amount') || !d.saved?.includes('sem_orders_count')) problems.push(`scaffold not saved: ${JSON.stringify(d.saved)}`);
     if (!/Total amount by order_date__month/.test(d.ui?.header ?? '') || !d.ui?.canvas) problems.push(`explorer result: ${JSON.stringify(d.ui)}`);
     if (JSON.stringify(d.api) !== JSON.stringify(d.expected)) problems.push(`metric != SQL: ${JSON.stringify(d.api)} vs ${JSON.stringify(d.expected)}`);
+  }
+  if (scenario === 'orchestration') {
+    if (d.airflow !== 'succeeded: 2 rows loaded') problems.push(`airflow: ${d.airflow}`);
+    if (d.python !== 'failed: 1 row (expected none)') problems.push(`python: ${d.python}`);
+    if (JSON.stringify(d.rows) !== JSON.stringify(['failed | API | query | SELECT * FROM e2e_orch_raw WHERE amount < 0 | 1 row (expected none)', 'succeeded | Airflow | sync | E2E orchestrated sync | 2 rows loaded'])) problems.push(`rows: ${JSON.stringify(d.rows)}`);
+    if (!d.snippet) problems.push('the snippet does not use the sync id');
   }
   if (scenario === 'pgwire') {
     if (!/^\d+$/.test(String((d.fields ?? [])[1] ?? ''))) problems.push(`fields: ${JSON.stringify(d.fields)}`);

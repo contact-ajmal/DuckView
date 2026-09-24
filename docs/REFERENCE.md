@@ -781,6 +781,34 @@ Config (`streams`):
 - **TLS:** with `pgwire.tls_cert` / `pgwire.tls_key` (PEM) clients upgrade with `sslmode=require`, and `pgwire.require_tls` refuses those that do not. Without TLS, passwords travel in clear text, so keep the default localhost address or a private network.
 - **Limits:** `pgwire.max_connections` (default 100) and `pgwire.max_rows` per statement (default 1,000,000).
 
+## Orchestration: Airflow, Dagster, Prefect
+
+**Pipelines run DuckView work and wait for one status** (`services/orchestrate.ts`, Settings → Orchestration). `POST /api/orchestrate/runs {kind, id, …}` starts a run, and `GET /api/orchestrate/runs/:id?wait=30` long-polls it until it is `succeeded` or `failed`.
+
+| Kind | Runs | Fails when |
+|---|---|---|
+| `sync` | a sync | the load fails |
+| `dbt` | a dbt command (`command`, `select`, `exclude`, `full_refresh`) | the command fails (the failed nodes are listed) |
+| `quality` | a data quality suite | a check fails, or warns with `fail_on_warn` |
+| `reverse_sync` | a reverse sync | delivery fails |
+| `notebook` | every cell of a notebook | a cell fails |
+| `alert` | an alert | the query errors, or the alert triggers with `fail_on_trigger` |
+| `snapshot` | a dashboard snapshot | rendering or delivery fails |
+| `agent` | a DuckView agent (`input`) | the run fails |
+| `monitor` | a metric monitor | it errors, or finds something unusual with `fail_on_anomaly` |
+| `query` | SQL in a workspace (`id` = workspace, `sql`) | `fail_if: rows` and there are rows (a query for bad data), or `no_rows` and there are none |
+
+- **Who and what:** starting runs needs an API token with the write scope. Runs act as the token's owner, with their permissions and access policies; the approval asked of agents that act on their own is not asked here.
+- **Records:** each run keeps its label, summary, details, the `source` (`airflow`, `dagster`, `prefect`, `api`) and the orchestrator's own run id. People see only their own runs.
+
+**Python** (`packages/sdk-python`):
+
+- `duckview.orchestrate.run(kind, id, **options)` starts a run, waits, and raises `RunFailed`.
+- **Airflow:** `duckview.airflow` has operators (`DuckViewSyncOperator`, `DuckViewDbtOperator`, `DuckViewQualityCheckOperator`, `DuckViewReverseSyncOperator`, `DuckViewNotebookOperator`, `DuckViewAgentOperator`, `DuckViewSQLCheckOperator`, the generic `DuckViewRunOperator`) and a *DuckView* connection type (Host = URL, Password = token, Extra `workspace`).
+- **Dagster:** `duckview.dagster` has a `DuckViewResource` and `duckview_op(kind, id)`; a failure raises `Failure`.
+- **Prefect:** `duckview.prefect` has tasks (`run_sync`, `run_dbt`, `run_quality_suite`, `run_reverse_sync`, `run_notebook`, `run_agent`, `run_sql_check`) and a `DuckViewCredentials` block.
+- Install with `pip install "duckview[airflow]"`, `[dagster]` or `[prefect]`.
+
 ## Governance
 
 **Catalog** (`#/governance/catalog`, `services/lineage.ts`): descriptions and tags (lower-case, e.g. `pii`, `finance`) on tables, views and columns, written by editors, read by every member (`GET /api/workspaces/:id/catalog/annotated`, `PUT /api/workspaces/:id/catalog/annotations {object_name, column_name?, description, tags}` — an empty description and no tags removes the note). Copilot's context carries the notes ("trust these over guesses from names"), and `inspect_schema` shows them next to the columns.

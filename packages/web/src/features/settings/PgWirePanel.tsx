@@ -50,7 +50,7 @@ export function PgWirePanel() {
           <div>
             <Tabs size="sm" value={tool} onChange={setTool} tabs={[{ id: 'bi', label: 'Tableau · Power BI · Metabase' }, { id: 'psql', label: 'psql' }, { id: 'jdbc', label: 'JDBC / DBeaver' }, { id: 'python', label: 'Python' }]} />
             <div className="relative mt-2">
-              <pre className="overflow-auto rounded-md bg-zinc-900 p-3 font-mono text-[11.5px] text-zinc-200" data-testid="pgwire-snippet">{snippets[tool]}</pre>
+              <pre className="overflow-auto rounded-md bg-zinc-900 p-3 pr-20 font-mono text-[11.5px] text-zinc-200" data-testid="pgwire-snippet">{snippets[tool]}</pre>
               <div className="absolute right-2 top-2"><CopyButton text={snippets[tool]} /></div>
             </div>
           </div>
