@@ -1,6 +1,7 @@
 /**
  * DuckCopilot: context hydration + streaming chat over the LLM bridge, persisted to chat_history.
  */
+import type { DecisionEngine } from '../agent/decision/types.js';
 import type { DuckViewConfig } from '../config/index.js';
 import type { WorkspaceService } from './workspaces.js';
 import type { QueryService } from './query.js';
@@ -346,6 +347,8 @@ export class CopilotService {
   notebooks: { promptSummary(p: Principal, id: string): Promise<string> } | null = null;
   /** Describes the object on screen in words for the prompt (set by the context: dashboards, apps …). */
   describePage: ((p: Principal, workspaceId: string, page: NonNullable<CopilotRequest['page']>) => Promise<string | null>) | null = null;
+  /** The agent's Decision Engine: on a large catalog, the tables most relevant to the question go first. */
+  decision: DecisionEngine | null = null;
   /** Open comment threads, for prompts (set by the context). */
   comments: { promptSummary(workspaceId: string, targetType: 'notebook', targetId: string): Promise<string> } | null = null;
 
@@ -395,6 +398,19 @@ export class CopilotService {
     return snapshot;
   }
 
+  /**
+   * More tables than the prompt shows (copilot.max_context_tables): order them by relevance to the question, the
+   * targets and the dataset on screen first, so the ones shown are the ones that matter. Smaller catalogs are left as
+   * they are.
+   */
+  private async focusTables(snapshot: ChatContextSnapshot, question: string, pinned: string[]): Promise<void> {
+    if (!this.decision || snapshot.tables.length <= this.cfg.copilot.max_context_tables) return;
+    const { ranked } = await this.decision.rankCandidates({ query: question, candidates: snapshot.tables.map((t) => ({ id: t.name, fields: { title: t.name, text: t.columns.map((c) => c.name).join(' ') } })) });
+    const score = new Map(ranked.map((r) => [r.id, r.score]));
+    const pin = new Set(pinned);
+    snapshot.tables = [...snapshot.tables].sort((a, b) => Number(pin.has(b.name)) - Number(pin.has(a.name)) || (score.get(b.name) ?? 0) - (score.get(a.name) ?? 0));
+  }
+
   /** Streams a copilot turn as events. The user turn is persisted first, the assistant turn on completion. */
   async *stream(p: Principal, req: CopilotRequest): AsyncGenerator<CopilotEvent, void, void> {
     requireScope(p, 'read');
@@ -411,6 +427,7 @@ export class CopilotService {
     const snapshot = await this.buildContext(p, req.workspaceId, { activeSql: req.activeSql, targets, notebookId: req.notebookId, page: req.page });
     snapshot.provider = provider;
     snapshot.model = instance.model;
+    await this.focusTables(snapshot, `${req.message ?? ''} ${req.activeSql ?? ''}`, Object.keys(snapshot.summaries ?? {}));
 
     // Compose the user turn from the action, the message and any attachments (error, result preview).
     const userParts: string[] = [];

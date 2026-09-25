@@ -48,6 +48,9 @@ import { WatchService } from './services/watches.js';
 import { EndpointService } from './services/endpoints.js';
 import { JoinService } from './services/joins.js';
 import { PrepService } from './services/prep.js';
+import { createDecisionEngine } from './agent/decision/providers.js';
+import type { DecisionEngine } from './agent/decision/types.js';
+import { ContextEngine } from './agent/context/engine.js';
 import { WorkspaceLifecycleService } from './services/workspace-lifecycle.js';
 import { ClusterService } from './services/cluster.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
@@ -121,6 +124,9 @@ export interface AppContext {
   endpoints: EndpointService;
   joins: JoinService;
   prep: PrepService;
+  /** The agent's Decision Engine (agent.decision.provider) and Context Engine. */
+  decision: DecisionEngine;
+  contextEngine: ContextEngine;
   lifecycle: WorkspaceLifecycleService;
   cluster: ClusterService;
   /** Cluster mode: joins the cluster at this URL once the server listens (then starts stream consumers). */
@@ -332,7 +338,11 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   if (cfg.ephemeralSecrets) {
     logger().warn('JWT_SECRET / ENCRYPTION_KEY not configured — using ephemeral secrets. Sessions and stored credentials will NOT survive a restart. Set them before production use.');
   }
+  const decision = createDecisionEngine(cfg);
   const ctx: AppContext = {
+    decision,
+    // Built below: it reads the other services through the context.
+    contextEngine: undefined as unknown as ContextEngine,
     cfg,
     store,
     engines,
@@ -401,6 +411,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     mosaic,
     startedAt: new Date(),
     async shutdown() {
+      ctx.contextEngine?.stop();
       syncs.stop();
       await streams.stopAll().catch(() => undefined);
       await pgwire.stop().catch(() => undefined);
@@ -438,6 +449,8 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   endpoints.bind(ctx);
   joins.bind(ctx);
   prep.bind(ctx);
+  ctx.contextEngine = new ContextEngine(ctx, ctx.decision);
+  copilot.decision = ctx.decision;
   lifecycle.bind(ctx);
   return ctx;
 }
