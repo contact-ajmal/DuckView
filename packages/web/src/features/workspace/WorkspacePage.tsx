@@ -20,7 +20,6 @@ import { ApprovalCard } from '../../components/ai';
 import { SaveDbtModelDialog } from '../transform/SaveDbtModelDialog';
 import { Explorer, type ExplorerNode } from '../explorer/Explorer';
 import { SchemaPanel } from '../explorer/SchemaPanel';
-import { FolderPicker } from '../explorer/FolderPicker';
 import { CloudWizard } from '../explorer/CloudWizard';
 import { LakehouseWizard } from '../explorer/LakehouseWizard';
 import { registerCopilotHost } from '../copilot/CopilotDrawer';
@@ -30,6 +29,7 @@ import { useLayout } from '../../store/layout';
 import { HideButton } from '../../components/LayoutMenu';
 import { Badge, Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, Tabs, cn, confirmAction, toast, CopyButton, Kbd } from '../../components/ui';
 import { usePageObject } from '../../store/context';
+import { LocationBrowser } from '../../components/data';
 
 type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile' | 'explore';
 
@@ -692,11 +692,15 @@ export function WorkspacePage() {
           </div>
         </div>
       </Modal>
-      <FolderPicker
+      <LocationBrowser
         open={picker}
         workspaceId={workspace.id}
+        mode="folder"
+        remote={false}
+        title="Add a folder to this workspace"
         onClose={() => setPicker(false)}
-        onPick={async (path) => {
+        onPick={async ([path]) => {
+          if (!path) return;
           await api.post(`/api/workspaces/${workspace.id}/folders`, { path });
           setExplorerKey((k) => k + 1);
           void ws.loadCatalog(true);

@@ -291,6 +291,97 @@ export class DataJail {
     return { path: target.relative, absolute: target.absolute, entries };
   }
 
+  /**
+   * One directory for the location browser: folders and files with absolute paths, the parent (when it is inside the
+   * jail), and whether new folders can be made here. Starts at the home directory (full mode) or the data directory.
+   */
+  locate(dirPath?: string, opts: { showHidden?: boolean } = {}): { path: string; parent: string | null; writable: boolean; entries: LocateEntry[] } {
+    const abs = this.resolve(dirPath && dirPath.trim() ? dirPath : this.isFullFilesystem ? os.homedir() : this.baseDir).absolute;
+    let dirents: fs.Dirent[];
+    try {
+      dirents = fs.readdirSync(abs, { withFileTypes: true });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      throw new SandboxViolation(code === 'ENOENT' ? `No such folder: ${abs}` : code === 'ENOTDIR' ? `Not a folder: ${abs}` : code === 'EACCES' || code === 'EPERM' ? `No permission to open ${abs}` : `Cannot read ${abs}: ${(err as Error).message}`, abs);
+    }
+    const entries: LocateEntry[] = [];
+    for (const d of dirents) {
+      const hidden = d.name.startsWith('.');
+      if ((hidden && !opts.showHidden) || isInternalFile(d.name)) continue;
+      const full = path.join(abs, d.name);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        const table = this.detectTableDir(full);
+        entries.push({ name: d.name, path: full, type: table ? 'table_dir' : 'dir', kind: table ?? 'other', size_bytes: null, modified_at: stat.mtime.toISOString(), queryable: !!table, hidden });
+      } else if (stat.isFile()) {
+        const kind = fileKind(d.name) ?? 'other';
+        entries.push({ name: d.name, path: full, type: 'file', kind, size_bytes: stat.size, modified_at: stat.mtime.toISOString(), queryable: kind !== 'other', hidden });
+      }
+    }
+    entries.sort((a, b) => ((a.type === 'file') === (b.type === 'file') ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.type === 'file' ? 1 : -1));
+    const parentAbs = path.dirname(abs);
+    let writable = false;
+    try {
+      fs.accessSync(abs, fs.constants.W_OK);
+      writable = true;
+    } catch {
+      /* read-only */
+    }
+    return { path: abs, parent: parentAbs !== abs && this.isInside(parentAbs) ? parentAbs : null, writable, entries };
+  }
+
+  /** Where the location browser's sidebar starts: the data directory, and in full mode the usual home folders and mounted volumes. */
+  places(): { name: string; path: string; kind: 'data' | 'home' | 'folder' | 'volume' }[] {
+    const out: { name: string; path: string; kind: 'data' | 'home' | 'folder' | 'volume' }[] = [{ name: 'Data directory', path: this.baseDir, kind: 'data' }];
+    if (!this.isFullFilesystem) return out;
+    const home = os.homedir();
+    const isDir = (p: string) => {
+      try {
+        return fs.statSync(p).isDirectory();
+      } catch {
+        return false;
+      }
+    };
+    out.push({ name: 'Home', path: home, kind: 'home' });
+    for (const n of ['Desktop', 'Documents', 'Downloads']) if (isDir(path.join(home, n))) out.push({ name: n, path: path.join(home, n), kind: 'folder' });
+    const volumeRoots = process.platform === 'darwin' ? ['/Volumes'] : process.platform === 'linux' ? ['/mnt', '/media', path.join('/media', path.basename(home))] : [];
+    for (const r of volumeRoots) {
+      let names: string[] = [];
+      try {
+        names = fs.readdirSync(r);
+      } catch {
+        continue;
+      }
+      for (const n of names) {
+        const full = path.join(r, n);
+        if (n.startsWith('.') || !isDir(full) || out.some((o) => o.path === full)) continue;
+        // macOS lists the boot disk under /Volumes as a symlink to /.
+        try {
+          if (fs.realpathSync(full) === '/') continue;
+        } catch {
+          continue;
+        }
+        out.push({ name: n, path: full, kind: 'volume' });
+      }
+    }
+    return out;
+  }
+
+  /** Makes one new folder inside an existing folder (both inside the jail). */
+  mkdir(parent: string, name: string): string {
+    if (!name.trim() || /[\\/\0]/.test(name) || name === '.' || name === '..') throw new SandboxViolation(`Not a valid folder name: ${name}`, name);
+    const dir = this.resolve(parent).absolute;
+    const full = this.resolve(path.join(dir, name.trim())).absolute;
+    if (fs.existsSync(full)) throw new SandboxViolation(`${name.trim()} already exists here`, full);
+    fs.mkdirSync(full);
+    return full;
+  }
+
   private detectTableDir(dir: string): JailEntry['kind'] | null {
     if (fs.existsSync(path.join(dir, '_delta_log'))) return 'delta';
     if (fs.existsSync(path.join(dir, 'metadata')) && fs.existsSync(path.join(dir, 'data'))) return 'iceberg';
@@ -306,6 +397,12 @@ export interface JailEntry {
   modified_at: string;
   /** Absolute path of the workspace folder this entry came from (absent for the data directory). */
   root?: string;
+}
+
+export interface LocateEntry extends Omit<TreeEntry, 'path'> {
+  /** Absolute path. */
+  path: string;
+  hidden: boolean;
 }
 
 export interface TreeEntry {

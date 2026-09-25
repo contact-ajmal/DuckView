@@ -5,6 +5,7 @@ import { conditional } from './conditional.js';
 import { requireWrite } from '../services/principal.js';
 import { CLOUD_PROVIDERS } from '../db/schema/sqlite.js';
 import { CLOUD_FIELDS } from '../services/cloud.js';
+import { forbidden } from '../services/errors.js';
 
 export async function storageRoutes(app: FastifyInstance, ctx: AppContext) {
   app.addHook('preHandler', app.authenticate);
@@ -26,6 +27,30 @@ export async function storageRoutes(app: FastifyInstance, ctx: AppContext) {
   app.get('/api/storage/browse', async (req) => {
     const q = z.object({ workspace_id: z.string().min(1), path: z.string().optional() }).parse(req.query ?? {});
     return ctx.storage.browse(req.principal!, q.workspace_id, q.path);
+  });
+
+  // ---- location browser: folders and files, the sidebar's places, new folders
+  app.get('/api/storage/locate', async (req) => {
+    const q = z.object({ workspace_id: z.string().min(1), path: z.string().optional(), hidden: z.enum(['0', '1']).optional() }).parse(req.query ?? {});
+    return ctx.storage.locate(req.principal!, q.workspace_id, q.path, q.hidden === '1');
+  });
+  app.get('/api/storage/places', async (req) => {
+    const q = z.object({ workspace_id: z.string().min(1) }).parse(req.query ?? {});
+    return { ...(await ctx.storage.places(req.principal!, q.workspace_id)), native_dialog: ctx.nativePicker.availability({ ip: req.ip, host: req.headers.host }) };
+  });
+  app.post('/api/storage/mkdir', async (req) => {
+    const body = z.object({ workspace_id: z.string().min(1), parent: z.string().min(1), name: z.string().min(1).max(255) }).parse(req.body);
+    return ctx.storage.mkdir(req.principal!, body.workspace_id, body.parent, body.name);
+  });
+
+  // ---- the operating system's own dialog, when DuckView runs on this computer
+  app.post('/api/storage/native-pick', async (req) => {
+    requireWrite(req.principal!);
+    const body = z.object({ kind: z.enum(['folder', 'files']), multiple: z.boolean().optional(), title: z.string().max(120).optional() }).parse(req.body ?? {});
+    const a = ctx.nativePicker.availability({ ip: req.ip, host: req.headers.host });
+    if (!a.available || req.principal!.via === 'token') throw forbidden(a.reason ?? 'The system dialog is for people signed in to DuckView, not API tokens.');
+    const paths = await ctx.nativePicker.pick(body);
+    return { paths: paths ?? [], cancelled: !paths };
   });
 
   // ---- workspace folders (VS Code-style "Add folder to workspace")

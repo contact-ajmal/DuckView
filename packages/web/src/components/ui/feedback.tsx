@@ -97,9 +97,14 @@ export function ConfirmHost() {
   };
   useEffect(() => {
     if (!current) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close(false);
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // Capture, and stop it there: Escape answers this question, not the dialog underneath it.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      close(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }); // eslint-disable-line react-hooks/exhaustive-deps
   if (!current) return null;
   return createPortal(

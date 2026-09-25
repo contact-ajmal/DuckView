@@ -6,7 +6,7 @@ import type { WorkspaceService } from './workspaces.js';
 import type { AuditService } from './audit.js';
 import type { CloudConnectionService } from './cloud.js';
 import type { Principal } from './principal.js';
-import { requireScope } from './principal.js';
+import { requireScope, requireWrite } from './principal.js';
 import { isRemoteUri, type TreeEntry } from '../engine/sandbox.js';
 import type { InspectResult } from '../engine/duckdb.js';
 import { HttpError } from './errors.js';
@@ -34,6 +34,28 @@ export class StorageService {
     requireScope(p, 'read');
     await this.workspaces.get(p, workspaceId);
     return { mode: this.cfg.security.filesystem_mode, ...this.workspaces.jail.browseDirs(dirPath) };
+  }
+
+  /** Location browser: one folder's folders and files, with absolute paths. */
+  async locate(p: Principal, workspaceId: string, dirPath?: string, showHidden = false) {
+    requireScope(p, 'read');
+    await this.workspaces.get(p, workspaceId);
+    return { mode: this.cfg.security.filesystem_mode, ...this.workspaces.jail.locate(dirPath, { showHidden }) };
+  }
+
+  /** The browser's sidebar: the data directory, home folders and volumes (full mode), and this workspace's folders. */
+  async places(p: Principal, workspaceId: string) {
+    requireScope(p, 'read');
+    const w = await this.workspaces.get(p, workspaceId);
+    return { mode: this.cfg.security.filesystem_mode, places: this.workspaces.jail.places(), workspace_folders: w.folders.map((f) => ({ name: f.name, path: f.path })) };
+  }
+
+  async mkdir(p: Principal, workspaceId: string, parent: string, name: string) {
+    requireWrite(p);
+    await this.workspaces.get(p, workspaceId);
+    const created = this.workspaces.jail.mkdir(parent, name);
+    this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'storage.mkdir', resource: `folder:${created}`, ip: p.ip });
+    return { path: created };
   }
 
   async cloudBuckets(p: Principal, connectionId: string) {

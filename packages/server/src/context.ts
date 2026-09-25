@@ -10,6 +10,7 @@ import { QueryService } from './services/query.js';
 import { FileService } from './services/files.js';
 import { CloudConnectionService } from './services/cloud.js';
 import { StorageService } from './services/storage.js';
+import { NativePicker } from './services/native-picker.js';
 import { ExportService } from './services/exports.js';
 import { SavedQueryService, DashboardService } from './services/bi.js';
 import { ChatHistoryService } from './services/chat.js';
@@ -71,6 +72,7 @@ export interface AppContext {
   files: FileService;
   cloud: CloudConnectionService;
   storage: StorageService;
+  nativePicker: NativePicker;
   exports: ExportService;
   savedQueries: SavedQueryService;
   dashboards: DashboardService;
@@ -309,6 +311,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     files,
     cloud,
     storage,
+    nativePicker: new NativePicker(cfg),
     exports: exportsSvc,
     savedQueries,
     dashboards,

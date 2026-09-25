@@ -3,7 +3,7 @@ import { UploadCloud, Folder, FolderOpen, FolderPlus, Database, Table2, Eye, Tra
 import { api, formatBytes, type JailEntry, type CloudConnection, type CloudEntry, type LakehouseConnection, type LakehouseBrowse, type DatabaseConnection, type DatabaseEntry, type ConnectorConnection, type BrowseEntry } from '../../api/client';
 import { useWorkspace } from '../../store/workspace';
 import { cn, confirmAction } from '../../components/ui';
-import { FolderPicker } from '../explorer/FolderPicker';
+import { LocationBrowser } from '../../components/data';
 
 /**
  * The Overview's data source bar: LOCAL (the data directory, folders mounted from this computer, the workspace's
@@ -282,7 +282,7 @@ export function DataSourceBar({ workspaceId, target, onSelect, onImport, onQuery
         </div>
 
       </div>
-      <FolderPicker open={picker} workspaceId={workspaceId} onClose={() => setPicker(false)} onPick={addFolder} />
+      <LocationBrowser open={picker} workspaceId={workspaceId} mode="folder" remote={false} title="Add a folder to this workspace" onClose={() => setPicker(false)} onPick={async ([path]) => { if (path) await addFolder(path); }} />
     </div>
   );
 }

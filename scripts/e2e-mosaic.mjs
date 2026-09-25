@@ -1241,6 +1241,72 @@ try {
     await key('Escape');
     report.details.charts = 1;
   }
+  else if (scenario === 'location-browser') {
+    // Choose a folder like a desktop dialog: places, a typed path, the preview, history, a new folder, then choose.
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dv-e2e-lb-')));
+    fs.mkdirSync(path.join(dir, 'sub'));
+    fs.writeFileSync(path.join(dir, 'sales.csv'), 'id,amount\n1,10\n2,20\n3,30\n');
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'hello');
+    cleanup = async () => {
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      for (const p of [path.join(dir, 'sub'), dir]) await authed(`/api/workspaces/${wsId}/folders?path=${encodeURIComponent(p)}`, { method: 'DELETE' }).catch(() => {});
+      fs.rmSync(dir, { recursive: true, force: true });
+    };
+    const names = `[...document.querySelectorAll('[data-testid="lb-entry"]')].map(e => e.dataset.name)`;
+    await evaluate(`location.hash = '#/data'; 'ok'`);
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Add a folder from this computer')`, 20000, 'add folder button');
+    await clickButton('Add a folder from this computer');
+    await waitFor(`!!document.querySelector('[data-testid="lb-places"]') && document.querySelector('[data-testid="lb-places"]').textContent.includes('Home')`, 10000, 'places');
+    report.details.places = await evaluate(`[...document.querySelectorAll('[data-testid="lb-places"] li button')].map(b => b.textContent).slice(0, 3)`);
+    report.details.native = await evaluate(`!!document.querySelector('[data-testid="lb-native"]')`);
+    await setField('[data-testid="lb-path"]', dir);
+    await evaluate(`document.querySelector('[data-testid="lb-path"]').form.requestSubmit(); 'ok'`);
+    await waitFor(`${names}.length === 3`, 10000, 'the typed folder');
+    report.details.entries = await evaluate(names);
+    // One click previews the file's columns.
+    await evaluate(`document.querySelector('[data-testid="lb-entry"][data-name="sales.csv"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="lb-columns"]')`, 10000, 'preview');
+    report.details.preview = await evaluate(`document.querySelector('[data-testid="lb-preview"]').textContent`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_browser.png'), Buffer.from(shot.result.data, 'base64')); }
+    // Into sub (double-click), up, then back.
+    await evaluate(`document.querySelector('[data-testid="lb-entry"][data-name="sub"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); 'ok'`);
+    await waitFor(`document.querySelector('[data-testid="lb-path"]').value.endsWith('/sub')`, 5000, 'into sub');
+    await evaluate(`document.querySelector('[data-testid="lb-up"]').click(); 'ok'`);
+    await waitFor(`document.querySelector('[data-testid="lb-path"]').value === ${JSON.stringify(dir)}`, 5000, 'up');
+    await evaluate(`document.querySelector('[aria-label="Back"]').click(); 'ok'`);
+    await waitFor(`document.querySelector('[data-testid="lb-path"]').value.endsWith('/sub')`, 5000, 'back');
+    report.details.history = 'ok';
+    await evaluate(`document.querySelector('[data-testid="lb-up"]').click(); 'ok'`);
+    await waitFor(`${names}.length === 3`, 5000, 'up again');
+    // New folder.
+    await evaluate(`document.querySelector('[data-testid="lb-new-folder"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="confirm-dialog"] input')`, 5000, 'new folder prompt');
+    await setField('[data-testid="confirm-dialog"] input', 'e2e-new');
+    await clickButton('Create');
+    await waitFor(`${names}.includes('e2e-new')`, 5000, 'new folder listed');
+    report.details.created = fs.existsSync(path.join(dir, 'e2e-new'));
+    report.details.selectedNew = await evaluate(`document.querySelector('[data-testid="lb-entry"][data-name="e2e-new"]').getAttribute('aria-selected')`);
+    // Keyboard: Home selects the first entry (sub... or e2e-new), Enter opens it.
+    const key = async (k) => { await send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: { Enter: 13, Home: 36, Backspace: 8 }[k], ...(k === 'Enter' ? { text: '\r' } : {}) }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k }); await sleep(150); };
+    await evaluate(`document.querySelector('[data-testid="lb-list"]').focus(); 'ok'`);
+    await key('Home');
+    await key('Enter');
+    await waitFor(`document.querySelector('[data-testid="lb-path"]').value.endsWith('/e2e-new')`, 5000, 'Enter opens');
+    await key('Backspace');
+    await waitFor(`document.querySelector('[data-testid="lb-path"]').value === ${JSON.stringify(dir)}`, 5000, 'Backspace goes up');
+    report.details.keyboard = 'ok';
+    // Choose sub.
+    await evaluate(`document.querySelector('[data-testid="lb-entry"][data-name="sub"]').click(); 'ok'`);
+    report.details.button = await evaluate(`document.querySelector('[data-testid="lb-choose"]').textContent`);
+    await evaluate(`document.querySelector('[data-testid="lb-choose"]').click(); 'ok'`);
+    await waitFor(`!document.querySelector('[data-testid="location-browser"]')`, 10000, 'browser closed');
+    report.details.folders = (await (await authed(`/api/workspaces/${wsId}/folders`)).json()).folders.map((f) => f.path);
+    report.details.sub = path.join(dir, 'sub');
+    report.details.charts = 1;
+  }
   else if (scenario === 'data-explorer') {
     // A dataset, then one of its columns in depth, then where the table comes from.
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -2249,6 +2315,15 @@ try {
     if (!/FROM nowhere_at_all/.test(d.selection ?? '')) problems.push(`go to line selected: ${JSON.stringify(d.selection)}`);
     if (d.saveFocus !== 'INPUT') problems.push(`save dialog focus: ${d.saveFocus}`);
     if ((d.shortcuts ?? []).length !== 6) problems.push(`shortcuts: ${JSON.stringify(d.shortcuts)}`);
+  }
+  if (scenario === 'location-browser') {
+    if (JSON.stringify(d.places?.slice(0, 2)) !== JSON.stringify(['Data directory', 'Home'])) problems.push(`places: ${JSON.stringify(d.places)}`);
+    if (d.native !== true) problems.push('the system dialog was not offered on localhost');
+    if (JSON.stringify(d.entries) !== JSON.stringify(['sub', 'notes.txt', 'sales.csv'])) problems.push(`entries: ${JSON.stringify(d.entries)}`);
+    if (!/2 columns/.test(d.preview ?? '') || !/amount/.test(d.preview ?? '')) problems.push(`preview: ${d.preview}`);
+    if (d.created !== true || d.selectedNew !== 'true') problems.push(`new folder: ${d.created} ${d.selectedNew}`);
+    if (d.button !== 'Choose “sub”') problems.push(`button: ${d.button}`);
+    if (!(d.folders ?? []).includes(d.sub)) problems.push(`folders: ${JSON.stringify(d.folders)}`);
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);
