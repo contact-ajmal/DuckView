@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { and, desc, eq, inArray, max, ne, sql } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
-import type { EngineSettings, Workspace, WorkspaceRole, MemberSubjectType } from '../db/schema/sqlite.js';
+import type { EngineSettings, Workspace, WorkspaceRole, MemberSubjectType, WidgetType } from '../db/schema/sqlite.js';
 import type { AppContext } from '../context.js';
 import type { Principal } from './principal.js';
 import { isPlatformAdmin, requireAdmin, requireWrite } from './principal.js';
@@ -53,7 +53,7 @@ export interface CreateInput {
 /** What a clone (and, later, a bundle) carries besides the data. */
 export interface WorkspaceObjects {
   queries: { id: string; name: string; folder: string; description: string | null; sql_text: string; tags: string[] }[];
-  dashboards: { name: string; description: string | null; kind: 'grid' | 'mosaic'; spec: unknown; layout: { i: string; x: number; y: number; w: number; h: number }[]; widgets: { id: string; title: string; widget_type: 'KPI' | 'CHART' | 'TABLE' | 'MARKDOWN'; saved_query_id: string | null; custom_sql: string | null; chart_config: Record<string, unknown>; refresh_interval_sec: number }[] }[];
+  dashboards: { name: string; description: string | null; kind: 'grid' | 'mosaic'; spec: unknown; layout: { i: string; x: number; y: number; w: number; h: number }[]; widgets: { id: string; title: string; widget_type: WidgetType; saved_query_id: string | null; custom_sql: string | null; chart_config: Record<string, unknown>; refresh_interval_sec: number }[] }[];
   notebooks: { title: string; cells: { type: string; name?: string | null; source: string; input?: unknown }[] }[];
   semantic: string | null;
   quality: { name: string; description: string | null; relation: string; checks: unknown[] }[];

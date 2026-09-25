@@ -11,6 +11,7 @@ import { cn, InlineError } from '../../components/ui';
 import { fetchCached } from '../../lib/useCached';
 import { useAuth } from '../../store/auth';
 import { ChartSkeleton } from '../../components/data';
+import { MapWidget } from './MapWidget';
 
 export interface WidgetData { columns: ColumnSchema[]; rows: unknown[][]; rowCount: number; totalRows: number | null; durationMs: number }
 
@@ -263,6 +264,7 @@ export function WidgetBody({ dashboardId, widget, tick, workspaceId, version }: 
       {widget.widget_type === 'KPI' && <KpiWidget data={data} config={widget.chart_config} />}
       {widget.widget_type === 'CHART' && <div className="h-full p-2"><ChartWidget data={data} config={widget.chart_config} /></div>}
       {widget.widget_type === 'TABLE' && <TableWidget data={data} config={widget.chart_config} />}
+      {widget.widget_type === 'MAP' && <MapWidget columns={data.columns} rows={data.rows} config={widget.chart_config} />}
       {at && (widget.refresh_interval_sec > 0 || fromCache) && <div className="absolute bottom-1 right-2 font-mono text-2xs text-zinc-500">{fromCache ? 'cached · ' : ''}computed {new Date(at).toLocaleTimeString()}</div>}
     </div>
   );

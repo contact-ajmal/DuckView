@@ -18,6 +18,10 @@ const ChartConfig = z
     page_size: z.number().int().min(1).max(500).optional(),
     markdown: z.string().max(50_000).optional(),
     colors: z.array(z.string()).max(8).optional(),
+    lat: z.string().optional(),
+    lon: z.string().optional(),
+    region: z.string().optional(),
+    label: z.string().optional(),
   })
   .strict();
 
@@ -108,7 +112,7 @@ export async function biRoutes(app: FastifyInstance, ctx: AppContext) {
     const body = z.object({ max_rows: z.number().int().min(1).max(5000).optional(), refresh: z.boolean().optional() }).parse(req.body ?? {});
     const { sql, workspace_id, widget } = await ctx.dashboards.widgetSql(req.principal!, id, wid);
     return conditional(req, reply, async (c) => {
-      const result = await ctx.queries.run(req.principal!, workspace_id, sql, { maxRows: body.max_rows ?? (widget.widget_type === 'KPI' ? 10 : widget.widget_type === 'TABLE' ? 1000 : 2000), countTotal: widget.widget_type === 'TABLE', refresh: c.refresh, ifNoneMatch: c.ifNoneMatch });
+      const result = await ctx.queries.run(req.principal!, workspace_id, sql, { maxRows: body.max_rows ?? (widget.widget_type === 'KPI' ? 10 : widget.widget_type === 'TABLE' ? 1000 : widget.widget_type === 'MAP' ? 5000 : 2000), countTotal: widget.widget_type === 'TABLE', refresh: c.refresh, ifNoneMatch: c.ifNoneMatch });
       const { analysis: _a, guardedSql: _g, ...rest } = result as typeof result & { guardedSql?: string };
       return { widget_id: wid, ...rest };
     });

@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import type { DashboardWidget, LayoutItem, NotebookCell, NotebookOutput } from '../../api/client';
 import { applyTheme } from '../../store/theme';
 import { ChartWidget, KpiWidget, MarkdownWidget, TableWidget, type WidgetData } from '../dashboards/widgets';
+import { MapWidget } from '../dashboards/MapWidget';
 import { ResultsGrid } from '../workspace/ResultsGrid';
 import { ChartPanel } from '../workspace/ChartPanel';
 
@@ -66,7 +67,7 @@ function EmbedWidget({ w }: { w: EmbedWidgetDef }) {
     <div className="flex h-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900" data-widget={w.title}>
       <div className="truncate px-3 pt-2 text-xs font-medium text-zinc-400">{w.title}</div>
       <div className="min-h-0 flex-1">
-        {w.widget_type === 'MARKDOWN' ? <MarkdownWidget config={w.chart_config} /> : error ? <div className="m-3 text-xs text-red-300">{error}</div> : !data ? <div className="flex h-full items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-zinc-500" /></div> : w.widget_type === 'KPI' ? <KpiWidget data={data} config={w.chart_config} /> : w.widget_type === 'CHART' ? <div className="h-full p-2"><ChartWidget data={data} config={w.chart_config} /></div> : <TableWidget data={data} config={w.chart_config} />}
+        {w.widget_type === 'MARKDOWN' ? <MarkdownWidget config={w.chart_config} /> : error ? <div className="m-3 text-xs text-red-300">{error}</div> : !data ? <div className="flex h-full items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-zinc-500" /></div> : w.widget_type === 'KPI' ? <KpiWidget data={data} config={w.chart_config} /> : w.widget_type === 'CHART' ? <div className="h-full p-2"><ChartWidget data={data} config={w.chart_config} /></div> : w.widget_type === 'MAP' ? <MapWidget columns={data.columns} rows={data.rows} config={w.chart_config} /> : <TableWidget data={data} config={w.chart_config} />}
       </div>
     </div>
   );

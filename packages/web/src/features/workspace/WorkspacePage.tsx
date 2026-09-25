@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search, Send, XCircle, Keyboard, Sparkles, AlignLeft } from 'lucide-react';
+import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search, Send, XCircle, Keyboard, Sparkles, AlignLeft, Webhook } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess, lakehouseEngine, engineConnectionId } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { fetchCached } from '../../lib/useCached';
@@ -16,6 +16,7 @@ import { SchemaTree } from './SchemaTree';
 import { SavedQueriesTree } from './SavedQueries';
 import { QueryHistoryDrawer, HistoryList } from './QueryHistory';
 import { PivotView } from './PivotView';
+import { ENDPOINT_DRAFT_KEY } from '../settings/EndpointsPanel';
 import { REVERSE_DRAFT_KEY } from '../connections/ReversePanel';
 import { HistoryDrawer } from '../history/HistoryDrawer';
 import { ApprovalCard } from '../../components/ai';
@@ -483,6 +484,7 @@ export function WorkspacePage() {
                   <MenuItem icon={<Play className="h-3.5 w-3.5" />} hint="⌘↵" onClick={() => { close(); run(null); }}>Run all</MenuItem>
                   <MenuItem icon={<Workflow className="h-3.5 w-3.5" />} onClick={() => { close(); setDbtModel(sql); }}>Save as dbt model…</MenuItem>
                   <MenuItem icon={<Send className="h-3.5 w-3.5" />} onClick={() => { close(); try { sessionStorage.setItem(REVERSE_DRAFT_KEY, JSON.stringify({ sql, name: tab?.title && !/^Query \d+$/.test(tab.title) ? tab.title : '' })); } catch { /* storage unavailable */ } location.hash = '#/connections/reverse'; }}>Send results to…</MenuItem>
+                  {canWrite && <MenuItem icon={<Webhook className="h-3.5 w-3.5" />} onClick={() => { close(); try { sessionStorage.setItem(ENDPOINT_DRAFT_KEY, sql); } catch { /* storage unavailable */ } location.hash = '#/settings/query-apis'; }}>Publish as an API…</MenuItem>}
                   <MenuItem icon={copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />} onClick={() => { navigator.clipboard.writeText(sql).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }); }}>Copy SQL</MenuItem>
                   <MenuItem icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => { close(); replaceSql(''); }}>Clear editor</MenuItem>
                   <MenuDivider />

@@ -1757,6 +1757,48 @@ try {
     report.details.accepted = true;
     report.details.charts = 1;
   }
+  else if (scenario === 'query-api') {
+    // Publish a query from the workbench, copy its key, and call it the way another system would.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = async (sql) => (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) })).json();
+    await q("CREATE OR REPLACE TABLE e2e_api_sales AS SELECT * FROM (VALUES ('eu', 10), ('eu', 20), ('us', 5)) t(region, amount)");
+    cleanup = async () => {
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      for (const e of ((await (await authed(`/api/workspaces/${wsId}/endpoints`)).json()).endpoints ?? []).filter((e) => e.slug.startsWith('e2e-api'))) await authed(`/api/endpoints/${e.id}`, { method: 'DELETE' }).catch(() => {});
+      await q('DROP TABLE IF EXISTS e2e_api_sales');
+    };
+    await evaluate(`sessionStorage.setItem('duckview.endpointDraft', "SELECT region, sum(amount) AS total FROM e2e_api_sales WHERE region = {{region}} GROUP BY 1"); location.hash = '#/settings/query-apis'; location.reload(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="endpoint-form"]')`, 20000, 'form opened with the SQL');
+    report.details.params = await evaluate(`[...document.querySelectorAll('[data-testid="endpoint-form"] li code')].map(c => c.textContent)`);
+    await setField('[data-testid="endpoint-name"]', 'E2E API sales');
+    await evaluate(`document.querySelector('[data-testid="endpoint-publish"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="endpoint-key"]')`, 15000, 'key shown once');
+    const key = await evaluate(`document.querySelector('[data-testid="endpoint-key"]').textContent`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_key.png'), Buffer.from(shot.result.data, 'base64')); }
+    const call = async (headers) => { const r = await fetch(`${BASE}/q/e2e-api-sales?region=eu`, { headers }); return { status: r.status, body: await r.json().catch(() => null) }; };
+    report.details.withKey = await call({ authorization: `Bearer ${key}` });
+    report.details.withoutKey = (await call({})).status;
+    await evaluate(`[...document.querySelectorAll('[data-testid="endpoint-issued"] button')].find(b => b.textContent.trim() === 'Done').click(); 'ok'`);
+    await waitFor(`!document.querySelector('[data-testid="endpoint-list"] tr[data-slug="e2e-api-sales"]')?.textContent.includes('—Copy')`, 10000, 'listed with the call counted');
+    report.details.row = await evaluate(`document.querySelector('[data-testid="endpoint-list"] tr[data-slug="e2e-api-sales"]').textContent`);
+    report.details.charts = 1;
+  }
+  else if (scenario === 'map') {
+    // A dashboard with a point map and a country map; the editor offers MAP.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const dash = (await j('POST', `/api/workspaces/${wsId}/dashboards`, { name: `E2E map ${Date.now()}` })).dashboard;
+    cleanup = async () => { await j('DELETE', `/api/dashboards/${dash.id}`); };
+    await j('POST', `/api/dashboards/${dash.id}/widgets`, { title: 'Stores', widget_type: 'MAP', custom_sql: "SELECT * FROM (VALUES ('Lisbon', 38.72, -9.14, 120), ('Berlin', 52.52, 13.40, 80), ('Oslo', 59.91, 10.75, 40)) t(city, lat, lon, sales)", chart_config: {} });
+    await j('POST', `/api/dashboards/${dash.id}/widgets`, { title: 'Sales by country', widget_type: 'MAP', custom_sql: "SELECT * FROM (VALUES ('PT', 120), ('DEU', 80), ('Norway', 40), ('Atlantis', 1)) t(country, sales)", chart_config: { value: 'sales' } });
+    await evaluate(`location.hash = '#/dashboards/${dash.id}'; 'ok'`);
+    await waitFor(`document.querySelectorAll('[data-testid="map-widget"]').length === 2 && !!document.querySelector('[data-testid="map-widget"][data-mode="regions"] [data-country]')`, 20000, 'maps drawn');
+    await sleep(500);
+    report.details.points = await evaluate(`document.querySelector('[data-testid="map-widget"][data-mode="points"]').querySelectorAll('[data-point]').length`);
+    report.details.countries = await evaluate(`[...document.querySelector('[data-testid="map-widget"][data-mode="regions"]').querySelectorAll('[data-country]')].map((p) => p.getAttribute('data-country')).sort()`);
+    report.details.unplaced = await evaluate(`document.querySelector('[data-testid="map-widget"][data-mode="regions"]').textContent`);
+    report.details.charts = 1;
+  }
   else if (scenario === 'data-explorer') {
     // A dataset, then one of its columns in depth, then where the table comes from.
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -2847,6 +2889,17 @@ try {
   if (scenario === 'watches') {
     if (!/region \(VARCHAR\) was added/.test(d.drift ?? '')) problems.push(`drift: ${d.drift}`);
     if (d.accepted !== true) problems.push('not accepted');
+  }
+  if (scenario === 'query-api') {
+    if (JSON.stringify(d.params) !== '["region"]') problems.push(`params: ${JSON.stringify(d.params)}`);
+    if (d.withKey?.status !== 200 || JSON.stringify(d.withKey?.body?.rows) !== '[{"region":"eu","total":30}]') problems.push(`call: ${JSON.stringify(d.withKey)}`);
+    if (d.withoutKey !== 401) problems.push(`without key: ${d.withoutKey}`);
+    if (!/Key …/.test(d.row ?? '') || !/1/.test(d.row ?? '')) problems.push(`row: ${d.row}`);
+  }
+  if (scenario === 'map') {
+    if (d.points !== 3) problems.push(`points: ${d.points}`);
+    if (JSON.stringify(d.countries) !== '["276","578","620"]') problems.push(`countries: ${JSON.stringify(d.countries)}`);
+    if (!/1 row not placed/.test(d.unplaced ?? '')) problems.push(`unplaced: ${d.unplaced}`);
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);

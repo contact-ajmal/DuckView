@@ -168,7 +168,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats, ORCHESTRATION_KINDS, ORCHESTRATION_STATUSES, TEMPLATE_STATUSES, type TemplateBody, type TemplateInstallObjects, WORKSPACE_BACKUP_KINDS, WATCH_STATUSES, type WatchSchema } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats, ORCHESTRATION_KINDS, ORCHESTRATION_STATUSES, TEMPLATE_STATUSES, type TemplateBody, type TemplateInstallObjects, WORKSPACE_BACKUP_KINDS, WATCH_STATUSES, type WatchSchema, type EndpointParam } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -1175,4 +1175,29 @@ export const dataWatches = pgTable(
     updated_at: ts('updated_at').notNull(),
   },
   (t) => [index('data_watches_ws_idx').on(t.workspace_id)],
+);
+
+export const queryEndpoints = pgTable(
+  'query_endpoints',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    description: text('description'),
+    sql: text('sql').notNull(),
+    params: jsonb('params').$type<EndpointParam[]>().notNull().default([]),
+    public: boolean('public').notNull().default(false),
+    key_hash: text('key_hash'),
+    key_hint: text('key_hint'),
+    max_rows: integer('max_rows').notNull().default(1000),
+    rate_per_minute: integer('rate_per_minute').notNull().default(60),
+    enabled: boolean('enabled').notNull().default(true),
+    calls: integer('calls').notNull().default(0),
+    last_called_at: ts('last_called_at'),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('query_endpoints_slug_idx').on(t.slug), index('query_endpoints_ws_idx').on(t.workspace_id)],
 );

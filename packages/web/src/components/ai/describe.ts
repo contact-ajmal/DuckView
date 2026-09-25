@@ -63,6 +63,8 @@ const VERBS: Record<string, (a: Args) => string> = {
   backup_workspace: () => 'Backed up the workspace',
   create_stream: (a) => `Created the stream ${q(str(a.name))}`,
   git_status: () => 'Checked Git for changes',
+  list_endpoints: () => 'Listed the query APIs',
+  publish_endpoint: (a) => `Published ${q(str(a.name))} as an API`,
   list_watches: () => 'Looked at the watches',
   create_watch: (a) => `Started watching ${str(a.target)}`,
   check_watch: () => 'Checked a watch',

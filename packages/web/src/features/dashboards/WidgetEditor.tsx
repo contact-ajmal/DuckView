@@ -73,7 +73,7 @@ export function WidgetEditor({ open, onClose, onSave, workspaceId, initial, save
             <div>
               <Label>Type</Label>
               <Select value={d.widget_type} onChange={(e) => setD({ ...d, widget_type: e.target.value as WidgetType })} className="w-full">
-                {(['KPI', 'CHART', 'TABLE', 'MARKDOWN'] as WidgetType[]).map((t) => <option key={t} value={t}>{t}</option>)}
+                {(['KPI', 'CHART', 'TABLE', 'MAP', 'MARKDOWN'] as WidgetType[]).map((t) => <option key={t} value={t}>{t}</option>)}
               </Select>
             </div>
           </div>
@@ -138,6 +138,18 @@ export function WidgetEditor({ open, onClose, onSave, workspaceId, initial, save
               <div><Label>Compare to (for % diff)</Label><Select value={cfg.compare ?? ''} onChange={(e) => setCfg({ compare: e.target.value || undefined })} className="w-full"><option value="">none</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select></div>
               <div><Label>Format</Label><Select value={cfg.format ?? 'number'} onChange={(e) => setCfg({ format: e.target.value as WidgetChartConfig['format'] })} className="w-full">{['number', 'compact', 'currency', 'percent'].map((f) => <option key={f} value={f}>{f}</option>)}</Select></div>
               <p className="text-2xs text-zinc-500">The query should return one row, e.g. <code className="font-mono">SELECT sum(x) AS total, lag_value AS previous …</code></p>
+            </>
+          )}
+          {d.widget_type === 'MAP' && (
+            <>
+              <p className="text-2xs text-zinc-500">Points from latitude and longitude, or countries coloured by a value. Columns named lat/lon or country are found by themselves.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div><Label>Latitude</Label><Select value={cfg.lat ?? ''} onChange={(e) => setCfg({ lat: e.target.value || undefined })} className="w-full" aria-label="Latitude column"><option value="">auto</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select></div>
+                <div><Label>Longitude</Label><Select value={cfg.lon ?? ''} onChange={(e) => setCfg({ lon: e.target.value || undefined })} className="w-full" aria-label="Longitude column"><option value="">auto</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select></div>
+              </div>
+              <div><Label>Or a country column</Label><Select value={cfg.region ?? ''} onChange={(e) => setCfg({ region: e.target.value || undefined })} className="w-full" aria-label="Country column"><option value="">auto</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select></div>
+              <div><Label>Value</Label><Select value={cfg.value ?? ''} onChange={(e) => setCfg({ value: e.target.value || undefined })} className="w-full" aria-label="Value column"><option value="">auto (first number)</option>{numeric.map((n) => <option key={n} value={n}>{n}</option>)}</Select></div>
+              <div><Label>Label</Label><Select value={cfg.label ?? ''} onChange={(e) => setCfg({ label: e.target.value || undefined })} className="w-full" aria-label="Label column"><option value="">auto</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select></div>
             </>
           )}
           {d.widget_type === 'TABLE' && <div><Label>Rows per page</Label><Input type="number" min={1} max={500} value={cfg.page_size ?? 10} onChange={(e) => setCfg({ page_size: Number(e.target.value) })} /></div>}

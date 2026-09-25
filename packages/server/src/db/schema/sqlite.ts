@@ -242,7 +242,7 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 // BI, cloud storage and copilot models
 // ---------------------------------------------------------------------------
 
-export const WIDGET_TYPES = ['KPI', 'CHART', 'TABLE', 'MARKDOWN'] as const;
+export const WIDGET_TYPES = ['KPI', 'CHART', 'TABLE', 'MARKDOWN', 'MAP'] as const;
 /** grid: widget grid (Chart.js); mosaic: a declarative Mosaic spec rendered with cross-filtering. */
 export const DASHBOARD_KINDS = ['grid', 'mosaic'] as const;
 export type DashboardKind = (typeof DASHBOARD_KINDS)[number];
@@ -324,6 +324,11 @@ export interface WidgetChartConfig {
   /** MARKDOWN: content. */
   markdown?: string;
   colors?: string[];
+  /** MAP: latitude and longitude columns (points), or a column of country codes or names (regions); label for points. */
+  lat?: string;
+  lon?: string;
+  region?: string;
+  label?: string;
 }
 
 export interface ChatContextSnapshot {
@@ -1813,3 +1818,34 @@ export const dataWatches = sqliteTable(
   (t) => [index('data_watches_ws_idx').on(t.workspace_id)],
 );
 export type DataWatch = typeof dataWatches.$inferSelect;
+
+/** A saved SELECT published as an HTTP endpoint: GET /q/<slug>?param=… returns its rows as JSON or CSV. */
+export const ENDPOINT_PARAM_TYPES = ['string', 'number', 'integer', 'boolean', 'date'] as const;
+export type EndpointParam = { name: string; type: (typeof ENDPOINT_PARAM_TYPES)[number]; required: boolean; default: string | null; description?: string | null };
+export const queryEndpoints = sqliteTable(
+  'query_endpoints',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Calls run as this person, read-only, under their access policies. */
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    description: text('description'),
+    sql: text('sql').notNull(),
+    params: text('params', { mode: 'json' }).$type<EndpointParam[]>().notNull().default([]),
+    /** Without a key anyone with the URL may call it. */
+    public: integer('public', { mode: 'boolean' }).notNull().default(false),
+    key_hash: text('key_hash'),
+    key_hint: text('key_hint'),
+    max_rows: integer('max_rows').notNull().default(1000),
+    rate_per_minute: integer('rate_per_minute').notNull().default(60),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    calls: integer('calls').notNull().default(0),
+    last_called_at: integer('last_called_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [uniqueIndex('query_endpoints_slug_idx').on(t.slug), index('query_endpoints_ws_idx').on(t.workspace_id)],
+);
+export type QueryEndpoint = typeof queryEndpoints.$inferSelect;

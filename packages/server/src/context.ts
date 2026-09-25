@@ -45,6 +45,7 @@ import { SearchService } from './services/search.js';
 import { DiffService } from './services/diff.js';
 import { PiiService } from './services/pii.js';
 import { WatchService } from './services/watches.js';
+import { EndpointService } from './services/endpoints.js';
 import { WorkspaceLifecycleService } from './services/workspace-lifecycle.js';
 import { ClusterService } from './services/cluster.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
@@ -115,6 +116,7 @@ export interface AppContext {
   diff: DiffService;
   pii: PiiService;
   watches: WatchService;
+  endpoints: EndpointService;
   lifecycle: WorkspaceLifecycleService;
   cluster: ClusterService;
   /** Cluster mode: joins the cluster at this URL once the server listens (then starts stream consumers). */
@@ -310,6 +312,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const diff = new DiffService();
   const pii = new PiiService();
   const watches = new WatchService(store);
+  const endpoints = new EndpointService(store);
   if (cfg.transform.scheduler_enabled) watches.start();
   const lifecycle = new WorkspaceLifecycleService(store);
   queries.quota = (id, mutating) => lifecycle.checkQuery(id, mutating);
@@ -372,6 +375,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     diff,
     pii,
     watches,
+    endpoints,
     lifecycle,
     cluster,
     startCluster,
@@ -423,6 +427,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   diff.bind(ctx);
   pii.bind(ctx);
   watches.bind(ctx);
+  endpoints.bind(ctx);
   lifecycle.bind(ctx);
   return ctx;
 }

@@ -400,14 +400,14 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
     define({
       name: 'create_dashboard_widget',
       title: 'Create dashboard widget',
-      description: 'Adds a widget to a dashboard (creates the dashboard when dashboard_id is omitted and dashboard_name is given). widget_type KPI expects chart_config.value; CHART expects chart_config.chart + x + y[]; TABLE needs nothing; MARKDOWN uses chart_config.markdown. The SQL is validated (read-only) and executed once to confirm it runs.',
+      description: 'Adds a widget to a dashboard (creates the dashboard when dashboard_id is omitted and dashboard_name is given). widget_type KPI expects chart_config.value; CHART expects chart_config.chart + x + y[]; TABLE needs nothing; MARKDOWN uses chart_config.markdown; MAP draws points (chart_config.lat + lon, optional value and label) or colours countries (chart_config.region holding ISO codes or names, and value). The SQL is validated (read-only) and executed once to confirm it runs.',
       inputSchema: {
         dashboard_id: z.string().optional(),
         dashboard_name: z.string().optional().describe('Create a new dashboard with this name when dashboard_id is omitted'),
         workspace_id: z.string().optional(),
         title: z.string().min(1),
         sql: z.string().min(1).describe('Read-only SQL for the widget (ignored for MARKDOWN)'),
-        widget_type: z.enum(['KPI', 'CHART', 'TABLE', 'MARKDOWN']),
+        widget_type: z.enum(['KPI', 'CHART', 'TABLE', 'MARKDOWN', 'MAP']),
         chart_config: z.record(z.string(), z.unknown()).optional(),
         refresh_interval_sec: z.number().int().min(0).max(86400).optional(),
       },
@@ -1611,6 +1611,42 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
       },
     }),
 
+    define({
+      name: 'list_endpoints',
+      title: 'List query APIs',
+      description: 'Queries the workspace publishes as HTTP endpoints (GET /q/<slug>): their address, parameters, whether a key is needed, and how often they are called.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const list = await env.ctx.endpoints.list(env.principal, ws);
+        const lines = list.map((e) => `- **${e.name}** ${e.url}${e.params.length ? `?${e.params.map((p) => `${p.name}=<${p.type}>`).join('&')}` : ''} · ${e.public ? 'public' : 'key required'} · ${e.calls} calls${e.enabled ? '' : ' · off'}`);
+        return { content: [text(`**Query APIs** (${list.length})\n${lines.join('\n') || '_(none)_'}`)], structuredContent: { status: 'ok', endpoints: list } };
+      },
+    }),
+
+    define({
+      name: 'publish_endpoint',
+      title: 'Publish a query as an API',
+      description: 'Publishes one read-only SELECT at GET /q/<slug>, for other systems to call. Parameters are {{name}} placeholders in the SQL (declare their type in params: string, number, integer, boolean or date). Returns the address and, unless public, the key once. Calls run as you, read-only. Needs a person\'s approval: call with dry_run=false only after they agreed.',
+      inputSchema: {
+        name: z.string().min(1).max(120),
+        sql: z.string().min(1),
+        slug: z.string().max(60).optional(),
+        params: z.array(z.object({ name: z.string(), type: z.enum(['string', 'number', 'integer', 'boolean', 'date']), required: z.boolean(), default: z.string().nullable() })).optional(),
+        public: z.boolean().optional().describe('Anyone with the address may call it (default false: a key is needed)'),
+        workspace_id: z.string().optional(),
+        dry_run: z.boolean().optional().describe('Default true. Set false once approved.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, a) {
+        const ws = resolveWorkspace(env, a.workspace_id);
+        needsApproval(env, a.dry_run, `publish_endpoint makes "${a.name}" callable over HTTP${a.public ? ' by anyone with the address' : ' with a key'}.`, 'publish_endpoint', a.sql.slice(0, 400));
+        const r = await env.ctx.endpoints.create(env.principal, ws, { name: a.name, sql: a.sql, slug: a.slug, params: a.params, public: a.public });
+        return { content: [text(`Published **${r.endpoint.name}** at ${r.endpoint.url}${r.key ? `\nKey (shown once): \`${r.key}\` — send it as \`Authorization: Bearer <key>\`.` : ' (public)'}`)], structuredContent: { status: 'ok', endpoint: r.endpoint, key: r.key } };
+      },
+    }),
+
     // ---------------------------------------------------------------- catalog & lineage
     define({
       name: 'search_catalog',
@@ -1702,7 +1738,7 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         widget_id: z.string(),
         title: z.string().min(1).optional(),
         sql: z.string().min(1).optional(),
-        widget_type: z.enum(['KPI', 'CHART', 'TABLE', 'MARKDOWN']).optional(),
+        widget_type: z.enum(['KPI', 'CHART', 'TABLE', 'MARKDOWN', 'MAP']).optional(),
         chart_config: z.record(z.string(), z.unknown()).optional(),
         refresh_interval_sec: z.number().int().min(0).max(86400).optional(),
         workspace_id: z.string().optional(),
@@ -1872,4 +1908,4 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template', 'list_saved_queries', 'get_saved_query', 'save_query', 'search_catalog', 'get_lineage', 'annotate_table', 'get_dashboard', 'update_widget', 'remove_widget', 'define_metric', 'workspace_health', 'list_backups', 'backup_workspace', 'create_stream', 'git_status', 'git_commit', 'query_history', 'search_workspace', 'diff_tables', 'scan_pii', 'tag_pii', 'protect_pii', 'list_watches', 'create_watch', 'check_watch'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template', 'list_saved_queries', 'get_saved_query', 'save_query', 'search_catalog', 'get_lineage', 'annotate_table', 'get_dashboard', 'update_widget', 'remove_widget', 'define_metric', 'workspace_health', 'list_backups', 'backup_workspace', 'create_stream', 'git_status', 'git_commit', 'query_history', 'search_workspace', 'diff_tables', 'scan_pii', 'tag_pii', 'protect_pii', 'list_watches', 'create_watch', 'check_watch', 'list_endpoints', 'publish_endpoint'] as const;
