@@ -168,7 +168,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats, ORCHESTRATION_KINDS, ORCHESTRATION_STATUSES, TEMPLATE_STATUSES, type TemplateBody, type TemplateInstallObjects, WORKSPACE_BACKUP_KINDS, WATCH_STATUSES, type WatchSchema, type EndpointParam } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats, ORCHESTRATION_KINDS, ORCHESTRATION_STATUSES, TEMPLATE_STATUSES, type TemplateBody, type TemplateInstallObjects, WORKSPACE_BACKUP_KINDS, WATCH_STATUSES, type WatchSchema, type EndpointParam, AGENT_TASK_STATUSES, type AgentPageRef, type AgentPlanStep, type AgentStepRecord, type AgentArtifact, type AgentApprovalRecord, type AgentWorkspaceAction, type AgentTelemetry } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -853,6 +853,7 @@ export const revisions = pgTable(
     message: text('message'),
     named: boolean('named').notNull().default(false),
     user_id: text('user_id'),
+    actor_type: text('actor_type'),
     created_at: ts('created_at').notNull(),
     updated_at: ts('updated_at').notNull(),
   },
@@ -1200,4 +1201,84 @@ export const queryEndpoints = pgTable(
     updated_at: ts('updated_at').notNull(),
   },
   (t) => [uniqueIndex('query_endpoints_slug_idx').on(t.slug), index('query_endpoints_ws_idx').on(t.workspace_id)],
+);
+
+export const agentSessions = pgTable(
+  'agent_sessions',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    via: text('via').notNull().default('ui'),
+    page: jsonb('page').$type<AgentPageRef | null>(),
+    archived: boolean('archived').notNull().default(false),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('agent_sessions_user_idx').on(t.user_id, t.workspace_id)],
+);
+
+export const agentTasks = pgTable(
+  'agent_tasks',
+  {
+    id: text('id').primaryKey(),
+    session_id: text('session_id').notNull().references(() => agentSessions.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    user_id: text('user_id').notNull(),
+    request: text('request').notNull(),
+    mode: text('mode').notNull().default('auto'),
+    intent: text('intent'),
+    status: text('status', { enum: AGENT_TASK_STATUSES }).notNull(),
+    plan: jsonb('plan').$type<AgentPlanStep[]>().notNull().default([]),
+    steps: jsonb('steps').$type<AgentStepRecord[]>().notNull().default([]),
+    artifacts: jsonb('artifacts').$type<AgentArtifact[]>().notNull().default([]),
+    actions: jsonb('actions').$type<AgentWorkspaceAction[]>().notNull().default([]),
+    approval: jsonb('approval').$type<AgentApprovalRecord | null>(),
+    answer: text('answer'),
+    error: text('error'),
+    provider: text('provider'),
+    model: text('model'),
+    telemetry: jsonb('telemetry').$type<AgentTelemetry | null>(),
+    trace_id: text('trace_id').notNull(),
+    created_at: ts('created_at').notNull(),
+    finished_at: ts('finished_at'),
+  },
+  (t) => [index('agent_tasks_session_idx').on(t.session_id), index('agent_tasks_user_idx').on(t.user_id, t.status)],
+);
+
+export const agentObservations = pgTable(
+  'agent_observations',
+  {
+    id: text('id').primaryKey(),
+    task_id: text('task_id').notNull().references(() => agentTasks.id, { onDelete: 'cascade' }),
+    session_id: text('session_id').notNull(),
+    workspace_id: text('workspace_id').notNull(),
+    user_id: text('user_id').notNull(),
+    kind: text('kind').notNull(),
+    subject: text('subject'),
+    text: text('text').notNull(),
+    data: jsonb('data').$type<Record<string, unknown> | null>(),
+    tool: text('tool'),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('agent_observations_session_idx').on(t.session_id), index('agent_observations_ws_idx').on(t.workspace_id, t.subject)],
+);
+
+export const agentMemories = pgTable(
+  'agent_memories',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull(),
+    scope: text('scope').notNull().default('user'),
+    kind: text('kind').notNull(),
+    subject: text('subject'),
+    text: text('text').notNull(),
+    source_task_id: text('source_task_id'),
+    uses: integer('uses').notNull().default(0),
+    created_at: ts('created_at').notNull(),
+    updated_at: ts('updated_at').notNull(),
+  },
+  (t) => [index('agent_memories_ws_idx').on(t.workspace_id, t.scope)],
 );

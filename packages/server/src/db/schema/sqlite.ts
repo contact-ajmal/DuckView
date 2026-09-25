@@ -1343,6 +1343,58 @@ export type Comment = typeof comments.$inferSelect;
 export type InboxItem = typeof inbox.$inferSelect;
 
 /** Version history: a snapshot of an object after a save (saves by one person within minutes are one revision). */
+
+// ---------- DuckView agent (agent/runtime): sessions, tasks, observations, memory ----------
+
+export const AGENT_TASK_STATUSES = ['planning', 'running', 'waiting_approval', 'completed', 'failed', 'cancelled'] as const;
+export type AgentTaskStatus = (typeof AGENT_TASK_STATUSES)[number];
+export const AGENT_ARTIFACT_TYPES = ['answer', 'table', 'chart', 'sql', 'notebook', 'dashboard', 'metric', 'quality_suite', 'dbt_model', 'app', 'saved_query', 'file'] as const;
+export type AgentArtifactType = (typeof AGENT_ARTIFACT_TYPES)[number];
+export interface AgentPageRef { kind: string; id?: string | null; label: string }
+export interface AgentPlanStep { text: string; status: 'pending' | 'active' | 'done' | 'skipped' }
+export interface AgentStepRecord {
+  n: number;
+  kind: 'route' | 'context' | 'decision' | 'tool' | 'approval' | 'action' | 'answer';
+  at: string;
+  tool?: string;
+  arguments?: Record<string, unknown>;
+  status: 'ok' | 'error' | 'approval_required' | 'denied' | 'skipped';
+  summary: string;
+  duration_ms?: number;
+  retry?: number;
+}
+export interface AgentArtifact { id: string; type: AgentArtifactType; title: string; href?: string | null; data?: Record<string, unknown>; tool?: string | null; created_at: string }
+export interface AgentApprovalRecord {
+  id: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  action_class: string;
+  reason: string;
+  preview: string | null;
+  requested_at: string;
+  decision?: 'approved' | 'denied';
+  decided_by?: string | null;
+  decided_at?: string | null;
+  note?: string | null;
+}
+export interface AgentWorkspaceAction { action: string; target?: string | null; href?: string | null; args?: Record<string, unknown> }
+export interface AgentTelemetry {
+  decision_engine: string;
+  context_objects_considered: number;
+  context_objects_selected: number;
+  context_tokens: number;
+  decision_ms: number;
+  reasoning_ms: number;
+  tool_calls: number;
+  tool_failures: number;
+  tool_ms: number;
+  llm_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost_usd: number | null;
+  duration_ms: number;
+}
+
 export const REVISION_TYPES = ['notebook', 'dashboard', 'query', 'semantic', 'dbt'] as const;
 export type RevisionType = (typeof REVISION_TYPES)[number];
 export const revisions = sqliteTable(
@@ -1359,6 +1411,8 @@ export const revisions = sqliteTable(
     message: text('message'),
     named: integer('named', { mode: 'boolean' }).notNull().default(false),
     user_id: text('user_id'),
+    /** USER, or AGENT when the DuckView agent (or another agent) made the change. */
+    actor_type: text('actor_type'),
     created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
@@ -1849,3 +1903,93 @@ export const queryEndpoints = sqliteTable(
   (t) => [uniqueIndex('query_endpoints_slug_idx').on(t.slug), index('query_endpoints_ws_idx').on(t.workspace_id)],
 );
 export type QueryEndpoint = typeof queryEndpoints.$inferSelect;
+
+export const agentSessions = sqliteTable(
+  'agent_sessions',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    /** ui | mcp | rest | a2a */
+    via: text('via').notNull().default('ui'),
+    /** What was on screen when it started (restored with the session). */
+    page: text('page', { mode: 'json' }).$type<AgentPageRef | null>(),
+    archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('agent_sessions_user_idx').on(t.user_id, t.workspace_id)],
+);
+export type AgentSession = typeof agentSessions.$inferSelect;
+
+export const agentTasks = sqliteTable(
+  'agent_tasks',
+  {
+    id: text('id').primaryKey(),
+    session_id: text('session_id').notNull().references(() => agentSessions.id, { onDelete: 'cascade' }),
+    workspace_id: text('workspace_id').notNull(),
+    user_id: text('user_id').notNull(),
+    request: text('request').notNull(),
+    mode: text('mode').notNull().default('auto'),
+    intent: text('intent'),
+    status: text('status', { enum: AGENT_TASK_STATUSES }).notNull(),
+    plan: text('plan', { mode: 'json' }).$type<AgentPlanStep[]>().notNull().default([]),
+    steps: text('steps', { mode: 'json' }).$type<AgentStepRecord[]>().notNull().default([]),
+    artifacts: text('artifacts', { mode: 'json' }).$type<AgentArtifact[]>().notNull().default([]),
+    actions: text('actions', { mode: 'json' }).$type<AgentWorkspaceAction[]>().notNull().default([]),
+    approval: text('approval', { mode: 'json' }).$type<AgentApprovalRecord | null>(),
+    answer: text('answer'),
+    error: text('error'),
+    provider: text('provider'),
+    model: text('model'),
+    telemetry: text('telemetry', { mode: 'json' }).$type<AgentTelemetry | null>(),
+    trace_id: text('trace_id').notNull(),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    finished_at: integer('finished_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => [index('agent_tasks_session_idx').on(t.session_id), index('agent_tasks_user_idx').on(t.user_id, t.status)],
+);
+export type AgentTask = typeof agentTasks.$inferSelect;
+
+export const agentObservations = sqliteTable(
+  'agent_observations',
+  {
+    id: text('id').primaryKey(),
+    task_id: text('task_id').notNull().references(() => agentTasks.id, { onDelete: 'cascade' }),
+    session_id: text('session_id').notNull(),
+    workspace_id: text('workspace_id').notNull(),
+    user_id: text('user_id').notNull(),
+    /** schema | result | metric | relationship | quality | artifact | error | note */
+    kind: text('kind').notNull(),
+    /** What it is about: a table, a metric, a dashboard… */
+    subject: text('subject'),
+    text: text('text').notNull(),
+    data: text('data', { mode: 'json' }).$type<Record<string, unknown> | null>(),
+    tool: text('tool'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('agent_observations_session_idx').on(t.session_id), index('agent_observations_ws_idx').on(t.workspace_id, t.subject)],
+);
+export type AgentObservation = typeof agentObservations.$inferSelect;
+
+export const agentMemories = sqliteTable(
+  'agent_memories',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Who it came from; `user` memories are seen by them only, `workspace` ones by every member. */
+    user_id: text('user_id').notNull(),
+    scope: text('scope').notNull().default('user'),
+    /** discovery | preference | outcome | failure */
+    kind: text('kind').notNull(),
+    subject: text('subject'),
+    text: text('text').notNull(),
+    source_task_id: text('source_task_id'),
+    uses: integer('uses').notNull().default(0),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('agent_memories_ws_idx').on(t.workspace_id, t.scope)],
+);
+export type AgentMemory = typeof agentMemories.$inferSelect;

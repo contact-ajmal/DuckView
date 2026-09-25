@@ -88,7 +88,9 @@ export class RevisionService {
   }
 
   /** Records the object's state after a save. Never throws: history must not break saving. */
-  async record(userId: string | null, workspaceId: string, type: RevisionType, id: string, opts: { message?: string | null; named?: boolean } = {}): Promise<Revision | null> {
+  async record(actor: string | null | Pick<Principal, 'userId' | 'actorType'>, workspaceId: string, type: RevisionType, id: string, opts: { message?: string | null; named?: boolean } = {}): Promise<Revision | null> {
+    const userId = typeof actor === 'string' || actor === null ? actor : actor.userId;
+    const actorType = typeof actor === 'string' || actor === null ? 'USER' : actor.actorType;
     if (this.restoring.has(`${type}:${id}`) && !opts.message) return null;
     try {
       const snapshot = await this.snapshot(workspaceId, type, id);
@@ -97,11 +99,11 @@ export class RevisionService {
       const now = new Date();
       if (latest && JSON.stringify(latest.snapshot) === JSON.stringify(snapshot) && !opts.named) return latest;
       // The same person still editing: their latest revision follows along.
-      if (latest && !opts.named && !opts.message && !latest.named && !latest.message && latest.user_id === userId && now.getTime() - latest.updated_at.getTime() < MERGE_WINDOW_MS) {
+      if (latest && !opts.named && !opts.message && !latest.named && !latest.message && latest.user_id === userId && (latest.actor_type ?? 'USER') === actorType && now.getTime() - latest.updated_at.getTime() < MERGE_WINDOW_MS) {
         await this.db.update(this.s.revisions).set({ snapshot, updated_at: now }).where(eq(this.s.revisions.id, latest.id));
         return { ...latest, snapshot, updated_at: now };
       }
-      const row: Revision = { id: newId(), workspace_id: workspaceId, object_type: type, object_id: id, number: (latest?.number ?? 0) + 1, snapshot, message: opts.message?.trim().slice(0, 300) || null, named: !!opts.named, user_id: userId, created_at: now, updated_at: now };
+      const row: Revision = { id: newId(), workspace_id: workspaceId, object_type: type, object_id: id, number: (latest?.number ?? 0) + 1, snapshot, message: opts.message?.trim().slice(0, 300) || null, named: !!opts.named, user_id: userId, actor_type: actorType, created_at: now, updated_at: now };
       await this.db.insert(this.s.revisions).values(row);
       // Keep the latest KEEP, and every named version.
       const old = await this.db.select({ id: this.s.revisions.id, named: this.s.revisions.named }).from(this.s.revisions).where(and(eq(this.s.revisions.object_type, type), eq(this.s.revisions.object_id, id), lt(this.s.revisions.number, row.number - KEEP + 1)));

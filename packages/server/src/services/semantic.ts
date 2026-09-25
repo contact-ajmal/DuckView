@@ -415,7 +415,7 @@ const TEMPORAL = /^(DATE|TIMESTAMP.*|DATETIME)$/i;
 
 export class SemanticService {
   /** Version history (set by the context). */
-  revisions: { record(userId: string | null, workspaceId: string, type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string, opts?: { message?: string | null }): Promise<unknown>; forget(type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string): Promise<void> } | null = null;
+  revisions: { record(actor: string | null | { userId: string; actorType: 'USER' | 'AGENT' | 'SYSTEM' }, workspaceId: string, type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string, opts?: { message?: string | null }): Promise<unknown>; forget(type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string): Promise<void> } | null = null;
   constructor(
     private readonly store: MetadataStore,
     private readonly workspaces: WorkspaceService,
@@ -505,7 +505,7 @@ export class SemanticService {
     const errors = await this.validate(p, workspaceId, all);
     if (errors.length && !opts.force) throw new HttpError(400, `The definitions do not run: ${errors.join('; ')}`, 'BAD_REQUEST', { problems: errors });
     await this.upsert(workspaceId, 'workspace', def, yaml, p.userId);
-    await this.revisions?.record(p.userId, workspaceId, 'semantic', 'workspace');
+    await this.revisions?.record(p, workspaceId, 'semantic', 'workspace');
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'semantic.update', resource: `workspace:${workspaceId}`, queryText: `${def.semantic_models.length} models, ${def.metrics.length} metrics`, ip: p.ip });
     return this.get(p, workspaceId);
   }

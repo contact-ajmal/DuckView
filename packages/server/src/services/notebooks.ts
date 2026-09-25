@@ -105,7 +105,7 @@ function stripWith(sql: string): { ctes: boolean; body: string } {
 
 export class NotebookService {
   /** Version history (set by the context). */
-  revisions: { record(userId: string | null, workspaceId: string, type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string, opts?: { message?: string | null }): Promise<unknown>; forget(type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string): Promise<void> } | null = null;
+  revisions: { record(actor: string | null | { userId: string; actorType: 'USER' | 'AGENT' | 'SYSTEM' }, workspaceId: string, type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string, opts?: { message?: string | null }): Promise<unknown>; forget(type: 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt', id: string): Promise<void> } | null = null;
   constructor(private readonly store: MetadataStore, private readonly workspaces: WorkspaceService, private readonly queries: QueryService, private readonly audit: AuditService) {}
   private get db() {
     return this.store.db;
@@ -172,7 +172,7 @@ export class NotebookService {
     const cells = this.checkCells(input.cells?.length ? input.cells : [{ type: 'markdown', source: '# Untitled notebook\n\nWhat is this analysis about?' }, { type: 'sql', name: 'df1', source: 'SELECT 42 AS answer' }]);
     const nb: Notebook = { id: newId(), workspace_id: workspaceId, user_id: p.userId, title: (input.title ?? '').trim().slice(0, 200) || 'Untitled notebook', cells, version: 1, updated_by: p.userId, created_at: now, updated_at: now };
     await this.db.insert(this.s.notebooks).values(nb);
-    await this.revisions?.record(p.userId, workspaceId, 'notebook', nb.id);
+    await this.revisions?.record(p, workspaceId, 'notebook', nb.id);
     this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'notebook.create', resource: `notebook:${nb.id}`, ip: p.ip });
     return nb;
   }
@@ -189,7 +189,7 @@ export class NotebookService {
     if (patch.title !== undefined) set.title = patch.title.trim().slice(0, 200) || nb.title;
     if (patch.cells !== undefined) set.cells = this.checkCells(patch.cells, nb.cells);
     await this.db.update(this.s.notebooks).set(set).where(eq(this.s.notebooks.id, id));
-    await this.revisions?.record(p.userId, nb.workspace_id, 'notebook', id);
+    await this.revisions?.record(p, nb.workspace_id, 'notebook', id);
     return { ...nb, ...set };
   }
 

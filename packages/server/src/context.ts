@@ -51,6 +51,7 @@ import { PrepService } from './services/prep.js';
 import { createDecisionEngine } from './agent/decision/providers.js';
 import type { DecisionEngine } from './agent/decision/types.js';
 import { ContextEngine } from './agent/context/engine.js';
+import { AgentRuntime } from './agent/runtime/runtime.js';
 import { WorkspaceLifecycleService } from './services/workspace-lifecycle.js';
 import { ClusterService } from './services/cluster.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
@@ -127,6 +128,8 @@ export interface AppContext {
   /** The agent's Decision Engine (agent.decision.provider) and Context Engine. */
   decision: DecisionEngine;
   contextEngine: ContextEngine;
+  /** The DuckView agent: sessions, tasks, approvals (agent/runtime). */
+  agentRuntime: AgentRuntime;
   lifecycle: WorkspaceLifecycleService;
   cluster: ClusterService;
   /** Cluster mode: joins the cluster at this URL once the server listens (then starts stream consumers). */
@@ -343,6 +346,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     decision,
     // Built below: it reads the other services through the context.
     contextEngine: undefined as unknown as ContextEngine,
+    agentRuntime: undefined as unknown as AgentRuntime,
     cfg,
     store,
     engines,
@@ -451,6 +455,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   prep.bind(ctx);
   ctx.contextEngine = new ContextEngine(ctx, ctx.decision);
   copilot.decision = ctx.decision;
+  ctx.agentRuntime = new AgentRuntime(ctx);
   lifecycle.bind(ctx);
   return ctx;
 }
