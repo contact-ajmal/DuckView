@@ -1442,6 +1442,54 @@ try {
     report.details.deleted = !(await j('GET', '/api/admin/workspaces')).workspaces.some((w) => w.name === 'E2E wa clone');
     report.details.charts = 1;
   }
+  else if (scenario === 'workspace-detail') {
+    // One workspace in depth: health (a folder that went missing), every tab, the activity, then archive, restore, delete.
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const w = (await j('POST', '/api/workspaces', { name: 'E2E wd', description: 'Detail page check', tags: ['e2e'], color: '2', active_db_path: `e2e-wd-${Date.now()}.duckdb` })).workspace;
+    await j('POST', `/api/workspaces/${w.id}/query`, { sql: 'CREATE TABLE e2e_wd AS SELECT 1 AS a' });
+    const gone = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dv-e2e-wd-')));
+    await j('POST', `/api/workspaces/${w.id}/folders`, { path: gone });
+    fs.rmSync(gone, { recursive: true });
+    cleanup = async () => { await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {}); await authed(`/api/workspaces/${w.id}`, { method: 'DELETE' }).catch(() => {}); };
+    await evaluate(`location.hash = '#/settings/workspaces'; location.reload(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="workspaces-table"] tr[data-name="E2E wd"]')`, 30000, 'the list');
+    await evaluate(`document.querySelector('[data-testid="workspaces-table"] tr[data-name="E2E wd"] td:nth-child(2)').click(); 'ok'`);
+    await waitFor(`location.hash.startsWith('#/workspaces/${w.id}') && !!document.querySelector('[data-testid="ws-health"]')`, 15000, 'detail page');
+    report.details.health = await evaluate(`[...document.querySelectorAll('[data-testid="ws-health"] li')].map(l => l.dataset.check + ':' + l.dataset.status)`);
+    report.details.counts = await evaluate(`document.querySelector('[data-testid="ws-counts"]').textContent`);
+    report.details.crumb = await evaluate(`document.querySelector('[data-testid="page-object"]')?.textContent`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_overview.png'), Buffer.from(shot.result.data, 'base64')); }
+    // Every tab renders without an error.
+    const tabs = await evaluate(`[...document.querySelectorAll('[data-testid="workspace-detail"] [role=tab]')].map(t => t.textContent)`);
+    report.details.tabs = tabs;
+    report.details.tabErrors = [];
+    for (const t of tabs) {
+      await evaluate(`[...document.querySelectorAll('[data-testid="workspace-detail"] [role=tab]')].find(x => x.textContent === ${JSON.stringify(t)}).click(); 'ok'`);
+      await waitFor(`[...document.querySelectorAll('[data-testid="workspace-detail"] [role=tab]')].find(x => x.textContent === ${JSON.stringify(t)})?.getAttribute('aria-selected') === 'true'`, 5000, `tab ${t}`);
+      await sleep(700);
+      const bad = await evaluate(`/could not be loaded|Something went wrong/.test(document.querySelector('[data-testid="workspace-detail"]').textContent)`);
+      if (bad) report.details.tabErrors.push(t);
+      if (t === 'Engine') report.details.engine = await evaluate(`document.querySelector('[data-testid="ws-engine"]')?.textContent`);
+      if (t === 'Audit') { await waitFor(`document.querySelectorAll('[data-testid="ws-audit"] tbody tr').length > 0`, 5000, 'audit rows'); report.details.audit = await evaluate(`document.querySelector('[data-testid="ws-audit"]').textContent`); }
+    }
+    // Lifecycle: archive, restore, delete.
+    await evaluate(`document.querySelector('[data-testid="ws-archive"] button').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="confirm-ok"]')`, 3000, 'archive confirm');
+    await evaluate(`document.querySelector('[data-testid="confirm-ok"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="ws-restore"]')`, 10000, 'archived');
+    report.details.archivedHeader = await evaluate(`document.querySelector('[data-testid="workspace-detail"] h1')?.textContent`);
+    await evaluate(`document.querySelector('[data-testid="ws-restore"] button').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="ws-archive"]')`, 10000, 'restored');
+    await evaluate(`document.querySelector('[data-testid="ws-delete"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="confirm-dialog"] input')`, 3000, 'delete confirm');
+    await setField('[data-testid="confirm-dialog"] input', 'E2E wd');
+    await evaluate(`document.querySelector('[data-testid="confirm-ok"]').click(); 'ok'`);
+    await waitFor(`location.hash === '#/settings/workspaces'`, 10000, 'back to the list');
+    report.details.deleted = !(await j('GET', '/api/admin/workspaces')).workspaces.some((x) => x.id === w.id);
+    report.details.charts = 1;
+  }
   else if (scenario === 'data-explorer') {
     // A dataset, then one of its columns in depth, then where the table comes from.
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -2477,6 +2525,18 @@ try {
     if (Number(d.cloneRows) !== 7) problems.push(`clone data: ${d.cloneRows}`);
     if (!(d.cloneQueries ?? []).includes('E2E wa count')) problems.push(`clone queries: ${JSON.stringify(d.cloneQueries)}`);
     if (d.archived !== true) problems.push('not shown as archived');
+    if (d.deleted !== true) problems.push('not deleted');
+  }
+  if (scenario === 'workspace-detail') {
+    if ((d.health ?? [])[0] !== 'folders:error') problems.push(`health: ${JSON.stringify(d.health)}`);
+    if (!(d.health ?? []).includes('engine:ok')) problems.push(`engine health: ${JSON.stringify(d.health)}`);
+    if (!/Tables1/.test(d.counts ?? '')) problems.push(`counts: ${d.counts}`);
+    if (d.crumb !== 'E2E wd') problems.push(`breadcrumb: ${d.crumb}`);
+    if ((d.tabs ?? []).length !== 9) problems.push(`tabs: ${JSON.stringify(d.tabs)}`);
+    if ((d.tabErrors ?? []).length) problems.push(`tabs with errors: ${JSON.stringify(d.tabErrors)}`);
+    if (!/Warm/.test(d.engine ?? '')) problems.push(`engine: ${d.engine}`);
+    if (!/workspace\.create/.test(d.audit ?? '')) problems.push(`audit: ${d.audit}`);
+    if (!/Archived/.test(d.archivedHeader ?? '')) problems.push(`archived header: ${d.archivedHeader}`);
     if (d.deleted !== true) problems.push('not deleted');
   }
   if (scenario === 'data-explorer') {

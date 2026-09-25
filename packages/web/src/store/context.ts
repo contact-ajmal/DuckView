@@ -6,7 +6,7 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
 
-export type PageObjectKind = 'dataset' | 'dashboard' | 'notebook' | 'query' | 'app' | 'model' | 'agent';
+export type PageObjectKind = 'dataset' | 'dashboard' | 'notebook' | 'query' | 'app' | 'model' | 'agent' | 'workspace';
 export interface PageObject {
   kind: PageObjectKind;
   id?: string;

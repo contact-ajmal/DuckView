@@ -156,6 +156,7 @@ export function WorkspacesAdminPanel() {
         error={error}
         onRetry={() => void load()}
         rowProps={(r) => ({ 'data-name': r.name })}
+        onRowClick={(r) => { location.hash = `#/workspaces/${r.id}`; }}
         initialSort={{ key: 'activity', desc: true }}
         empty={rows && rows.length ? 'No workspace matches these filters.' : 'No workspaces yet.'}
         toolbar={

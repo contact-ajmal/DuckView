@@ -68,6 +68,12 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
     const action = body.action === 'transfer' ? { action: 'transfer' as const, user_id: body.user_id! } : body.action === 'tag' || body.action === 'untag' ? { action: body.action, tags: body.tags! } : { action: body.action };
     return { results: await ctx.workspaceAdmin.bulk(req.principal!, body.ids, action) };
   });
+  // The detail page: counts, health, engine, connections; and what happened lately.
+  app.get('/api/workspaces/:id/summary', async (req) => ctx.workspaceAdmin.summary(req.principal!, (req.params as { id: string }).id));
+  app.get('/api/workspaces/:id/activity', async (req) => {
+    const q = z.object({ limit: z.coerce.number().int().min(1).max(500).optional(), offset: z.coerce.number().int().min(0).optional() }).parse(req.query ?? {});
+    return { events: await ctx.workspaceAdmin.activity(req.principal!, (req.params as { id: string }).id, q) };
+  });
   // Archive or restore one workspace (owners).
   app.post('/api/workspaces/:id/archive', async (req) => {
     const { id } = req.params as { id: string };

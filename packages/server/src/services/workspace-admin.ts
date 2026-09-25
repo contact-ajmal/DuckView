@@ -8,13 +8,13 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { eq, inArray, max, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, max, sql } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
 import type { EngineSettings, Workspace, WorkspaceRole, MemberSubjectType } from '../db/schema/sqlite.js';
 import type { AppContext } from '../context.js';
 import type { Principal } from './principal.js';
-import { requireAdmin, requireWrite } from './principal.js';
-import { badRequest } from './errors.js';
+import { isPlatformAdmin, requireAdmin, requireWrite } from './principal.js';
+import { badRequest, forbidden } from './errors.js';
 import { normalizeTags } from './workspaces.js';
 import { logger } from '../observability/logger.js';
 
@@ -267,6 +267,104 @@ export class WorkspaceAdminService {
     for (const n of o.notebooks) await c.notebooks.create(p, workspaceId, { title: n.title, cells: n.cells as never });
     if (o.semantic) await c.semantic.save(p, workspaceId, o.semantic, { force: true });
     for (const q of o.quality) await c.quality.create(p, workspaceId, { name: q.name, description: q.description, relation: q.relation, checks: q.checks as never });
+  }
+
+  /**
+   * One workspace in depth, for its detail page: what it holds, whether it is healthy, where its engine runs, which
+   * connections it reads through, and what happened lately. Any member may look; recent activity is for owners.
+   */
+  async summary(p: Principal, id: string) {
+    const c = this.ctx;
+    const w = await c.workspaces.get(p, id);
+    const s = this.s;
+    const count = async (table: typeof s.savedQueries | typeof s.dashboards | typeof s.notebooks | typeof s.dataApps | typeof s.hostedAgents | typeof s.qualitySuites | typeof s.dataSyncs) =>
+      Number((await this.db.select({ n: sql<number>`count(*)` }).from(table).where(eq((table as typeof s.dashboards).workspace_id, id)))[0]?.n ?? 0);
+    const [queries, dashboards, notebooks, apps, agents, suites, syncs] = await Promise.all([count(s.savedQueries), count(s.dashboards), count(s.notebooks), count(s.dataApps), count(s.hostedAgents), count(s.qualitySuites), count(s.dataSyncs)]);
+
+    // Tables: only from a warm engine (the summary never starts one).
+    const live = await c.engines.liveStats().catch(() => null);
+    const warm = live?.engines.find((e) => e.workspaceId === id) ?? null;
+    let tables: number | null = null;
+    let views: number | null = null;
+    if (warm && !w.archived_at) {
+      try {
+        const { engine } = await c.workspaces.engine(p, id);
+        const cat = (await engine.catalog()).filter((o) => o.schema !== 'information_schema' && o.schema !== 'pg_catalog');
+        tables = cat.filter((o) => o.type !== 'VIEW').length;
+        views = cat.filter((o) => o.type === 'VIEW').length;
+      } catch {
+        /* the engine went away */
+      }
+    }
+    const node = c.cluster.enabled ? await c.cluster.holder(`workspace:${id}`).catch(() => null) : null;
+
+    // Health: one line per thing that can go wrong, worst first.
+    type Check = { id: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string };
+    const checks: Check[] = [];
+    checks.push(w.archived_at ? { id: 'archived', label: 'Engine', status: 'warn', detail: 'Archived: queries are refused until it is restored' } : { id: 'engine', label: 'Engine', status: 'ok', detail: warm ? `Warm, ${warm.active_queries} running` : 'Stopped; starts on the next query' });
+    const missing = w.folders.filter((f) => !fs.existsSync(f.path));
+    checks.push(missing.length ? { id: 'folders', label: 'Folders', status: 'error', detail: `${missing.map((f) => f.name).join(', ')} not found` } : { id: 'folders', label: 'Folders', status: 'ok', detail: w.folders.length ? `${w.folders.length} folder${w.folders.length === 1 ? '' : 's'} reachable` : 'No folders added' });
+    if (w.cloud_sync) checks.push(w.cloud_sync.last_error ? { id: 'cloud', label: 'Cloud sync', status: 'error', detail: w.cloud_sync.last_error } : { id: 'cloud', label: 'Cloud sync', status: w.cloud_sync.dirty ? 'warn' : 'ok', detail: w.cloud_sync.dirty ? 'Changes not pushed yet' : w.cloud_sync.synced_at ? `Synced ${new Date(w.cloud_sync.synced_at).toISOString()}` : 'Not synced yet' });
+    const failingSuites = await this.db.select({ name: s.qualitySuites.name, status: s.qualitySuites.status }).from(s.qualitySuites).where(and(eq(s.qualitySuites.workspace_id, id), inArray(s.qualitySuites.status, ['fail', 'error'])));
+    if (suites) checks.push(failingSuites.length ? { id: 'quality', label: 'Data quality', status: 'error', detail: `${failingSuites.map((q) => q.name).join(', ')} failing` } : { id: 'quality', label: 'Data quality', status: 'ok', detail: `${suites} suite${suites === 1 ? '' : 's'} passing or not run` });
+    if (syncs) {
+      const runs = await this.db.select({ sync: s.dataSyncRuns.sync_id, status: s.dataSyncRuns.status, error: s.dataSyncRuns.error }).from(s.dataSyncRuns).where(eq(s.dataSyncRuns.workspace_id, id)).orderBy(desc(s.dataSyncRuns.started_at)).limit(200);
+      const latest = new Map<string, { status: string; error: string | null }>();
+      for (const r of runs) if (!latest.has(r.sync)) latest.set(r.sync, r);
+      const failed = [...latest.values()].filter((r) => r.status === 'error');
+      checks.push(failed.length ? { id: 'syncs', label: 'Syncs', status: 'error', detail: `${failed.length} of ${syncs} failed last time${failed[0]?.error ? `: ${failed[0].error.split('\n')[0]}` : ''}` } : { id: 'syncs', label: 'Syncs', status: 'ok', detail: `${syncs} sync${syncs === 1 ? '' : 's'}` });
+    }
+    const budget = (await c.usage.listBudgets(p, id).catch(() => []))[0];
+    if (budget) checks.push({ id: 'budget', label: 'Budget', status: budget.percent >= 100 ? 'error' : budget.percent >= 80 ? 'warn' : 'ok', detail: `${Math.round(budget.percent)}% of ${budget.amount} this period` });
+    const rank = { error: 0, warn: 1, ok: 2 } as const;
+    checks.sort((a, b) => rank[a.status] - rank[b.status]);
+
+    // Connections the workspace reads through: the owner's (secrets and catalogs come from the owner).
+    const owner = w.user_id;
+    const [cloud, databases, lakehouses, connectors] = await Promise.all([
+      this.db.select({ id: s.cloudConnections.id, name: s.cloudConnections.name, kind: s.cloudConnections.provider }).from(s.cloudConnections).where(eq(s.cloudConnections.user_id, owner)),
+      this.db.select({ id: s.databaseConnections.id, name: s.databaseConnections.name, kind: s.databaseConnections.engine, status: s.databaseConnections.status, alias: s.databaseConnections.alias }).from(s.databaseConnections).where(eq(s.databaseConnections.user_id, owner)),
+      this.db.select({ id: s.lakehouseConnections.id, name: s.lakehouseConnections.name, kind: s.lakehouseConnections.provider, status: s.lakehouseConnections.status, alias: s.lakehouseConnections.alias }).from(s.lakehouseConnections).where(eq(s.lakehouseConnections.user_id, owner)),
+      this.db.select({ id: s.connectorConnections.id, name: s.connectorConnections.name, kind: s.connectorConnections.connector, status: s.connectorConnections.status }).from(s.connectorConnections).where(eq(s.connectorConnections.user_id, owner)),
+    ]);
+
+    return {
+      workspace: await c.workspaces.describe(p, id),
+      size_bytes: this.sizeOf(w),
+      counts: { tables, views, queries, dashboards, notebooks, apps, agents, quality_suites: suites, syncs, folders: w.folders.length },
+      engine: { state: w.archived_at ? 'archived' : warm ? 'running' : 'idle', memory_bytes: warm?.memory_usage_bytes ?? null, memory_limit_bytes: warm?.memory_limit_bytes ?? null, threads: warm?.threads ?? null, active_queries: warm?.active_queries ?? 0, node: node ? { id: node.id, url: node.url } : null, cluster: c.cluster.enabled },
+      checks,
+      connections: {
+        cloud: cloud.map((x) => ({ ...x, status: 'ok' as const })),
+        databases,
+        lakehouses,
+        connectors,
+        attached: w.engine_settings.connection_ids ?? [],
+      },
+      folders: w.folders.map((f) => ({ ...f, missing: !fs.existsSync(f.path) })),
+      disk: await c.workspaces
+        .listAllFiles(p, id)
+        .then(({ files }) => ({ total_bytes: files.reduce((n, f) => n + f.size_bytes, 0), files: files.length, largest: [...files].sort((a, b) => b.size_bytes - a.size_bytes).slice(0, 15).map((f) => ({ path: f.path, root: f.root ?? null, kind: f.kind, size_bytes: f.size_bytes, modified_at: f.modified_at })) }))
+        .catch(() => null),
+    };
+  }
+
+  /** What happened in a workspace (owners and administrators). */
+  async activity(p: Principal, id: string, opts: { limit?: number; offset?: number } = {}) {
+    const w = await this.ctx.workspaces.get(p, id);
+    if (w.role !== 'OWNER' && !isPlatformAdmin(p)) throw forbidden('Only owners see the activity of a workspace');
+    const a = this.s.auditLogs;
+    const rows = await this.db
+      .select({ id: a.id, timestamp: a.timestamp, action: a.action, actor_type: a.actor_type, user_id: a.user_id, query_text: a.query_text, status: a.status })
+      .from(a)
+      .where(eq(a.resource, `workspace:${id}`))
+      .orderBy(desc(a.timestamp))
+      .limit(Math.min(opts.limit ?? 100, 500))
+      .offset(opts.offset ?? 0);
+    const ids = [...new Set(rows.map((r) => r.user_id).filter(Boolean))] as string[];
+    const users = ids.length ? await this.db.select({ id: this.s.users.id, email: this.s.users.email }).from(this.s.users).where(inArray(this.s.users.id, ids)) : [];
+    const emails = new Map(users.map((u) => [u.id, u.email]));
+    return rows.map((r) => ({ ...r, timestamp: new Date(r.timestamp as unknown as string).toISOString(), who: r.user_id ? emails.get(r.user_id) ?? 'deleted user' : r.actor_type.toLowerCase() }));
   }
 
   /** Engine defaults for the wizard: the server's configuration. */

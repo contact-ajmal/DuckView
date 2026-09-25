@@ -19,6 +19,7 @@ import { SnapshotView } from './features/dashboards/SnapshotView';
 import { CopilotDrawer } from './features/copilot/CopilotDrawer';
 import { ShareDialog } from './features/workspace/ShareDialog';
 import { CreateWorkspaceWizard } from './features/workspace/CreateWorkspaceWizard';
+import { WorkspaceDetailPage } from './features/workspace/WorkspaceDetailPage';
 import { Sidebar } from './components/shell/Sidebar';
 import { TopBar } from './components/shell/TopBar';
 import { SectionNav } from './components/shell/SectionNav';
@@ -91,6 +92,7 @@ export default function App() {
             {page === 'settings' && <SettingsPage />}
             {page === 'mcp' && <McpPage />}
             {page === 'templates' && <TemplatesPage />}
+            {page === 'workspace' && <WorkspaceDetailPage />}
           </main>
           <CopilotDrawer />
         </div>

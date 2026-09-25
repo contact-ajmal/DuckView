@@ -14,10 +14,10 @@ import { StorageChooser, toDbPath, loadStorageOptions, type StorageChoice } from
 const STEPS = ['Basics', 'Storage', 'Engine', 'Start from', 'People'] as const;
 type Step = (typeof STEPS)[number];
 interface TemplateSummary { id: string; name: string; description: string | null; category: string; contents: { dashboards: number; queries: number; notebooks: number } }
-type Start = { kind: 'empty' } | { kind: 'template'; template_id: string } | { kind: 'clone'; workspace_id: string };
+export type Start = { kind: 'empty' } | { kind: 'template'; template_id: string } | { kind: 'clone'; workspace_id: string };
 type Member = { subject_type: 'user' | 'group'; subject_id: string; role: WorkspaceRole; label: string };
 
-export function CreateWorkspaceWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolean; onClose: () => void; initial?: { name?: string; start?: Start } }) {
   const ws = useWorkspace();
   const me = useAuth((s) => s.user);
   const [step, setStep] = useState(0);
@@ -44,6 +44,8 @@ export function CreateWorkspaceWizard({ open, onClose }: { open: boolean; onClos
     if (!open) return;
     setStep(0);
     setError(null);
+    if (initial?.name) setName(initial.name);
+    if (initial?.start) setStart(initial.start);
     void loadStorageOptions(true).then(setOptions).catch(() => undefined);
     void api.get<{ templates: TemplateSummary[] }>('/api/templates').then((r) => setTemplates(r.templates)).catch(() => setTemplates([]));
     void api.get<{ users: DirectoryUser[] }>('/api/users/directory').then((r) => setUsers(r.users)).catch(() => setUsers([]));

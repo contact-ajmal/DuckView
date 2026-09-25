@@ -26,8 +26,8 @@ function storageLabel(w: Workspace): { icon: typeof Cloud; text: string; title: 
   return { icon: kind === 'folder' ? FolderOpen : HardDrive, text: w.active_db_path.split('/').pop() ?? w.active_db_path, title: kind === 'folder' ? `Stored in a folder on the server: ${w.active_db_path}` : `DuckDB file in the data directory: ${w.active_db_path}` };
 }
 
-const OBJECT_ICON: Record<PageObjectKind, typeof Table2> = { dataset: Table2, dashboard: LayoutDashboard, notebook: NotebookPen, query: FileCode2, app: AppWindow, model: Boxes, agent: Bot };
-const OBJECT_NOUN: Record<PageObjectKind, string> = { dataset: 'Dataset', dashboard: 'Dashboard', notebook: 'Notebook', query: 'Query tab', app: 'App', model: 'Model', agent: 'Agent' };
+const OBJECT_ICON: Record<PageObjectKind, typeof Table2> = { dataset: Table2, dashboard: LayoutDashboard, notebook: NotebookPen, query: FileCode2, app: AppWindow, model: Boxes, agent: Bot, workspace: SlidersHorizontal };
+const OBJECT_NOUN: Record<PageObjectKind, string> = { dataset: 'Dataset', dashboard: 'Dashboard', notebook: 'Notebook', query: 'Query tab', app: 'App', model: 'Model', agent: 'Agent', workspace: 'Workspace' };
 
 /** Compact application header: where you are, the command bar, status, AI and your account. */
 export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNewWorkspace: () => void; onShare: () => void }) {
@@ -124,6 +124,11 @@ export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNew
               {auth.user?.role !== 'READ_ONLY' && (
                 <MenuItem icon={<Plus className="h-3.5 w-3.5" />} onClick={() => { close(); onNewWorkspace(); }}>
                   New workspace
+                </MenuItem>
+              )}
+              {active && active.role === 'OWNER' && (
+                <MenuItem icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={() => { close(); location.hash = `#/workspaces/${active.id}`; }}>
+                  Manage {active.name}
                 </MenuItem>
               )}
               {auth.user?.role === 'ADMIN' && (

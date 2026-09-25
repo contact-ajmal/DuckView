@@ -130,4 +130,22 @@ describe('workspace management', () => {
     await api('POST', '/api/admin/workspaces/bulk', adminJwt, { ids: [copy], action: 'delete' });
     expect(await ctx.workspaces.rowById(copy)).toBeNull();
   });
+
+  it('summarises one workspace: counts, health (worst first), engine, connections; activity for owners', async () => {
+    fs.mkdirSync(path.join(dir, 'data', 'gone'), { recursive: true });
+    await api('POST', `/api/workspaces/${source}/folders`, adminJwt, { path: 'gone' });
+    fs.rmSync(path.join(dir, 'data', 'gone'), { recursive: true });
+    await api('POST', `/api/workspaces/${source}/query`, adminJwt, { sql: 'SELECT 1' });
+    const r = await api('GET', `/api/workspaces/${source}/summary`, userJwt);
+    expect(r.status).toBe(200);
+    expect(r.json.counts).toMatchObject({ tables: 1, queries: 1, dashboards: 1, notebooks: 1, folders: 1 });
+    expect(r.json.engine.state).toBe('running');
+    expect(r.json.checks[0]).toMatchObject({ id: 'folders', status: 'error' });
+    expect(r.json.checks.find((c: { id: string }) => c.id === 'engine').status).toBe('ok');
+    expect(r.json.folders[0].missing).toBe(true);
+    expect(r.json.connections).toHaveProperty('databases');
+    expect((await api('GET', `/api/workspaces/${source}/activity`, userJwt)).status).toBe(403);
+    const act = await api('GET', `/api/workspaces/${source}/activity`, adminJwt);
+    expect(act.json.events.some((e: { action: string; who: string }) => e.action === 'workspace.create' && e.who === 'admin@test.local')).toBe(true);
+  });
 });
