@@ -19,7 +19,8 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
   app.addHook('preHandler', app.authenticate);
 
   app.get('/api/workspaces', async (req) => {
-    let list = await ctx.workspaces.list(req.principal!);
+    const q = z.object({ archived: z.enum(['0', '1']).optional() }).parse(req.query ?? {});
+    let list = await ctx.workspaces.list(req.principal!, { archived: q.archived === '1' });
     if (list.length === 0 && req.principal!.via !== 'token' && req.principal!.role !== 'READ_ONLY') {
       await ctx.workspaces.ensureDefault(req.principal!);
       list = await ctx.workspaces.list(req.principal!);
@@ -31,12 +32,49 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
     throw new HttpError(400, message, 'BAD_REQUEST');
   };
 
+  // Create: storage, engine, description and tags, a starting point (empty, a template, a clone) and people.
   app.post('/api/workspaces', async (req) => {
     requireWrite(req.principal!);
-    const body = z.object({ name: z.string().max(120), active_db_path: z.string().max(500).optional(), engine_settings: EngineSettings.optional(), cloud_connection_id: z.string().nullable().optional() }).parse(req.body);
-    const w = await ctx.workspaces.create(req.principal!, body);
-    ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.create', resource: `workspace:${w.id}`, ip: req.ip });
-    return { workspace: await ctx.workspaces.describe(req.principal!, w.id) };
+    const body = z
+      .object({
+        name: z.string().max(120),
+        description: z.string().max(500).nullable().optional(),
+        tags: z.array(z.string().max(40)).max(12).optional(),
+        color: z.string().max(2).nullable().optional(),
+        active_db_path: z.string().max(500).optional(),
+        engine_settings: EngineSettings.optional(),
+        cloud_connection_id: z.string().nullable().optional(),
+        start_from: z.discriminatedUnion('kind', [z.object({ kind: z.literal('empty') }), z.object({ kind: z.literal('template'), template_id: z.string().min(1) }), z.object({ kind: z.literal('clone'), workspace_id: z.string().min(1) })]).optional(),
+        members: z.array(z.object({ subject_type: z.enum(MEMBER_SUBJECT_TYPES), subject_id: z.string().min(1), role: z.enum(WORKSPACE_ROLES) })).max(200).optional(),
+      })
+      .parse(req.body);
+    const { workspace, started } = await ctx.workspaceAdmin.create(req.principal!, body);
+    return { workspace: await ctx.workspaces.describe(req.principal!, workspace.id), started };
+  });
+
+  // ---- administration: every workspace, and bulk actions
+  app.get('/api/admin/workspaces', async (req) => ({ workspaces: await ctx.workspaceAdmin.list(req.principal!) }));
+  app.post('/api/admin/workspaces/bulk', async (req) => {
+    const body = z
+      .object({
+        ids: z.array(z.string().min(1)).min(1).max(500),
+        action: z.enum(['archive', 'restore', 'delete', 'transfer', 'tag', 'untag']),
+        user_id: z.string().optional(),
+        tags: z.array(z.string().max(40)).max(12).optional(),
+      })
+      .parse(req.body);
+    if (body.action === 'transfer' && !body.user_id) return reply400('Choose who receives the workspaces');
+    if ((body.action === 'tag' || body.action === 'untag') && !body.tags?.length) return reply400('Name at least one tag');
+    const action = body.action === 'transfer' ? { action: 'transfer' as const, user_id: body.user_id! } : body.action === 'tag' || body.action === 'untag' ? { action: body.action, tags: body.tags! } : { action: body.action };
+    return { results: await ctx.workspaceAdmin.bulk(req.principal!, body.ids, action) };
+  });
+  // Archive or restore one workspace (owners).
+  app.post('/api/workspaces/:id/archive', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z.object({ archived: z.boolean() }).parse(req.body ?? {});
+    await ctx.workspaces.setArchived(req.principal!, id, body.archived);
+    ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: body.archived ? 'workspace.archive' : 'workspace.restore', resource: `workspace:${id}`, ip: req.ip });
+    return { workspace: await ctx.workspaces.describe(req.principal!, id) };
   });
 
   app.get('/api/workspaces/:id', async (req) => {
@@ -49,7 +87,7 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
   app.patch('/api/workspaces/:id', async (req) => {
     requireWrite(req.principal!);
     const { id } = req.params as { id: string };
-    const body = z.object({ name: z.string().max(120).optional(), active_db_path: z.string().max(500).optional(), engine_settings: EngineSettings.optional(), cloud_connection_id: z.string().nullable().optional() }).parse(req.body);
+    const body = z.object({ name: z.string().max(120).optional(), description: z.string().max(500).nullable().optional(), tags: z.array(z.string().max(40)).max(12).optional(), color: z.string().max(2).nullable().optional(), active_db_path: z.string().max(500).optional(), engine_settings: EngineSettings.optional(), cloud_connection_id: z.string().nullable().optional() }).parse(req.body);
     await ctx.workspaces.update(req.principal!, id, body);
     ctx.audit.log({ userId: req.principal!.userId, actorType: req.principal!.actorType, action: 'workspace.update', resource: `workspace:${id}`, ip: req.ip });
     return { workspace: await ctx.workspaces.describe(req.principal!, id) };
@@ -88,6 +126,7 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
   // Storage choices for the New-workspace dialog and the Storage panel.
   app.get('/api/workspaces/storage-options', async (req) => ({
     mode: ctx.cfg.security.filesystem_mode,
+    engine_defaults: ctx.workspaceAdmin.engineDefaults(),
     default_database: ctx.engines.defaultDatabase,
     data_directory: ctx.workspaces.jail.baseDir,
     cloud_connections: (await ctx.cloud.list(req.principal!.userId)).map((c) => ({ id: c.id, name: c.name, provider: c.provider, bucket: c.bucket, uri_scheme: c.uri_scheme })),

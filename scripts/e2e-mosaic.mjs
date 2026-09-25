@@ -1379,6 +1379,69 @@ try {
     report.details.removed = true;
     report.details.charts = 1;
   }
+  else if (scenario === 'workspace-admin') {
+    // Administration → Workspaces: the create wizard (a clone), then archive, restore and delete in bulk.
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const src = (await j('POST', '/api/workspaces', { name: 'E2E wa source', active_db_path: `e2e-wa-source-${Date.now()}.duckdb` })).workspace;
+    await j('POST', `/api/workspaces/${src.id}/query`, { sql: 'CREATE TABLE e2e_wa AS SELECT range AS id FROM range(7)' });
+    await j('POST', `/api/workspaces/${src.id}/queries`, { name: 'E2E wa count', sql_text: 'SELECT count(*) FROM e2e_wa' });
+    const activeBefore = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    cleanup = async () => {
+      const all = (await j('GET', '/api/admin/workspaces')).workspaces ?? [];
+      for (const w of all.filter((w) => w.name.startsWith('E2E wa'))) await authed(`/api/workspaces/${w.id}`, { method: 'DELETE' }).catch(() => {});
+      await evaluate(`localStorage.setItem('duckview.workspace', ${JSON.stringify(activeBefore)}); location.hash = '#/'; 'ok'`).catch(() => {});
+    };
+    await evaluate(`location.hash = '#/settings/workspaces'; location.reload(); 'ok'`);
+    const row = (name) => `document.querySelector('[data-testid="workspaces-table"] tr[data-name=${JSON.stringify(name).replace(/"/g, '\\"')}]')`;
+    await waitFor(`!!${row('E2E wa source')}`, 30000, 'the workspace list');
+    report.details.headers = await evaluate(`[...document.querySelectorAll('[data-testid="workspaces-table"] th')].map(t => t.textContent.trim()).filter(Boolean)`);
+    // The wizard: basics, storage, engine, start from a copy, people.
+    await clickButton('New workspace');
+    await waitFor(`!!document.querySelector('[data-testid="create-workspace"]')`, 5000, 'wizard');
+    await setField('[data-testid="ws-name"]', 'E2E wa clone');
+    await setField('[data-testid="ws-tags"]', 'e2e, wizard');
+    const next = async (label) => { await evaluate(`document.querySelector('[data-testid="ws-next"]').click(); 'ok'`); await waitFor(`document.querySelector('[data-testid="create-workspace"] [aria-current="step"]')?.textContent.includes(${JSON.stringify(label)})`, 3000, label); };
+    await next('Storage');
+    await next('Engine');
+    await next('Start from');
+    await evaluate(`document.querySelector('[data-start="clone"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="ws-clone"]')`, 3000, 'clone picker');
+    await setField('[data-testid="ws-clone"]', src.id, 'change');
+    await next('People');
+    report.details.steps = await evaluate(`[...document.querySelectorAll('[data-testid="create-workspace"] ol li')].map(l => l.textContent.trim())`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_wizard.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`document.querySelector('[data-testid="ws-create"]').click(); 'ok'`);
+    await waitFor(`[...document.querySelectorAll('[role=status], [data-sonner-toast], li, div')].some(e => /Cloned from E2E wa source/.test(e.textContent ?? '')) || !document.querySelector('[data-testid="create-workspace"]')`, 60000, 'created');
+    await waitFor(`!!${row('E2E wa clone')}`, 20000, 'the clone in the list');
+    report.details.cloneRow = await evaluate(`${row('E2E wa clone')}.textContent`);
+    const clone = (await j('GET', '/api/admin/workspaces')).workspaces.find((w) => w.name === 'E2E wa clone');
+    report.details.cloneRows = (await j('POST', `/api/workspaces/${clone.id}/query`, { sql: 'SELECT count(*) AS n FROM e2e_wa' })).rows?.[0]?.[0];
+    report.details.cloneQueries = ((await j('GET', `/api/workspaces/${clone.id}/queries`)).queries ?? []).map((q) => q.name);
+    // Archive both E2E workspaces in bulk, find them under Archived, restore, then delete the clone.
+    const select = (name) => evaluate(`${row(name)}.querySelector('input[type=checkbox]').click(); 'ok'`);
+    await select('E2E wa clone');
+    await waitFor(`!!document.querySelector('[data-testid="wa-bulk"]')`, 3000, 'bulk bar');
+    await evaluate(`[...document.querySelectorAll('[data-testid="wa-bulk"] button')].find(b => b.textContent.includes('Archive')).click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="confirm-ok"]')`, 3000, 'archive confirm');
+    await evaluate(`document.querySelector('[data-testid="confirm-ok"]').click(); 'ok'`);
+    await waitFor(`!${row('E2E wa clone')}`, 10000, 'archived rows leave the default view');
+    await setField('[data-testid="wa-state"]', 'archived', 'change');
+    await waitFor(`!!${row('E2E wa clone')}`, 5000, 'shown under Archived');
+    report.details.archived = await evaluate(`${row('E2E wa clone')}.textContent.includes('Archived')`);
+    await select('E2E wa clone');
+    await evaluate(`[...document.querySelectorAll('[data-testid="wa-bulk"] button')].find(b => b.textContent.includes('Restore')).click(); 'ok'`);
+    await waitFor(`!${row('E2E wa clone')}`, 10000, 'restored');
+    await setField('[data-testid="wa-state"]', 'active', 'change');
+    await waitFor(`!!${row('E2E wa clone')}`, 5000, 'back in the list');
+    await select('E2E wa clone');
+    await evaluate(`[...document.querySelectorAll('[data-testid="wa-bulk"] button')].find(b => b.textContent.includes('Delete')).click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="confirm-dialog"] input')`, 3000, 'delete confirm');
+    await setField('[data-testid="confirm-dialog"] input', 'E2E wa clone');
+    await evaluate(`document.querySelector('[data-testid="confirm-ok"]').click(); 'ok'`);
+    await waitFor(`!${row('E2E wa clone')}`, 10000, 'deleted');
+    report.details.deleted = !(await j('GET', '/api/admin/workspaces')).workspaces.some((w) => w.name === 'E2E wa clone');
+    report.details.charts = 1;
+  }
   else if (scenario === 'data-explorer') {
     // A dataset, then one of its columns in depth, then where the table comes from.
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -2406,6 +2469,15 @@ try {
     if (d.queryButton !== true) problems.push('no Query hover action');
     if (JSON.stringify(d.localTab) !== JSON.stringify(['Add a folder', 'Upload files', 'Open one file'])) problems.push(`local tab: ${JSON.stringify(d.localTab)}`);
     if (d.removed !== true) problems.push('folder not removed');
+  }
+  if (scenario === 'workspace-admin') {
+    for (const h of ['Name', 'Owner', 'Storage', 'Size', 'Members', 'Engine', 'Last activity', 'Cost this month', 'Budget', 'Tags']) if (!(d.headers ?? []).includes(h)) problems.push(`column ${h} missing: ${JSON.stringify(d.headers)}`);
+    if (JSON.stringify(d.steps) !== JSON.stringify(['Basics', 'Storage', 'Engine', 'Start from', '5People'])) problems.push(`steps: ${JSON.stringify(d.steps)}`);
+    if (!/e2e/.test(d.cloneRow ?? '') || !/wizard/.test(d.cloneRow ?? '')) problems.push(`clone row: ${d.cloneRow}`);
+    if (Number(d.cloneRows) !== 7) problems.push(`clone data: ${d.cloneRows}`);
+    if (!(d.cloneQueries ?? []).includes('E2E wa count')) problems.push(`clone queries: ${JSON.stringify(d.cloneQueries)}`);
+    if (d.archived !== true) problems.push('not shown as archived');
+    if (d.deleted !== true) problems.push('not deleted');
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);

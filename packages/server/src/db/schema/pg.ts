@@ -38,6 +38,14 @@ export const workspaces = pgTable(
     data_version: integer('data_version').notNull().default(0),
     cloud_connection_id: text('cloud_connection_id'),
     cloud_sync: jsonb('cloud_sync').$type<CloudSyncState | null>(),
+    /** One line on what the workspace is for. */
+    description: text('description'),
+    /** Free-form labels for finding and grouping workspaces (lower case). */
+    tags: jsonb('tags').$type<string[]>().notNull().default([]),
+    /** A series colour token (1–8) shown next to the name. */
+    color: text('color'),
+    /** Archived workspaces are hidden from the switcher and cannot run queries until restored. */
+    archived_at: ts('archived_at'),
     created_at: ts('created_at').notNull(),
     updated_at: ts('updated_at').notNull(),
   },

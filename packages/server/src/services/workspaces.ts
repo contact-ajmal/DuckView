@@ -141,13 +141,15 @@ export class WorkspaceService {
   }
 
   /** Workspaces the principal may use: own, shared with them (directly or via a team), or all for platform admins. */
-  async list(p: Principal): Promise<WorkspaceListing[]> {
+  async list(p: Principal, opts: { archived?: boolean } = {}): Promise<WorkspaceListing[]> {
     const grants = await this.grantsFor(p);
     const sharedIds = [...new Set(grants.map((g) => g.workspace_id))];
     const where = isPlatformAdmin(p) ? undefined : sharedIds.length ? or(eq(this.s.workspaces.user_id, p.userId), inArray(this.s.workspaces.id, sharedIds)) : eq(this.s.workspaces.user_id, p.userId);
     const q = this.db.select().from(this.s.workspaces).orderBy(desc(this.s.workspaces.updated_at));
     let rows = where ? await q.where(where) : await q;
     if (p.workspaceScope) rows = rows.filter((w) => w.id === p.workspaceScope);
+    // Archived workspaces leave the switcher; administrators find them under Administration → Workspaces.
+    if (!opts.archived) rows = rows.filter((w) => !w.archived_at);
     return this.decorate(p, rows, grants);
   }
 
@@ -377,7 +379,7 @@ export class WorkspaceService {
     return `${base}-${newId().slice(0, 8)}.duckdb`;
   }
 
-  async create(p: Principal, input: { name: string; active_db_path?: string; engine_settings?: EngineSettings; cloud_connection_id?: string | null }): Promise<Workspace> {
+  async create(p: Principal, input: { name: string; active_db_path?: string; engine_settings?: EngineSettings; cloud_connection_id?: string | null; description?: string | null; tags?: string[]; color?: string | null }): Promise<Workspace> {
     const now = new Date();
     const name = (input.name ?? '').trim() || 'Untitled workspace';
     // No explicit database → the configured default: a file that keeps the analyst's tables, or a scratch memory db.
@@ -391,6 +393,10 @@ export class WorkspaceService {
       active_db_path: dbPath,
       engine_settings: this.validateSettings(input.engine_settings ?? {}),
       folders: [],
+      description: input.description?.trim().slice(0, 500) || null,
+      tags: normalizeTags(input.tags ?? []),
+      color: normalizeColor(input.color),
+      archived_at: null,
       data_version: 0,
       cloud_connection_id: cloudConnectionId,
       cloud_sync: cloudConnectionId ? { etag: null, synced_at: null, size_bytes: null, dirty: false, last_error: null } : null,
@@ -402,10 +408,13 @@ export class WorkspaceService {
     return w;
   }
 
-  async update(p: Principal, id: string, patch: { name?: string; active_db_path?: string; engine_settings?: EngineSettings; cloud_connection_id?: string | null }): Promise<Workspace> {
+  async update(p: Principal, id: string, patch: { name?: string; active_db_path?: string; engine_settings?: EngineSettings; cloud_connection_id?: string | null; description?: string | null; tags?: string[]; color?: string | null }): Promise<Workspace> {
     const w = await this.get(p, id, 'OWNER');
     const set: Partial<Workspace> = { updated_at: new Date() };
     if (patch.name !== undefined) set.name = patch.name.trim() || w.name;
+    if (patch.description !== undefined) set.description = patch.description?.trim().slice(0, 500) || null;
+    if (patch.tags !== undefined) set.tags = normalizeTags(patch.tags);
+    if (patch.color !== undefined) set.color = normalizeColor(patch.color);
     if (patch.active_db_path !== undefined) {
       set.active_db_path = this.validateDbPath(patch.active_db_path);
       if (set.active_db_path !== w.active_db_path || patch.cloud_connection_id !== undefined) {
@@ -506,6 +515,15 @@ export class WorkspaceService {
     return { folders: w.folders, files, truncated };
   }
 
+  /** Archives (hides from the switcher, stops the engine, refuses queries) or restores a workspace. Owners only. */
+  async setArchived(p: Principal, id: string, archived: boolean): Promise<Workspace> {
+    const w = await this.get(p, id, 'OWNER');
+    const archived_at = archived ? w.archived_at ?? new Date() : null;
+    await this.db.update(this.s.workspaces).set({ archived_at, updated_at: new Date() }).where(eq(this.s.workspaces.id, id));
+    if (archived) this.evict(id);
+    return { ...w, archived_at };
+  }
+
   async remove(p: Principal, id: string): Promise<void> {
     await this.get(p, id, 'OWNER');
     this.evict(id);
@@ -572,6 +590,7 @@ export class WorkspaceService {
    */
   async engine(p: Principal, workspaceId: string): Promise<{ workspace: WorkspaceAccess; engine: WorkspaceEngine; role: WorkspaceRole }> {
     const workspace = await this.get(p, workspaceId);
+    if (workspace.archived_at) throw badRequest(`${workspace.name} is archived. Restore it to run queries`);
     const engine = await this.engineFor(workspace);
     const restriction = this.policies ? await this.policies.restrictionFor(p, workspace.id, workspace.role) : null;
     return { workspace, engine: restriction ? this.policies!.guard(engine, restriction) : engine, role: workspace.role };
@@ -672,4 +691,14 @@ export class WorkspaceService {
       .returning({ id: this.s.sessionTabs.id });
     if (r.length === 0) throw notFound('Tab');
   }
+}
+
+/** Tags: trimmed, lower case, unique, at most 12 of 40 characters. */
+export function normalizeTags(tags: string[]): string[] {
+  return [...new Set(tags.map((t) => String(t).trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40)).filter(Boolean))].slice(0, 12);
+}
+
+/** A series colour: "1" … "8", or none. */
+export function normalizeColor(color: string | null | undefined): string | null {
+  return color && /^[1-8]$/.test(String(color)) ? String(color) : null;
 }

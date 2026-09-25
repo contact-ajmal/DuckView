@@ -129,7 +129,7 @@ export interface SemanticLayer { yaml: string; semantic_models: SemanticModelDef
 export interface MetricQueryResult { sql: string; metrics: { name: string; label: string | null; description: string | null }[]; group_by: string[]; columns: ColumnSchema[]; rows: unknown[][]; row_count: number; truncated: boolean; duration_ms: number }
 export interface ScimStatus { enabled: boolean; source: 'config' | 'console' | null; prefix: string | null; created_at: string | null; on_delete: 'deactivate' | 'delete'; endpoint: string }
 export interface CloudSyncState { etag: string | null; synced_at: string | null; size_bytes: number | null; dirty: boolean; last_error: string | null; last_push_ms?: number }
-export interface StorageOptions { mode: 'sandboxed' | 'full'; default_database: 'file' | 'memory'; data_directory: string; cloud_connections: { id: string; name: string; provider: 'S3' | 'R2' | 'GCS' | 'AZURE'; bucket: string | null; uri_scheme: string }[] }
+export interface StorageOptions { mode: 'sandboxed' | 'full'; default_database: 'file' | 'memory'; data_directory: string; engine_defaults?: { memory_limit: string; threads: number | 'auto'; query_timeout_seconds: number }; cloud_connections: { id: string; name: string; provider: 'S3' | 'R2' | 'GCS' | 'AZURE'; bucket: string | null; uri_scheme: string }[] }
 export type StorageKind = 'data' | 'folder' | 'cloud' | 'memory' | 'motherduck';
 /** Where a workspace's database lives, derived from its path. */
 export function storageKindOf(activeDbPath: string, dataDirectory?: string | null): StorageKind {
@@ -154,6 +154,28 @@ export interface Workspace {
   /** Cloud-backed databases (s3:// gs:// r2:// az://): the owner's connection and where the local copy stands. */
   cloud_connection_id: string | null;
   cloud_sync: CloudSyncState | null;
+  description?: string | null;
+  tags?: string[];
+  /** A series colour, "1" … "8". */
+  color?: string | null;
+  archived_at?: string | null;
+}
+/** Administration → Workspaces: one row per workspace in the organisation. */
+export interface WorkspaceRow {
+  id: string; name: string; description: string | null; tags: string[]; color: string | null;
+  owner: { id: string; email: string; name: string | null };
+  storage: { kind: 'memory' | 'data' | 'folder' | 'cloud' | 'motherduck'; location: string };
+  size_bytes: number | null; members: number;
+  engine: { state: 'running' | 'idle' | 'archived'; memory_bytes: number | null; active_queries: number };
+  last_activity_at: string | null; cost_this_month: number; budget: { amount: number; percent: number } | null;
+  archived_at: string | null; created_at: string;
+}
+/** What the create wizard sends. */
+export interface CreateWorkspaceInput {
+  name: string; description?: string | null; tags?: string[]; color?: string | null;
+  active_db_path?: string; cloud_connection_id?: string; engine_settings?: Partial<EngineSettings>;
+  start_from?: { kind: 'empty' } | { kind: 'template'; template_id: string } | { kind: 'clone'; workspace_id: string };
+  members?: { subject_type: 'user' | 'group'; subject_id: string; role: WorkspaceRole }[];
 }
 export interface WorkspaceMember { id: string; workspace_id: string; subject_type: 'user' | 'group'; subject_id: string; role: WorkspaceRole; added_by: string | null; created_at: string; name: string; email: string | null; external: boolean }
 export interface Group { id: string; name: string; description: string | null; external_id: string | null; created_by: string | null; created_at: string; updated_at: string; member_count: number; my_role: 'MANAGER' | 'MEMBER' | null }

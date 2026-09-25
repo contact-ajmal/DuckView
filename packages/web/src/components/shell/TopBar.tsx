@@ -126,6 +126,11 @@ export function TopBar({ route, onNewWorkspace, onShare }: { route: Route; onNew
                   New workspace
                 </MenuItem>
               )}
+              {auth.user?.role === 'ADMIN' && (
+                <MenuItem icon={<Boxes className="h-3.5 w-3.5" />} onClick={() => { close(); location.hash = '#/settings/workspaces'; }}>
+                  Manage workspaces
+                </MenuItem>
+              )}
             </>
           )}
         </Menu>

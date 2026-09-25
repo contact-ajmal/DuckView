@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { StorageChooser, toDbPath, loadStorageOptions, type StorageChoice } from './features/workspace/StorageChooser';
 import { useAuth } from './store/auth';
 import { useWorkspace } from './store/workspace';
 import { LoginPage } from './features/auth/LoginPage';
@@ -19,20 +18,19 @@ import { TransformPage } from './features/transform/TransformPage';
 import { SnapshotView } from './features/dashboards/SnapshotView';
 import { CopilotDrawer } from './features/copilot/CopilotDrawer';
 import { ShareDialog } from './features/workspace/ShareDialog';
+import { CreateWorkspaceWizard } from './features/workspace/CreateWorkspaceWizard';
 import { Sidebar } from './components/shell/Sidebar';
 import { TopBar } from './components/shell/TopBar';
 import { SectionNav } from './components/shell/SectionNav';
 import { CommandPalette } from './components/shell/CommandPalette';
 import { parseRoute, type Route } from './app/routes';
-import { Button, Input, Label, Modal, Spinner, toast } from './components/ui';
+import { Spinner } from './components/ui';
 
 export default function App() {
   const auth = useAuth();
   const ws = useWorkspace();
   const [route, setRoute] = useState<Route>(() => parseRoute());
   const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newStorage, setNewStorage] = useState<StorageChoice>({ kind: 'data', path: '' });
   const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
@@ -101,38 +99,7 @@ export default function App() {
 
       <ShareDialog open={sharing} onClose={() => setSharing(false)} workspace={active ?? null} />
 
-      <Modal open={creating} onClose={() => setCreating(false)} title="New workspace" width="max-w-3xl">
-        <div className="space-y-3">
-          <div>
-            <Label>Name</Label>
-            <Input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Marketing analytics" />
-          </div>
-          <div>
-            <Label>Storage</Label>
-            <StorageChooser value={newStorage} onChange={setNewStorage} suggestedName={newName} compact />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setCreating(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={async () => {
-                try {
-                  await ws.createWorkspace({ name: newName, ...toDbPath(newStorage, await loadStorageOptions().catch(() => null)) });
-                  setCreating(false);
-                  setNewName('');
-                  setNewStorage({ kind: 'data', path: '' });
-                } catch (e) {
-                  toast.error(e, 'Could not create the workspace');
-                }
-              }}
-            >
-              Create workspace
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      <CreateWorkspaceWizard open={creating} onClose={() => setCreating(false)} />
     </div>
   );
 }

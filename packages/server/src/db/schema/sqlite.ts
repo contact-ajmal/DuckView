@@ -94,6 +94,14 @@ export const workspaces = sqliteTable(
     cloud_connection_id: text('cloud_connection_id'),
     /** Sync bookkeeping of the local working copy against the cloud object. */
     cloud_sync: text('cloud_sync', { mode: 'json' }).$type<CloudSyncState | null>(),
+    /** One line on what the workspace is for. */
+    description: text('description'),
+    /** Free-form labels for finding and grouping workspaces (lower case). */
+    tags: text('tags', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** A series colour token (1–8) shown next to the name. */
+    color: text('color'),
+    /** Archived workspaces are hidden from the switcher and cannot run queries until restored. */
+    archived_at: integer('archived_at', { mode: 'timestamp_ms' }),
     created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },

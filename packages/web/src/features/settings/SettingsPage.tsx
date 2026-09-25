@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Code2, GitBranch, Workflow, Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, Layers, Pencil, AppWindow, ScrollText, Server, ReceiptText } from 'lucide-react';
+import { Boxes, Code2, GitBranch, Workflow, Users, Trash2, Plug, KeyRound, Activity, Palette, LayoutTemplate, Cpu, Database, Cloud, Bot, UserRound, ShieldCheck, Layers, Pencil, AppWindow, ScrollText, Server, ReceiptText } from 'lucide-react';
 import { api, formatBytes, timeAgo, type LiveStats, type SystemInfo, type User, type PublicConnection, type CloudConnection, type CopilotConfig, type LakehouseConnection } from '../../api/client';
 import { Gauge } from '../../components/Gauge';
 import { PageHeader, SideCard, Panel, KvRows, Tag } from '../../components/layout';
@@ -26,9 +26,10 @@ import { PgWirePanel } from './PgWirePanel';
 import { OrchestrationPanel } from './OrchestrationPanel';
 import { ClusterPanel } from './ClusterPanel';
 import { UsagePanel } from './UsagePanel';
+import { WorkspacesAdminPanel } from './WorkspacesAdminPanel';
 import { DataTable } from '../../components/data';
 
-type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients' | 'orchestration' | 'cluster' | 'usage';
+type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients' | 'orchestration' | 'cluster' | 'usage' | 'workspaces';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; group: string; admin?: boolean }[] = [
   { id: 'account', group: 'Your account', label: 'Account', blurb: 'Your password and identity', icon: <UserRound className="h-4 w-4" /> },
   { id: 'usage', group: 'Administration', label: 'Usage & cost', blurb: 'Queries, AI and storage, what they cost, and monthly budgets', icon: <ReceiptText className="h-4 w-4" /> },
@@ -37,6 +38,7 @@ const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.Reac
   { id: 'layout', group: 'Your account', label: 'Layout', blurb: 'Show or hide parts of the interface', icon: <LayoutTemplate className="h-4 w-4" /> },
   { id: 'storage', group: 'Your account', label: 'Storage & credentials', blurb: 'Cloud storage, lakehouse catalogs and stored credentials', icon: <Cloud className="h-4 w-4" /> },
   { id: 'integrations', group: 'Your account', label: 'Integrations', blurb: 'Google sign-in for Drive, Sheets and BigQuery', icon: <Plug className="h-4 w-4" /> },
+  { id: 'workspaces', group: 'Administration', label: 'Workspaces', blurb: 'Every workspace: owner, storage, size, activity and cost; archive, tag, transfer', icon: <Boxes className="h-4 w-4" />, admin: true },
   { id: 'users', group: 'Administration', label: 'Users', blurb: 'Roles, access and deactivation', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
   { id: 'audit', group: 'Administration', label: 'Audit log', blurb: 'Who did what, and where the log is streamed', icon: <ScrollText className="h-4 w-4" /> },
   { id: 'provisioning', group: 'Administration', label: 'Provisioning', blurb: 'SCIM 2.0 users and teams from your identity provider', icon: <KeyRound className="h-4 w-4" />, admin: true },
@@ -159,7 +161,7 @@ export function SettingsPage() {
 
       {/* Category content */}
       <main className="min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-5xl space-y-5 px-6 py-5">
+        <div className={cn('mx-auto space-y-5 px-6 py-5', cat === 'workspaces' || cat === 'usage' ? 'max-w-[1400px]' : 'max-w-5xl')}>
           <div className="lg:hidden">
             <Select aria-label="Settings page" value={cat} onChange={(e) => setCat(e.target.value as Category)} className="w-full">
               {GROUPS.map((g) => {
@@ -179,6 +181,7 @@ export function SettingsPage() {
           {cat === 'embedding' && ws.activeId && <EmbedPanel key={ws.activeId} workspaceId={ws.activeId} />}
           {cat === 'sql-clients' && <PgWirePanel />}
           {cat === 'cluster' && isAdmin && <ClusterPanel />}
+          {cat === 'workspaces' && isAdmin && <WorkspacesAdminPanel />}
           {cat === 'usage' && <UsagePanel />}
           {cat === 'orchestration' && ws.activeId && <OrchestrationPanel key={ws.activeId} workspaceId={ws.activeId} />}
 

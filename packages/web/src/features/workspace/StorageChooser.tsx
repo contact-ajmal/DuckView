@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { HardDrive, Zap, Cloud, FolderOpen, Database } from 'lucide-react';
+import { HardDrive, Zap, Cloud, FolderOpen, Database, FileSearch } from 'lucide-react';
 import { api, type StorageOptions } from '../../api/client';
-import { Input, Label, Select, cn } from '../../components/ui';
+import { Button, Input, Label, Select, cn } from '../../components/ui';
+import { LocationBrowser } from '../../components/data';
+import { useWorkspace } from '../../store/workspace';
 
-export type StorageChoice = { kind: 'data'; path: string } | { kind: 'folder'; path: string } | { kind: 'cloud'; connectionId: string; key: string } | { kind: 'memory' } | { kind: 'motherduck'; path: string };
+export type StorageChoice = { kind: 'data'; path: string } | { kind: 'folder'; path: string } | { kind: 'existing'; path: string } | { kind: 'cloud'; connectionId: string; key: string } | { kind: 'memory' } | { kind: 'motherduck'; path: string };
 
 /** The `active_db_path` (and connection) a choice resolves to; empty path = let the server name it. */
 export function toDbPath(choice: StorageChoice, options: StorageOptions | null): { active_db_path?: string; cloud_connection_id?: string } {
@@ -13,6 +15,7 @@ export function toDbPath(choice: StorageChoice, options: StorageOptions | null):
     case 'data':
       return choice.path.trim() ? { active_db_path: choice.path.trim() } : {};
     case 'folder':
+    case 'existing':
       return { active_db_path: choice.path.trim() };
     case 'motherduck':
       return { active_db_path: choice.path.trim() || 'md:' };
@@ -34,7 +37,9 @@ export function loadStorageOptions(force = false): Promise<StorageOptions> {
  * Where a workspace's database should live: the data directory (default), any folder on the host (full filesystem
  * mode), an object in cloud storage through one of the person's cloud connections, in-memory, or MotherDuck.
  */
-export function StorageChooser({ value, onChange, suggestedName, allowMemory = true, allowMotherduck = true, compact }: { value: StorageChoice; onChange: (c: StorageChoice) => void; suggestedName: string; allowMemory?: boolean; allowMotherduck?: boolean; compact?: boolean }) {
+export function StorageChooser({ value, onChange, suggestedName, allowMemory = true, allowMotherduck = true, allowExisting = false, allowCloud = true, compact }: { value: StorageChoice; onChange: (c: StorageChoice) => void; suggestedName: string; allowMemory?: boolean; allowMotherduck?: boolean; allowExisting?: boolean; allowCloud?: boolean; compact?: boolean }) {
+  const workspaceId = useWorkspace((s) => s.activeId);
+  const [browse, setBrowse] = useState<'folder' | 'existing' | null>(null);
   const [options, setOptions] = useState<StorageOptions | null>(null);
   const [suggested, setSuggested] = useState('');
   useEffect(() => {
@@ -50,7 +55,8 @@ export function StorageChooser({ value, onChange, suggestedName, allowMemory = t
   const cards: { kind: StorageChoice['kind']; label: string; hint: string; icon: ReactNode; disabled?: string }[] = [
     { kind: 'data', label: 'Data directory', hint: 'A .duckdb file in DuckView\'s data directory. Survives restarts; backed up with the data directory.', icon: <HardDrive className="h-4 w-4" /> },
     { kind: 'folder', label: 'Folder on the server', hint: full ? 'Any writable folder on the host — a mounted volume, a network share.' : 'Needs security.filesystem_mode: full.', icon: <FolderOpen className="h-4 w-4" />, disabled: full ? undefined : 'Only in full filesystem mode' },
-    { kind: 'cloud', label: 'Cloud storage', hint: clouds.length ? 'An object in S3, R2, GCS or Azure through one of your cloud connections; worked on locally and synced automatically.' : 'Add a cloud connection under Settings → Storage first.', icon: <Cloud className="h-4 w-4" />, disabled: clouds.length ? undefined : 'No cloud connection yet' },
+    ...(allowExisting ? [{ kind: 'existing' as const, label: 'Existing database', hint: 'Open a .duckdb file that is already on the server: its tables come with it.', icon: <FileSearch className="h-4 w-4" /> }] : []),
+    { kind: 'cloud', label: 'Cloud storage', hint: clouds.length ? 'An object in S3, R2, GCS or Azure through one of your cloud connections; worked on locally and synced automatically.' : 'Add a cloud connection under Settings → Storage first.', icon: <Cloud className="h-4 w-4" />, disabled: !allowCloud ? 'Not available here' : clouds.length ? undefined : 'No cloud connection yet' },
     ...(allowMemory ? [{ kind: 'memory' as const, label: 'In-memory scratch', hint: 'Fastest; cleared when the engine restarts. Can be made persistent later without losing tables.', icon: <Zap className="h-4 w-4" /> }] : []),
     ...(allowMotherduck ? [{ kind: 'motherduck' as const, label: 'MotherDuck', hint: 'A cloud DuckDB database (md:name) through your MotherDuck token.', icon: <Database className="h-4 w-4" /> }] : []),
   ];
@@ -58,6 +64,7 @@ export function StorageChooser({ value, onChange, suggestedName, allowMemory = t
     if (kind === value.kind) return;
     if (kind === 'data') onChange({ kind, path: '' });
     else if (kind === 'folder') onChange({ kind, path: '' });
+    else if (kind === 'existing') onChange({ kind, path: '' });
     else if (kind === 'cloud') onChange({ kind, connectionId: clouds[0]?.id ?? '', key: suggested || 'workspace.duckdb' });
     else if (kind === 'memory') onChange({ kind });
     else onChange({ kind: 'motherduck', path: 'md:' });
@@ -83,9 +90,40 @@ export function StorageChooser({ value, onChange, suggestedName, allowMemory = t
       {value.kind === 'folder' && (
         <div>
           <Label>Absolute path of the database file</Label>
-          <Input value={value.path} onChange={(e) => onChange({ kind: 'folder', path: e.target.value })} className="font-mono" placeholder={`/mnt/analytics/${suggested || 'workspace.duckdb'}`} spellCheck={false} />
+          <div className="flex gap-2">
+            <Input value={value.path} onChange={(e) => onChange({ kind: 'folder', path: e.target.value })} className="font-mono" placeholder={`/mnt/analytics/${suggested || 'workspace.duckdb'}`} spellCheck={false} aria-label="Database file path" />
+            {workspaceId && <Button type="button" onClick={() => setBrowse('folder')}>Choose folder…</Button>}
+          </div>
           <p className="mt-1 text-2xs text-zinc-500">The folder is created if needed and must be writable for the DuckView process. Only one DuckView instance may open the file.</p>
         </div>
+      )}
+      {value.kind === 'existing' && (
+        <div>
+          <Label>Database file</Label>
+          <div className="flex gap-2">
+            <Input value={value.path} onChange={(e) => onChange({ kind: 'existing', path: e.target.value })} className="font-mono" placeholder="/data/warehouse.duckdb" spellCheck={false} aria-label="Existing database file" />
+            {workspaceId && <Button type="button" onClick={() => setBrowse('existing')} data-testid="storage-browse-existing">Browse…</Button>}
+          </div>
+          <p className="mt-1 text-2xs text-zinc-500">Only one workspace, and one DuckView instance, can open a database file at a time.</p>
+        </div>
+      )}
+      {workspaceId && (
+        <LocationBrowser
+          open={browse !== null}
+          workspaceId={workspaceId}
+          mode={browse === 'existing' ? 'files' : 'folder'}
+          remote={false}
+          title={browse === 'existing' ? 'Choose a DuckDB database' : 'Choose where the database file goes'}
+          confirmLabel={browse === 'existing' ? 'Use this database' : undefined}
+          onClose={() => setBrowse(null)}
+          onPick={([p]) => {
+            if (!p) return;
+            if (browse === 'existing') {
+              if (!/\.(duckdb|ddb|db)$/i.test(p)) throw new Error('Choose a .duckdb file');
+              onChange({ kind: 'existing', path: p });
+            } else onChange({ kind: 'folder', path: `${p.replace(/\/$/, '')}/${suggested || 'workspace.duckdb'}` });
+          }}
+        />
       )}
       {value.kind === 'cloud' && (
         <div className="grid gap-2 md:grid-cols-2">

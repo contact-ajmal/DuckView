@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, queryStream, ApiError, type Workspace, type SessionTab, type ColumnSchema, type ChartConfig, type ApprovalChallenge, type CatalogObject, type JailEntry, type QueryResult, type LakehouseConnection, type WorkspaceRole } from '../api/client';
+import { api, queryStream, ApiError, type Workspace, type SessionTab, type ColumnSchema, type ChartConfig, type ApprovalChallenge, type CatalogObject, type JailEntry, type QueryResult, type LakehouseConnection, type WorkspaceRole, type CreateWorkspaceInput } from '../api/client';
 import { useAuth } from './auth';
 import { resultCache, cacheId } from '../lib/resultCache';
 import { subscribeLiveEvents } from '../lib/liveEvents';
@@ -77,7 +77,7 @@ interface WorkspaceState {
   setTabEngine(id: string, engine: string | null): Promise<void>;
   loadWorkspaces(): Promise<void>;
   selectWorkspace(id: string): Promise<void>;
-  createWorkspace(input: { name: string; active_db_path?: string }): Promise<Workspace>;
+  createWorkspace(input: CreateWorkspaceInput): Promise<Workspace & { started?: { kind: string; detail: string } }>;
   updateWorkspace(id: string, patch: Partial<Pick<Workspace, 'name' | 'active_db_path' | 'engine_settings'>>): Promise<void>;
   deleteWorkspace(id: string): Promise<void>;
   loadTabs(): Promise<void>;
@@ -150,10 +150,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     void get().loadCatalog(true);
   },
   async createWorkspace(input) {
-    const r = await api.post<{ workspace: Workspace }>('/api/workspaces', input);
+    const r = await api.post<{ workspace: Workspace; started?: { kind: string; detail: string } }>('/api/workspaces', input);
     set({ workspaces: [r.workspace, ...get().workspaces] });
     await get().selectWorkspace(r.workspace.id);
-    return r.workspace;
+    return { ...r.workspace, started: r.started };
   },
   async updateWorkspace(id, patch) {
     const r = await api.patch<{ workspace: Workspace }>(`/api/workspaces/${id}`, patch);
