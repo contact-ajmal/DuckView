@@ -34,3 +34,7 @@ docs/reference/
 
 # website build output (site/build.mjs)
 site/dist/
+
+# Claude Code session state
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
