@@ -66,6 +66,8 @@ export function buildChallenge(analysis: SqlAnalysis): ApprovalChallenge {
 }
 
 export class QueryService {
+  /** The organisation's quotas (query time per day, storage for writes); set by the lifecycle service. */
+  quota: ((workspaceId: string, mutating: boolean) => Promise<void>) | null = null;
   constructor(private readonly cfg: DuckViewConfig, private readonly workspaces: WorkspaceService, private readonly audit: AuditService, private readonly cache: ResultCache) {}
 
   /** Any statement that is not a pure read moves the workspace's data epoch — even when it failed halfway. */
@@ -104,6 +106,7 @@ export class QueryService {
       // Cheap access check first so a forbidden or HITL-blocked statement never spins up an engine.
       const { role } = await this.workspaces.get(p, workspaceId);
       this.authorize(p, analysis, opts, role);
+      await this.quota?.(workspaceId, analysis.isMutating);
       const execute = async () => {
         const { engine } = await this.workspaces.engine(p, workspaceId);
         try {
@@ -140,6 +143,7 @@ export class QueryService {
     try {
       const { role } = await this.workspaces.get(p, workspaceId);
       this.authorize(p, analysis, opts, role);
+      await this.quota?.(workspaceId, analysis.isMutating);
       const { engine } = await this.workspaces.engine(p, workspaceId);
       let out;
       try {

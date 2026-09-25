@@ -40,6 +40,7 @@ import { OrchestrationService } from './services/orchestrate.js';
 import { UsageService } from './services/usage.js';
 import { TemplateService } from './services/templates.js';
 import { WorkspaceAdminService } from './services/workspace-admin.js';
+import { WorkspaceLifecycleService } from './services/workspace-lifecycle.js';
 import { ClusterService } from './services/cluster.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
 import { NotebookService } from './services/notebooks.js';
@@ -104,6 +105,7 @@ export interface AppContext {
   usage: UsageService;
   templates: TemplateService;
   workspaceAdmin: WorkspaceAdminService;
+  lifecycle: WorkspaceLifecycleService;
   cluster: ClusterService;
   /** Cluster mode: joins the cluster at this URL once the server listens (then starts stream consumers). */
   startCluster(advertiseUrl: string): Promise<void>;
@@ -293,6 +295,10 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   if (cfg.notifications.scheduler_enabled) usage.start();
   const templates = new TemplateService(store);
   const workspaceAdmin = new WorkspaceAdminService(store);
+  const lifecycle = new WorkspaceLifecycleService(store);
+  queries.quota = (id, mutating) => lifecycle.checkQuery(id, mutating);
+  workspaces.memoryCap = (limit) => lifecycle.capMemory(limit);
+  if (cfg.notifications.scheduler_enabled) lifecycle.start();
   const pgwire = new PgWireServer(cfg, auth, workspaces, queries, audit);
   await pgwire.start().catch((err) => logger().error({ err: (err as Error).message }, 'The Postgres protocol listener could not start'));
   if (cfg.security.filesystem_mode === 'full') {
@@ -345,6 +351,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     usage,
     templates,
     workspaceAdmin,
+    lifecycle,
     cluster,
     startCluster,
     reverse,
@@ -368,6 +375,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       snapshots.stop();
       auditExport.stop();
       usage.stop();
+      lifecycle.stop();
       dbt.stop();
       quality.stop();
       insights.stop();
@@ -389,5 +397,6 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   orchestrate.bind(ctx);
   templates.bind(ctx);
   workspaceAdmin.bind(ctx);
+  lifecycle.bind(ctx);
   return ctx;
 }

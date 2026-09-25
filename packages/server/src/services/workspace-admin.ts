@@ -8,7 +8,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { and, desc, eq, inArray, max, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, max, ne, sql } from 'drizzle-orm';
 import type { MetadataStore } from '../db/index.js';
 import type { EngineSettings, Workspace, WorkspaceRole, MemberSubjectType } from '../db/schema/sqlite.js';
 import type { AppContext } from '../context.js';
@@ -59,6 +59,7 @@ export interface WorkspaceObjects {
   quality: { name: string; description: string | null; relation: string; checks: unknown[] }[];
 }
 
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const monthStart = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
 
 export class WorkspaceAdminService {
@@ -86,7 +87,7 @@ export class WorkspaceAdminService {
     const members = await this.db.select({ ws: this.s.workspaceMembers.workspace_id, n: sql<number>`count(*)` }).from(this.s.workspaceMembers).where(inArray(this.s.workspaceMembers.workspace_id, ids)).groupBy(this.s.workspaceMembers.workspace_id);
     const memberMap = new Map(members.map((m) => [m.ws, Number(m.n)]));
     const a = this.s.auditLogs;
-    const activity = await this.db.select({ resource: a.resource, at: max(a.timestamp) }).from(a).where(inArray(a.resource, ids.map((id) => `workspace:${id}`))).groupBy(a.resource);
+    const activity = await this.db.select({ resource: a.resource, at: max(a.timestamp) }).from(a).where(and(inArray(a.resource, ids.map((id) => `workspace:${id}`)), ne(a.actor_type, 'SYSTEM'))).groupBy(a.resource);
     const activityMap = new Map(activity.map((r) => [String(r.resource).slice('workspace:'.length), r.at]));
     const usage = await c.usage.compute({ from: monthStart(), to: new Date() }, 'org').catch((err) => {
       logger().warn({ err: (err as Error).message }, 'Workspace list: usage unavailable');
@@ -167,6 +168,7 @@ export class WorkspaceAdminService {
   async create(p: Principal, input: CreateInput): Promise<{ workspace: Workspace; started: { kind: string; detail: string } }> {
     requireWrite(p);
     const c = this.ctx;
+    input = { ...input, engine_settings: (await c.lifecycle.checkCreate(p, { name: input.name, engine_settings: input.engine_settings as Record<string, unknown> })) as EngineSettings };
     const from = input.start_from ?? { kind: 'empty' };
     let source: Workspace | null = null;
     if (from.kind === 'clone') {
@@ -181,10 +183,10 @@ export class WorkspaceAdminService {
     try {
       if (from.kind === 'template') {
         const r = await c.templates.install(p, from.template_id, { workspace_id: w.id, sample_data: true });
-        started = { kind: 'template', detail: `${r.install.template_name}: ${r.created.dashboards.length} dashboards, ${r.created.queries.length} queries, ${r.created.notebooks.length} notebooks` };
+        started = { kind: 'template', detail: `${r.install.template_name}: ${plural(r.created.dashboards.length, 'dashboard')}, ${plural(r.created.queries.length, 'query', 'queries')}, ${plural(r.created.notebooks.length, 'notebook')}` };
       } else if (from.kind === 'clone' && source) {
         const copied = await this.clone(p, source, w);
-        started = { kind: 'clone', detail: `Cloned from ${source.name}: ${copied.tables} tables, ${copied.objects.dashboards.length} dashboards, ${copied.objects.queries.length} queries, ${copied.objects.notebooks.length} notebooks` };
+        started = { kind: 'clone', detail: `Cloned from ${source.name}: ${plural(copied.tables, 'table')}, ${plural(copied.objects.dashboards.length, 'dashboard')}, ${plural(copied.objects.queries.length, 'query', 'queries')}, ${plural(copied.objects.notebooks.length, 'notebook')}` };
       }
       for (const m of input.members ?? []) await c.workspaces.setMember(p, w.id, m);
     } catch (err) {
@@ -368,8 +370,9 @@ export class WorkspaceAdminService {
   }
 
   /** Engine defaults for the wizard: the server's configuration. */
-  engineDefaults() {
+  async engineDefaults() {
     const d = this.ctx.cfg.duckdb;
-    return { memory_limit: d.default_memory_limit, threads: d.default_threads, query_timeout_seconds: d.query_timeout_seconds };
+    const pol = await this.ctx.lifecycle.policy();
+    return { memory_limit: pol.creation.memory_limit ?? d.default_memory_limit, threads: pol.creation.threads ?? d.default_threads, query_timeout_seconds: pol.creation.query_timeout_seconds ?? d.query_timeout_seconds, memory_cap: pol.quotas.memory_limit, name_hint: pol.creation.name_hint, name_pattern: pol.creation.name_pattern, admins_only: pol.creation.admins_only };
   }
 }

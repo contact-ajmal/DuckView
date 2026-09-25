@@ -19,6 +19,7 @@ import { OrchestrationPanel } from '../settings/OrchestrationPanel';
 import { PgWirePanel } from '../settings/PgWirePanel';
 import { ShareDialog } from './ShareDialog';
 import { CreateWorkspaceWizard } from './CreateWorkspaceWizard';
+import { WorkspaceBackups } from './WorkspaceBackups';
 
 type Tab = 'overview' | 'members' | 'storage' | 'engine' | 'sources' | 'integrations' | 'usage' | 'audit' | 'lifecycle';
 const TABS: { id: Tab; label: string; owner?: boolean }[] = [
@@ -364,12 +365,26 @@ function Sources({ s }: { s: Summary }) {
 interface UsageReport { totals: { queries: number; query_seconds: number; cost: { total: number } }; daily: { date: string; cost: { total: number } }[]; top_queries: { sql: string; runs: number; total_seconds: number; avg_ms: number; cost: number }[] }
 interface Budget { id: string; name: string; amount: number; spent: number; percent: number; period: string }
 const money = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+interface Quota { storage: { used_bytes: number | null; limit_bytes: number | null }; query_seconds: { used: number; limit: number | null }; memory: { limit: string | null } }
+
+function QuotaBar({ label, used, limit, format, hint }: { label: string; used: number; limit: number; format: (n: number) => string; hint: string }) {
+  const pct = Math.min(100, (used / limit) * 100);
+  return (
+    <li className="space-y-1 text-body">
+      <div className="flex justify-between"><span className="text-zinc-200">{label}</span><span className={pct >= 100 ? 'text-red-400' : pct >= 80 ? 'text-amber-300' : 'text-zinc-400'}>{format(used)} of {format(limit)}</span></div>
+      <div className="h-1.5 rounded-full bg-zinc-800" role="progressbar" aria-label={label} aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}><div className={pct >= 100 ? 'h-full rounded-full bg-red-500' : pct >= 80 ? 'h-full rounded-full bg-amber-500' : 'h-full rounded-full bg-emerald-500'} style={{ width: `${pct}%` }} /></div>
+      <p className="text-2xs text-zinc-500">{hint}</p>
+    </li>
+  );
+}
 
 function Usage({ id, isOwner }: { id: string; isOwner: boolean }) {
   const [r, setR] = useState<UsageReport | null>(null);
   const [budgets, setBudgets] = useState<Budget[] | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [quota, setQuota] = useState<Quota | null>(null);
   useEffect(() => {
+    void api.get<Quota>(`/api/workspaces/${id}/quota`).then(setQuota).catch(() => undefined);
     void api.get<UsageReport>(`/api/usage?workspace_id=${id}&days=30`).then(setR, setError);
     void api.get<{ budgets: Budget[] }>(`/api/usage/budgets?workspace_id=${id}`).then((b) => setBudgets(b.budgets), () => setBudgets([]));
   }, [id]);
@@ -383,6 +398,15 @@ function Usage({ id, isOwner }: { id: string; isOwner: boolean }) {
           {r.daily.map((d) => <div key={d.date} className="flex-1 rounded-t-sm bg-[color:var(--series-1)] opacity-80 hover:opacity-100" style={{ height: `${Math.max(1, (d.cost.total / max) * 100)}%` }} title={`${d.date}: ${money(d.cost.total)}`} />)}
         </div>
       </Section>
+      {quota && (quota.storage.limit_bytes || quota.query_seconds.limit || quota.memory.limit) && (
+        <Section title="Quotas" meta="Set by your administrators">
+          <ul className="space-y-3" data-testid="ws-quotas">
+            {quota.storage.limit_bytes != null && <QuotaBar label="Storage" used={quota.storage.used_bytes ?? 0} limit={quota.storage.limit_bytes} format={formatBytes} hint="Over the quota, reads work but writes are refused." />}
+            {quota.query_seconds.limit != null && <QuotaBar label="Query time today" used={quota.query_seconds.used} limit={quota.query_seconds.limit} format={(n) => `${Math.round(n / 60).toLocaleString()} min`} hint="Resets at midnight UTC." />}
+            {quota.memory.limit && <li className="text-body text-zinc-300">Engine memory is capped at <span className="font-mono">{quota.memory.limit}</span>.</li>}
+          </ul>
+        </Section>
+      )}
       <Section title="Budget" actions={isOwner ? <a className="text-xs text-accent-300 hover:underline" href="#/settings/usage">Set a budget</a> : undefined}>
         {!budgets ? <Skeleton lines={1} /> : budgets.length === 0 ? <p className="text-xs text-zinc-500">No budget for this workspace.</p> : (
           <ul className="space-y-2">{budgets.map((b) => (
@@ -486,7 +510,10 @@ function Lifecycle({ w, isAdmin, onClone, onChanged }: { w: Workspace; isAdmin: 
     </div>
   );
   return (
-    <div className="divide-y divide-zinc-800/70 border-y border-zinc-800/70">
+    <div className="space-y-6">
+    <Section title="Backups" meta="Point-in-time copies of the data and objects, kept on the server"><WorkspaceBackups w={w} onChanged={onChanged} /></Section>
+    <Section title="Lifecycle">
+    <div className="divide-y divide-zinc-800/70 border-b border-zinc-800/70">
       {w.archived_at
         ? row('Restore', `Archived ${timeAgo(w.archived_at)}. Restoring brings it back to the switcher and lets it run queries.`, <Button onClick={() => void archive(false)}><ArchiveRestore className="h-3.5 w-3.5" /> Restore</Button>, 'ws-restore')
         : row('Archive', 'Hide it from the switcher and stop its engine. Nothing is deleted; restore it any time.', <Button onClick={() => void archive(true)}><Archive className="h-3.5 w-3.5" /> Archive</Button>, 'ws-archive')}
@@ -498,6 +525,8 @@ function Lifecycle({ w, isAdmin, onClone, onChanged }: { w: Workspace; isAdmin: 
         </div>
       ))}
       {row('Delete', 'Remove the workspace and everything in it for everyone. The database file stays on disk.', <Button variant="danger" onClick={() => void remove()} data-testid="ws-delete"><Trash2 className="h-3.5 w-3.5" /> Delete…</Button>)}
+    </div>
+    </Section>
     </div>
   );
 }

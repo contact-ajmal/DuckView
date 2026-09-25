@@ -71,7 +71,7 @@ describe('workspace management', () => {
 
     const r = await api('POST', '/api/workspaces', adminJwt, { name: 'Sales copy', active_db_path: 'sales-copy.duckdb', start_from: { kind: 'clone', workspace_id: source } });
     expect(r.status).toBe(200);
-    expect(r.json.started.detail).toMatch(/Cloned from Sales: 1 tables, 1 dashboards, 1 queries, 1 notebooks/);
+    expect(r.json.started.detail).toMatch(/Cloned from Sales: 1 table, 1 dashboard, 1 query, 1 notebook/);
     const clone = r.json.workspace.id;
     const rows = await api('POST', `/api/workspaces/${clone}/query`, adminJwt, { sql: 'SELECT count(*) AS n, sum(amount) AS s FROM orders' });
     expect(rows.json.rows[0].map(Number)).toEqual([5, 100]);
@@ -89,7 +89,7 @@ describe('workspace management', () => {
     const r = await api('POST', '/api/workspaces', adminJwt, { name: 'Shop', active_db_path: 'shop.duckdb', start_from: { kind: 'template', template_id: 'builtin:ecommerce' } });
     expect(r.status).toBe(200);
     expect(r.json.started.kind).toBe('template');
-    expect(r.json.started.detail).toMatch(/dashboards/);
+    expect(r.json.started.detail).toMatch(/\d+ dashboards?, \d+ quer(y|ies)/);
   });
 
   it('lists every workspace for administrators only, with owner, storage, size, members and engine', async () => {

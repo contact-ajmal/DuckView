@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
-import { requireWrite } from '../services/principal.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { requireAdmin, requireWrite } from '../services/principal.js';
 import { HttpError } from '../services/errors.js';
 import { WORKSPACE_ROLES, MEMBER_SUBJECT_TYPES } from '../db/schema/sqlite.js';
 
@@ -74,6 +77,101 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
     const q = z.object({ limit: z.coerce.number().int().min(1).max(500).optional(), offset: z.coerce.number().int().min(0).optional() }).parse(req.query ?? {});
     return { events: await ctx.workspaceAdmin.activity(req.principal!, (req.params as { id: string }).id, q) };
   });
+  // ---- the organisation's workspace policy: quotas, the idle policy, creation rules (administrators)
+  const Policy = z.object({
+    quotas: z.object({ storage_bytes: z.number().int().positive().nullable(), memory_limit: z.string().max(20).nullable(), query_seconds_per_day: z.number().int().positive().nullable() }),
+    idle: z.object({ warn_days: z.number().int().min(1).max(3650).nullable(), archive_days: z.number().int().min(1).max(3650).nullable(), channel_ids: z.array(z.string().max(64)).max(20) }),
+    creation: z.object({ admins_only: z.boolean(), name_pattern: z.string().max(200).nullable(), name_hint: z.string().max(200).nullable(), memory_limit: z.string().max(20).nullable(), threads: z.number().int().min(1).max(1024).nullable(), query_timeout_seconds: z.number().int().min(1).max(86_400).nullable() }),
+  });
+  app.get('/api/admin/workspace-policy', async (req) => {
+    requireAdmin(req.principal!);
+    return { policy: await ctx.lifecycle.policy() };
+  });
+  app.put('/api/admin/workspace-policy', async (req) => ({ policy: await ctx.lifecycle.setPolicy(req.principal!, Policy.parse(req.body ?? {})) }));
+  app.post('/api/admin/workspace-policy/run', async (req) => {
+    requireAdmin(req.principal!);
+    return ctx.lifecycle.tick();
+  });
+  app.get('/api/workspaces/:id/quota', async (req) => ctx.lifecycle.quotaStatus(req.principal!, (req.params as { id: string }).id));
+
+  // ---- backups: list, take now, schedule, restore, download, delete (owners)
+  app.get('/api/workspaces/:id/backups', async (req) => {
+    const { id } = req.params as { id: string };
+    const w = await ctx.workspaces.get(req.principal!, id, 'OWNER');
+    return { backups: await ctx.lifecycle.listBackups(req.principal!, id), policy: w.backup_policy ?? null, last_backup_at: w.last_backup_at ?? null };
+  });
+  app.post('/api/workspaces/:id/backups', async (req) => {
+    requireWrite(req.principal!);
+    const body = z.object({ note: z.string().max(200).nullable().optional() }).parse(req.body ?? {});
+    return { backup: await ctx.lifecycle.backup(req.principal!, (req.params as { id: string }).id, 'manual', body.note ?? null) };
+  });
+  app.put('/api/workspaces/:id/backup-policy', async (req) => {
+    requireWrite(req.principal!);
+    const body = z.object({ policy: z.object({ every_hours: z.number().int(), keep: z.number().int() }).nullable() }).parse(req.body ?? {});
+    await ctx.lifecycle.setBackupPolicy(req.principal!, (req.params as { id: string }).id, body.policy);
+    return { ok: true };
+  });
+  app.post('/api/workspaces/:id/backups/:backupId/restore', async (req) => {
+    requireWrite(req.principal!);
+    const { id, backupId } = req.params as { id: string; backupId: string };
+    const body = z.object({ objects: z.boolean().optional() }).parse(req.body ?? {});
+    return ctx.lifecycle.restore(req.principal!, id, backupId, body);
+  });
+  app.delete('/api/workspaces/:id/backups/:backupId', async (req) => {
+    requireWrite(req.principal!);
+    const { id, backupId } = req.params as { id: string; backupId: string };
+    await ctx.lifecycle.deleteBackup(req.principal!, id, backupId);
+    return { ok: true };
+  });
+  app.get('/api/workspaces/:id/backups/:backupId/download', async (req, reply) => {
+    const { id, backupId } = req.params as { id: string; backupId: string };
+    const b = (await ctx.lifecycle.listBackups(req.principal!, id)).find((x) => x.id === backupId);
+    if (!b || !b.exists) return reply400('That backup file is gone');
+    reply.header('content-type', 'application/octet-stream');
+    reply.header('content-disposition', `attachment; filename="${path.basename(b.file)}"`);
+    reply.header('content-length', String(fs.statSync(b.file).size));
+    return reply.send(fs.createReadStream(b.file));
+  });
+
+  // ---- bundles: a workspace as one .duckview file (data and objects), and back
+  app.get('/api/workspaces/:id/bundle', async (req, reply) => {
+    const r = await ctx.lifecycle.exportBundle(req.principal!, (req.params as { id: string }).id);
+    reply.header('content-type', 'application/octet-stream');
+    reply.header('content-disposition', `attachment; filename="${r.name.replace(/"/g, '')}"`);
+    reply.header('content-length', String(fs.statSync(r.file).size));
+    const stream = fs.createReadStream(r.file);
+    stream.on('close', () => fs.rmSync(r.file, { force: true }));
+    return reply.send(stream);
+  });
+  app.post('/api/workspaces/import', async (req) => {
+    if (req.isMultipart()) {
+      const dir = path.join(ctx.workspaces.jail.baseDir, '.duckview', 'imports');
+      fs.mkdirSync(dir, { recursive: true });
+      let tmp: string | null = null;
+      const fields: Record<string, string> = {};
+      for await (const part of req.parts()) {
+        if (part.type === 'file') {
+          tmp = path.join(dir, `${Date.now()}-${Math.random().toString(36).slice(2)}.duckview`);
+          await pipeline(part.file, fs.createWriteStream(tmp));
+          if (part.file.truncated) {
+            fs.rmSync(tmp, { force: true });
+            return reply400(`The bundle exceeds the upload limit of ${ctx.cfg.security.max_upload_bytes} bytes; copy it to the server and import it by path`);
+          }
+        } else fields[part.fieldname] = String(part.value ?? '');
+      }
+      if (!tmp) return reply400('Attach a .duckview file');
+      try {
+        const w = await ctx.lifecycle.importBundle(req.principal!, tmp, { name: fields.name, active_db_path: fields.active_db_path });
+        return { workspace: await ctx.workspaces.describe(req.principal!, w.id) };
+      } finally {
+        fs.rmSync(tmp, { force: true });
+      }
+    }
+    const body = z.object({ path: z.string().min(1).max(1000), name: z.string().max(120).optional(), active_db_path: z.string().max(500).optional() }).parse(req.body ?? {});
+    const w = await ctx.lifecycle.importBundle(req.principal!, body.path, body);
+    return { workspace: await ctx.workspaces.describe(req.principal!, w.id) };
+  });
+
   // Archive or restore one workspace (owners).
   app.post('/api/workspaces/:id/archive', async (req) => {
     const { id } = req.params as { id: string };
@@ -132,7 +230,7 @@ export async function workspaceRoutes(app: FastifyInstance, ctx: AppContext) {
   // Storage choices for the New-workspace dialog and the Storage panel.
   app.get('/api/workspaces/storage-options', async (req) => ({
     mode: ctx.cfg.security.filesystem_mode,
-    engine_defaults: ctx.workspaceAdmin.engineDefaults(),
+    engine_defaults: await ctx.workspaceAdmin.engineDefaults(),
     default_database: ctx.engines.defaultDatabase,
     data_directory: ctx.workspaces.jail.baseDir,
     cloud_connections: (await ctx.cloud.list(req.principal!.userId)).map((c) => ({ id: c.id, name: c.name, provider: c.provider, bucket: c.bucket, uri_scheme: c.uri_scheme })),

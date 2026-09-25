@@ -3,18 +3,19 @@
  * database, a folder, cloud), engine (memory, threads, timeout — defaults from the server), a starting point (empty,
  * a template, or a clone of another workspace) and people (users and teams with a role).
  */
-import { useEffect, useMemo, useState } from 'react';
-import { Check, Copy, LayoutTemplate, Square, Trash2, UserPlus } from 'lucide-react';
-import { api, type CreateWorkspaceInput, type DirectoryUser, type Group, type StorageOptions, type WorkspaceRole } from '../../api/client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, Copy, LayoutTemplate, PackageOpen, Square, Trash2, UserPlus } from 'lucide-react';
+import { api, getToken, type CreateWorkspaceInput, type DirectoryUser, type Group, type StorageOptions, type WorkspaceRole } from '../../api/client';
 import { Button, Field, IconButton, Input, Modal, Select, Textarea, cn, toast, errorText } from '../../components/ui';
 import { useWorkspace } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { StorageChooser, toDbPath, loadStorageOptions, type StorageChoice } from './StorageChooser';
+import { LocationBrowser } from '../../components/data';
 
 const STEPS = ['Basics', 'Storage', 'Engine', 'Start from', 'People'] as const;
 type Step = (typeof STEPS)[number];
 interface TemplateSummary { id: string; name: string; description: string | null; category: string; contents: { dashboards: number; queries: number; notebooks: number } }
-export type Start = { kind: 'empty' } | { kind: 'template'; template_id: string } | { kind: 'clone'; workspace_id: string };
+export type Start = { kind: 'empty' } | { kind: 'template'; template_id: string } | { kind: 'clone'; workspace_id: string } | { kind: 'bundle'; path: string; file: File | null };
 type Member = { subject_type: 'user' | 'group'; subject_id: string; role: WorkspaceRole; label: string };
 
 export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolean; onClose: () => void; initial?: { name?: string; start?: Start } }) {
@@ -38,6 +39,8 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
   const [pick, setPick] = useState('');
   const [pickRole, setPickRole] = useState<WorkspaceRole>('EDITOR');
   const [busy, setBusy] = useState(false);
+  const [browseBundle, setBrowseBundle] = useState(false);
+  const bundleInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -69,7 +72,7 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
     setStep(0);
   };
   // A clone is copied into a file of its own.
-  const cloneNeedsFile = start.kind === 'clone' && !(storage.kind === 'data' || storage.kind === 'folder');
+  const cloneNeedsFile = (start.kind === 'clone' || start.kind === 'bundle') && !(storage.kind === 'data' || storage.kind === 'folder');
   const cloneable = ws.workspaces.filter((w) => w.role === 'OWNER' || w.role === 'EDITOR');
   const d = options?.engine_defaults;
   const problem = useMemo(() => {
@@ -79,6 +82,8 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
     if (step === 2 && timeout && !/^\d+$/.test(timeout)) return 'The timeout is a whole number of seconds';
     if (step === 3 && start.kind === 'template' && !start.template_id) return 'Choose a template';
     if (step === 3 && start.kind === 'clone' && !start.workspace_id) return 'Choose the workspace to clone';
+    if (step === 3 && start.kind === 'bundle' && !start.path && !start.file) return 'Choose the bundle file';
+    if (step === 0 && d?.name_pattern && name.trim() && !new RegExp(d.name_pattern).test(name.trim())) return `Names follow the naming rule${d.name_hint ? `: ${d.name_hint}` : ''}`;
     return null;
   }, [step, name, storage, threads, timeout, start]);
 
@@ -97,9 +102,16 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
         color,
         ...toDbPath(storage, options),
         engine_settings,
-        start_from: start,
+        start_from: start.kind === 'bundle' ? { kind: 'empty' } : start,
         members: members.map(({ label: _l, ...m }) => m),
       };
+      if (start.kind === 'bundle') {
+        const w = await importBundle(input);
+        toast.success(`Imported ${w.name} from the bundle`);
+        reset();
+        close();
+        return;
+      }
       // A clone into the data directory needs a file name even when the person left it to the server.
       if (start.kind === 'clone' && !input.active_db_path) input.active_db_path = (await api.get<{ path: string }>(`/api/workspaces/suggest-db-path?name=${encodeURIComponent(name)}`)).path;
       const w = await ws.createWorkspace(input);
@@ -111,6 +123,28 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
     } finally {
       setBusy(false);
     }
+  };
+
+  /** A bundle becomes a workspace through the import endpoint; the wizard's basics and people apply on top. */
+  const importBundle = async (input: CreateWorkspaceInput) => {
+    if (start.kind !== 'bundle') throw new Error('No bundle chosen');
+    let r: { workspace: { id: string; name: string } };
+    if (start.file) {
+      const form = new FormData();
+      form.append('name', input.name);
+      if (input.active_db_path) form.append('active_db_path', input.active_db_path);
+      form.append('file', start.file, start.file.name);
+      const res = await fetch('/api/workspaces/import', { method: 'POST', headers: { authorization: `Bearer ${getToken()}` }, body: form });
+      const body = (await res.json().catch(() => ({}))) as { workspace?: { id: string; name: string }; message?: string };
+      if (!res.ok || !body.workspace) throw new Error(body.message ?? `Import failed (${res.status})`);
+      r = { workspace: body.workspace };
+    } else r = await api.post('/api/workspaces/import', { path: start.path, name: input.name, active_db_path: input.active_db_path });
+    const id = r.workspace.id;
+    if (input.description || input.tags?.length || input.color) await api.patch(`/api/workspaces/${id}`, { ...(input.description ? { description: input.description } : {}), ...(input.tags?.length ? { tags: input.tags } : {}), ...(input.color ? { color: input.color } : {}) });
+    for (const m of input.members ?? []) await api.put(`/api/workspaces/${id}/members`, m);
+    await ws.loadWorkspaces();
+    await ws.selectWorkspace(id);
+    return r.workspace;
   };
 
   const addMember = () => {
@@ -140,7 +174,7 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
         <div className="min-h-72 border-t border-zinc-800 pt-4">
           {current === 'Basics' && (
             <div className="space-y-3">
-              <Field label="Name" htmlFor="ws-name">
+              <Field label="Name" hint={d?.name_hint ? `Naming rule: ${d.name_hint}` : undefined} htmlFor="ws-name">
                 <Input id="ws-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Marketing analytics" data-testid="ws-name" />
               </Field>
               <Field label="Description" hint="One line on what this workspace is for." htmlFor="ws-desc">
@@ -188,13 +222,14 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
 
           {current === 'Start from' && (
             <div className="space-y-3">
-              <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Start from">
+              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Start from">
                 {([
                   { kind: 'empty', label: 'Empty', hint: 'A blank workspace with one query tab.', icon: <Square className="h-4 w-4" /> },
                   { kind: 'template', label: 'A template', hint: 'Dashboards, queries and notebooks, with sample data.', icon: <LayoutTemplate className="h-4 w-4" /> },
                   { kind: 'clone', label: 'A copy of a workspace', hint: 'Its tables, folders, dashboards, queries and notebooks.', icon: <Copy className="h-4 w-4" /> },
+                  { kind: 'bundle', label: 'A bundle file', hint: 'A .duckview file exported from DuckView, here or elsewhere.', icon: <PackageOpen className="h-4 w-4" /> },
                 ] as const).map((o) => (
-                  <button key={o.kind} type="button" role="radio" aria-checked={start.kind === o.kind} data-start={o.kind} onClick={() => setStart(o.kind === 'empty' ? { kind: 'empty' } : o.kind === 'template' ? { kind: 'template', template_id: '' } : { kind: 'clone', workspace_id: ws.activeId ?? '' })} className={cn('rounded-md border p-2.5 text-left', start.kind === o.kind ? 'border-accent-500 bg-accent-500/10' : 'border-zinc-800 hover:border-zinc-600')}>
+                  <button key={o.kind} type="button" role="radio" aria-checked={start.kind === o.kind} data-start={o.kind} onClick={() => setStart(o.kind === 'empty' ? { kind: 'empty' } : o.kind === 'template' ? { kind: 'template', template_id: '' } : o.kind === 'bundle' ? { kind: 'bundle', path: '', file: null } : { kind: 'clone', workspace_id: ws.activeId ?? '' })} className={cn('rounded-md border p-2.5 text-left', start.kind === o.kind ? 'border-accent-500 bg-accent-500/10' : 'border-zinc-800 hover:border-zinc-600')}>
                     <div className="flex items-center gap-1.5 text-body font-medium text-zinc-100">{o.icon} {o.label}</div>
                     <div className="mt-1 text-2xs text-zinc-500">{o.hint}</div>
                   </button>
@@ -207,6 +242,19 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
                     {(templates ?? []).map((t) => <option key={t.id} value={t.id}>{t.name} · {t.category} · {t.contents.dashboards} dashboards</option>)}
                   </Select>
                 </Field>
+              )}
+              {start.kind === 'bundle' && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button onClick={() => bundleInput.current?.click()} data-testid="ws-bundle-upload">Upload a file…</Button>
+                    <Button variant="ghost" onClick={() => setBrowseBundle(true)} data-testid="ws-bundle-browse">Choose on the server…</Button>
+                    <span className="min-w-0 truncate font-mono text-xs text-zinc-300" data-testid="ws-bundle-chosen">{start.file?.name ?? start.path}</span>
+                  </div>
+                  <input ref={bundleInput} type="file" accept=".duckview" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setStart({ kind: 'bundle', path: '', file: f }); }} />
+                  <p className="text-2xs text-zinc-500">Its tables, queries, dashboards, notebooks and settings come with it. Large bundles are best copied to the server and chosen there.</p>
+                  {cloneNeedsFile && <p className="text-xs text-amber-300">An imported workspace needs its own database file. <button type="button" className="underline" onClick={() => setStorage({ kind: 'data', path: '' })}>Store it in the data directory</button>.</p>}
+                  {ws.activeId && <LocationBrowser open={browseBundle} workspaceId={ws.activeId} mode="files" remote={false} title="Choose a .duckview bundle" confirmLabel="Use this bundle" onClose={() => setBrowseBundle(false)} onPick={([p]) => { if (!p) return; if (!p.endsWith('.duckview')) throw new Error('Choose a .duckview file'); setStart({ kind: 'bundle', path: p, file: null }); }} />}
+                </div>
               )}
               {start.kind === 'clone' && (
                 <>
@@ -272,7 +320,7 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
             <Button variant="primary" onClick={() => setStep(step + 1)} disabled={!!problem} data-testid="ws-next">Next</Button>
           ) : null}
           {(step === STEPS.length - 1 || step >= 1) && (
-            <Button variant={step === STEPS.length - 1 ? 'primary' : 'secondary'} onClick={() => void create()} loading={busy} disabled={!!problem || !name.trim() || cloneNeedsFile || (start.kind === 'template' && !start.template_id) || (start.kind === 'clone' && !start.workspace_id)} data-testid="ws-create">
+            <Button variant={step === STEPS.length - 1 ? 'primary' : 'secondary'} onClick={() => void create()} loading={busy} disabled={!!problem || !name.trim() || cloneNeedsFile || (start.kind === 'template' && !start.template_id) || (start.kind === 'clone' && !start.workspace_id) || (start.kind === 'bundle' && !start.path && !start.file)} data-testid="ws-create">
               Create workspace
             </Button>
           )}

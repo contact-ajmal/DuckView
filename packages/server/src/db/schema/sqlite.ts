@@ -102,6 +102,11 @@ export const workspaces = sqliteTable(
     color: text('color'),
     /** Archived workspaces are hidden from the switcher and cannot run queries until restored. */
     archived_at: integer('archived_at', { mode: 'timestamp_ms' }),
+    /** Scheduled backups: every N hours, keeping the newest `keep`. */
+    backup_policy: text('backup_policy', { mode: 'json' }).$type<{ every_hours: number; keep: number } | null>(),
+    last_backup_at: integer('last_backup_at', { mode: 'timestamp_ms' }),
+    /** When the idle policy last warned the owner (cleared by activity). */
+    idle_warned_at: integer('idle_warned_at', { mode: 'timestamp_ms' }),
     created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
@@ -1755,3 +1760,24 @@ export const templateInstalls = sqliteTable(
   (t) => [index('template_installs_ws_idx').on(t.workspace_id)],
 );
 export type TemplateInstall = typeof templateInstalls.$inferSelect;
+
+/** Point-in-time copies of a workspace: its data and objects in one .duckview bundle file. */
+export const WORKSPACE_BACKUP_KINDS = ['manual', 'scheduled', 'pre_restore'] as const;
+export const workspaceBackups = sqliteTable(
+  'workspace_backups',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: WORKSPACE_BACKUP_KINDS }).notNull(),
+    /** Absolute path of the bundle file. */
+    file: text('file').notNull(),
+    size_bytes: integer('size_bytes').notNull().default(0),
+    tables: integer('tables').notNull().default(0),
+    objects: text('objects', { mode: 'json' }).$type<{ queries: number; dashboards: number; notebooks: number; quality: number }>().notNull().default({ queries: 0, dashboards: 0, notebooks: 0, quality: 0 }),
+    note: text('note'),
+    created_by: text('created_by'),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('workspace_backups_ws_idx').on(t.workspace_id, t.created_at)],
+);
+export type WorkspaceBackup = typeof workspaceBackups.$inferSelect;

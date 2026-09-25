@@ -8,14 +8,25 @@ import { Archive, ArchiveRestore, Plus, Tag as TagIcon, Trash2, UserRoundCog, X 
 import { api, formatBytes, timeAgo, type User, type WorkspaceRow } from '../../api/client';
 import { DataTable, type Column } from '../../components/data';
 import { Tag } from '../../components/layout';
-import { Button, Field, Modal, Select, StatusDot, confirmAction, promptAction, toast, errorText } from '../../components/ui';
+import { Button, Field, Modal, Select, StatusDot, Tabs, confirmAction, promptAction, toast, errorText } from '../../components/ui';
 import { useWorkspace } from '../../store/workspace';
 import { CreateWorkspaceWizard } from '../workspace/CreateWorkspaceWizard';
+import { WorkspacePolicyPanel } from './WorkspacePolicyPanel';
 
 const STORAGE_LABEL: Record<WorkspaceRow['storage']['kind'], string> = { memory: 'In memory', data: 'Data directory', folder: 'Folder', cloud: 'Cloud', motherduck: 'MotherDuck' };
 const money = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: n < 10 ? 2 : 0 });
 
 export function WorkspacesAdminPanel() {
+  const [view, setView] = useState<'all' | 'policies'>(() => (location.hash.includes('policies') ? 'policies' : 'all'));
+  return (
+    <div className="space-y-4">
+      <Tabs<'all' | 'policies'> value={view} onChange={setView} tabs={[{ id: 'all', label: 'All workspaces' }, { id: 'policies', label: 'Policies' }]} />
+      {view === 'all' ? <WorkspaceList /> : <WorkspacePolicyPanel />}
+    </div>
+  );
+}
+
+function WorkspaceList() {
   const ws = useWorkspace();
   const [rows, setRows] = useState<WorkspaceRow[] | null>(null);
   const [error, setError] = useState<unknown>(null);

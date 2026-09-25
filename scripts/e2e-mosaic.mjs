@@ -1490,6 +1490,73 @@ try {
     report.details.deleted = !(await j('GET', '/api/admin/workspaces')).workspaces.some((x) => x.id === w.id);
     report.details.charts = 1;
   }
+  else if (scenario === 'workspace-lifecycle') {
+    // Backups (take, restore, schedule), a bundle imported through the wizard, and the workspace policy.
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const count = async (id) => Number((await j('POST', `/api/workspaces/${id}/query`, { sql: 'SELECT count(*) FROM e2e_wl' })).rows?.[0]?.[0]);
+    const w = (await j('POST', '/api/workspaces', { name: 'E2E wl', active_db_path: `e2e-wl-${Date.now()}.duckdb` })).workspace;
+    await j('POST', `/api/workspaces/${w.id}/query`, { sql: 'CREATE TABLE e2e_wl AS SELECT range AS id FROM range(3)' });
+    await j('POST', `/api/workspaces/${w.id}/queries`, { name: 'E2E wl rows', sql_text: 'SELECT * FROM e2e_wl' });
+    const bundle = path.join(os.tmpdir(), `e2e-wl-${Date.now()}.duckview`);
+    fs.writeFileSync(bundle, Buffer.from(await (await authed(`/api/workspaces/${w.id}/bundle`)).arrayBuffer()));
+    const policyBefore = (await j('GET', '/api/admin/workspace-policy')).policy;
+    const activeBefore = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    cleanup = async () => {
+      await authed('/api/admin/workspace-policy', { method: 'PUT', body: JSON.stringify(policyBefore) }).catch(() => {});
+      for (const x of ((await j('GET', '/api/admin/workspaces')).workspaces ?? []).filter((x) => x.name.startsWith('E2E wl'))) await authed(`/api/workspaces/${x.id}`, { method: 'DELETE' }).catch(() => {});
+      fs.rmSync(bundle, { force: true });
+      await evaluate(`localStorage.setItem('duckview.workspace', ${JSON.stringify(activeBefore)}); location.hash = '#/'; 'ok'`).catch(() => {});
+    };
+    await evaluate(`location.hash = '#/workspaces/${w.id}/lifecycle'; location.reload(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="ws-backup-now"]')`, 30000, 'backups');
+    await evaluate(`document.querySelector('[data-testid="ws-backup-now"]').click(); 'ok'`);
+    await waitFor(`document.querySelectorAll('[data-testid="ws-backup-list"] tbody tr [data-testid="ws-restore-backup"]').length === 1`, 20000, 'one backup');
+    report.details.backupRow = await evaluate(`document.querySelector('[data-testid="ws-backup-list"] tbody tr').textContent`);
+    await j('POST', `/api/workspaces/${w.id}/query`, { sql: 'INSERT INTO e2e_wl SELECT range + 10 FROM range(10)' });
+    report.details.before = await count(w.id);
+    await evaluate(`document.querySelector('[data-testid="ws-restore-backup"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="ws-restore-confirm"]')`, 3000, 'restore dialog');
+    await evaluate(`document.querySelector('[data-testid="ws-restore-confirm"]').click(); 'ok'`);
+    await waitFor(`document.querySelectorAll('[data-testid="ws-backup-list"] tbody tr [data-testid="ws-restore-backup"]').length === 2`, 30000, 'safety backup listed');
+    report.details.after = await count(w.id);
+    report.details.kinds = await evaluate(`[...document.querySelectorAll('[data-testid="ws-backup-list"] tbody tr td:nth-child(2)')].map(t => t.textContent)`);
+    await setField('[data-testid="ws-backup-schedule"]', '24', 'change');
+    await sleep(800);
+    report.details.schedule = (await j('GET', `/api/workspaces/${w.id}/backups`)).policy;
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_backups.png'), Buffer.from(shot.result.data, 'base64')); }
+    // The wizard: start from the exported bundle (uploaded).
+    await evaluate(`location.hash = '#/settings/workspaces'; 'ok'`);
+    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New workspace')`, 15000, 'admin list');
+    await clickButton('New workspace');
+    await waitFor(`!!document.querySelector('[data-testid="ws-name"]')`, 5000, 'wizard');
+    await setField('[data-testid="ws-name"]', 'E2E wl import');
+    for (let i = 0; i < 3; i++) { await evaluate(`document.querySelector('[data-testid="ws-next"]').click(); 'ok'`); await sleep(200); }
+    await evaluate(`document.querySelector('[data-start="bundle"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('input[type=file][accept=".duckview"]')`, 3000, 'bundle input');
+    const doc = await send('DOM.getDocument', { depth: -1 });
+    const node = await send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector: 'input[type=file][accept=".duckview"]' });
+    await send('DOM.setFileInputFiles', { nodeId: node.result.nodeId, files: [bundle] });
+    await waitFor(`document.querySelector('[data-testid="ws-bundle-chosen"]')?.textContent.endsWith('.duckview')`, 5000, 'bundle chosen');
+    await evaluate(`document.querySelector('[data-testid="ws-create"]').click(); 'ok'`);
+    await waitFor(`!document.querySelector('[data-testid="create-workspace"]')`, 60000, 'imported');
+    const imported = ((await j('GET', '/api/admin/workspaces')).workspaces ?? []).find((x) => x.name === 'E2E wl import');
+    report.details.imported = imported ? await count(imported.id) : null;
+    report.details.importedQueries = imported ? ((await j('GET', `/api/workspaces/${imported.id}/queries`)).queries ?? []).map((q) => q.name) : [];
+    // The workspace policy.
+    await evaluate(`location.hash = '#/settings/workspaces'; 'ok'`);
+    await waitFor(`[...document.querySelectorAll('[role=tab]')].some(t => t.textContent === 'Policies')`, 10000, 'policies tab');
+    await evaluate(`[...document.querySelectorAll('[role=tab]')].find(t => t.textContent === 'Policies').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="wp-storage"]')`, 10000, 'policy form');
+    await setField('[data-testid="wp-storage"]', '50');
+    await setField('[data-testid="wp-query"]', '120');
+    await evaluate(`document.querySelector('[data-testid="wp-save"]').click(); 'ok'`);
+    await sleep(1200);
+    report.details.policy = (await j('GET', '/api/admin/workspace-policy')).policy.quotas;
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_policy.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'data-explorer') {
     // A dataset, then one of its columns in depth, then where the table comes from.
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -2538,6 +2605,15 @@ try {
     if (!/workspace\.create/.test(d.audit ?? '')) problems.push(`audit: ${d.audit}`);
     if (!/Archived/.test(d.archivedHeader ?? '')) problems.push(`archived header: ${d.archivedHeader}`);
     if (d.deleted !== true) problems.push('not deleted');
+  }
+  if (scenario === 'workspace-lifecycle') {
+    if (!/Manual/.test(d.backupRow ?? '') || !/1 table ·/.test(d.backupRow ?? '')) problems.push(`backup row: ${d.backupRow}`);
+    if (d.before !== 13 || d.after !== 3) problems.push(`restore: ${d.before} → ${d.after}`);
+    if (!(d.kinds ?? []).includes('Before a restore')) problems.push(`kinds: ${JSON.stringify(d.kinds)}`);
+    if (d.schedule?.every_hours !== 24) problems.push(`schedule: ${JSON.stringify(d.schedule)}`);
+    if (d.imported !== 3) problems.push(`imported rows: ${d.imported}`);
+    if (!(d.importedQueries ?? []).includes('E2E wl rows')) problems.push(`imported queries: ${JSON.stringify(d.importedQueries)}`);
+    if (d.policy?.storage_bytes !== 50e9 || d.policy?.query_seconds_per_day !== 7200) problems.push(`policy: ${JSON.stringify(d.policy)}`);
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);

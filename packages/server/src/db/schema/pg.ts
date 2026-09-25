@@ -2,7 +2,7 @@
  * Metadata store schema — PostgreSQL dialect (enterprise mode via DATABASE_URL).
  * Mirrors ./sqlite.ts exactly (names, nullability, JSON shapes).
  */
-import { pgTable, text, integer, timestamp, jsonb, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, timestamp, jsonb, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import type { EngineSettings, ChartConfig, TokenScope, WorkspaceFolder, CloudSyncState } from './sqlite.js';
 import { AUTH_PROVIDERS, USER_ROLES, CONNECTION_TYPES, ACTOR_TYPES, WORKSPACE_ROLES, GROUP_MEMBER_ROLES, MEMBER_SUBJECT_TYPES } from './sqlite.js';
 
@@ -46,6 +46,9 @@ export const workspaces = pgTable(
     color: text('color'),
     /** Archived workspaces are hidden from the switcher and cannot run queries until restored. */
     archived_at: ts('archived_at'),
+    backup_policy: jsonb('backup_policy').$type<{ every_hours: number; keep: number } | null>(),
+    last_backup_at: ts('last_backup_at'),
+    idle_warned_at: ts('idle_warned_at'),
     created_at: ts('created_at').notNull(),
     updated_at: ts('updated_at').notNull(),
   },
@@ -165,7 +168,7 @@ export const workspaceMembers = pgTable(
 // ---------------------------------------------------------------------------
 // BI, cloud storage and copilot models (mirror of sqlite.ts)
 // ---------------------------------------------------------------------------
-import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats, ORCHESTRATION_KINDS, ORCHESTRATION_STATUSES, TEMPLATE_STATUSES, type TemplateBody, type TemplateInstallObjects } from './sqlite.js';
+import { WIDGET_TYPES, DASHBOARD_KINDS, CLOUD_PROVIDERS, CHAT_ROLES, COPILOT_USAGE_STATUSES, DATABASE_ENGINES, SYNC_MODES, SYNC_RUN_STATUSES, LAKEHOUSE_PROVIDERS, LAKEHOUSE_STATUSES, AGENT_FRAMEWORKS, APP_KINDS, APP_STATUSES, APP_VISIBILITIES, APP_PUBLISH_STATUSES, APP_EXECUTIONS, CHANNEL_TYPES, DELIVERY_STATUSES, ALERT_STATES, ALERT_SEVERITIES, SNAPSHOT_FORMATS, AUDIT_SINK_TYPES, type ColumnMask, type PolicySubjects, type AlertCondition, type SnapshotTarget, type AppFiles, type LayoutItem, type WidgetChartConfig, type ChatContextSnapshot, type LakehouseConfig, type AgentConfig, type DatabaseConfig, type SyncSource, type SyncSchedule, type SyncLastRun, DBT_COMMANDS, DBT_RUN_STATUSES, type DbtSchedule, type DbtScheduledCommand, type DbtNodeResult, type DbtLastRun, QUALITY_STATUSES, type QualityCheck, type QualityCheckResult, type QualityLastRun, REVERSE_MODES, REVERSE_RUN_STATUSES, type ReverseDestination, type ReverseLastRun, type NotebookCell, COMMENT_TARGETS, INBOX_KINDS, REVISION_TYPES, MONITOR_GRAINS, MONITOR_STATUSES, INSIGHT_STATUSES, type MonitorLastRun, type InsightDetail, HOSTED_RUN_STATUSES, type HostedAgentLastRun, type HostedAgentStep, STREAM_KINDS, STREAM_FORMATS, STREAM_MODES, STREAM_STATUSES, type StreamConfig, type StreamStats, ORCHESTRATION_KINDS, ORCHESTRATION_STATUSES, TEMPLATE_STATUSES, type TemplateBody, type TemplateInstallObjects, WORKSPACE_BACKUP_KINDS } from './sqlite.js';
 
 export const savedQueries = pgTable(
   'saved_queries',
@@ -1131,4 +1134,21 @@ export const templateInstalls = pgTable(
     created_at: ts('created_at').notNull(),
   },
   (t) => [index('template_installs_ws_idx').on(t.workspace_id)],
+);
+
+export const workspaceBackups = pgTable(
+  'workspace_backups',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: WORKSPACE_BACKUP_KINDS }).notNull(),
+    file: text('file').notNull(),
+    size_bytes: bigint('size_bytes', { mode: 'number' }).notNull().default(0),
+    tables: integer('tables').notNull().default(0),
+    objects: jsonb('objects').$type<{ queries: number; dashboards: number; notebooks: number; quality: number }>().notNull().default({ queries: 0, dashboards: 0, notebooks: 0, quality: 0 }),
+    note: text('note'),
+    created_by: text('created_by'),
+    created_at: ts('created_at').notNull(),
+  },
+  (t) => [index('workspace_backups_ws_idx').on(t.workspace_id, t.created_at)],
 );

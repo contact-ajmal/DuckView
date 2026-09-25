@@ -129,7 +129,7 @@ export interface SemanticLayer { yaml: string; semantic_models: SemanticModelDef
 export interface MetricQueryResult { sql: string; metrics: { name: string; label: string | null; description: string | null }[]; group_by: string[]; columns: ColumnSchema[]; rows: unknown[][]; row_count: number; truncated: boolean; duration_ms: number }
 export interface ScimStatus { enabled: boolean; source: 'config' | 'console' | null; prefix: string | null; created_at: string | null; on_delete: 'deactivate' | 'delete'; endpoint: string }
 export interface CloudSyncState { etag: string | null; synced_at: string | null; size_bytes: number | null; dirty: boolean; last_error: string | null; last_push_ms?: number }
-export interface StorageOptions { mode: 'sandboxed' | 'full'; default_database: 'file' | 'memory'; data_directory: string; engine_defaults?: { memory_limit: string; threads: number | 'auto'; query_timeout_seconds: number }; cloud_connections: { id: string; name: string; provider: 'S3' | 'R2' | 'GCS' | 'AZURE'; bucket: string | null; uri_scheme: string }[] }
+export interface StorageOptions { mode: 'sandboxed' | 'full'; default_database: 'file' | 'memory'; data_directory: string; engine_defaults?: { memory_limit: string; threads: number | 'auto'; query_timeout_seconds: number; memory_cap?: string | null; name_hint?: string | null; name_pattern?: string | null; admins_only?: boolean }; cloud_connections: { id: string; name: string; provider: 'S3' | 'R2' | 'GCS' | 'AZURE'; bucket: string | null; uri_scheme: string }[] }
 export type StorageKind = 'data' | 'folder' | 'cloud' | 'memory' | 'motherduck';
 /** Where a workspace's database lives, derived from its path. */
 export function storageKindOf(activeDbPath: string, dataDirectory?: string | null): StorageKind {
@@ -490,6 +490,27 @@ export async function exportAndDownload(workspaceId: string, sql: string, format
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
   return r.export;
+}
+
+/** Downloads a file from an authenticated endpoint; the name comes from the response when it names one. */
+export async function downloadAuthed(url: string, fallbackName: string): Promise<void> {
+  const res = await fetch(url, { headers: { authorization: `Bearer ${getToken()}` } });
+  if (!res.ok) {
+    let message = await res.text();
+    try {
+      message = (JSON.parse(message) as { message?: string }).message ?? message;
+    } catch {
+      /* plain text */
+    }
+    throw new ApiError(res.status, 'DOWNLOAD', message);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? fallbackName;
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 }
 
 export const TAB_MARKER = '-- @duckview-tab:';

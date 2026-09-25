@@ -60,6 +60,8 @@ export class WorkspaceService {
 
   /** Cloud-backed database sync (set by the context right after construction). */
   cloudSync: WorkspaceCloudSync | null = null;
+  /** The organisation's memory quota (set by the lifecycle service): caps an engine's memory limit. */
+  memoryCap: ((limit: string | undefined) => Promise<string | undefined>) | null = null;
   /** Cluster mode (set by the context): leases decide which node opens a workspace. */
   cluster: ClusterService | null = null;
 
@@ -397,6 +399,9 @@ export class WorkspaceService {
       tags: normalizeTags(input.tags ?? []),
       color: normalizeColor(input.color),
       archived_at: null,
+      backup_policy: null,
+      last_backup_at: null,
+      idle_warned_at: null,
       data_version: 0,
       cloud_connection_id: cloudConnectionId,
       cloud_sync: cloudConnectionId ? { etag: null, synced_at: null, size_bytes: null, dirty: false, last_error: null } : null,
@@ -630,7 +635,9 @@ export class WorkspaceService {
       if (!this.engines.peek(workspace.id)) await this.cloudSync.pull(workspace);
       dbPath = this.cloudSync.localPath(workspace.id);
     }
-    return this.engines.get({ workspaceId: workspace.id, dbPath, settings: workspace.engine_settings, secrets, attachments: [...lake.attachments, ...dbs] });
+    const settings = this.memoryCap ? { ...workspace.engine_settings, memory_limit: await this.memoryCap(workspace.engine_settings.memory_limit) } : workspace.engine_settings;
+    if (settings.memory_limit === undefined) delete settings.memory_limit;
+    return this.engines.get({ workspaceId: workspace.id, dbPath, settings, secrets, attachments: [...lake.attachments, ...dbs] });
   }
 
   // ---------- Tabs (per user, inside a possibly shared workspace) ----------
