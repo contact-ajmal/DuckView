@@ -54,6 +54,33 @@ export async function governanceRoutes(app: FastifyInstance, ctx: AppContext) {
     const body = z.object({ object_name: z.string().max(300), column_name: z.string().max(200).nullable().optional(), description: z.string().max(4000).nullable().optional(), tags: z.array(z.string().max(40)).max(20).optional() }).parse(req.body ?? {});
     return { annotation: await ctx.lineage.annotate(req.principal!, (req.params as { id: string }).id, body) };
   });
+  // ---- watches: schema drift and freshness of a dataset
+  const Watch = z.object({ target: z.string().min(1).max(2000).optional(), watch_schema: z.boolean().optional(), max_age_hours: z.number().int().min(1).max(8760).nullable().optional(), time_column: z.string().max(200).nullable().optional(), check_every_minutes: z.number().int().min(5).max(10080).optional(), channel_ids: z.array(z.string().max(64)).max(20).optional(), enabled: z.boolean().optional() });
+  app.get('/api/workspaces/:id/watches', async (req) => ({ watches: await ctx.watches.list(req.principal!, (req.params as { id: string }).id) }));
+  app.post('/api/workspaces/:id/watches', async (req) => ({ watch: await ctx.watches.create(req.principal!, (req.params as { id: string }).id, Watch.parse(req.body ?? {})) }));
+  app.patch('/api/watches/:id', async (req) => ({ watch: await ctx.watches.update(req.principal!, (req.params as { id: string }).id, Watch.parse(req.body ?? {})) }));
+  app.delete('/api/watches/:id', async (req) => {
+    await ctx.watches.remove(req.principal!, (req.params as { id: string }).id);
+    return { ok: true };
+  });
+  app.post('/api/watches/:id/check', async (req) => ({ watch: await ctx.watches.check(req.principal!, (req.params as { id: string }).id) }));
+  app.post('/api/watches/:id/accept', async (req) => ({ watch: await ctx.watches.accept(req.principal!, (req.params as { id: string }).id) }));
+
+  // ---- personal data: find it, tag it in the catalog, mask it with a policy
+  const PII_KINDS = ['email', 'phone', 'card', 'iban', 'national_id', 'ip', 'birth_date', 'address', 'person_name'] as const;
+  app.post('/api/workspaces/:id/pii/scan', async (req) => {
+    const body = z.object({ tables: z.array(z.string().max(300)).max(500).optional(), sample: z.number().int().min(20).max(5000).optional() }).parse(req.body ?? {});
+    return { findings: await ctx.pii.scan(req.principal!, (req.params as { id: string }).id, body) };
+  });
+  app.post('/api/workspaces/:id/pii/tag', async (req) => {
+    const body = z.object({ items: z.array(z.object({ object: z.string().min(1), column: z.string().min(1), kind: z.enum(PII_KINDS) })).min(1).max(1000) }).parse(req.body ?? {});
+    return { tagged: await ctx.pii.tag(req.principal!, (req.params as { id: string }).id, body.items) };
+  });
+  app.post('/api/workspaces/:id/pii/protect', async (req) => {
+    const body = z.object({ table: z.string().min(1).max(300), columns: z.record(z.string(), z.enum(['null', 'redact', 'hash', 'partial'])) }).parse(req.body ?? {});
+    return { policy: await ctx.pii.protect(req.principal!, (req.params as { id: string }).id, body.table, body.columns) };
+  });
+
   app.get('/api/workspaces/:id/lineage', async (req) => ctx.lineage.graph(req.principal!, (req.params as { id: string }).id));
 
   // ---------------------------------------------------------------- audit export (administrators)

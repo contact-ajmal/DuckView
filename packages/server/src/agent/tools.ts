@@ -28,6 +28,7 @@ import { parseBuildPlan } from '../services/builder.js';
 import { describeCheck } from '../services/quality.js';
 import type { AppSource } from '../services/apps.js';
 import { framework } from '../services/app-frameworks.js';
+import { PII_LABEL } from '../services/pii.js';
 
 export type ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 export type ToolResult = { content: ToolContent[]; structuredContent?: Record<string, unknown>; isError?: boolean };
@@ -1508,6 +1509,108 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
       },
     }),
 
+    define({
+      name: 'diff_tables',
+      title: 'Compare two datasets',
+      description:
+        'Compares two tables, views, files or SELECTs of the workspace — or a table with its copy in a backup (right: "backup:<backup id>:<table>", see list_backups). Reports columns added, removed or retyped and both row counts; with key columns, rows added, removed and changed (how many changed in each column, and examples with the value before and after); without keys, rows found on one side only. Use it after a change to see exactly what moved, or to check two versions of a dataset agree.',
+      inputSchema: { left: z.string().min(1).describe('the "before" dataset'), right: z.string().min(1).describe('the "after" dataset'), key: z.array(z.string()).max(8).optional().describe('columns that identify a row'), sample: z.number().int().min(1).max(50).optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { left, right, key, sample, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const d = await env.ctx.diff.compare(env.principal, ws, { left, right, key, sample: sample ?? 10 });
+        const sc = d.schema;
+        const lines = [
+          `**${left}** (${d.left.rows.toLocaleString()} rows) → **${right}** (${d.right.rows.toLocaleString()} rows)`,
+          sc.added.length || sc.removed.length || sc.retyped.length ? `Schema: ${[...sc.added.map((c) => `+${c.name}`), ...sc.removed.map((c) => `-${c.name}`), ...sc.retyped.map((c) => `${c.name} ${c.from}→${c.to}`)].join(', ')}` : 'Schema: the same columns',
+          d.key.length ? `By ${d.key.join(', ')}: ${d.added} added, ${d.removed} removed, ${d.changed} changed, ${d.unchanged} unchanged${d.duplicate_keys.left || d.duplicate_keys.right ? ` (keys repeat: ${d.duplicate_keys.left} on the left, ${d.duplicate_keys.right} on the right)` : ''}` : `Whole rows only on the left: ${d.only_left}, only on the right: ${d.only_right}`,
+          ...(d.columns.length ? [`Changed columns: ${d.columns.map((c) => `${c.name} (${c.changed})`).join(', ')}`] : []),
+          ...d.samples.changed.slice(0, 5).map((c) => `- ${JSON.stringify(c.key)}: ${c.changes.map((x) => `${x.column} ${JSON.stringify(x.before)} → ${JSON.stringify(x.after)}`).join('; ')}`),
+        ];
+        return { content: [text(lines.join('\n'))], structuredContent: { status: 'ok', ...d } };
+      },
+    }),
+
+    define({
+      name: 'scan_pii',
+      title: 'Find personal data',
+      description: 'Looks for personal data in the workspace\'s tables (or the ones named): columns whose names say so and columns whose values look like email addresses, phone numbers, card numbers, IBANs, IP addresses or national IDs. Reads a sample of each table; examples come back masked. Follow with tag_pii to label the columns, and protect_pii to mask them.',
+      inputSchema: { tables: z.array(z.string()).optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { tables, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const f = await env.ctx.pii.scan(env.principal, ws, { tables });
+        const lines = f.map((x) => `- \`${x.object}.${x.column}\`: ${PII_LABEL[x.kind]} (${x.confidence}; ${x.evidence === 'both' ? 'name and values' : x.evidence}${x.match_rate != null ? `, ${Math.round(x.match_rate * 100)}% of values` : ''})${x.examples.length ? ` e.g. ${x.examples.join(', ')}` : ''}${x.tagged ? ' · tagged' : ''} · suggested mask: ${x.suggested_mask}`);
+        return { content: [text(`**Personal data** (${f.length} column${f.length === 1 ? '' : 's'})\n${lines.join('\n') || '_(none found)_'}`)], structuredContent: { status: 'ok', workspace_id: ws, findings: f } };
+      },
+    }),
+
+    define({
+      name: 'tag_pii',
+      title: 'Tag personal data',
+      description: 'Labels columns as personal data in the catalog (tags pii and pii:<kind>), usually the findings of scan_pii, so people and agents see what is sensitive.',
+      inputSchema: { items: z.array(z.object({ object: z.string(), column: z.string(), kind: z.enum(['email', 'phone', 'card', 'iban', 'national_id', 'ip', 'birth_date', 'address', 'person_name']) })).min(1).max(500), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { items, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const n = await env.ctx.pii.tag(env.principal, ws, items);
+        return { content: [text(`Tagged ${n} column${n === 1 ? '' : 's'} as personal data.`)], structuredContent: { status: 'ok', tagged: n } };
+      },
+    }),
+
+    define({
+      name: 'protect_pii',
+      title: 'Mask personal data',
+      description: 'Masks columns of one table for everyone except the workspace owners, with an access policy ("Personal data in <table>"): null, redact, hash (keeps joins working) or partial (shows the shape). Needs a person\'s approval: call with dry_run=false only after they agreed.',
+      inputSchema: { table: z.string().min(1), columns: z.record(z.string(), z.enum(['null', 'redact', 'hash', 'partial'])), workspace_id: z.string().optional(), dry_run: z.boolean().optional().describe('Default true. Set false once approved.') },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { table, columns, workspace_id, dry_run }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        needsApproval(env, dry_run, `protect_pii masks ${Object.keys(columns).join(', ')} in ${table} for everyone except the workspace owners.`, 'protect_pii', JSON.stringify(columns));
+        const policy = await env.ctx.pii.protect(env.principal, ws, table, columns);
+        return { content: [text(`Masked ${Object.entries(columns).map(([c, m]) => `${c} (${m})`).join(', ')} in ${table} with the policy “${policy.name}”.`)], structuredContent: { status: 'ok', policy: { id: policy.id, name: policy.name } } };
+      },
+    }),
+
+    define({
+      name: 'list_watches',
+      title: 'List watches',
+      description: 'The workspace\'s watches on datasets — schema drift (columns added, removed or retyped since the accepted schema) and freshness (data older than expected) — with each one\'s state and what it found.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const list = await env.ctx.watches.list(env.principal, ws);
+        const lines = list.map((w) => `- **${w.target}** (\`${w.id}\`) · ${w.status}${w.detail ? `: ${w.detail}` : ''} · ${[w.watch_schema && 'schema', w.max_age_hours && `fresh within ${w.max_age_hours} h`].filter(Boolean).join(', ')}${w.enabled ? '' : ' · paused'}`);
+        return { content: [text(`**Watches** (${list.length})\n${lines.join('\n') || '_(none)_'}`)], structuredContent: { status: 'ok', watches: list } };
+      },
+    }),
+
+    define({
+      name: 'create_watch',
+      title: 'Watch a dataset',
+      description: 'Starts watching a table, view, file or glob of files: its schema (a change from today\'s columns is reported) and/or its freshness (stale when older than max_age_hours, measured by time_column, the file\'s modified time, or the last sync into the table). Checked every check_every_minutes; changes go to channel_ids. Returns the first check.',
+      inputSchema: { target: z.string().min(1), watch_schema: z.boolean().optional(), max_age_hours: z.number().int().min(1).max(8760).optional(), time_column: z.string().optional(), check_every_minutes: z.number().int().min(5).max(10080).optional(), channel_ids: z.array(z.string()).optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, a) {
+        const ws = resolveWorkspace(env, a.workspace_id);
+        const w = await env.ctx.watches.create(env.principal, ws, { target: a.target, watch_schema: a.watch_schema, max_age_hours: a.max_age_hours ?? null, time_column: a.time_column ?? null, check_every_minutes: a.check_every_minutes, channel_ids: a.channel_ids });
+        return { content: [text(`Watching **${w.target}** (\`${w.id}\`): ${w.status}${w.detail ? ` — ${w.detail}` : ''}.`)], structuredContent: { status: 'ok', watch: w } };
+      },
+    }),
+
+    define({
+      name: 'check_watch',
+      title: 'Check a watch',
+      description: 'Checks a watch now and returns its state: ok, drift (with the columns that changed), stale (with how old the data is) or error.',
+      inputSchema: { watch_id: z.string() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { watch_id }) {
+        const w = await env.ctx.watches.check(env.principal, watch_id);
+        return { content: [text(`**${w.target}**: ${w.status}${w.detail ? ` — ${w.detail}` : ''}`)], structuredContent: { status: 'ok', watch: w } };
+      },
+    }),
+
     // ---------------------------------------------------------------- catalog & lineage
     define({
       name: 'search_catalog',
@@ -1769,4 +1872,4 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template', 'list_saved_queries', 'get_saved_query', 'save_query', 'search_catalog', 'get_lineage', 'annotate_table', 'get_dashboard', 'update_widget', 'remove_widget', 'define_metric', 'workspace_health', 'list_backups', 'backup_workspace', 'create_stream', 'git_status', 'git_commit', 'query_history', 'search_workspace'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template', 'list_saved_queries', 'get_saved_query', 'save_query', 'search_catalog', 'get_lineage', 'annotate_table', 'get_dashboard', 'update_widget', 'remove_widget', 'define_metric', 'workspace_health', 'list_backups', 'backup_workspace', 'create_stream', 'git_status', 'git_commit', 'query_history', 'search_workspace', 'diff_tables', 'scan_pii', 'tag_pii', 'protect_pii', 'list_watches', 'create_watch', 'check_watch'] as const;

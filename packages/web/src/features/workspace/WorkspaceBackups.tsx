@@ -3,7 +3,8 @@
  * optionally queries, dashboards and notebooks), download, delete; and export the workspace as a .duckview bundle.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { ArchiveRestore, DatabaseBackup, Download, PackageOpen, Trash2 } from 'lucide-react';
+import { ArchiveRestore, DatabaseBackup, Download, GitCompareArrows, PackageOpen, Trash2 } from 'lucide-react';
+import { useWorkspace } from '../../store/workspace';
 import { api, downloadAuthed, formatBytes, timeAgo, type Workspace } from '../../api/client';
 import { DataTable } from '../../components/data';
 import { Button, Checkbox, Field, IconButton, Modal, Select, confirmAction, toast, errorText } from '../../components/ui';
@@ -19,6 +20,7 @@ const SCHEDULES: { label: string; hours: number | null }[] = [
 ];
 
 export function WorkspaceBackups({ w, onChanged }: { w: Workspace; onChanged: () => void }) {
+  const ws = useWorkspace();
   const [backups, setBackups] = useState<Backup[] | null>(null);
   const [policy, setPolicy] = useState<{ every_hours: number; keep: number } | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -118,6 +120,7 @@ export function WorkspaceBackups({ w, onChanged }: { w: Workspace; onChanged: ()
             cell: (b) => (
               <span className="inline-flex gap-1">
                 <Button size="sm" variant="ghost" disabled={!b.exists || !local || !!busy} title={local ? 'Put the workspace back to this point' : 'Restoring needs a database file on the server'} onClick={() => { setWithObjects(false); setRestoring(b); }} data-testid="ws-restore-backup"><ArchiveRestore className="h-3.5 w-3.5" /> Restore</Button>
+                <IconButton label="Compare this backup with now" disabled={!b.exists} onClick={() => void ws.selectWorkspace(w.id).then(() => { location.hash = `#/compare?backup=${b.id}`; })} data-testid="ws-compare-backup"><GitCompareArrows className="h-3.5 w-3.5" /></IconButton>
                 <IconButton label="Download this backup" disabled={!b.exists} onClick={() => void run(`dl:${b.id}`, () => downloadAuthed(`/api/workspaces/${w.id}/backups/${b.id}/download`, 'backup.duckview'))}><Download className="h-3.5 w-3.5" /></IconButton>
                 <IconButton label="Delete this backup" onClick={() => void remove(b)}><Trash2 className="h-3.5 w-3.5" /></IconButton>
               </span>

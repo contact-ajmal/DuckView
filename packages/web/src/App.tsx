@@ -20,6 +20,7 @@ import { CopilotDrawer } from './features/copilot/CopilotDrawer';
 import { ShareDialog } from './features/workspace/ShareDialog';
 import { CreateWorkspaceWizard } from './features/workspace/CreateWorkspaceWizard';
 import { WorkspaceDetailPage } from './features/workspace/WorkspaceDetailPage';
+import { ComparePage } from './features/overview/ComparePage';
 import { Sidebar } from './components/shell/Sidebar';
 import { TopBar } from './components/shell/TopBar';
 import { SectionNav } from './components/shell/SectionNav';
@@ -93,6 +94,7 @@ export default function App() {
             {page === 'mcp' && <McpPage />}
             {page === 'templates' && <TemplatesPage />}
             {page === 'workspace' && <WorkspaceDetailPage />}
+            {page === 'compare' && <ComparePage />}
           </main>
           <CopilotDrawer />
         </div>

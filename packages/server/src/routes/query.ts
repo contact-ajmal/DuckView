@@ -58,6 +58,16 @@ export async function queryRoutes(app: FastifyInstance, ctx: AppContext) {
     return { hits: await ctx.search.search(req.principal!, (req.params as { id: string }).id, q.q, { limit: q.limit, kinds }) };
   });
 
+  // Compare two datasets (tables, files, SELECTs, or a table in a backup: backup:<id>:<table>).
+  app.post('/api/workspaces/:id/diff', { preHandler: app.authenticate }, async (req) => {
+    const body = z.object({ left: z.string().min(1).max(20_000), right: z.string().min(1).max(20_000), key: z.array(z.string().min(1).max(200)).max(8).optional(), sample: z.number().int().min(1).max(200).optional() }).parse(req.body ?? {});
+    return ctx.diff.compare(req.principal!, (req.params as { id: string }).id, body);
+  });
+  app.get('/api/workspaces/:id/backups/:backupId/tables', { preHandler: app.authenticate }, async (req) => {
+    const { id, backupId } = req.params as { id: string; backupId: string };
+    return { tables: await ctx.diff.backupTables(req.principal!, id, backupId) };
+  });
+
   app.get('/api/workspaces/:id/catalog', { preHandler: app.authenticate }, async (req) => {
     const { id } = req.params as { id: string };
     return ctx.queries.catalog(req.principal!, id);

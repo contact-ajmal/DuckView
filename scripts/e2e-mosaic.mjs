@@ -1677,6 +1677,86 @@ try {
     report.details.tabId = tab?.id;
     report.details.charts = 1;
   }
+  else if (scenario === 'compare') {
+    // Data → Compare: two versions of a table matched by key.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = async (sql) => (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) })).json();
+    await q("CREATE OR REPLACE TABLE e2e_cmp_a AS SELECT * FROM (VALUES (1, 'ann', 10), (2, 'bob', 20), (3, 'cy', 30)) t(id, name, amount)");
+    await q("CREATE OR REPLACE TABLE e2e_cmp_b AS SELECT * FROM (VALUES (2, 'bob', 25), (3, 'cy', 30), (4, 'dee', 40)) t(id, name, amount)");
+    cleanup = async () => { await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {}); await q('DROP TABLE IF EXISTS e2e_cmp_a'); await q('DROP TABLE IF EXISTS e2e_cmp_b'); };
+    await evaluate(`location.hash = '#/compare?left=e2e_cmp_a&right=e2e_cmp_b&key=id'; location.reload(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="compare-run"]')`, 20000, 'compare page');
+    report.details.subnav = await evaluate(`[...document.querySelectorAll('a')].some(a => a.textContent.trim() === 'Compare')`);
+    await evaluate(`document.querySelector('[data-testid="compare-run"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="compare-summary"]')`, 20000, 'result');
+    report.details.summary = await evaluate(`[...document.querySelectorAll('[data-testid="compare-summary"] > div')].map(d => d.querySelector('dt').textContent + '=' + d.querySelector('dd').textContent)`);
+    report.details.changed = await evaluate(`[...document.querySelectorAll('[data-testid="compare-changed"] tbody tr')].map(r => [...r.querySelectorAll('td')].map(td => td.textContent.trim()).join('|'))`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_result.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.hash = await evaluate(`location.hash`);
+    report.details.charts = 1;
+  }
+  else if (scenario === 'pii') {
+    // Catalog → Find personal data: scan, tag the test table's columns, mask them for non-owners.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = async (sql) => (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) })).json();
+    await q("CREATE OR REPLACE TABLE e2e_pii_people AS SELECT 'user' || range || '@example.com' AS contact, '+44 20 7946 ' || lpad(range::VARCHAR, 4, '0') AS tel, 'x' AS colour FROM range(20)");
+    cleanup = async () => {
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      for (const pol of ((await (await authed(`/api/workspaces/${wsId}/policies`)).json()).policies ?? []).filter((x) => x.name === 'Personal data in e2e_pii_people')) await authed(`/api/policies/${pol.id}`, { method: 'DELETE' }).catch(() => {});
+      await q('DROP TABLE IF EXISTS e2e_pii_people');
+    };
+    await evaluate(`location.hash = '#/governance/catalog'; location.reload(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="pii-open"]')`, 20000, 'catalog');
+    await evaluate(`document.querySelector('[data-testid="pii-open"]').click(); 'ok'`);
+    const row = (col) => `document.querySelector('[data-testid="pii-findings"] tr[data-column="e2e_pii_people.${col}"]')`;
+    await waitFor(`!!${row('contact')}`, 60000, 'findings');
+    report.details.contact = await evaluate(`${row('contact')}.textContent`);
+    report.details.colour = await evaluate(`!!${row('colour')}`);
+    // Only the test table's columns: clear the default selection first.
+    await evaluate(`(() => { const all = document.querySelector('[data-testid="pii-findings"] input[aria-label="Select all"]'); if (all.checked) all.click(); else { all.click(); all.click(); } return true; })()`);
+    for (const col of ['contact', 'tel']) await evaluate(`${row(col)}.querySelector('input[type=checkbox]').click(); 'ok'`);
+    await waitFor(`document.querySelector('[data-testid="pii-drawer"]').textContent.includes('2 selected')`, 3000, 'two selected');
+    await evaluate(`document.querySelector('[data-testid="pii-tag"]').click(); 'ok'`);
+    await waitFor(`${row('contact')}?.textContent.includes('pii')`, 20000, 'tagged');
+    await evaluate(`(() => { const all = document.querySelector('[data-testid="pii-findings"] input[aria-label="Select all"]'); if (all.checked) all.click(); else { all.click(); all.click(); } return true; })()`);
+    for (const col of ['contact', 'tel']) await evaluate(`${row(col)}.querySelector('input[type=checkbox]').click(); 'ok'`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_findings.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`document.querySelector('[data-testid="pii-mask"]').click(); 'ok'`);
+    await sleep(1500);
+    const pols = ((await (await authed(`/api/workspaces/${wsId}/policies`)).json()).policies ?? []).filter((x) => x.name === 'Personal data in e2e_pii_people');
+    report.details.policy = pols.map((x) => Object.keys(x.column_masks ?? {}).sort());
+    const tags = ((await (await authed(`/api/workspaces/${wsId}/catalog/annotated`)).json()).objects ?? []).find((o) => o.name === 'e2e_pii_people')?.columns.find((c) => c.name === 'contact')?.tags;
+    report.details.tags = tags;
+    report.details.charts = 1;
+  }
+  else if (scenario === 'watches') {
+    // Quality → Watches: watch a table, change its columns, see the drift, accept it.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = async (sql) => (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) })).json();
+    await q('CREATE OR REPLACE TABLE e2e_watch_t AS SELECT 1 AS id, 2 AS amount');
+    cleanup = async () => {
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      for (const w of ((await (await authed(`/api/workspaces/${wsId}/watches`)).json()).watches ?? []).filter((w) => w.target === 'e2e_watch_t')) await authed(`/api/watches/${w.id}`, { method: 'DELETE' }).catch(() => {});
+      await q('DROP TABLE IF EXISTS e2e_watch_t');
+    };
+    await evaluate(`location.hash = '#/transform/quality'; location.reload(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="watch-new"]')`, 20000, 'watches section');
+    await evaluate(`document.querySelector('[data-testid="watch-new"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="watch-target"]')`, 5000, 'form');
+    await setField('[data-testid="watch-target"]', 'e2e_watch_t');
+    await evaluate(`document.querySelector('[data-testid="watch-save"]').click(); 'ok'`);
+    const row = `document.querySelector('[data-testid="watch-list"] tr[data-target="e2e_watch_t"]')`;
+    await waitFor(`${row}?.textContent.includes('As expected')`, 15000, 'watch created');
+    await q('ALTER TABLE e2e_watch_t ADD COLUMN region VARCHAR');
+    await evaluate(`${row}.querySelector('[data-testid="watch-check"]').click(); 'ok'`);
+    await waitFor(`${row}?.textContent.includes('Schema changed')`, 15000, 'drift');
+    report.details.drift = await evaluate(`${row}.textContent`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_drift.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`${row}.querySelector('[data-testid="watch-accept"]').click(); 'ok'`);
+    await waitFor(`${row}?.textContent.includes('As expected')`, 15000, 'accepted');
+    report.details.accepted = true;
+    report.details.charts = 1;
+  }
   else if (scenario === 'data-explorer') {
     // A dataset, then one of its columns in depth, then where the table comes from.
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -2751,6 +2831,22 @@ try {
     if (d.pivotRows !== 3) problems.push(`pivot rows: ${d.pivotRows}`);
     if (!/rows scanned/.test(d.planSummary ?? '') || !/slowest step/.test(d.planSummary ?? '')) problems.push(`plan summary: ${d.planSummary}`);
     if (!(d.planNodes ?? []).some((n) => /SCAN/.test(n))) problems.push(`plan nodes: ${JSON.stringify(d.planNodes)}`);
+  }
+  if (scenario === 'compare') {
+    if (d.subnav !== true) problems.push('no Compare tab under Data');
+    if (JSON.stringify(d.summary) !== JSON.stringify(['Rows before=3', 'Rows after=3', 'Added=1', 'Removed=1', 'Changed=1', 'Unchanged=1'])) problems.push(`summary: ${JSON.stringify(d.summary)}`);
+    if (JSON.stringify(d.changed) !== JSON.stringify(['2|amount|20|25'])) problems.push(`changed rows: ${JSON.stringify(d.changed)}`);
+    if (!/key=id/.test(d.hash ?? '')) problems.push(`link: ${d.hash}`);
+  }
+  if (scenario === 'pii') {
+    if (!/Email address/.test(d.contact ?? '') || !/high/.test(d.contact ?? '')) problems.push(`contact finding: ${d.contact}`);
+    if (d.colour !== false) problems.push('a plain column was reported as personal data');
+    if (JSON.stringify(d.tags) !== JSON.stringify(['pii', 'pii:email'])) problems.push(`tags: ${JSON.stringify(d.tags)}`);
+    if (JSON.stringify(d.policy) !== JSON.stringify([['contact', 'tel']])) problems.push(`policy: ${JSON.stringify(d.policy)}`);
+  }
+  if (scenario === 'watches') {
+    if (!/region \(VARCHAR\) was added/.test(d.drift ?? '')) problems.push(`drift: ${d.drift}`);
+    if (d.accepted !== true) problems.push('not accepted');
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);

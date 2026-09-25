@@ -42,6 +42,9 @@ import { TemplateService } from './services/templates.js';
 import { WorkspaceAdminService } from './services/workspace-admin.js';
 import { QueryHistoryService } from './services/query-history.js';
 import { SearchService } from './services/search.js';
+import { DiffService } from './services/diff.js';
+import { PiiService } from './services/pii.js';
+import { WatchService } from './services/watches.js';
 import { WorkspaceLifecycleService } from './services/workspace-lifecycle.js';
 import { ClusterService } from './services/cluster.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
@@ -109,6 +112,9 @@ export interface AppContext {
   workspaceAdmin: WorkspaceAdminService;
   queryHistory: QueryHistoryService;
   search: SearchService;
+  diff: DiffService;
+  pii: PiiService;
+  watches: WatchService;
   lifecycle: WorkspaceLifecycleService;
   cluster: ClusterService;
   /** Cluster mode: joins the cluster at this URL once the server listens (then starts stream consumers). */
@@ -301,6 +307,10 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const workspaceAdmin = new WorkspaceAdminService(store);
   const queryHistory = new QueryHistoryService(store, workspaces);
   const search = new SearchService(store);
+  const diff = new DiffService();
+  const pii = new PiiService();
+  const watches = new WatchService(store);
+  if (cfg.transform.scheduler_enabled) watches.start();
   const lifecycle = new WorkspaceLifecycleService(store);
   queries.quota = (id, mutating) => lifecycle.checkQuery(id, mutating);
   workspaces.memoryCap = (limit) => lifecycle.capMemory(limit);
@@ -359,6 +369,9 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     workspaceAdmin,
     queryHistory,
     search,
+    diff,
+    pii,
+    watches,
     lifecycle,
     cluster,
     startCluster,
@@ -384,6 +397,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
       auditExport.stop();
       usage.stop();
       lifecycle.stop();
+      watches.stop();
       dbt.stop();
       quality.stop();
       insights.stop();
@@ -406,6 +420,9 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   templates.bind(ctx);
   workspaceAdmin.bind(ctx);
   search.bind(ctx);
+  diff.bind(ctx);
+  pii.bind(ctx);
+  watches.bind(ctx);
   lifecycle.bind(ctx);
   return ctx;
 }

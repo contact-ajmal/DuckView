@@ -6,6 +6,7 @@ import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { Button, Empty, IconButton, Input, Label, Menu, MenuDivider, MenuItem, Modal, Select, StatusDot, cn, confirmAction } from '../../components/ui';
 import { PageHeader } from '../../components/layout';
+import { WatchesSection } from './WatchesSection';
 import { CHANNEL_META } from '../alerts/ChannelsPanel';
 
 const TONE: Record<QualityStatus, 'ok' | 'warn' | 'error' | 'idle'> = { unknown: 'idle', pass: 'ok', warn: 'warn', fail: 'error', error: 'error' };
@@ -197,6 +198,7 @@ export function QualityPanel({ workspaceId }: { workspaceId: string }) {
       )}
 
       {draft && <SuiteEditor workspaceId={workspaceId} draft={draft} setDraft={setDraft} channels={channels} tables={(ws.catalog?.objects ?? []).map((o) => ({ name: o.schema === 'main' ? o.name : `${o.schema}.${o.name}`, columns: o.columns }))} onSaved={(id) => { setDraft(null); setSelected(id); void load().then(() => loadDetail(id)); }} />}
+      <WatchesSection workspaceId={workspaceId} canEdit={canEdit} />
     </div>
   );
 }

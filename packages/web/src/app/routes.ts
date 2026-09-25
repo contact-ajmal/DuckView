@@ -7,7 +7,7 @@ import { House, Database, SquareTerminal, LayoutDashboard, AppWindow, Bot, Plug,
 
 export type Section = 'home' | 'data' | 'sql' | 'dashboards' | 'apps' | 'ai' | 'connections' | 'settings';
 /** Which component renders the page. */
-export type Page = 'home' | 'data' | 'query' | 'notebooks' | 'transform' | 'governance' | 'dashboards' | 'alerts' | 'apps' | 'mcp' | 'connections' | 'settings' | 'templates' | 'workspace';
+export type Page = 'home' | 'data' | 'query' | 'notebooks' | 'transform' | 'governance' | 'dashboards' | 'alerts' | 'apps' | 'mcp' | 'connections' | 'settings' | 'templates' | 'workspace' | 'compare';
 
 export const SECTIONS: { id: Section; label: string; hash: string; icon: LucideIcon; hint: string }[] = [
   { id: 'home', label: 'Home', hash: '#/', icon: House, hint: 'Recent work and workspace status' },
@@ -29,6 +29,7 @@ export const SUBPAGES: Partial<Record<Section, { id: string; label: string; hash
     { id: 'quality', label: 'Quality', hash: '#/transform/quality' },
     { id: 'catalog', label: 'Catalog', hash: '#/governance/catalog' },
     { id: 'lineage', label: 'Lineage', hash: '#/governance/lineage' },
+    { id: 'compare', label: 'Compare', hash: '#/compare' },
     { id: 'policies', label: 'Access policies', hash: '#/governance/policies' },
   ],
   sql: [
@@ -62,6 +63,7 @@ export function parseRoute(hash = location.hash): Route {
     return { sub: s?.id ?? null, crumb: s && s.id !== SUBPAGES[section]![0]!.id ? s.label : null };
   };
   if (first === 'data' || first === 'overview') return { section: 'data', page: 'data', ...sub('data', 'explorer') };
+  if (first === 'compare') return { section: 'data', page: 'compare', ...sub('data', 'compare') };
   if (first === 'query') return { section: 'sql', page: 'query', ...sub('sql', 'query') };
   if (first === 'notebooks') return { section: 'sql', page: 'notebooks', ...sub('sql', 'notebooks') };
   if (first === 'transform') return { section: 'data', page: 'transform', ...sub('data', second === 'metrics' || second === 'quality' ? second : 'dbt') };

@@ -47,8 +47,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function withHeadless<T>(opts: HeadlessOptions, fn: (page: HeadlessPage) => Promise<T>): Promise<T> {
   const { default: WebSocket } = await import('ws');
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'dv-headless-'));
-  const port = 9400 + Math.floor(Math.random() * 500);
-  const flags = [`--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--no-default-browser-check', '--disable-dev-shm-usage', '--disable-extensions', '--font-render-hinting=none', `--window-size=${opts.width},${opts.height}`, 'about:blank'];
+  // Port 0: Chrome picks a free port and writes it to DevToolsActivePort, so parallel renders never collide.
+  const flags = ['--remote-debugging-port=0', `--user-data-dir=${profile}`, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--no-default-browser-check', '--disable-dev-shm-usage', '--disable-extensions', '--font-render-hinting=none', `--window-size=${opts.width},${opts.height}`, 'about:blank'];
   // Containers (root, or an unprivileged user without user namespaces) cannot use Chrome's sandbox.
   if (process.getuid?.() === 0 || process.env.CHROME_NO_SANDBOX === '1') flags.unshift('--no-sandbox');
   const child = spawn(opts.chromePath, flags, { stdio: 'ignore' });
@@ -57,9 +57,12 @@ export async function withHeadless<T>(opts: HeadlessOptions, fn: (page: Headless
   try {
     const run = async (): Promise<T> => {
       let target: { webSocketDebuggerUrl: string } | undefined;
+      let port = 0;
       for (let i = 0; i < 50 && !target; i++) {
         if (child.exitCode !== null) throw new Error(`Chrome exited with ${child.exitCode}`);
         try {
+          if (!port) port = Number(fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || 0;
+          if (!port) throw new Error('not yet');
           const list = (await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(1000) })).json()) as { type: string; webSocketDebuggerUrl: string }[];
           target = list.find((t) => t.type === 'page');
         } catch {
@@ -82,9 +85,10 @@ export async function withHeadless<T>(opts: HeadlessOptions, fn: (page: Headless
           pending.get(m.id)!.resolve(m);
           pending.delete(m.id);
         } else if (m.method === 'Network.requestWillBeSent') {
-          // Streams that stay open by design (live events, sockets) never finish: they must not hold "idle" off.
+          // Streams that stay open by design (live events, sockets) never finish, and fonts from a CDN can hang on a
+          // slow network: neither may hold "idle" off (fonts get their own short wait before the screenshot).
           const params = (m as { params?: { requestId?: string; type?: string; request?: { url?: string } } }).params ?? {};
-          if (params.type === 'EventSource' || params.type === 'WebSocket' || /\/api\/events\b/.test(params.request?.url ?? '')) return;
+          if (params.type === 'EventSource' || params.type === 'WebSocket' || params.type === 'Font' || /\/api\/events\b/.test(params.request?.url ?? '')) return;
           if (params.requestId) tracked.add(params.requestId);
           inFlight++;
           requests++;

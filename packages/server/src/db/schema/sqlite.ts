@@ -1781,3 +1781,35 @@ export const workspaceBackups = sqliteTable(
   (t) => [index('workspace_backups_ws_idx').on(t.workspace_id, t.created_at)],
 );
 export type WorkspaceBackup = typeof workspaceBackups.$inferSelect;
+
+/** Watches on a dataset: its schema (columns added, removed or retyped) and how fresh it is. */
+export const WATCH_STATUSES = ['unknown', 'ok', 'drift', 'stale', 'error'] as const;
+export type WatchSchema = { name: string; type: string }[];
+export const dataWatches = sqliteTable(
+  'data_watches',
+  {
+    id: text('id').primaryKey(),
+    workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    /** A table, view, file or glob of files. */
+    target: text('target').notNull(),
+    watch_schema: integer('watch_schema', { mode: 'boolean' }).notNull().default(true),
+    /** Stale when the data is older than this (null: freshness not watched). */
+    max_age_hours: integer('max_age_hours'),
+    /** Freshness from the newest value of this column; otherwise the file's modified time or the last sync. */
+    time_column: text('time_column'),
+    check_every_minutes: integer('check_every_minutes').notNull().default(60),
+    channel_ids: text('channel_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    /** The accepted schema; drift is measured against it. */
+    baseline: text('baseline', { mode: 'json' }).$type<WatchSchema | null>(),
+    status: text('status', { enum: WATCH_STATUSES }).notNull().default('unknown'),
+    detail: text('detail'),
+    last_seen_at: integer('last_seen_at', { mode: 'timestamp_ms' }),
+    last_checked_at: integer('last_checked_at', { mode: 'timestamp_ms' }),
+    created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('data_watches_ws_idx').on(t.workspace_id)],
+);
+export type DataWatch = typeof dataWatches.$inferSelect;

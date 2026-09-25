@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BookOpen, ChevronDown, ChevronRight, Tag } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronRight, ScanSearch, Tag } from 'lucide-react';
 import { api, type AnnotatedObject } from '../../api/client';
-import { useWorkspaceAccess } from '../../store/workspace';
+import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
+import { PiiDrawer } from './PiiDrawer';
 import { Badge, Button, Empty, Input, cn } from '../../components/ui';
 
 /** Governance → Catalog: what tables and columns mean — Copilot and agents read these notes. */
@@ -12,6 +13,8 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
   const [filter, setFilter] = useState('');
   const [edit, setEdit] = useState<{ object: string; column: string | null; description: string; tags: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [piiOpen, setPiiOpen] = useState(false);
+  const isOwner = useWorkspace((s) => s.workspaces.find((w) => w.id === workspaceId)?.role === 'OWNER');
   const load = useCallback(async () => setObjects((await api.get<{ objects: AnnotatedObject[] }>(`/api/workspaces/${workspaceId}/catalog/annotated`)).objects.filter((o) => !o.name.startsWith('duckview_mosaic'))), [workspaceId]);
   useEffect(() => void load().catch((e) => setError((e as Error).message)), [load]);
   const nameOf = (o: AnnotatedObject) => (o.schema === 'main' ? o.name : `${o.schema}.${o.name}`);
@@ -44,7 +47,10 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
     <div className="space-y-3 text-xs">
       <div className="flex items-center justify-between gap-2">
         <p className="text-zinc-500">What the tables and columns mean. Copilot and agents are given these notes, so write what a newcomer would need; tag sensitive columns (<code>pii</code>).</p>
-        <Input aria-label="Filter the catalog" className="h-7 w-56" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name, text or tag" />
+        <div className="flex shrink-0 items-center gap-2">
+          <Input aria-label="Filter the catalog" className="h-7 w-56" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name, text or tag" />
+          <Button size="sm" onClick={() => setPiiOpen(true)} data-testid="pii-open"><ScanSearch className="h-3.5 w-3.5" /> Find personal data</Button>
+        </div>
       </div>
       {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 font-mono text-red-200">{error}</div>}
       {shown.length === 0 ? <div className="border-y border-zinc-800 py-12"><Empty icon={<BookOpen className="h-10 w-10" />} title="No tables" hint="Tables and views of the workspace appear here." /></div> : (
@@ -78,6 +84,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
           })}
         </div>
       )}
+      <PiiDrawer open={piiOpen} onClose={() => setPiiOpen(false)} workspaceId={workspaceId} canTag={canEdit} canMask={isOwner} onChanged={() => void load()} />
     </div>
   );
 }
