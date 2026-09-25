@@ -116,6 +116,8 @@ Use in this order: an existing primitive, then an extension of it, then a new sh
     - View-mode widget actions are "Open in SQL" and "Ask AI about this".
   - Chart.js via `lib/chart.ts` (`useChartTheme`, `MAX_SERIES`, `compactNumber`), Mosaic via `lib/mosaic`.
   - Categorical colours in SVG are `var(--series-n)` set through `style`, not presentation attributes. Axis and label text is `zinc-400`/`zinc-500`, gridlines `zinc-800`, series from `--series-*`. Don't draw a legend when there is a single series. Charts never decorate.
+  - Maps use `features/dashboards/MapWidget` (SVG on bundled world outlines; never a tile or map service). Scales are stepped (a few opacity steps of one series colour), not gradients.
+  - Diagrams (relationships, lineage) are hand-laid SVG: boxes `fill-zinc-950 stroke-zinc-700`, lines `stroke-zinc-500`, dashed for inferred or uncertain, `stroke-accent-500` only for the hovered or selected item.
 
 - Feedback (`components/ui/feedback.tsx`, exported from `components/ui`):
   - `toast.success(title, detail?)`, `toast.error(err, title?)`, `toast.info(…, action?)`: the outcome of an action. The mount is in `main.tsx`.

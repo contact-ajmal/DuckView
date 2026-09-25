@@ -29,6 +29,7 @@ import { describeCheck } from '../services/quality.js';
 import type { AppSource } from '../services/apps.js';
 import { framework } from '../services/app-frameworks.js';
 import { PII_LABEL } from '../services/pii.js';
+import { PrepStep, compileRecipe } from '../services/prep.js';
 
 export type ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 export type ToolResult = { content: ToolContent[]; structuredContent?: Record<string, unknown>; isError?: boolean };
@@ -1546,6 +1547,46 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
     }),
 
     define({
+      name: 'find_joins',
+      title: 'Find how tables join',
+      description: 'Finds how the workspace\'s tables join (or how the named tables join to the others): declared foreign keys, and relationships inferred from column names (orders.customer_id → customers.id, the same *_id column in two tables) confirmed on the data. Each comes with its cardinality, the share of values that match, the unmatched values that would drop out of an inner join, and the JOIN to use.',
+      inputSchema: { tables: z.array(z.string()).optional().describe('Only relationships touching these tables'), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { tables, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const m = await env.ctx.joins.discover(env.principal, ws, { tables });
+        const lines = m.relationships.map((r) => `- \`${r.from_table}.${r.from_column}\` → \`${r.to_table}.${r.to_column}\`: ${r.cardinality}, ${r.source === 'declared' ? 'declared foreign key' : `${Math.round(r.coverage * 100)}% of values match${r.orphans ? `, ${r.orphans} unmatched` : ''}`} (${r.confidence})`);
+        return { content: [text(`**Relationships** (${m.relationships.length}, ${m.checked} checked on the data)\n${lines.join('\n') || '_(none found)_'}`)], structuredContent: { status: 'ok', workspace_id: ws, ...m } };
+      },
+    }),
+
+    define({
+      name: 'prepare_data',
+      title: 'Prepare data with a recipe',
+      description: 'Cleans and reshapes a table or file with a recipe of steps, compiled to one SELECT (a CTE per step). Steps (op): filter {condition}, keep {columns}, drop {columns}, rename {column, to}, cast {column, type}, fill {column, value}, text {column, fn: trim|lower|upper|collapse_spaces|digits_only}, replace {column, find, with}, derive {name, expression}, split {column, separator, into[]}, parse_date {column, format (strptime, e.g. %d/%m/%Y)}, dedupe {columns?}, sort {by: [{column, desc?}]}. Without save_as it previews: the SQL, the first rows and the rows left after each step. save_as {name, as: view|table|dbt, project_id for dbt} writes the result; views and tables need a person\'s approval (dry_run=false once they agreed).',
+      inputSchema: {
+        source: z.string().min(1).describe('A table, view or quoted file path'),
+        steps: z.array(z.record(z.string(), z.unknown())).max(100),
+        save_as: z.object({ name: z.string().min(1), as: z.enum(['view', 'table', 'dbt']), project_id: z.string().optional(), replace: z.boolean().optional() }).optional(),
+        workspace_id: z.string().optional(),
+        dry_run: z.boolean().optional().describe('Default true. Set false once approved (only for saving a view or table).'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { source, steps: raw, save_as, workspace_id, dry_run }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const steps = z.array(PrepStep).parse(raw);
+        if (!save_as) {
+          const r = await env.ctx.prep.preview(env.principal, ws, source, steps, 20);
+          const counts = [`${r.source_rows.toLocaleString()} rows in ${source}`, ...r.steps.map((s, i) => `${i + 1}. ${s} → ${(r.step_rows[i] ?? 0).toLocaleString()} rows`)];
+          return { content: [text(`${counts.join('\n')}\n\n\`\`\`sql\n${r.sql}\n\`\`\`\n\n${toMarkdownTable({ columns: r.columns, rows: r.rows.slice(0, 10) }, 60)}`)], structuredContent: { status: 'ok', sql: r.sql, columns: r.columns, rows: r.rows, source_rows: r.source_rows, step_rows: r.step_rows } };
+        }
+        if (save_as.as !== 'dbt') needsApproval(env, dry_run, `prepare_data creates the ${save_as.as} ${save_as.name} from ${source} (${steps.length} step${steps.length === 1 ? '' : 's'}).`, 'prepare_data', compileRecipe(source, steps));
+        const r = await env.ctx.prep.save(env.principal, ws, { source, steps, ...save_as }, { dryRun: false });
+        return { content: [text(r.kind === 'dbt' ? `Wrote the dbt model \`${r.path}\`. Run it with run_dbt.` : `Created the ${r.kind} ${r.name}.`)], structuredContent: { status: 'ok', ...r } };
+      },
+    }),
+
+    define({
       name: 'tag_pii',
       title: 'Tag personal data',
       description: 'Labels columns as personal data in the catalog (tags pii and pii:<kind>), usually the findings of scan_pii, so people and agents see what is sensitive.',
@@ -1908,4 +1949,4 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template', 'list_saved_queries', 'get_saved_query', 'save_query', 'search_catalog', 'get_lineage', 'annotate_table', 'get_dashboard', 'update_widget', 'remove_widget', 'define_metric', 'workspace_health', 'list_backups', 'backup_workspace', 'create_stream', 'git_status', 'git_commit', 'query_history', 'search_workspace', 'diff_tables', 'scan_pii', 'tag_pii', 'protect_pii', 'list_watches', 'create_watch', 'check_watch', 'list_endpoints', 'publish_endpoint'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template', 'list_saved_queries', 'get_saved_query', 'save_query', 'search_catalog', 'get_lineage', 'annotate_table', 'get_dashboard', 'update_widget', 'remove_widget', 'define_metric', 'workspace_health', 'list_backups', 'backup_workspace', 'create_stream', 'git_status', 'git_commit', 'query_history', 'search_workspace', 'diff_tables', 'scan_pii', 'tag_pii', 'protect_pii', 'list_watches', 'create_watch', 'check_watch', 'list_endpoints', 'publish_endpoint', 'find_joins', 'prepare_data'] as const;

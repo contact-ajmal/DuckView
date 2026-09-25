@@ -1799,6 +1799,67 @@ try {
     report.details.unplaced = await evaluate(`document.querySelector('[data-testid="map-widget"][data-mode="regions"]').textContent`);
     report.details.charts = 1;
   }
+  else if (scenario === 'joins') {
+    // Relationships in the catalog: a declared key and an inferred one, drawn, listed, and opened as SQL.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = async (sql) => (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) })).json();
+    await q('DROP SCHEMA IF EXISTS e2e_jn CASCADE');
+    for (const sql of ['CREATE SCHEMA e2e_jn', 'CREATE TABLE e2e_jn.customers (id INTEGER PRIMARY KEY, name VARCHAR)', "INSERT INTO e2e_jn.customers VALUES (1, 'Ada'), (2, 'Bo')", 'CREATE TABLE e2e_jn.orders (order_id INTEGER PRIMARY KEY, customer_id INTEGER, amount DOUBLE)', 'INSERT INTO e2e_jn.orders VALUES (10, 1, 5), (11, 1, 7), (12, 2, 3), (13, 3, 1)', 'CREATE TABLE e2e_jn.lines (order_id INTEGER REFERENCES e2e_jn.orders (order_id), qty INTEGER)', 'INSERT INTO e2e_jn.lines VALUES (10, 1), (11, 2)']) await q(sql);
+    cleanup = async () => {
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      await q('DROP SCHEMA IF EXISTS e2e_jn CASCADE');
+    };
+    await evaluate(`location.hash = '#/governance/catalog'; location.reload(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="joins-open"]')`, 20000, 'catalog');
+    await evaluate(`document.querySelector('[data-testid="joins-open"]').click(); 'ok'`);
+    const inferred = `document.querySelector('[data-testid="joins-list"] tr[data-rel="e2e_jn.orders.customer_id>e2e_jn.customers.id"]')`;
+    await waitFor(`!!${inferred}`, 30000, 'relationships found');
+    report.details.inferred = await evaluate(`[...${inferred}.querySelectorAll('td')].map((c) => c.textContent.trim()).filter(Boolean)`);
+    report.details.declared = await evaluate(`[...(document.querySelector('[data-testid="joins-list"] tr[data-rel="e2e_jn.lines.order_id>e2e_jn.orders.order_id"]')?.querySelectorAll('td') ?? [])].map((c) => c.textContent.trim()).filter(Boolean)`);
+    report.details.diagram = await evaluate(`['e2e_jn.customers', 'e2e_jn.orders', 'e2e_jn.lines'].map((t) => !!document.querySelector('[data-testid="joins-diagram"] g[data-table="' + t + '"]')).concat(!!document.querySelector('[data-testid="joins-diagram"] path[data-rel="e2e_jn.orders.customer_id>e2e_jn.customers.id"]'))`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_drawer.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`${inferred}.querySelector('[data-testid="join-open"]').click(); 'ok'`);
+    await waitFor(`location.hash.startsWith('#/query') && (document.querySelector('.cm-content')?.innerText ?? '').includes('JOIN "e2e_jn"."customers" AS b')`, 15000, 'join opened as SQL');
+    report.details.sql = await evaluate(`document.querySelector('.cm-content').innerText`);
+    report.details.charts = 1;
+  }
+  else if (scenario === 'prepare') {
+    // A recipe built from the menu: remove duplicates, clean text, filter; each step's rows, then saved as a view.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = async (sql) => (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) })).json();
+    await q("CREATE OR REPLACE TABLE e2e_prep_raw AS SELECT * FROM (VALUES (1, '  ADA '), (2, 'Bo'), (2, 'Bo'), (3, NULL)) t(id, name)");
+    cleanup = async () => {
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      await q('DROP VIEW IF EXISTS e2e_prep_clean');
+      await q('DROP TABLE IF EXISTS e2e_prep_raw');
+    };
+    await evaluate(`location.hash = '#/transform/prepare?source=e2e_prep_raw'; location.reload(); 'ok'`);
+    await waitFor(`document.querySelectorAll('[data-testid="prep-preview"] tbody tr').length === 4`, 30000, 'source previewed');
+    const addStep = async (label) => {
+      await evaluate(`document.querySelector('[data-testid="prep-add"]').click(); 'ok'`);
+      await waitFor(`[...document.querySelectorAll('[role="menu"] button, [role="menuitem"]')].some((b) => b.textContent.startsWith(${JSON.stringify(label)}))`, 5000, `menu ${label}`);
+      await evaluate(`[...document.querySelectorAll('[role="menu"] button, [role="menuitem"]')].find((b) => b.textContent.startsWith(${JSON.stringify(label)})).click(); 'ok'`);
+    };
+    const rowsText = `[...document.querySelectorAll('[data-testid="prep-step-rows"]')].map((e) => e.textContent)`;
+    await addStep('Remove duplicates');
+    await waitFor(`${rowsText}[0] === '3 rows (−1)'`, 15000, 'dedupe counted');
+    await addStep('Clean text');
+    await setField('[data-testid="prep-column"]', 'name');
+    await evaluate(`(() => { const s = document.querySelector('[data-testid="prep-fn"]'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'lower'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await addStep('Clean text');
+    await setField('[data-testid="prep-column"]', 'name');
+    await addStep('Filter rows');
+    await setField('[data-testid="prep-value"]', 'name IS NOT NULL');
+    await waitFor(`${rowsText}.length === 4 && ${rowsText}[3] === '2 rows (−1)'`, 15000, 'filter counted');
+    report.details.rows = await evaluate(rowsText);
+    report.details.steps = await evaluate(`[...document.querySelectorAll('[data-testid="prep-step"] button[aria-expanded]')].map((b) => b.textContent)`);
+    report.details.result = await evaluate(`[...document.querySelectorAll('[data-testid="prep-preview"] tbody tr')].map((r) => [...r.querySelectorAll('td')].map((c) => c.textContent).join('|'))`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_recipe.png'), Buffer.from(shot.result.data, 'base64')); }
+    await setField('[data-testid="prep-name"]', 'e2e_prep_clean');
+    await evaluate(`document.querySelector('[data-testid="prep-save"]').click(); 'ok'`);
+    for (let i = 0; i < 50; i++) { const r = await q('SELECT count(*) FROM e2e_prep_clean'); if (r.rows) { report.details.saved = r.rows; break; } await sleep(200); }
+    report.details.charts = 1;
+  }
   else if (scenario === 'data-explorer') {
     // A dataset, then one of its columns in depth, then where the table comes from.
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -2900,6 +2961,18 @@ try {
     if (d.points !== 3) problems.push(`points: ${d.points}`);
     if (JSON.stringify(d.countries) !== '["276","578","620"]') problems.push(`countries: ${JSON.stringify(d.countries)}`);
     if (!/1 row not placed/.test(d.unplaced ?? '')) problems.push(`unplaced: ${d.unplaced}`);
+  }
+  if (scenario === 'joins') {
+    if (JSON.stringify(d.inferred) !== JSON.stringify(['e2e_jn.orders.customer_id', 'e2e_jn.customers.id', 'many-to-one', '67%', '1', 'medium'])) problems.push(`inferred: ${JSON.stringify(d.inferred)}`);
+    if (JSON.stringify(d.declared) !== JSON.stringify(['e2e_jn.lines.order_id', 'e2e_jn.orders.order_id', 'many-to-one', 'declared', '—', 'foreign key'])) problems.push(`declared: ${JSON.stringify(d.declared)}`);
+    if (JSON.stringify(d.diagram) !== '[true,true,true,true]') problems.push(`diagram: ${JSON.stringify(d.diagram)}`);
+    if (!/FROM "e2e_jn"\."orders" AS a/.test(d.sql ?? '')) problems.push(`sql: ${d.sql}`);
+  }
+  if (scenario === 'prepare') {
+    if (JSON.stringify(d.rows) !== JSON.stringify(['3 rows (−1)', '3 rows', '3 rows', '2 rows (−1)'])) problems.push(`rows: ${JSON.stringify(d.rows)}`);
+    if (JSON.stringify(d.steps) !== JSON.stringify(['Remove duplicate rows', 'Lowercase name', 'Trim name', 'Keep rows where name IS NOT NULL'])) problems.push(`steps: ${JSON.stringify(d.steps)}`);
+    if (JSON.stringify([...(d.result ?? [])].sort()) !== JSON.stringify(['1|ada', '2|bo'])) problems.push(`result: ${JSON.stringify(d.result)}`);
+    if (JSON.stringify(d.saved) !== '[[2]]') problems.push(`saved view: ${JSON.stringify(d.saved)}`);
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);

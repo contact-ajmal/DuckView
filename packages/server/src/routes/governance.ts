@@ -81,6 +81,12 @@ export async function governanceRoutes(app: FastifyInstance, ctx: AppContext) {
     return { policy: await ctx.pii.protect(req.principal!, (req.params as { id: string }).id, body.table, body.columns) };
   });
 
+  // ---- how tables join: declared foreign keys and relationships inferred from names, confirmed on the data
+  app.get('/api/workspaces/:id/joins', async (req) => {
+    const qs = z.object({ tables: z.string().max(20_000).optional() }).parse(req.query ?? {});
+    return ctx.joins.discover(req.principal!, (req.params as { id: string }).id, { tables: qs.tables ? qs.tables.split(',').map((t) => t.trim()).filter(Boolean) : undefined });
+  });
+
   app.get('/api/workspaces/:id/lineage', async (req) => ctx.lineage.graph(req.principal!, (req.params as { id: string }).id));
 
   // ---------------------------------------------------------------- audit export (administrators)

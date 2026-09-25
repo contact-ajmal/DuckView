@@ -68,6 +68,8 @@ const VERBS: Record<string, (a: Args) => string> = {
   list_watches: () => 'Looked at the watches',
   create_watch: (a) => `Started watching ${str(a.target)}`,
   check_watch: () => 'Checked a watch',
+  prepare_data: (a) => (a.save_as && typeof a.save_as === 'object' ? `Prepared ${str(a.source)} and saved it as ${str((a.save_as as Record<string, unknown>).name)}` : `Prepared ${str(a.source)} (${Array.isArray(a.steps) ? a.steps.length : 0} steps)`),
+  find_joins: (a) => (Array.isArray(a.tables) && a.tables.length ? `Found how ${a.tables.map(String).join(', ')} joins to other tables` : 'Found how the tables join'),
   scan_pii: () => 'Looked for personal data',
   tag_pii: () => 'Tagged personal data',
   protect_pii: (a) => `Masked personal data in ${str(a.table)}`,

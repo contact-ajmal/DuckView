@@ -24,6 +24,7 @@ export const SECTIONS: { id: Section; label: string; hash: string; icon: LucideI
 export const SUBPAGES: Partial<Record<Section, { id: string; label: string; hash: string }[]>> = {
   data: [
     { id: 'explorer', label: 'Explorer', hash: '#/data' },
+    { id: 'prepare', label: 'Prepare', hash: '#/transform/prepare' },
     { id: 'dbt', label: 'Models', hash: '#/transform/dbt' },
     { id: 'metrics', label: 'Metrics', hash: '#/transform/metrics' },
     { id: 'quality', label: 'Quality', hash: '#/transform/quality' },
@@ -66,7 +67,7 @@ export function parseRoute(hash = location.hash): Route {
   if (first === 'compare') return { section: 'data', page: 'compare', ...sub('data', 'compare') };
   if (first === 'query') return { section: 'sql', page: 'query', ...sub('sql', 'query') };
   if (first === 'notebooks') return { section: 'sql', page: 'notebooks', ...sub('sql', 'notebooks') };
-  if (first === 'transform') return { section: 'data', page: 'transform', ...sub('data', second === 'metrics' || second === 'quality' ? second : 'dbt') };
+  if (first === 'transform') return { section: 'data', page: 'transform', ...sub('data', second === 'metrics' || second === 'quality' || second === 'prepare' ? second : 'dbt') };
   if (first === 'governance') {
     if (second === 'audit' || second === 'provisioning') return { section: 'settings', page: 'governance', sub: second, crumb: second === 'audit' ? 'Audit log' : 'Provisioning' };
     return { section: 'data', page: 'governance', ...sub('data', second || 'catalog') };

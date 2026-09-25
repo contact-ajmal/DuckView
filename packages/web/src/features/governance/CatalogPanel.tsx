@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BookOpen, ChevronDown, ChevronRight, ScanSearch, Tag } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronRight, Network, ScanSearch, Tag } from 'lucide-react';
 import { api, type AnnotatedObject } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { PiiDrawer } from './PiiDrawer';
+import { RelationshipsDrawer } from './RelationshipsDrawer';
 import { Badge, Button, Empty, Input, cn } from '../../components/ui';
 
 /** Governance → Catalog: what tables and columns mean — Copilot and agents read these notes. */
@@ -14,6 +15,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
   const [edit, setEdit] = useState<{ object: string; column: string | null; description: string; tags: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [piiOpen, setPiiOpen] = useState(false);
+  const [joinsOpen, setJoinsOpen] = useState(false);
   const isOwner = useWorkspace((s) => s.workspaces.find((w) => w.id === workspaceId)?.role === 'OWNER');
   const load = useCallback(async () => setObjects((await api.get<{ objects: AnnotatedObject[] }>(`/api/workspaces/${workspaceId}/catalog/annotated`)).objects.filter((o) => !o.name.startsWith('duckview_mosaic'))), [workspaceId]);
   useEffect(() => void load().catch((e) => setError((e as Error).message)), [load]);
@@ -49,6 +51,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
         <p className="text-zinc-500">What the tables and columns mean. Copilot and agents are given these notes, so write what a newcomer would need; tag sensitive columns (<code>pii</code>).</p>
         <div className="flex shrink-0 items-center gap-2">
           <Input aria-label="Filter the catalog" className="h-7 w-56" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name, text or tag" />
+          <Button size="sm" onClick={() => setJoinsOpen(true)} data-testid="joins-open"><Network className="h-3.5 w-3.5" /> Relationships</Button>
           <Button size="sm" onClick={() => setPiiOpen(true)} data-testid="pii-open"><ScanSearch className="h-3.5 w-3.5" /> Find personal data</Button>
         </div>
       </div>
@@ -84,6 +87,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string }) {
           })}
         </div>
       )}
+      <RelationshipsDrawer open={joinsOpen} onClose={() => setJoinsOpen(false)} workspaceId={workspaceId} />
       <PiiDrawer open={piiOpen} onClose={() => setPiiOpen(false)} workspaceId={workspaceId} canTag={canEdit} canMask={isOwner} onChanged={() => void load()} />
     </div>
   );

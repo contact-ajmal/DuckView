@@ -1061,6 +1061,13 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `workspace_health()` · `list_backups()` · `backup_workspace(note?)` | Contents, health checks (worst first), engine and quotas; the backups and their schedule; a backup taken now. |
 | `create_stream(name, kind, target_table, …, dry_run?)` | An HTTP, Kafka or Kinesis stream into a table. Needs approval; an HTTP stream returns its push key once. |
 | `git_status()` · `git_commit(message, dry_run?)` | Local changes against the workspace's Git repository; commit and push them after approval. |
+| `query_history(search?, status?, slowest?, limit?)` · `search_workspace(query, kinds?)` | Past queries in the workspace (who ran what, how long, what failed); one search over tables, columns, saved queries, dashboards, notebooks, metrics and apps. |
+| `diff_tables(left, right, key?)` | What changed between two tables, files, queries or a backup and now: schema changes, and rows added, removed and changed (matched on the key). |
+| `scan_pii(tables?)` · `tag_pii(items)` · `protect_pii(table, columns, dry_run?)` | Find columns holding personal data (from names and a sample of values; examples come back masked), tag them in the catalog, and mask them for everyone but the owners with an access policy (needs approval). |
+| `list_watches()` · `create_watch(target, watch_schema?, max_age_hours?, …)` · `check_watch(watch_id)` | Schema drift and freshness watches on tables and files; channels hear when either changes. |
+| `list_endpoints()` · `publish_endpoint(name, sql, params?, public?, …, dry_run?)` | Queries published as `GET /q/<slug>` (JSON or CSV) with typed parameters, a key, a rate limit and a row cap. Publishing needs approval; the key is returned once. |
+| `find_joins(tables?)` | How tables join: declared foreign keys, and joins inferred from column names and confirmed on the data, with cardinality, the share of values that match, the unmatched values and the JOIN. |
+| `prepare_data(source, steps, save_as?, dry_run?)` | A data prep recipe (filter, keep, drop, rename, cast, fill, text, replace, derive, split, parse_date, dedupe, sort) compiled to one SELECT; previews the rows each step leaves, or saves the result as a view, a table (both need approval) or a dbt model. |
 
 **Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec), `duckdb://guides/data-app` (how to write a Streamlit data app with the SDK), `duckdb://guides/dbt` (how DuckView runs dbt projects and a workflow for agents).
 
@@ -1091,6 +1098,11 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Usage | `GET /api/usage?days&workspace_id&mine` · `GET /api/usage/export.csv?by=day\|workspace\|user` · `GET/POST /api/usage/budgets` · `PATCH/DELETE /api/usage/budgets/:id` |
 | Templates | `GET /api/templates` · `GET /api/templates/:id` · `POST /api/templates/:id/{check,install,review}` · `GET /api/workspaces/:id/template-installs` · `DELETE /api/template-installs/:id` · `POST /api/templates` (publish) · `PATCH/DELETE /api/templates/:id` · `GET /api/templates/:id/export` · `POST /api/templates/import` |
 | Cluster | `GET /api/admin/cluster` (nodes, heartbeats, leases) · node-to-node, with the cluster secret: `POST /internal/cluster/{engine,stream,events,evict,streams/stop}` |
+| Analysis | `GET /api/workspaces/:id/history` (past queries) · `GET …/search?q=` (workspace search) · `POST …/diff` (compare two datasets) · `GET …/backups/:bid/tables` · `GET …/joins?tables=` (relationships) |
+| Personal data | `POST /api/workspaces/:id/pii/scan` · `…/pii/tag` · `…/pii/protect` |
+| Watches | `GET/POST /api/workspaces/:id/watches` · `PATCH/DELETE /api/watches/:id` · `POST /api/watches/:id/check` · `…/accept` |
+| Data prep | `POST /api/workspaces/:id/prep/preview {source, steps, limit?}` · `POST …/prep/save {source, steps, name, as: view\|table\|dbt, project_id?, replace?}` |
+| Query APIs | `GET/POST /api/workspaces/:id/endpoints` · `PATCH/DELETE /api/endpoints/:id` · `POST /api/endpoints/:id/rotate-key` · callers: `GET /q/:slug?param=…[&format=csv]` with `Authorization: Bearer dvq_…` or `x-api-key` (none when public) |
 | Probes | `GET /healthz` · `GET /readyz` · `GET /metrics` |
 
 Errors are uniform JSON: `{ error, message, request_id, challenge? }` — `403 SANDBOX_VIOLATION`, `403 FORBIDDEN` (role or scope too low), `404 NOT_FOUND` (also for workspaces the caller has no grant on), `409 APPROVAL_REQUIRED` (with the HITL challenge), `408 QUERY_TIMEOUT`, `400 SQL_ERROR` (DuckDB parser/binder errors), `429 RATE_LIMITED`.
