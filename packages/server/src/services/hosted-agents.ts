@@ -26,7 +26,11 @@ import { nextRunAt } from './syncs.js';
 import { badRequest, notFound } from './errors.js';
 import { logger } from '../observability/logger.js';
 import { liveEvents } from '../observability/events.js';
-import { buildTools, runTool, type ToolDef, type ToolEnv } from '../agent/tools.js';
+import { runTool, type ToolDef, type ToolEnv } from '../agent/tools.js';
+import { toolRegistry } from '../agent/registry.js';
+import { parseToolCall } from '../agent/reasoning/protocol.js';
+
+export { parseToolCall };
 import { toolInputJsonSchema } from '../agent/openapi.js';
 import { AGENT_TEMPLATES, templateById, type AgentTemplate } from '../agent/templates.js';
 import type { AppContext } from '../context.js';
@@ -49,12 +53,11 @@ export interface HostedAgentInput {
 
 /** SQL runs as the owner with the read scope only, so these are safe although they could write for others. */
 const READ_ONLY_SQL = new Set(['execute_query']);
-const TOOL_BLOCK = /```tool[ \t]*\n([\s\S]*?)```/;
 const MAX_RESULT_CHARS = 8000;
 
 /** Tools a hosted agent may be given: the registry's read-only tools and read-only SQL. */
 export function hostedToolCatalog(cfg: DuckViewConfig): ToolDef[] {
-  return buildTools(cfg).filter((t) => t.annotations.readOnlyHint === true || READ_ONLY_SQL.has(t.name));
+  return toolRegistry(cfg).all().filter((t) => t.annotations.readOnlyHint === true || READ_ONLY_SQL.has(t.name));
 }
 
 /** "name(a: string, b?: number) — description", for the prompt. */
@@ -62,21 +65,6 @@ export function describeTool(t: ToolDef): string {
   const schema = toolInputJsonSchema(t) as { properties?: Record<string, { type?: string; enum?: unknown[] }>; required?: string[] };
   const args = Object.entries(schema.properties ?? {}).map(([k, v]) => `${k}${schema.required?.includes(k) ? '' : '?'}: ${v.enum ? v.enum.map((x) => JSON.stringify(x)).join('|') : v.type ?? 'any'}`);
   return `- ${t.name}(${args.join(', ')}) — ${t.description.split('\n')[0]!.slice(0, 400)}`;
-}
-
-/** The first ```tool block of a reply: {name, arguments}, or an error to send back to the model. */
-export function parseToolCall(text: string): { name: string; arguments: Record<string, unknown> } | { error: string } | null {
-  const m = TOOL_BLOCK.exec(text);
-  if (!m) return null;
-  try {
-    const raw = JSON.parse(m[1]!.trim()) as { name?: unknown; tool?: unknown; arguments?: unknown; args?: unknown };
-    const name = String(raw.name ?? raw.tool ?? '');
-    if (!name) return { error: 'The tool block needs "name".' };
-    const args = (raw.arguments ?? raw.args ?? {}) as Record<string, unknown>;
-    return { name, arguments: typeof args === 'object' && args && !Array.isArray(args) ? args : {} };
-  } catch (err) {
-    return { error: `The tool block is not valid JSON (${(err as Error).message}). Send {"name": "...", "arguments": {...}}.` };
-  }
 }
 
 /** A line that says what a tool returned — not a table header or a code fence. */
@@ -124,7 +112,7 @@ export class HostedAgentService {
   // ------------------------------------------------------------------------------------------ marketplace
 
   templates(): (AgentTemplate & { tool_titles: string[] })[] {
-    const byName = new Map(buildTools(this.cfg).map((t) => [t.name, t.title]));
+    const byName = new Map(toolRegistry(this.cfg).all().map((t) => [t.name, t.title]));
     return AGENT_TEMPLATES.map((t) => ({ ...t, tool_titles: t.tools.map((n) => byName.get(n) ?? n) }));
   }
 

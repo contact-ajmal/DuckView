@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ToolDef } from './tools.js';
+import { semanticsOf } from './semantics.js';
 
 export function toolInputJsonSchema(tool: ToolDef): Record<string, unknown> {
   const schema = zodToJsonSchema(z.object(tool.inputSchema), { target: 'openApi3', $refStrategy: 'none' }) as Record<string, unknown>;
@@ -24,6 +25,7 @@ export function buildOpenApi(tools: ToolDef[], opts: { serverUrl: string; versio
         description: t.description,
         tags: ['tools'],
         'x-duckview-annotations': t.annotations,
+        'x-duckview': semanticsOf(t),
         requestBody: { required: true, content: { 'application/json': { schema: toolInputJsonSchema(t) } } },
         responses: {
           '200': { description: 'Tool result', content: { 'application/json': { schema: { $ref: '#/components/schemas/ToolResult' } } } },

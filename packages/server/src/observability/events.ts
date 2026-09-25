@@ -27,6 +27,8 @@ export type LiveEvent =
   | { type: 'quality'; at: string; workspace_id: string; suite_id: string; status: 'pass' | 'warn' | 'fail' | 'error'; changed: boolean }
   | { type: 'insight'; at: string; workspace_id: string; monitor_id: string; count: number }
   | { type: 'stream'; at: string; workspace_id: string; stream_id: string; rows: number; rows_total: number; duration_ms: number; error: string | null }
+  /** A DuckView agent task moved (agent/events.ts): the milestones, for the workspace's members and the activity feed. */
+  | { type: 'agent'; at: string; workspace_id: string; user_id: string; task_id: string; session_id: string; event: string; data: Record<string, unknown> }
   | { type: 'hosted_agent'; at: string; workspace_id: string; agent_id: string; run_id: string; status: 'running' | 'completed' | 'failed'; step: number }
   /** A dbt run started or finished. */
   | { type: 'dbt'; at: string; workspace_id: string; project_id: string; run_id: string; status: 'running' | 'ok' | 'error'; summary: string | null }

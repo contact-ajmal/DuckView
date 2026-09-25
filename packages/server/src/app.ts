@@ -51,6 +51,7 @@ import { endpointAdminRoutes, endpointPublicRoutes } from './routes/endpoints.js
 import { prepRoutes } from './routes/prep.js';
 import { buildAppsServer } from './apps-server.js';
 import { agentRoutes } from './routes/agent.js';
+import { agentRuntimeRoutes } from './routes/agent-runtime.js';
 import { groupRoutes } from './routes/groups.js';
 import { mosaicRoutes } from './routes/mosaic.js';
 import { registerMcpHttp, McpSessionRegistry } from './mcp/http.js';
@@ -173,6 +174,7 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
   await app.register(async (r) => endpointPublicRoutes(r, ctx));
   await app.register(async (r) => prepRoutes(r, ctx));
   await app.register(async (r) => agentRoutes(r, ctx));
+  await app.register(async (r) => agentRuntimeRoutes(r, ctx));
   await app.register(async (r) => groupRoutes(r, ctx));
   await app.register(async (r) => mosaicRoutes(r, ctx));
   await app.register(async (r) => registerMcpHttp(r, ctx, mcpSessions));

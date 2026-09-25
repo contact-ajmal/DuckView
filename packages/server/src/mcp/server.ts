@@ -11,7 +11,9 @@ import { DBT_GUIDE } from '../services/dbt.js';
 import type { AppContext } from '../context.js';
 import type { Principal } from '../services/principal.js';
 import { formatBytes } from '../engine/results.js';
-import { buildTools, runTool, type ToolEnv } from '../agent/tools.js';
+import { runTool, type ToolEnv } from '../agent/tools.js';
+import { toolRegistry } from '../agent/registry.js';
+import { semanticsOf } from '../agent/semantics.js';
 
 export const MCP_SERVER_INFO = { name: 'duckview', version: '1.2.0' } as const;
 
@@ -37,8 +39,8 @@ export function buildMcpServer(ctx: AppContext, principal: Principal, opts: { de
   const env: ToolEnv = { ctx, principal, defaultWorkspaceId: opts.defaultWorkspaceId ?? null, via: 'mcp', agent: opts.agent ?? null };
 
   // ------------------------------------------------------------------ tools (shared registry)
-  for (const tool of buildTools(ctx.cfg)) {
-    server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations }, (args: Record<string, unknown>) => runTool(env, tool, args));
+  for (const tool of toolRegistry(ctx.cfg).all()) {
+    server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations, _meta: { 'duckview/semantics': semanticsOf(tool) } }, (args: Record<string, unknown>) => runTool(env, tool, args));
   }
 
   // -------------------------------------------------------------- resources

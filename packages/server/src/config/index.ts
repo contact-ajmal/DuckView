@@ -446,6 +446,31 @@ export const ConfigSchema = z.object({
     })
     .default({}),
   /** Agent2Agent (A2A): published DuckView agents answer other agents; people and agents ask remote A2A agents. */
+  /** The DuckView agent (agent/): the runtime behind the agent dock, /api/agent/tasks and the Agent MCP server. */
+  agent: z
+    .object({
+      enabled: z.coerce.boolean().default(true),
+      /** Which Decision Engine picks context and tools: "default" (built in); other names are registered adapters. */
+      decision: z.object({ provider: z.string().min(1).default('default') }).default({}),
+      /** What one model call may be shown. */
+      budget: z
+        .object({
+          max_objects: z.coerce.number().int().min(1).max(200).default(24),
+          max_tokens: z.coerce.number().int().min(500).max(200_000).default(6000),
+          max_tool_definitions: z.coerce.number().int().min(1).max(100).default(12),
+          max_observations: z.coerce.number().int().min(0).max(100).default(12),
+          max_result_rows: z.coerce.number().int().min(1).max(1000).default(50),
+        })
+        .default({}),
+      /** Tool calls a task may make before it must answer. */
+      max_steps: z.coerce.number().int().min(1).max(50).default(12),
+      /** Retries of a failed tool call (with the error shown to the model) before the task gives up on it. */
+      max_retries: z.coerce.number().int().min(0).max(5).default(2),
+      max_output_tokens: z.coerce.number().int().min(256).max(64_000).default(2000),
+      /** Agent MCP server: high-level agent tools at /mcp/agent. */
+      mcp: z.object({ enabled: z.coerce.boolean().default(true) }).default({}),
+    })
+    .default({}),
   a2a: z
     .object({
       enabled: z.coerce.boolean().default(true),

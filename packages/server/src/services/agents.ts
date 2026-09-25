@@ -21,7 +21,8 @@ import { requireScope } from './principal.js';
 import { badRequest, notFound, forbidden, HttpError } from './errors.js';
 import { defaultAwsBridge, newSessionId, type AwsBridge } from './aws.js';
 import { FRAMEWORK_META, snippetsFor, renderSnippet, type Snippet } from '../agent/snippets.js';
-import { buildTools, runTool, type ToolEnv } from '../agent/tools.js';
+import { runTool, type ToolEnv } from '../agent/tools.js';
+import { toolRegistry } from '../agent/registry.js';
 import type { AppContext } from '../context.js';
 
 export type PublicAgent = Agent & { token_prefix: string | null; token_scopes: TokenScope[]; token_revoked: boolean; framework_title: string; can_invoke: boolean };
@@ -214,7 +215,7 @@ export class AgentService {
     if (!rec) throw new HttpError(409, 'The agent token was revoked — rotate it first', 'AGENT_TOKEN_REVOKED');
     const principal = await this.auth.principalFromTokenRecord(rec, p.ip);
     if (!principal) throw forbidden('Token owner not found');
-    const tool = buildTools(this.cfg).find((t) => t.name === 'list_accessible_data')!;
+    const tool = toolRegistry(this.cfg).all().find((t) => t.name === 'list_accessible_data')!;
     const env: ToolEnv = { ctx: this.ctx, principal, via: 'rest', defaultWorkspaceId: agent.workspace_id, agent: { id: agent.id, name: agent.name, framework: agent.framework } };
     const r = await runTool(env, tool, agent.workspace_id ? { workspace_id: agent.workspace_id } : {});
     return { ok: !r.isError, text: r.content.map((c) => (c.type === 'text' ? c.text : `[image ${c.mimeType}]`)).join('\n'), structured: r.structuredContent };

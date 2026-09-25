@@ -9,7 +9,9 @@ import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { AGENT_FRAMEWORKS } from '../db/schema/sqlite.js';
 import { snippetsFor, renderSnippet } from '../agent/snippets.js';
-import { buildTools, runTool } from '../agent/tools.js';
+import { runTool } from '../agent/tools.js';
+import { toolRegistry } from '../agent/registry.js';
+import { semanticsOf } from '../agent/semantics.js';
 import { buildOpenApi, toolInputJsonSchema } from '../agent/openapi.js';
 import { forbidden, notFound } from '../services/errors.js';
 import type { Principal } from '../services/principal.js';
@@ -19,7 +21,7 @@ const AgentConfigSchema = z.object({ region: z.string().optional(), agent_id: z.
 
 export async function agentRoutes(app: FastifyInstance, ctx: AppContext) {
   app.addHook('preHandler', app.authenticate);
-  const tools = buildTools(ctx.cfg);
+  const tools = toolRegistry(ctx.cfg).all();
   const baseUrl = (req: { protocol: string; host: string }) => (ctx.cfg.server.public_url ?? `${req.protocol}://${req.host}`).replace(/\/+$/, '');
 
   // ------------------------------------------------------------------ registered agents
@@ -131,7 +133,7 @@ export async function agentRoutes(app: FastifyInstance, ctx: AppContext) {
 
   app.get('/api/agent/v1/tools', async (req) => {
     requireAgentScope(req.principal!);
-    return { tools: tools.map((t) => ({ name: t.name, title: t.title, description: t.description, annotations: t.annotations, input_schema: toolInputJsonSchema(t) })), mcp_url: `${baseUrl(req)}/mcp` };
+    return { tools: tools.map((t) => ({ name: t.name, title: t.title, description: t.description, annotations: t.annotations, semantics: semanticsOf(t), input_schema: toolInputJsonSchema(t) })), mcp_url: `${baseUrl(req)}/mcp` };
   });
 
   app.post('/api/agent/v1/tools/:name', async (req, reply) => {
