@@ -75,16 +75,23 @@ export async function withHeadless<T>(opts: HeadlessOptions, fn: (page: Headless
       let inFlight = 0;
       let lastActivity = Date.now();
       let requests = 0;
+      const tracked = new Set<string>();
       socket.on('message', (raw) => {
         const m = JSON.parse(String(raw)) as { id?: number; method?: string; result?: Record<string, unknown>; error?: { message: string } };
         if (m.id && pending.has(m.id)) {
           pending.get(m.id)!.resolve(m);
           pending.delete(m.id);
         } else if (m.method === 'Network.requestWillBeSent') {
+          // Streams that stay open by design (live events, sockets) never finish: they must not hold "idle" off.
+          const params = (m as { params?: { requestId?: string; type?: string; request?: { url?: string } } }).params ?? {};
+          if (params.type === 'EventSource' || params.type === 'WebSocket' || /\/api\/events\b/.test(params.request?.url ?? '')) return;
+          if (params.requestId) tracked.add(params.requestId);
           inFlight++;
           requests++;
           lastActivity = Date.now();
         } else if (m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') {
+          const requestId = (m as { params?: { requestId?: string } }).params?.requestId;
+          if (requestId && !tracked.delete(requestId)) return;
           inFlight = Math.max(0, inFlight - 1);
           lastActivity = Date.now();
         }

@@ -5,6 +5,8 @@ import { Prec } from '@codemirror/state';
 import { sql, PostgreSQL } from '@codemirror/lang-sql';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { useTheme } from '../../store/theme';
+import { formatSql } from '../../lib/formatSql';
+import { toast } from '../../components/ui';
 
 export interface SqlEditorHandle {
   /** Inserts text at the cursor (replacing any selection) and focuses the editor. */
@@ -12,6 +14,19 @@ export interface SqlEditorHandle {
   focus(): void;
   /** Selects a line (1-based) and scrolls to it, e.g. where an error points. */
   goToLine(line: number): void;
+  /** Formats the selection, or everything; one undo step. Throws when the SQL cannot be parsed. */
+  format(): void;
+}
+
+/** Formats the selection (or the whole document) in place, as one undoable change. */
+function formatIn(view: EditorView) {
+  const sel = view.state.selection.main;
+  const from = sel.empty ? 0 : sel.from;
+  const to = sel.empty ? view.state.doc.length : sel.to;
+  const before = view.state.sliceDoc(from, to);
+  if (!before.trim()) return;
+  const after = formatSql(before);
+  if (after !== before) view.dispatch({ changes: { from, to, insert: after }, selection: sel.empty ? { anchor: Math.min(sel.head, from + after.length) } : { anchor: from, head: from + after.length } });
 }
 
 interface Props {
@@ -45,6 +60,10 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({
     focus() {
       cm.current?.view?.focus();
     },
+    format() {
+      const view = cm.current?.view;
+      if (view) formatIn(view);
+    },
     goToLine(line) {
       const view = cm.current?.view;
       if (!view) return;
@@ -60,6 +79,17 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor({
       EditorView.lineWrapping,
       Prec.highest(
         keymap.of([
+          {
+            key: 'Mod-Shift-f',
+            run: (view) => {
+              try {
+                formatIn(view);
+              } catch (e) {
+                toast.error(`Could not format: ${(e as Error).message.split('\n')[0]}`);
+              }
+              return true;
+            },
+          },
           {
             key: 'Mod-Enter',
             run: (view) => {

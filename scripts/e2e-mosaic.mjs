@@ -1608,6 +1608,75 @@ try {
     };
     report.details.charts = 1;
   }
+  else if (scenario === 'global-search') {
+    // ⌘K searches the whole workspace on the server: a table by its description, a column by its tag.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const q = async (sql) => (await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) })).json();
+    const word = `zebrafish${Date.now() % 100000}`;
+    await q('CREATE OR REPLACE TABLE e2e_search_t AS SELECT 1 AS id, 2 AS e2e_secret_col');
+    await authed(`/api/workspaces/${wsId}/catalog/annotations`, { method: 'PUT', body: JSON.stringify({ object_name: 'e2e_search_t', description: `Holds the ${word} counts` }) });
+    await authed(`/api/workspaces/${wsId}/catalog/annotations`, { method: 'PUT', body: JSON.stringify({ object_name: 'e2e_search_t', column_name: 'e2e_secret_col', tags: [`${word}tag`] }) });
+    cleanup = async () => { await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {}); await q('DROP TABLE IF EXISTS e2e_search_t'); };
+    await evaluate(`location.hash = '#/'; 'ok'`);
+    await sleep(500);
+    const openPalette = async () => { await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK', modifiers: 4, windowsVirtualKeyCode: 75 }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'k', code: 'KeyK', modifiers: 4 }); await waitFor(`!!document.querySelector('[aria-label="Command palette"] input')`, 5000, 'palette'); };
+    await openPalette();
+    await setField('[aria-label="Command palette"] input', word);
+    await waitFor(`[...document.querySelectorAll('[aria-label="Command palette"] [role=option]')].some(o => o.textContent.includes('e2e_search_t'))`, 10000, 'table found by its description');
+    report.details.tableHit = await evaluate(`[...document.querySelectorAll('[aria-label="Command palette"] [role=option]')].find(o => o.textContent.includes('e2e_search_t')).textContent`);
+    report.details.groups = await evaluate(`[...document.querySelectorAll('[aria-label="Command palette"] [role=listbox] > div > div:first-child')].map(d => d.textContent).filter(t => t && !t.includes(' '))`);
+    await setField('[aria-label="Command palette"] input', `${word}tag`);
+    await waitFor(`[...document.querySelectorAll('[aria-label="Command palette"] [role=option]')].some(o => o.textContent.includes('e2e_secret_col'))`, 10000, 'column found by its tag');
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_palette.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`[...document.querySelectorAll('[aria-label="Command palette"] [role=option]')].find(o => o.textContent.includes('e2e_secret_col')).click(); 'ok'`);
+    await waitFor(`location.hash.startsWith('#/data') && document.querySelector('[data-testid="dataset-name"]')?.textContent === 'e2e_search_t'`, 20000, 'opens the table');
+    report.details.opened = true;
+    report.details.charts = 1;
+  }
+  else if (scenario === 'sql-tools') {
+    // Format the SQL, pivot the result, and read the measured plan.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql: "CREATE OR REPLACE TABLE e2e_pivot AS SELECT (['north','south','east'])[1 + range % 3] AS region, (['q1','q2'])[1 + range % 2] AS quarter, range AS amount FROM range(60)" }) });
+    const tab = (await (await authed(`/api/workspaces/${wsId}/tabs`, { method: 'POST', body: JSON.stringify({ title: 'E2E sql tools', sql_content: '' }) })).json()).tab;
+    cleanup = async () => {
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql: 'DROP TABLE IF EXISTS e2e_pivot' }) });
+      const tabs = (await (await authed(`/api/workspaces/${wsId}/tabs`)).json()).tabs ?? [];
+      for (const t of tabs.filter((t) => t.title === 'E2E sql tools' || t.title === 'Pivot')) await authed(`/api/workspaces/${wsId}/tabs/${t.id}`, { method: 'DELETE' }).catch(() => {});
+    };
+    await evaluate(`location.hash = '#/query'; location.reload(); 'ok'`);
+    await waitFor(`!!document.querySelector('.cm-content')`, 20000, 'editor');
+    await evaluate(`[...document.querySelectorAll('[role=tab], button')].find(b => b.textContent.trim().startsWith('E2E sql tools'))?.click(); 'ok'`);
+    await sleep(500);
+    await evaluate(`(() => { const el = document.querySelector('.cm-content'); el.focus(); document.execCommand('selectAll'); document.execCommand('insertText', false, "select region, quarter, amount from e2e_pivot where amount > 5"); return true; })()`);
+    await evaluate(`document.querySelector('[data-testid="format-sql"]').click(); 'ok'`);
+    await waitFor(`document.querySelector('.cm-content').innerText.includes('FROM')`, 5000, 'formatted');
+    report.details.formatted = await evaluate(`[...document.querySelectorAll('.cm-content .cm-line')].map(l => l.textContent)`);
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('Run')).click(); 'ok'`);
+    await waitFor(`/\\d+ rows/.test(document.querySelector('[data-testid="run-status"]')?.textContent ?? '')`, 20000, 'ran');
+    // Pivot: regions down the side, quarters across the top, amounts summed.
+    await evaluate(`[...document.querySelectorAll('[role=tab]')].find(t => t.textContent === 'Pivot').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="pivot-view"]')`, 5000, 'pivot view');
+    await setField('[data-testid="pivot-rows"]', 'region', 'change');
+    await setField('[data-testid="pivot-on"]', 'quarter', 'change');
+    await setField('[data-testid="pivot-agg"]', 'sum', 'change');
+    await setField('[data-testid="pivot-value"]', 'amount', 'change');
+    await evaluate(`document.querySelector('[data-testid="pivot-run"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="pivot-result"] tbody tr')`, 15000, 'pivot result');
+    report.details.pivotHeader = await evaluate(`[...document.querySelectorAll('[data-testid="pivot-result"] thead th')].map(t => t.textContent.trim())`);
+    report.details.pivotRows = await evaluate(`document.querySelectorAll('[data-testid="pivot-result"] tbody tr').length`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_pivot.png'), Buffer.from(shot.result.data, 'base64')); }
+    // The measured plan.
+    await evaluate(`[...document.querySelectorAll('[role=tab]')].find(t => t.textContent === 'Explain').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="plan-analyze"]')`, 5000, 'plan view');
+    await evaluate(`document.querySelector('[data-testid="plan-analyze"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="plan-summary"]')`, 20000, 'measured plan');
+    report.details.planSummary = await evaluate(`document.querySelector('[data-testid="plan-summary"]').textContent`);
+    report.details.planNodes = await evaluate(`[...document.querySelectorAll('[data-testid="plan-node"]')].map(n => n.dataset.name)`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_plan.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.tabId = tab?.id;
+    report.details.charts = 1;
+  }
   else if (scenario === 'data-explorer') {
     // A dataset, then one of its columns in depth, then where the table comes from.
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -2615,7 +2684,7 @@ try {
     if (d.errorPanel?.title !== 'The query failed' || !(d.errorPanel?.goto ?? []).includes('Go to line 2') || !(d.errorPanel?.goto ?? []).includes('Fix with AI')) problems.push(`error panel: ${JSON.stringify(d.errorPanel)}`);
     if (!/FROM nowhere_at_all/.test(d.selection ?? '')) problems.push(`go to line selected: ${JSON.stringify(d.selection)}`);
     if (d.saveFocus !== 'INPUT') problems.push(`save dialog focus: ${d.saveFocus}`);
-    if ((d.shortcuts ?? []).length !== 6) problems.push(`shortcuts: ${JSON.stringify(d.shortcuts)}`);
+    if ((d.shortcuts ?? []).length !== 7) problems.push(`shortcuts: ${JSON.stringify(d.shortcuts)}`);
   }
   if (scenario === 'location-browser') {
     if (JSON.stringify(d.places?.slice(0, 2)) !== JSON.stringify(['Data directory', 'Home'])) problems.push(`places: ${JSON.stringify(d.places)}`);
@@ -2671,6 +2740,17 @@ try {
     if (!/Failed/.test(d.failure ?? '')) problems.push(`failure row: ${d.failure}`);
     if (!(d.groups ?? []).some((cells) => cells.some((c) => c.endsWith(`AS ${d.tag}`)) && cells.includes('2'))) problems.push(`groups: ${JSON.stringify(d.groups)}`);
     if (d.rerun !== true) problems.push('rerun did not open a tab');
+  }
+  if (scenario === 'global-search') {
+    if (!/e2e_search_t/.test(d.tableHit ?? '') || !/zebrafish/.test(d.tableHit ?? '')) problems.push(`table hit: ${d.tableHit}`);
+    if (d.opened !== true) problems.push('the column result did not open its table');
+  }
+  if (scenario === 'sql-tools') {
+    if (JSON.stringify((d.formatted ?? []).slice(0, 5)) !== JSON.stringify(['SELECT', '  region,', '  quarter,', '  amount', 'FROM'])) problems.push(`formatted: ${JSON.stringify(d.formatted)}`);
+    if (!['region', 'q1', 'q2'].every((h) => (d.pivotHeader ?? []).some((x) => x.startsWith(h)))) problems.push(`pivot header: ${JSON.stringify(d.pivotHeader)}`);
+    if (d.pivotRows !== 3) problems.push(`pivot rows: ${d.pivotRows}`);
+    if (!/rows scanned/.test(d.planSummary ?? '') || !/slowest step/.test(d.planSummary ?? '')) problems.push(`plan summary: ${d.planSummary}`);
+    if (!(d.planNodes ?? []).some((n) => /SCAN/.test(n))) problems.push(`plan nodes: ${JSON.stringify(d.planNodes)}`);
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);

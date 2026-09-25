@@ -63,6 +63,7 @@ const VERBS: Record<string, (a: Args) => string> = {
   backup_workspace: () => 'Backed up the workspace',
   create_stream: (a) => `Created the stream ${q(str(a.name))}`,
   git_status: () => 'Checked Git for changes',
+  search_workspace: (a) => `Searched the workspace for ${q(str(a.query))}`,
   query_history: (a) => (a.search ? `Looked through past queries for ${q(str(a.search))}` : a.slowest ? 'Looked at the slowest past queries' : 'Looked at past queries'),
   git_commit: (a) => `Committed to Git: ${q(str(a.message))}`,
 };

@@ -1494,6 +1494,20 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
       },
     }),
 
+    define({
+      name: 'search_workspace',
+      title: 'Search the workspace',
+      description: 'Finds anything in the workspace by words: tables and views (name, description, tags), columns, data files, saved queries (their SQL too), dashboards (and their widgets), notebooks (and their cells), metrics and apps. Best matches first: a name match ranks above a description, which ranks above content. Use it to find where something already exists before building it again.',
+      inputSchema: { query: z.string().min(1).max(200), kinds: z.array(z.enum(['table', 'column', 'file', 'query', 'dashboard', 'notebook', 'metric', 'app'])).optional(), limit: z.number().int().min(1).max(100).optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { query, kinds, limit, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const hits = await env.ctx.search.search(env.principal, ws, query, { kinds, limit: limit ?? 25 });
+        const lines = hits.map((h) => `- ${h.kind} **${h.title}** (\`${h.id}\`)${h.subtitle ? ` · ${h.subtitle}` : ''}${h.snippet ? ` — “${h.snippet}”` : ''}`);
+        return { content: [text(`**Search: “${query}”** (${hits.length})\n${lines.join('\n') || '_(nothing matches)_'}`)], structuredContent: { status: 'ok', workspace_id: ws, hits } };
+      },
+    }),
+
     // ---------------------------------------------------------------- catalog & lineage
     define({
       name: 'search_catalog',
@@ -1755,4 +1769,4 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template', 'list_saved_queries', 'get_saved_query', 'save_query', 'search_catalog', 'get_lineage', 'annotate_table', 'get_dashboard', 'update_widget', 'remove_widget', 'define_metric', 'workspace_health', 'list_backups', 'backup_workspace', 'create_stream', 'git_status', 'git_commit', 'query_history'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template', 'list_saved_queries', 'get_saved_query', 'save_query', 'search_catalog', 'get_lineage', 'annotate_table', 'get_dashboard', 'update_widget', 'remove_widget', 'define_metric', 'workspace_health', 'list_backups', 'backup_workspace', 'create_stream', 'git_status', 'git_commit', 'query_history', 'search_workspace'] as const;

@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Search, CornerDownLeft, Table2, FileText, LayoutDashboard, Plus, Sparkles, Moon, Sun, Briefcase, ArrowRight, Upload, FileCode2, LayoutTemplate, ReceiptText } from 'lucide-react';
+import { Search, CornerDownLeft, Table2, FileText, LayoutDashboard, Plus, Sparkles, Moon, Sun, Briefcase, ArrowRight, Upload, FileCode2, LayoutTemplate, ReceiptText, Columns3, NotebookPen, Sigma, AppWindow } from 'lucide-react';
 import { SECTIONS, SUBPAGES } from '../../app/routes';
 import { useWorkspace } from '../../store/workspace';
 import { useCopilot } from '../../store/copilot';
 import { useTheme } from '../../store/theme';
 import { api, type Dashboard, type SavedQuery } from '../../api/client';
 import { usePalette } from './palette';
+import { metricsLink } from '../../features/copilot/CopilotDrawer';
 import { Kbd, cn } from '../ui';
 
 interface Command {
   id: string;
-  group: 'Go to' | 'Actions' | 'Datasets' | 'Saved queries' | 'Dashboards' | 'Workspaces' | 'Theme';
+  group: 'Go to' | 'Actions' | 'Datasets' | 'Columns' | 'Saved queries' | 'Dashboards' | 'Notebooks' | 'Metrics' | 'Apps' | 'Workspaces' | 'Theme';
   label: string;
   hint?: string;
   icon: ReactNode;
@@ -18,7 +19,9 @@ interface Command {
   run: () => void;
 }
 
-const GROUP_ORDER: Command['group'][] = ['Actions', 'Go to', 'Datasets', 'Saved queries', 'Dashboards', 'Workspaces', 'Theme'];
+const GROUP_ORDER: Command['group'][] = ['Datasets', 'Columns', 'Metrics', 'Saved queries', 'Dashboards', 'Notebooks', 'Apps', 'Actions', 'Go to', 'Workspaces', 'Theme'];
+
+interface SearchHit { kind: 'table' | 'column' | 'file' | 'query' | 'dashboard' | 'notebook' | 'metric' | 'app'; id: string; title: string; subtitle: string | null; match: 'name' | 'description' | 'content'; snippet: string | null; score: number }
 
 /** ⌘K: go anywhere, open any dataset, query or dashboard, and run the common actions. */
 export function CommandPalette() {
@@ -30,6 +33,7 @@ export function CommandPalette() {
   const [sel, setSel] = useState(0);
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [saved, setSaved] = useState<SavedQuery[]>([]);
+  const [hits, setHits] = useState<{ q: string; hits: SearchHit[] } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -55,6 +59,16 @@ export function CommandPalette() {
       void api.get<{ queries: SavedQuery[] }>(`/api/workspaces/${ws.activeId}/queries`).then((r) => setSaved(r.queries)).catch(() => setSaved([]));
     }
   }, [palette.open, ws.activeId]);
+
+  // As you type, the server searches everything in the workspace: descriptions, tags, columns, SQL, cells.
+  useEffect(() => {
+    const term = q.trim();
+    if (!palette.open || !ws.activeId || term.length < 2) return setHits(null);
+    const t = setTimeout(() => {
+      void api.get<{ hits: SearchHit[] }>(`/api/workspaces/${ws.activeId}/search?q=${encodeURIComponent(term)}&limit=40`).then((r) => setHits({ q: term, hits: r.hits }), () => setHits(null));
+    }, 150);
+    return () => clearTimeout(t);
+  }, [q, palette.open, ws.activeId]);
 
   const close = () => palette.setOpen(false);
   const go = (hash: string) => () => {
@@ -89,6 +103,25 @@ export function CommandPalette() {
     return out;
   }, [ws.catalog, ws.workspaces, ws.activeId, dashboards, saved, th.themeId, cp.open]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const serverCommands = useMemo<Command[] | null>(() => {
+    if (!hits || hits.q !== q.trim()) return null;
+    const openDataset = (name: string) => () => { if (ws.activeId) ws.setOverviewTarget(ws.activeId, name); location.hash = '#/data'; close(); };
+    const why = (h: SearchHit) => (h.snippet ? `${h.subtitle ? `${h.subtitle} · ` : ''}“${h.snippet}”` : h.subtitle ?? undefined);
+    return hits.hits.map((h): Command => {
+      const base = { id: `s-${h.kind}-${h.id}`, label: h.title, hint: why(h), keywords: `${h.title} ${h.snippet ?? ''} ${h.subtitle ?? ''}` };
+      switch (h.kind) {
+        case 'table': return { ...base, group: 'Datasets', icon: <Table2 className="h-4 w-4" />, run: openDataset(h.id) };
+        case 'file': return { ...base, group: 'Datasets', icon: <FileText className="h-4 w-4" />, run: openDataset(h.id) };
+        case 'column': return { ...base, group: 'Columns', icon: <Columns3 className="h-4 w-4" />, run: openDataset(h.id.slice(0, h.id.lastIndexOf('.'))) };
+        case 'query': return { ...base, group: 'Saved queries', icon: <FileCode2 className="h-4 w-4" />, run: () => { const sq = saved.find((x) => x.id === h.id); if (sq) void ws.addTab({ title: sq.name, sql: sq.sql_text }); location.hash = '#/query'; close(); } };
+        case 'dashboard': return { ...base, group: 'Dashboards', icon: <LayoutDashboard className="h-4 w-4" />, run: go(`#/dashboards/${h.id}`) };
+        case 'notebook': return { ...base, group: 'Notebooks', icon: <NotebookPen className="h-4 w-4" />, run: go(`#/notebooks/${h.id}`) };
+        case 'metric': return { ...base, group: 'Metrics', icon: <Sigma className="h-4 w-4" />, run: go(metricsLink({ metrics: [h.id] })) };
+        default: return { ...base, group: 'Apps', icon: <AppWindow className="h-4 w-4" />, run: go(`#/apps/${h.id}`) };
+      }
+    });
+  }, [hits, q, saved, ws.activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filtered = useMemo(() => {
     const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
     const score = (c: Command) => {
@@ -96,7 +129,10 @@ export function CommandPalette() {
       if (!terms.every((t) => hay.includes(t))) return -1;
       return c.label.toLowerCase().startsWith(terms[0] ?? '') ? 2 : 1;
     };
-    const hits = commands.map((c) => ({ c, s: score(c) })).filter((x) => x.s >= 0);
+    // Server results replace the client's own lists of datasets, queries and dashboards once they arrive.
+    const replaced = new Set<Command['group']>(serverCommands ? ['Datasets', 'Saved queries', 'Dashboards'] : []);
+    const local = commands.filter((c) => !replaced.has(c.group)).map((c) => ({ c, s: score(c) })).filter((x) => x.s >= 0);
+    const hits = [...local, ...(serverCommands ?? []).map((c, i) => ({ c, s: 100 - i }))];
     // Without a query, show actions and navigation only; datasets and the rest appear as you type.
     const base = terms.length ? hits : hits.filter((x) => x.c.group === 'Actions' || x.c.group === 'Go to');
     const found = GROUP_ORDER.flatMap((g) => base.filter((x) => x.c.group === g).sort((a, b) => b.s - a.s).slice(0, terms.length ? 8 : 20).map((x) => x.c));
@@ -107,7 +143,7 @@ export function CommandPalette() {
       return found.length ? [...found, ask] : [ask];
     }
     return found;
-  }, [commands, q]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [commands, serverCommands, q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setSel(0), [q]);
   useEffect(() => {

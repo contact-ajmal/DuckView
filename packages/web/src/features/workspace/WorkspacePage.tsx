@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search, Send, XCircle, Keyboard, Sparkles } from 'lucide-react';
+import { Play, Square, Plus, X, Download, ShieldAlert, Trash2, Copy, Check, FileUp, RefreshCw, Save, Wrench, FolderOpen, PanelLeft, Layers, DatabaseZap, Workflow, MoreHorizontal, Search, Send, XCircle, Keyboard, Sparkles, AlignLeft } from 'lucide-react';
 import { useWorkspace, useWorkspaceAccess, lakehouseEngine, engineConnectionId } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { fetchCached } from '../../lib/useCached';
@@ -15,6 +15,7 @@ import { ExploreView } from '../explore/ExploreView';
 import { SchemaTree } from './SchemaTree';
 import { SavedQueriesTree } from './SavedQueries';
 import { QueryHistoryDrawer, HistoryList } from './QueryHistory';
+import { PivotView } from './PivotView';
 import { REVERSE_DRAFT_KEY } from '../connections/ReversePanel';
 import { HistoryDrawer } from '../history/HistoryDrawer';
 import { ApprovalCard } from '../../components/ai';
@@ -32,7 +33,7 @@ import { Badge, Button, Empty, IconButton, Input, Label, Menu, MenuDivider, Menu
 import { usePageObject } from '../../store/context';
 import { LocationBrowser } from '../../components/data';
 
-type View = 'table' | 'schema' | 'chart' | 'plan' | 'profile' | 'explore';
+type View = 'table' | 'schema' | 'chart' | 'pivot' | 'plan' | 'profile' | 'explore';
 
 export function WorkspacePage() {
   const ws = useWorkspace();
@@ -467,6 +468,7 @@ export function WorkspacePage() {
             <Select uiSize="sm" value={ws.maxRows} onChange={(e) => ws.setMaxRows(Number(e.target.value))} title="Row limit for the grid" aria-label="Row limit">
               {[100, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n.toLocaleString()} rows</option>)}
             </Select>
+            <Button size="sm" variant="ghost" onClick={() => { try { editor.current?.format(); } catch (e) { toast.error(`Could not format: ${(e as Error).message.split('\n')[0]}`); } }} disabled={!sql.trim()} title="Format the SQL (⌘⇧F)" data-testid="format-sql"><AlignLeft className="h-3.5 w-3.5" /> Format</Button>
             <Button size="sm" variant="ghost" onClick={openSave} disabled={!sql.trim() || !canWrite} title="Save to the query library"><Save className="h-3.5 w-3.5" /> Save</Button>
             <Menu
               width="w-60"
@@ -522,6 +524,7 @@ export function WorkspacePage() {
           tabs={[
             { id: 'table', label: 'Results' },
             { id: 'chart', label: 'Chart' },
+            { id: 'pivot', label: 'Pivot' },
             { id: 'profile', label: 'Profile' },
             { id: 'plan', label: 'Explain' },
             { id: 'schema', label: 'Schema' },
@@ -603,6 +606,7 @@ export function WorkspacePage() {
           />
         )}
         {view === 'chart' && tab && (chartable ? <ChartPanel columns={result!.columns} rows={result!.rows} config={tab.chart_config} onChange={(c: ChartConfig) => void ws.setChart(tab.id, c)} /> : <Empty title="Run a query to chart it" />)}
+        {view === 'pivot' && <PivotView workspaceId={workspace.id} sql={executed ? result.sql ?? sql : ''} columns={executed ? result.columns : []} onOpenSql={(s) => void ws.addTab({ title: 'Pivot', sql: s })} />}
         {view === 'plan' && <PlanView plan={plan} loading={planLoading} onExplain={() => void explain(false)} onAnalyze={() => void explain(true)} />}
         {view === 'explore' && (
           // Explores the tab's SQL as it is in the editor (a single SELECT); the view is rebuilt when the SQL changes.
@@ -711,6 +715,7 @@ export function WorkspacePage() {
           {([
             ['Run the editor, or the selection', ['⌘', '↵']],
             ['Explain the query', ['⌘', '⇧', '↵']],
+            ['Format the SQL, or the selection', ['⌘', '⇧', 'F']],
             ['Stop the running query', ['Esc']],
             ['Save to the query library', ['⌘', 'S']],
             ['Search data, queries and commands', ['⌘', 'K']],

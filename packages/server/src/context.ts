@@ -41,6 +41,7 @@ import { UsageService } from './services/usage.js';
 import { TemplateService } from './services/templates.js';
 import { WorkspaceAdminService } from './services/workspace-admin.js';
 import { QueryHistoryService } from './services/query-history.js';
+import { SearchService } from './services/search.js';
 import { WorkspaceLifecycleService } from './services/workspace-lifecycle.js';
 import { ClusterService } from './services/cluster.js';
 import { ReverseEtlService } from './services/reverse-etl.js';
@@ -107,6 +108,7 @@ export interface AppContext {
   templates: TemplateService;
   workspaceAdmin: WorkspaceAdminService;
   queryHistory: QueryHistoryService;
+  search: SearchService;
   lifecycle: WorkspaceLifecycleService;
   cluster: ClusterService;
   /** Cluster mode: joins the cluster at this URL once the server listens (then starts stream consumers). */
@@ -298,6 +300,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   const templates = new TemplateService(store);
   const workspaceAdmin = new WorkspaceAdminService(store);
   const queryHistory = new QueryHistoryService(store, workspaces);
+  const search = new SearchService(store);
   const lifecycle = new WorkspaceLifecycleService(store);
   queries.quota = (id, mutating) => lifecycle.checkQuery(id, mutating);
   workspaces.memoryCap = (limit) => lifecycle.capMemory(limit);
@@ -355,6 +358,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
     templates,
     workspaceAdmin,
     queryHistory,
+    search,
     lifecycle,
     cluster,
     startCluster,
@@ -401,6 +405,7 @@ export async function createContext(cfg: DuckViewConfig, opts: { providerFactory
   orchestrate.bind(ctx);
   templates.bind(ctx);
   workspaceAdmin.bind(ctx);
+  search.bind(ctx);
   lifecycle.bind(ctx);
   return ctx;
 }

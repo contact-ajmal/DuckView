@@ -665,7 +665,7 @@ export class WorkspaceEngine {
     }
   }
 
-  async explain(rawSql: string, opts: { analyze?: boolean; timeoutMs?: number } = {}): Promise<{ format: 'json' | 'text'; plan: unknown; text: string }> {
+  async explain(rawSql: string, opts: { analyze?: boolean; timeoutMs?: number } = {}): Promise<{ format: 'json' | 'text'; plan: unknown; text: string; summary?: { latency_s: number | null; rows_scanned: number | null; peak_memory_bytes: number | null } }> {
     const guarded = this.guard(rawSql);
     if (guarded.analysis.statements.length !== 1) throw new Error('EXPLAIN requires exactly one statement');
     const inner = stripTrailingSemicolon(guarded.sql).replace(/^\s*EXPLAIN(\s+ANALYZE)?\s*(\([^)]*\))?\s*/i, '');
@@ -674,9 +674,18 @@ export class WorkspaceEngine {
     return this.withConnection(
       async (conn) => {
         if (opts.analyze) {
-          const r = await conn.runAndReadAll(`EXPLAIN ANALYZE ${inner}`);
-          const text = r.getRowsJson().map((row) => String(row[1] ?? '')).join('\n');
-          return { format: 'text' as const, plan: null, text };
+          // The measured plan as a tree: each operator's time, rows out and rows scanned, plus the query's totals.
+          try {
+            const r = await conn.runAndReadAll(`EXPLAIN (ANALYZE, FORMAT json) ${inner}`);
+            const prof = JSON.parse(String(r.getRowsJson()[0]?.[1] ?? '{}')) as ProfileNode & { latency?: number; cumulative_rows_scanned?: number; system_peak_buffer_memory?: number; rows_returned?: number };
+            const top = (prof.children ?? []).flatMap((c) => (c.operator_type === 'EXPLAIN_ANALYZE' ? c.children ?? [] : [c]));
+            const plan = top.map(toPlanNode);
+            return { format: 'json' as const, plan, text: renderPlanText(plan), summary: { latency_s: prof.latency ?? null, rows_scanned: prof.cumulative_rows_scanned ?? null, peak_memory_bytes: prof.system_peak_buffer_memory ?? null } };
+          } catch {
+            const r = await conn.runAndReadAll(`EXPLAIN ANALYZE ${inner}`);
+            const text = r.getRowsJson().map((row) => String(row[1] ?? '')).join('\n');
+            return { format: 'text' as const, plan: null, text };
+          }
         }
         try {
           const r = await conn.runAndReadAll(`EXPLAIN (FORMAT json) ${inner}`);
@@ -1305,4 +1314,28 @@ export class EngineManager {
     clearInterval(this.sweeper);
     for (const id of [...this.engines.keys()]) this.evict(id);
   }
+}
+
+/** One operator of DuckDB's JSON profile (EXPLAIN (ANALYZE, FORMAT json)). */
+interface ProfileNode { operator_name?: string; operator_type?: string; operator_timing?: number; operator_cardinality?: number; operator_rows_scanned?: number; extra_info?: Record<string, unknown>; children?: ProfileNode[] }
+interface PlanTreeNode { name: string; extra_info: Record<string, unknown>; children: PlanTreeNode[] }
+
+/** A profile operator in the same shape as EXPLAIN (FORMAT json), with the measurements as extra_info. */
+function toPlanNode(n: ProfileNode): PlanTreeNode {
+  return {
+    name: String(n.operator_name ?? n.operator_type ?? 'OPERATOR').trim(),
+    extra_info: { ...(n.extra_info ?? {}), Timing: n.operator_timing ?? 0, 'Actual Rows': n.operator_cardinality ?? 0, ...(n.operator_rows_scanned ? { 'Rows Scanned': n.operator_rows_scanned } : {}) },
+    children: (n.children ?? []).map(toPlanNode),
+  };
+}
+
+/** An indented text rendering of a plan tree (for copying). */
+function renderPlanText(nodes: PlanTreeNode[], depth = 0): string {
+  return nodes
+    .map((n) => {
+      const i = n.extra_info;
+      const line = `${'  '.repeat(depth)}${n.name}  ${typeof i.Timing === 'number' ? `${(i.Timing * 1000).toFixed(2)} ms  ` : ''}${i['Actual Rows'] != null ? `${Number(i['Actual Rows']).toLocaleString()} rows` : ''}`;
+      return [line, renderPlanText(n.children, depth + 1)].filter(Boolean).join('\n');
+    })
+    .join('\n');
 }

@@ -51,6 +51,13 @@ export async function queryRoutes(app: FastifyInstance, ctx: AppContext) {
     return ctx.queryHistory.list(req.principal!, (req.params as { id: string }).id, { ...q, group: q.group === '1' });
   });
 
+  // One search across the workspace's tables, columns, files, queries, dashboards, notebooks, metrics and apps.
+  app.get('/api/workspaces/:id/search', { preHandler: app.authenticate }, async (req) => {
+    const q = z.object({ q: z.string().max(200).default(''), limit: z.coerce.number().int().min(1).max(200).optional(), kinds: z.string().max(200).optional() }).parse(req.query ?? {});
+    const kinds = q.kinds ? (q.kinds.split(',').filter(Boolean) as never) : undefined;
+    return { hits: await ctx.search.search(req.principal!, (req.params as { id: string }).id, q.q, { limit: q.limit, kinds }) };
+  });
+
   app.get('/api/workspaces/:id/catalog', { preHandler: app.authenticate }, async (req) => {
     const { id } = req.params as { id: string };
     return ctx.queries.catalog(req.principal!, id);
