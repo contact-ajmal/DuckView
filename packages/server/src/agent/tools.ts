@@ -12,6 +12,7 @@ import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import type { Principal } from '../services/principal.js';
 import { HitlBlocked } from '../services/query.js';
+import { analyzeSql } from '../engine/sql-guard.js';
 import { SandboxViolation } from '../engine/sandbox.js';
 import { QueryTimeoutError } from '../engine/duckdb.js';
 import { toMarkdownTable, truncateCell, formatBytes, type QueryResult } from '../engine/results.js';
@@ -76,6 +77,21 @@ export function errorResult(err: unknown): ToolResult {
 
 function truncateRows(result: QueryResult, maxCellChars: number): unknown[][] {
   return result.rows.map((r) => r.map((v) => (typeof v === 'string' && v.length > maxCellChars ? truncateCell(v, maxCellChars) : typeof v === 'object' && v !== null && JSON.stringify(v).length > maxCellChars ? truncateCell(v, maxCellChars) : v)));
+}
+
+/** Agents confirm changes a person must approve by calling again with dry_run=false (humans in the UI are exempt). */
+function needsApproval(env: ToolEnv, dryRun: boolean | undefined, reason: string, verb: string, preview: string) {
+  if (env.principal.actorType !== 'AGENT' || !env.ctx.cfg.mcp.require_confirmation_for_mutations || dryRun === false) return;
+  throw new HitlBlocked({ status: 'approval_required', reason: `${reason} Confirm with dry_run=false to proceed.`, statement_classes: ['CHANGE'], mutating_verbs: [verb.toUpperCase()], statements: [{ index: 0, verb: verb.toUpperCase(), class: 'CHANGE', preview }], how_to_proceed: 'Show this to the human operator. If they approve, call the tool again with the same arguments and `dry_run: false`.' });
+}
+
+/** A dashboard by id or name (in the workspace when given). */
+async function findDashboard(env: ToolEnv, ref: string, workspaceId?: string) {
+  const want = ref.trim().toLowerCase();
+  const list = workspaceId ? await env.ctx.dashboards.list(env.principal, workspaceId) : await env.ctx.dashboards.listAll(env.principal);
+  const d = list.find((x) => x.id === ref) ?? list.find((x) => x.name.toLowerCase() === want);
+  if (!d) throw new HttpError(404, `No dashboard ${ref} — list_dashboards shows them`, 'NOT_FOUND');
+  return env.ctx.dashboards.get(env.principal, d.id);
 }
 
 export function resolveWorkspace(env: ToolEnv, id?: string | null): string {
@@ -408,7 +424,8 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
           ws = existing.workspace_id;
         }
         if (widget_type !== 'MARKDOWN') {
-          // Dry-run the SQL so agents get immediate feedback on broken queries.
+          // Widgets only read; then run the SQL once so agents get immediate feedback on broken queries.
+          if (analyzeSql(sql).isMutating) throw new HttpError(400, 'Widget SQL must be read-only', 'BAD_REQUEST');
           await env.ctx.queries.run(env.principal, ws, sql, { maxRows: 5, dryRun: true });
         }
         const cfgW = (chart_config ?? {}) as Record<string, unknown>;
@@ -1402,7 +1419,340 @@ export function buildTools(cfg: AppContext['cfg']): ToolDef[] {
         return { content: [text(`**${remote.name}** (${r.state})${r.context_id ? ` · context_id ${r.context_id}` : ''}:\n\n${r.text}`)], structuredContent: { status: r.state === 'completed' ? 'ok' : 'error', agent: { kind: 'remote', id: remote.id, name: remote.name }, answer: r.text, state: r.state, task_id: r.task_id, context_id: r.context_id } };
       },
     }),
+
+    // ---------------------------------------------------------------- saved queries
+    define({
+      name: 'list_saved_queries',
+      title: 'List saved queries',
+      description: 'The workspace\'s query library: saved queries with their folder, description and tags (no SQL; use get_saved_query). Reuse a saved query before writing a new one — dashboards and people already rely on them.',
+      inputSchema: { workspace_id: z.string().optional(), search: z.string().optional().describe('Filter by words in the name, folder, description or tags') },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id, search }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const words = (search ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+        const all = await env.ctx.savedQueries.list(env.principal, ws);
+        const list = all.filter((q) => words.every((w) => `${q.name} ${q.folder} ${q.description ?? ''} ${q.tags.join(' ')}`.toLowerCase().includes(w)));
+        const lines = list.map((q) => `- **${q.name}** (\`${q.id}\`)${q.folder ? ` in ${q.folder}` : ''}${q.description ? ` — ${q.description}` : ''}${q.tags.length ? ` · ${q.tags.join(', ')}` : ''}`);
+        return { content: [text(`**Saved queries** (${list.length}${search ? ` matching “${search}”` : ''})\n${lines.join('\n') || '_(none)_'}`)], structuredContent: { status: 'ok', workspace_id: ws, queries: list.map((q) => ({ id: q.id, name: q.name, folder: q.folder, description: q.description, tags: q.tags, updated_at: q.updated_at })) } };
+      },
+    }),
+
+    define({
+      name: 'get_saved_query',
+      title: 'Get saved query',
+      description: 'One saved query with its SQL, by id or by name.',
+      inputSchema: { query: z.string().describe('saved query id or name'), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { query, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const want = query.trim().toLowerCase();
+        const q = (await env.ctx.savedQueries.list(env.principal, ws)).find((x) => x.id === query || x.name.toLowerCase() === want);
+        if (!q) throw new HttpError(404, `No saved query ${query} — list_saved_queries shows them`, 'NOT_FOUND');
+        return { content: [text(`**${q.name}** (\`${q.id}\`)${q.description ? `\n${q.description}` : ''}\n\n\`\`\`sql\n${q.sql_text}\n\`\`\``)], structuredContent: { status: 'ok', query: { id: q.id, name: q.name, folder: q.folder, description: q.description, tags: q.tags, sql: q.sql_text } } };
+      },
+    }),
+
+    define({
+      name: 'save_query',
+      title: 'Save query',
+      description: 'Adds a query to the workspace\'s library (or updates the one with this id) so people can find, run and chart it. The SQL is checked to be read-only and run once to confirm it works.',
+      inputSchema: {
+        name: z.string().min(1).max(200),
+        sql: z.string().min(1),
+        folder: z.string().max(200).optional(),
+        description: z.string().max(2000).optional(),
+        tags: z.array(z.string().max(40)).max(12).optional(),
+        query_id: z.string().optional().describe('Update this saved query instead of creating one'),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { name, sql, folder, description, tags, query_id, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        // Checked before it runs: a saved query never changes data.
+        if (analyzeSql(sql).isMutating) throw new HttpError(400, 'Saved queries are read-only SELECT statements', 'BAD_REQUEST');
+        const r = await env.ctx.queries.run(env.principal, ws, sql, { maxRows: 1, cache: false });
+        const input = { name, sql_text: sql, folder: folder ?? '', description: description ?? null, tags: tags ?? [] };
+        const q = query_id ? await env.ctx.savedQueries.update(env.principal, ws, query_id, input) : await env.ctx.savedQueries.create(env.principal, ws, input);
+        return { content: [text(`${query_id ? 'Updated' : 'Saved'} **${q.name}** (\`${q.id}\`). It returns ${r.columns.length} column${r.columns.length === 1 ? '' : 's'}: ${r.columns.map((c) => c.name).join(', ')}.`)], structuredContent: { status: 'ok', query: { id: q.id, name: q.name, folder: q.folder }, columns: r.columns.map((c) => c.name) } };
+      },
+    }),
+
+    define({
+      name: 'query_history',
+      title: 'Query history',
+      description: 'Statements already run in the workspace, newest or slowest first: yours by default; owners can ask for everyone\'s or agents\'. Search by words in the SQL, keep only failures, or group identical statements (runs, errors, average time). Use it to reuse what worked, find slow queries, or see what failed.',
+      inputSchema: { search: z.string().max(500).optional(), who: z.enum(['me', 'everyone', 'agents']).optional(), errors_only: z.boolean().optional(), slowest: z.boolean().optional(), grouped: z.boolean().optional(), limit: z.number().int().min(1).max(100).optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, a) {
+        const ws = resolveWorkspace(env, a.workspace_id);
+        const r = await env.ctx.queryHistory.list(env.principal, ws, { q: a.search, who: a.who, status: a.errors_only ? 'error' : 'all', sort: a.slowest ? 'slowest' : 'recent', group: a.grouped, limit: a.limit ?? 20 });
+        const one = (s: string) => s.replace(/\s+/g, ' ').slice(0, 300);
+        const lines = r.groups
+          ? r.groups.map((g) => `- ${g.runs}× · avg ${g.avg_ms} ms${g.errors ? ` · ${g.errors} failed` : ''} · last ${g.last_at}\n  \`${one(g.sql)}\``)
+          : (r.runs ?? []).map((x) => `- ${x.at} · ${x.who} · ${x.status === 'ok' ? `${x.duration_ms ?? '?'} ms` : `${x.status}: ${(x.error ?? '').split('\n')[0]}`}\n  \`${one(x.sql)}\``);
+        return { content: [text(`**Query history** (${r.who === 'me' ? 'yours' : r.who})\n${lines.join('\n') || '_(nothing yet)_'}`)], structuredContent: { status: 'ok', ...r } };
+      },
+    }),
+
+    // ---------------------------------------------------------------- catalog & lineage
+    define({
+      name: 'search_catalog',
+      title: 'Search the catalog',
+      description: 'Finds tables, views and columns by name, description or tag, with their documented meaning. Use it before writing SQL against an unfamiliar workspace: "revenue", "customer email", "pii".',
+      inputSchema: { query: z.string().min(1), workspace_id: z.string().optional(), limit: z.number().int().min(1).max(100).optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { query, workspace_id, limit }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+        const objects = await env.ctx.lineage.catalog(env.principal, ws);
+        const hits: { object: string; column: string | null; type: string; description: string | null; tags: string[]; score: number }[] = [];
+        const score = (hay: string, name: string) => (words.every((w) => hay.includes(w)) ? (words.every((w) => name.includes(w)) ? 2 : 1) : 0);
+        for (const o of objects) {
+          const full = o.schema === 'main' ? o.name : `${o.schema}.${o.name}`;
+          const s = score(`${full} ${o.description ?? ''} ${o.tags.join(' ')}`.toLowerCase(), full.toLowerCase());
+          if (s) hits.push({ object: full, column: null, type: o.type, description: o.description, tags: o.tags, score: s + 1 });
+          for (const c of o.columns) {
+            const cs = score(`${c.name} ${c.description ?? ''} ${c.tags.join(' ')} ${full}`.toLowerCase(), c.name.toLowerCase());
+            if (cs) hits.push({ object: full, column: c.name, type: c.type, description: c.description, tags: c.tags, score: cs });
+          }
+        }
+        hits.sort((a, b) => b.score - a.score);
+        const top = hits.slice(0, limit ?? 30);
+        const lines = top.map((h) => `- \`${h.object}${h.column ? `.${h.column}` : ''}\` (${h.column ? h.type.toLowerCase() : h.type.toLowerCase()})${h.description ? ` — ${h.description}` : ''}${h.tags.length ? ` · ${h.tags.join(', ')}` : ''}`);
+        return { content: [text(`**Catalog matches for “${query}”** (${top.length}${hits.length > top.length ? ` of ${hits.length}` : ''})\n${lines.join('\n') || '_(nothing matches)_'}`)], structuredContent: { status: 'ok', workspace_id: ws, matches: top.map(({ score: _s, ...h }) => h) } };
+      },
+    }),
+
+    define({
+      name: 'get_lineage',
+      title: 'Get lineage',
+      description: 'Where a table comes from and what depends on it: syncs, dbt projects, streams and files upstream; saved queries, dashboards, notebooks, alerts and apps downstream. Omit object for the whole workspace graph.',
+      inputSchema: { object: z.string().optional().describe('Table, view or file to centre on'), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { object, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const g = await env.ctx.lineage.graph(env.principal, ws);
+        const label = new Map(g.nodes.map((n) => [n.id, `${n.kind} ${n.label}`]));
+        if (!object) {
+          const lines = g.edges.slice(0, 200).map((e) => `- ${label.get(e.from) ?? e.from} —${e.kind}→ ${label.get(e.to) ?? e.to}`);
+          return { content: [text(`**Lineage** (${g.nodes.length} nodes, ${g.edges.length} edges)\n${lines.join('\n') || '_(nothing connected yet)_'}`)], structuredContent: { status: 'ok', nodes: g.nodes, edges: g.edges } };
+        }
+        const want = object.trim().toLowerCase().replace(/^main\./, '');
+        const node = g.nodes.find((n) => n.label.toLowerCase() === want || n.label.toLowerCase().replace(/^main\./, '') === want || n.id.toLowerCase().endsWith(want));
+        if (!node) throw new HttpError(404, `${object} is not in the lineage graph`, 'NOT_FOUND');
+        const up = g.edges.filter((e) => e.to === node.id).map((e) => ({ kind: e.kind, from: label.get(e.from) ?? e.from }));
+        const down = g.edges.filter((e) => e.from === node.id).map((e) => ({ kind: e.kind, to: label.get(e.to) ?? e.to }));
+        return {
+          content: [text(`**${node.label}** (${node.kind})${node.description ? ` — ${node.description}` : ''}\n\n**Upstream** (${up.length})\n${up.map((u) => `- ${u.from} (${u.kind})`).join('\n') || '_(none)_'}\n\n**Downstream** (${down.length})\n${down.map((d) => `- ${d.to} (${d.kind})`).join('\n') || '_(none)_'}`)],
+          structuredContent: { status: 'ok', node, upstream: up, downstream: down },
+        };
+      },
+    }),
+
+    define({
+      name: 'annotate_table',
+      title: 'Document a table',
+      description: 'Writes the catalog description and tags of a table or one of its columns, so people and agents know what it means. Tags are lower-case words (e.g. pii, finance, deprecated). Pass description null to clear it.',
+      inputSchema: { object: z.string().min(1), column: z.string().optional(), description: z.string().max(4000).nullable().optional(), tags: z.array(z.string().max(40)).max(20).optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { object, column, description, tags, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const a = await env.ctx.lineage.annotate(env.principal, ws, { object_name: object, column_name: column ?? null, description, tags });
+        return { content: [text(`Documented \`${object}${column ? `.${column}` : ''}\`${a?.description ? `: ${a.description}` : ''}${a?.tags?.length ? ` · tags ${a.tags.join(', ')}` : ''}.`)], structuredContent: { status: 'ok', annotation: a } };
+      },
+    }),
+
+    // ---------------------------------------------------------------- dashboards (read, edit)
+    define({
+      name: 'get_dashboard',
+      title: 'Get dashboard',
+      description: 'One dashboard with every widget: its id, type, SQL (or saved query), chart configuration and place in the layout. Use before update_widget or remove_widget.',
+      inputSchema: { dashboard: z.string().describe('dashboard id or name'), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { dashboard, workspace_id }) {
+        const d = await findDashboard(env, dashboard, workspace_id);
+        const lines = d.widgets.map((w) => `- **${w.title}** (\`${w.id}\`, ${w.widget_type})${w.saved_query_id ? ` · saved query \`${w.saved_query_id}\`` : ''}${w.custom_sql ? `\n  \`\`\`sql\n  ${w.custom_sql.replace(/\n/g, '\n  ')}\n  \`\`\`` : ''}`);
+        return { content: [text(`**${d.name}** (\`${d.id}\`, ${d.kind})${d.description ? ` — ${d.description}` : ''}\n${lines.join('\n') || '_(no widgets)_'}`)], structuredContent: { status: 'ok', dashboard: { id: d.id, name: d.name, description: d.description, kind: d.kind, layout: d.layout, spec: d.spec, workspace_id: d.workspace_id, widgets: d.widgets.map((w) => ({ id: w.id, title: w.title, widget_type: w.widget_type, custom_sql: w.custom_sql, saved_query_id: w.saved_query_id, chart_config: w.chart_config, refresh_interval_sec: w.refresh_interval_sec })) } } };
+      },
+    }),
+
+    define({
+      name: 'update_widget',
+      title: 'Update dashboard widget',
+      description: 'Changes a widget: its title, SQL, type, chart configuration or refresh interval. New SQL is checked to be read-only and run once.',
+      inputSchema: {
+        dashboard: z.string().describe('dashboard id or name'),
+        widget_id: z.string(),
+        title: z.string().min(1).optional(),
+        sql: z.string().min(1).optional(),
+        widget_type: z.enum(['KPI', 'CHART', 'TABLE', 'MARKDOWN']).optional(),
+        chart_config: z.record(z.string(), z.unknown()).optional(),
+        refresh_interval_sec: z.number().int().min(0).max(86400).optional(),
+        workspace_id: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { dashboard, widget_id, title, sql, widget_type, chart_config, refresh_interval_sec, workspace_id }) {
+        const d = await findDashboard(env, dashboard, workspace_id);
+        const w = d.widgets.find((x) => x.id === widget_id);
+        if (!w) throw new HttpError(404, `No widget ${widget_id} on ${d.name} — get_dashboard lists them`, 'NOT_FOUND');
+        if (sql) {
+          if (analyzeSql(sql).isMutating) throw new HttpError(400, 'Widget SQL must be read-only', 'BAD_REQUEST');
+          await env.ctx.queries.run(env.principal, d.workspace_id, sql, { maxRows: 1, cache: false });
+        }
+        const next = await env.ctx.dashboards.updateWidget(env.principal, d.id, widget_id, { ...(title ? { title } : {}), ...(sql ? { custom_sql: sql, saved_query_id: null } : {}), ...(widget_type ? { widget_type } : {}), ...(chart_config ? { chart_config: chart_config as never } : {}), ...(refresh_interval_sec !== undefined ? { refresh_interval_sec } : {}) });
+        return { content: [text(`Updated **${next.title}** on ${d.name}.`)], structuredContent: { status: 'ok', widget: { id: next.id, title: next.title, widget_type: next.widget_type } } };
+      },
+    }),
+
+    define({
+      name: 'remove_widget',
+      title: 'Remove dashboard widget',
+      description: 'Removes a widget from a dashboard. Needs a person\'s approval: call with dry_run=false only after they agreed.',
+      inputSchema: { dashboard: z.string().describe('dashboard id or name'), widget_id: z.string(), workspace_id: z.string().optional(), dry_run: z.boolean().optional().describe('Default true. Set false once approved.') },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      async handler(env, { dashboard, widget_id, workspace_id, dry_run }) {
+        const d = await findDashboard(env, dashboard, workspace_id);
+        const w = d.widgets.find((x) => x.id === widget_id);
+        if (!w) throw new HttpError(404, `No widget ${widget_id} on ${d.name}`, 'NOT_FOUND');
+        needsApproval(env, dry_run, `remove_widget deletes the widget "${w.title}" from the dashboard "${d.name}".`, 'remove_widget', `widget ${w.title}`);
+        await env.ctx.dashboards.removeWidget(env.principal, d.id, widget_id);
+        return { content: [text(`Removed **${w.title}** from ${d.name}.`)], structuredContent: { status: 'ok', removed: widget_id } };
+      },
+    }),
+
+    // ---------------------------------------------------------------- metrics layer
+    define({
+      name: 'define_metric',
+      title: 'Define metrics',
+      description:
+        'Adds semantic models and metrics to the workspace\'s metrics layer (YAML, same format as list_metrics shows: semantic_models with table, entities, dimensions and measures; metrics of type simple, ratio or derived). Existing names are kept. Validated before it is saved. Needs a person\'s approval: call with dry_run=false only after they agreed.',
+      inputSchema: { yaml: z.string().min(1).max(100_000), workspace_id: z.string().optional(), dry_run: z.boolean().optional().describe('Default true. Set false once approved.') },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      async handler(env, { yaml, workspace_id, dry_run }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const current = (await env.ctx.semantic.get(env.principal, ws)).yaml ?? '';
+        const merged = env.ctx.templates.mergeSemantic(current, yaml);
+        needsApproval(env, dry_run, 'define_metric changes the metrics layer that dashboards and people query.', 'define_metric', yaml.slice(0, 400));
+        await env.ctx.semantic.save(env.principal, ws, merged);
+        const def = await env.ctx.semantic.definition(ws);
+        return { content: [text(`Saved the metrics layer: ${def.semantic_models.length} semantic models, ${def.metrics.length} metrics (${def.metrics.map((m) => m.name).join(', ')}).`)], structuredContent: { status: 'ok', models: def.semantic_models.map((m) => m.name), metrics: def.metrics.map((m) => m.name) } };
+      },
+    }),
+
+    // ---------------------------------------------------------------- workspace health & backups
+    define({
+      name: 'workspace_health',
+      title: 'Workspace health',
+      description: 'How a workspace is doing: size, tables, dashboards and other contents; health checks (engine, missing folders, cloud sync, failing quality suites and syncs, budget), worst first; where its engine runs; and its quotas.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const s = await env.ctx.workspaceAdmin.summary(env.principal, ws);
+        const q = await env.ctx.lifecycle.quotaStatus(env.principal, ws);
+        const c = s.counts;
+        const lines = [
+          `**${s.workspace.name}** · ${s.size_bytes != null ? formatBytes(s.size_bytes) : 'in memory'} · engine ${s.engine.state}`,
+          `Contents: ${c.tables ?? '?'} tables, ${c.dashboards} dashboards, ${c.queries} saved queries, ${c.notebooks} notebooks, ${c.apps} apps, ${c.agents} agents, ${c.quality_suites} quality suites, ${c.syncs} syncs`,
+          '',
+          '**Health**',
+          ...s.checks.map((ch) => `- ${ch.status === 'ok' ? 'OK' : ch.status === 'warn' ? 'WARNING' : 'PROBLEM'} · ${ch.label}: ${ch.detail}`),
+          ...(q.storage.limit_bytes || q.query_seconds.limit ? ['', '**Quotas**', ...(q.storage.limit_bytes ? [`- Storage ${formatBytes(q.storage.used_bytes ?? 0)} of ${formatBytes(q.storage.limit_bytes)}`] : []), ...(q.query_seconds.limit ? [`- Query time today ${q.query_seconds.used} s of ${q.query_seconds.limit} s`] : [])] : []),
+        ];
+        return { content: [text(lines.join('\n'))], structuredContent: { status: 'ok', workspace_id: ws, counts: c, checks: s.checks, engine: s.engine, size_bytes: s.size_bytes, quotas: q } };
+      },
+    }),
+
+    define({
+      name: 'list_backups',
+      title: 'List backups',
+      description: 'The workspace\'s backups (owners): when each was taken, why (manual, scheduled, before a restore), its size and contents, and the backup schedule.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const list = await env.ctx.lifecycle.listBackups(env.principal, ws);
+        const w = await env.ctx.workspaces.get(env.principal, ws);
+        const lines = list.map((b) => `- ${b.created_at.toISOString()} · ${b.kind.replace('_', ' ')} · ${b.tables} tables, ${b.objects.dashboards} dashboards · ${formatBytes(b.size_bytes)}${b.exists ? '' : ' · FILE MISSING'}${b.note ? ` · ${b.note}` : ''} (\`${b.id}\`)`);
+        return { content: [text(`**Backups** (${list.length}) · schedule: ${w.backup_policy ? `every ${w.backup_policy.every_hours} h, keeping ${w.backup_policy.keep}` : 'off'}\n${lines.join('\n') || '_(none yet)_'}`)], structuredContent: { status: 'ok', schedule: w.backup_policy ?? null, backups: list.map((b) => ({ id: b.id, kind: b.kind, created_at: b.created_at, size_bytes: b.size_bytes, tables: b.tables, objects: b.objects, note: b.note, exists: b.exists })) } };
+      },
+    }),
+
+    define({
+      name: 'backup_workspace',
+      title: 'Back up workspace',
+      description: 'Takes a backup of the workspace now (owners): its data plus its queries, dashboards, notebooks, metrics and quality suites, kept on the server. Do this before risky changes; a person restores from the workspace\'s Lifecycle tab.',
+      inputSchema: { note: z.string().max(200).optional(), workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      async handler(env, { note, workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const b = await env.ctx.lifecycle.backup(env.principal, ws, 'manual', note ?? null);
+        return { content: [text(`Backed up ${b.tables} table${b.tables === 1 ? '' : 's'}, ${b.objects.dashboards} dashboards and ${b.objects.queries} queries (${formatBytes(b.size_bytes)}). Backup \`${b.id}\`.`)], structuredContent: { status: 'ok', backup: { id: b.id, created_at: b.created_at, size_bytes: b.size_bytes, tables: b.tables, objects: b.objects } } };
+      },
+    }),
+
+    // ---------------------------------------------------------------- streams & git
+    define({
+      name: 'create_stream',
+      title: 'Create stream',
+      description:
+        'Starts appending a live source to a table: kind "http" (records POSTed to a push URL; the key is returned once), "kafka" (brokers + topic) or "kinesis" (stream + region). Records are json objects (default) or plain text lines. mode "append" keeps every record; "mirror" keeps the latest row per key_columns. Needs a person\'s approval: call with dry_run=false only after they agreed.',
+      inputSchema: {
+        name: z.string().min(1).max(120),
+        kind: z.enum(['http', 'kafka', 'kinesis']),
+        target_table: z.string().min(1).max(120),
+        brokers: z.array(z.string()).optional().describe('kafka'),
+        topic: z.string().optional().describe('kafka'),
+        stream: z.string().optional().describe('kinesis'),
+        region: z.string().optional().describe('kinesis'),
+        format: z.enum(['json', 'text']).optional().describe('json (one object per record, default) or text (one line per record)'),
+        mode: z.enum(['append', 'mirror']).optional(),
+        key_columns: z.array(z.string()).optional(),
+        workspace_id: z.string().optional(),
+        dry_run: z.boolean().optional().describe('Default true. Set false once approved.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, a) {
+        const ws = resolveWorkspace(env, a.workspace_id);
+        const config = a.kind === 'kafka' ? { kind: 'kafka' as const, brokers: a.brokers ?? [], topic: a.topic ?? '' } : a.kind === 'kinesis' ? { kind: 'kinesis' as const, stream: a.stream ?? '', region: a.region ?? '' } : { kind: 'http' as const };
+        needsApproval(env, a.dry_run, `create_stream starts a ${a.kind} consumer that writes continuously into ${a.target_table}.`, 'create_stream', JSON.stringify(config));
+        const r = await env.ctx.streams.create(env.principal, ws, { name: a.name, config, format: a.format ?? 'json', mode: a.mode ?? 'append', key_columns: a.key_columns, target_table: a.target_table });
+        const base = env.ctx.cfg.server.public_url?.replace(/\/+$/, '') ?? '';
+        return { content: [text(`Created the stream **${r.stream.name}** → ${r.stream.target_table}.${r.push_key ? `\nPush records with \`POST ${base}/api/streams/${r.stream.id}/push\` and the header \`x-stream-key: ${r.push_key}\` (shown once).` : ''}`)], structuredContent: { status: 'ok', stream: { id: r.stream.id, name: r.stream.name, target_table: r.stream.target_table }, push_key: r.push_key } };
+      },
+    }),
+
+    define({
+      name: 'git_status',
+      title: 'Git status',
+      description: 'Whether the workspace\'s notebooks, queries, dashboards and models are in step with its Git repository: the files that changed here and whether the repository has newer commits.',
+      inputSchema: { workspace_id: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      async handler(env, { workspace_id }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const cfg = await env.ctx.git.get(env.principal, ws);
+        if (!cfg) return { content: [text('This workspace is not connected to Git. Connect a repository under Settings → Git.')], structuredContent: { status: 'ok', connected: false } };
+        const s = await env.ctx.git.status(env.principal, ws);
+        const lines = s.changes.map((c) => `- ${c.status} ${c.path}`);
+        return { content: [text(`**${cfg.repo_url}** (${cfg.branch})${s.needs_pull ? ' · the repository has newer commits: pull first' : ''}\n${lines.join('\n') || '_(no local changes)_'}`)], structuredContent: { status: 'ok', connected: true, repo: cfg.repo_url, branch: cfg.branch, needs_pull: s.needs_pull, changes: s.changes } };
+      },
+    }),
+
+    define({
+      name: 'git_commit',
+      title: 'Commit to Git',
+      description: 'Commits the workspace\'s changed notebooks, queries, dashboards and models to its Git repository and pushes them, with a message. Needs a person\'s approval: call with dry_run=false only after they agreed.',
+      inputSchema: { message: z.string().min(1).max(500), workspace_id: z.string().optional(), dry_run: z.boolean().optional().describe('Default true. Set false once approved.') },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      async handler(env, { message, workspace_id, dry_run }) {
+        const ws = resolveWorkspace(env, workspace_id);
+        const s = await env.ctx.git.status(env.principal, ws);
+        needsApproval(env, dry_run, `git_commit pushes ${s.changes.length} changed file(s) to the workspace's Git repository.`, 'git_commit', s.changes.map((c) => `${c.status} ${c.path}`).join('\n').slice(0, 400));
+        const r = await env.ctx.git.push(env.principal, ws, message);
+        return { content: [text(r.pushed ? `Pushed ${r.files} file${r.files === 1 ? '' : 's'} (${r.sha?.slice(0, 8)}).` : 'Nothing to commit.')], structuredContent: { status: 'ok', ...r } };
+      },
+    }),
   ];
 }
 
-export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template'] as const;
+export const TOOL_NAMES = ['execute_query', 'profile_dataset', 'explain_query', 'list_accessible_data', 'save_dataset', 'browse_storage', 'inspect_schema', 'lakehouse_query', 'list_dashboards', 'create_dashboard_widget', 'create_mosaic_dashboard', 'list_data_sources', 'create_data_sync', 'update_data_sync', 'run_data_sync', 'browse_connector', 'connector_query', 'list_apps', 'create_app', 'update_app', 'run_app', 'stop_app', 'get_app_logs', 'preview_app', 'publish_app', 'list_alerts', 'create_alert', 'run_alert', 'snapshot_dashboard', 'list_dbt_projects', 'get_dbt_project', 'create_dbt_project', 'write_dbt_files', 'create_dbt_model', 'run_dbt', 'get_dbt_run', 'list_metrics', 'query_metrics', 'list_quality_suites', 'suggest_quality_checks', 'create_quality_suite', 'run_quality_suite', 'list_reverse_syncs', 'create_reverse_sync', 'run_reverse_sync', 'list_notebooks', 'get_notebook', 'create_notebook', 'run_notebook', 'list_comments', 'add_comment', 'build_dashboard', 'detect_anomalies', 'list_insights', 'create_metric_monitor', 'list_agents', 'ask_agent', 'list_streams', 'get_usage', 'list_templates', 'install_template', 'list_saved_queries', 'get_saved_query', 'save_query', 'search_catalog', 'get_lineage', 'annotate_table', 'get_dashboard', 'update_widget', 'remove_widget', 'define_metric', 'workspace_health', 'list_backups', 'backup_workspace', 'create_stream', 'git_status', 'git_commit', 'query_history'] as const;

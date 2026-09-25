@@ -1054,6 +1054,13 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | `query_metrics(metrics, group_by?, where?, order_by?, limit?, workspace_id?)` | Computes metrics exactly as defined — time grains, joined dimensions, filters — and returns the rows and the compiled SQL. Read-only. |
 | `list_alerts` · `create_alert(name, sql, condition, every_minutes \| cron, channel_ids, …)` · `run_alert` | SQL alerts: a read-only query and a condition checked on a schedule; state changes go to Slack, Teams, email, PagerDuty or webhooks — see [Alerts & delivery](#alerts--delivery). |
 | `list_apps` · `create_app(name, source, …)` · `update_app` · `run_app` · `stop_app` · `get_app_logs` · `preview_app` · `publish_app` | Streamlit data apps: generated from a dashboard, saved queries or code (validated first), run, previewed with a screenshot, published after human approval — see [Data apps](#data-apps-streamlit-dash-gradio). |
+| `list_saved_queries(search?)` · `get_saved_query(query)` · `save_query(name, sql, folder?, description?, tags?, query_id?)` | The workspace's query library: find and reuse a query before writing a new one; save or update one. Saved SQL is checked to be read-only before it runs. |
+| `search_catalog(query, limit?)` · `get_lineage(object?)` · `annotate_table(object, column?, description?, tags?)` | Find tables and columns by name, description or tag; see what a table comes from and what depends on it; write catalog documentation. |
+| `get_dashboard(dashboard)` · `update_widget(dashboard, widget_id, …)` · `remove_widget(dashboard, widget_id, dry_run?)` | Read a dashboard's widgets and change or remove one. Removing needs approval. |
+| `define_metric(yaml, dry_run?)` | Adds semantic models and metrics to the metrics layer, keeping existing names. Validated, and needs approval. |
+| `workspace_health()` · `list_backups()` · `backup_workspace(note?)` | Contents, health checks (worst first), engine and quotas; the backups and their schedule; a backup taken now. |
+| `create_stream(name, kind, target_table, …, dry_run?)` | An HTTP, Kafka or Kinesis stream into a table. Needs approval; an HTTP stream returns its push key once. |
+| `git_status()` · `git_commit(message, dry_run?)` | Local changes against the workspace's Git repository; commit and push them after approval. |
 
 **Resources** — `duckdb://workspaces`, `duckdb://schemas/{workspace_id}` (DDL + column map + files), `duckdb://system/resources` (CPUs, RAM, DuckDB ceiling, spill disk, active engines), `duckdb://guides/mosaic-spec` (how to write a Mosaic dashboard spec), `duckdb://guides/data-app` (how to write a Streamlit data app with the SDK), `duckdb://guides/dbt` (how DuckView runs dbt projects and a workflow for agents).
 

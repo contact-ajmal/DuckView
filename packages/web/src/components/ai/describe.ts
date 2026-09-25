@@ -48,6 +48,23 @@ const VERBS: Record<string, (a: Args) => string> = {
   get_usage: () => 'Looked at usage and cost',
   install_template: (a) => `Installed the template ${str(a.template_id)}`,
   list_templates: () => 'Looked through templates',
+  list_saved_queries: (a) => (a.search ? `Looked for saved queries about ${q(str(a.search))}` : 'Listed the saved queries'),
+  get_saved_query: (a) => `Read the saved query ${q(str(a.query))}`,
+  save_query: (a) => `Saved the query ${q(str(a.name))}`,
+  search_catalog: (a) => `Searched the catalog for ${q(str(a.query))}`,
+  get_lineage: (a) => (a.object ? `Traced the lineage of ${str(a.object)}` : 'Read the lineage graph'),
+  annotate_table: (a) => `Documented ${str(a.object)}${a.column ? `.${str(a.column)}` : ''}`,
+  get_dashboard: (a) => `Opened the dashboard ${q(str(a.dashboard))}`,
+  update_widget: (a) => `Changed a widget${a.title ? ` to ${q(str(a.title))}` : ''}`,
+  remove_widget: () => 'Removed a widget',
+  define_metric: () => 'Defined metrics',
+  workspace_health: () => 'Checked the workspace health',
+  list_backups: () => 'Listed the backups',
+  backup_workspace: () => 'Backed up the workspace',
+  create_stream: (a) => `Created the stream ${q(str(a.name))}`,
+  git_status: () => 'Checked Git for changes',
+  query_history: (a) => (a.search ? `Looked through past queries for ${q(str(a.search))}` : a.slowest ? 'Looked at the slowest past queries' : 'Looked at past queries'),
+  git_commit: (a) => `Committed to Git: ${q(str(a.message))}`,
 };
 
 export function describeTool(tool: string, args: Args = {}, title?: string | null): string {

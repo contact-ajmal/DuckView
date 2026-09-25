@@ -213,6 +213,11 @@ const authed = async (url, init = {}) => {
   }
 };
 // React inputs ignore a plain `.value =`; set through the prototype setter and fire the event React listens to.
+/** Deletes the database files a scenario's workspaces left in the data directory (deleting a workspace keeps its file). */
+const removeDataFiles = async (prefix) => {
+  const dir = (await (await authed('/api/workspaces/storage-options')).json()).data_directory;
+  for (const f of fs.readdirSync(dir)) if (f.startsWith(prefix) && /\.duckdb(\.wal)?$/.test(f)) fs.rmSync(`${dir}/${f}`, { force: true });
+};
 const setField = (selector, value, event = 'input') => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set; set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); return el.value; })()`);
 const clickButton = (text, which = 'first') => evaluate(`(() => { const all = [...document.querySelectorAll('button')].filter(b => b.textContent.trim() === ${JSON.stringify(text)}); const b = ${JSON.stringify(which)} === 'last' ? all.at(-1) : all[0]; if (!b) throw new Error('no button: ' + ${JSON.stringify(text)}); b.click(); return true; })()`);
 let cleanup = null;
@@ -321,6 +326,8 @@ try {
   else if (scenario === 'browser-app') {
     const wsList = await (await authed('/api/workspaces')).json();
     const wsId = wsList.workspaces?.[0]?.id ?? wsList[0]?.id;
+    // The viewer must not be able to create this table; clear any copy an earlier run left behind.
+    await authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql: 'DROP TABLE IF EXISTS e2e_browser_write' }) });
     // Through the New-app dialog, choosing "In the viewer's browser".
     await send('Page.navigate', { url: `${BASE}/#/apps` });
     await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'New app')`, 20000, 'gallery');
@@ -1389,6 +1396,7 @@ try {
     cleanup = async () => {
       const all = (await j('GET', '/api/admin/workspaces')).workspaces ?? [];
       for (const w of all.filter((w) => w.name.startsWith('E2E wa'))) await authed(`/api/workspaces/${w.id}`, { method: 'DELETE' }).catch(() => {});
+      await removeDataFiles('e2e-wa-');
       await evaluate(`localStorage.setItem('duckview.workspace', ${JSON.stringify(activeBefore)}); location.hash = '#/'; 'ok'`).catch(() => {});
     };
     await evaluate(`location.hash = '#/settings/workspaces'; location.reload(); 'ok'`);
@@ -1452,7 +1460,7 @@ try {
     const gone = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dv-e2e-wd-')));
     await j('POST', `/api/workspaces/${w.id}/folders`, { path: gone });
     fs.rmSync(gone, { recursive: true });
-    cleanup = async () => { await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {}); await authed(`/api/workspaces/${w.id}`, { method: 'DELETE' }).catch(() => {}); };
+    cleanup = async () => { await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {}); await authed(`/api/workspaces/${w.id}`, { method: 'DELETE' }).catch(() => {}); await removeDataFiles('e2e-wd-'); };
     await evaluate(`location.hash = '#/settings/workspaces'; location.reload(); 'ok'`);
     await waitFor(`!!document.querySelector('[data-testid="workspaces-table"] tr[data-name="E2E wd"]')`, 30000, 'the list');
     await evaluate(`document.querySelector('[data-testid="workspaces-table"] tr[data-name="E2E wd"] td:nth-child(2)').click(); 'ok'`);
@@ -1506,6 +1514,7 @@ try {
     cleanup = async () => {
       await authed('/api/admin/workspace-policy', { method: 'PUT', body: JSON.stringify(policyBefore) }).catch(() => {});
       for (const x of ((await j('GET', '/api/admin/workspaces')).workspaces ?? []).filter((x) => x.name.startsWith('E2E wl'))) await authed(`/api/workspaces/${x.id}`, { method: 'DELETE' }).catch(() => {});
+      await removeDataFiles('e2e-wl-');
       fs.rmSync(bundle, { force: true });
       await evaluate(`localStorage.setItem('duckview.workspace', ${JSON.stringify(activeBefore)}); location.hash = '#/'; 'ok'`).catch(() => {});
     };
@@ -1555,6 +1564,48 @@ try {
     await sleep(1200);
     report.details.policy = (await j('GET', '/api/admin/workspace-policy')).policy.quotas;
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_policy.png'), Buffer.from(shot.result.data, 'base64')); }
+    report.details.charts = 1;
+  }
+  else if (scenario === 'query-history') {
+    // Server-side history: the sidebar lists your runs from any device; the drawer filters failures, groups and reruns.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const tag = `e2e_hist_${Date.now()}`;
+    const run = async (sql) => authed(`/api/workspaces/${wsId}/query`, { method: 'POST', body: JSON.stringify({ sql }) });
+    await run(`SELECT 1 AS ${tag}`);
+    await run(`SELECT 1 AS ${tag}`);
+    await run(`SELECT * FROM ${tag}_missing`);
+    await sleep(500);
+    await evaluate(`location.hash = '#/query'; 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="history-list"]')`, 20000, 'history section');
+    await setField('[data-testid="history-list"] input', tag);
+    await waitFor(`document.querySelectorAll('[data-testid="history-item"]').length === 3`, 10000, 'three runs of the tag');
+    report.details.sidebar = await evaluate(`[...document.querySelectorAll('[data-testid="history-item"]')].map(b => b.textContent)`);
+    await setField('[data-testid="history-list"] input', '');
+    await evaluate(`document.querySelector('[data-testid="history-open"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="history-drawer"]')`, 5000, 'drawer');
+    await setField('[data-testid="history-search"]', tag);
+    await setField('[data-testid="history-status"]', 'error', 'change');
+    // Each failed run also has an expanded row with its error, so count the rows with a result cell.
+    const resultRows = `[...document.querySelectorAll('[data-testid="history-runs"] tbody tr')].filter(r => r.querySelectorAll('td').length > 2)`;
+    await waitFor(`${resultRows}.length === 1 && ${resultRows}[0].textContent.includes('Failed')`, 10000, 'failures only');
+    report.details.failure = await evaluate(`${resultRows}[0].textContent + ' | ' + document.querySelector('[data-testid="history-runs"] tbody').textContent`);
+    await setField('[data-testid="history-status"]', 'all', 'change');
+    await evaluate(`[...document.querySelectorAll('[data-testid="history-drawer"] [role=switch]')][0].click(); 'ok'`);
+    await waitFor(`document.querySelectorAll('[data-testid="history-groups"] tbody tr').length === 2`, 10000, 'grouped');
+    report.details.groups = await evaluate(`[...document.querySelectorAll('[data-testid="history-groups"] tbody tr')].map(r => [...r.querySelectorAll('td')].map(td => td.textContent.trim()))`);
+    report.details.tag = tag;
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_drawer.png'), Buffer.from(shot.result.data, 'base64')); }
+    const tabsBefore = await evaluate(`document.querySelectorAll('[data-testid="query-tab"], [role=tab]').length`);
+    await evaluate(`[...document.querySelectorAll('[data-testid="history-groups"] tbody tr')].find(r => r.textContent.includes('AS ${tag}')).querySelectorAll('button')[1].click(); 'ok'`);
+    await waitFor(`!document.querySelector('[data-testid="history-drawer"]')`, 5000, 'drawer closed');
+    await waitFor(`document.querySelector('.cm-content')?.textContent.includes(${JSON.stringify(`AS ${tag}`)})`, 10000, 'rerun in a tab');
+    report.details.rerun = true;
+    report.details.tabsBefore = tabsBefore;
+    cleanup = async () => {
+      const tabs = (await (await authed(`/api/workspaces/${wsId}/tabs`)).json()).tabs ?? [];
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      for (const t of tabs.filter((t) => t.title === 'From history')) await authed(`/api/workspaces/${wsId}/tabs/${t.id}`, { method: 'DELETE' }).catch(() => {});
+    };
     report.details.charts = 1;
   }
   else if (scenario === 'data-explorer') {
@@ -2614,6 +2665,12 @@ try {
     if (d.imported !== 3) problems.push(`imported rows: ${d.imported}`);
     if (!(d.importedQueries ?? []).includes('E2E wl rows')) problems.push(`imported queries: ${JSON.stringify(d.importedQueries)}`);
     if (d.policy?.storage_bytes !== 50e9 || d.policy?.query_seconds_per_day !== 7200) problems.push(`policy: ${JSON.stringify(d.policy)}`);
+  }
+  if (scenario === 'query-history') {
+    if ((d.sidebar ?? []).length !== 3 || !/failed/.test((d.sidebar ?? [])[0] ?? '')) problems.push(`sidebar: ${JSON.stringify(d.sidebar)}`);
+    if (!/Failed/.test(d.failure ?? '')) problems.push(`failure row: ${d.failure}`);
+    if (!(d.groups ?? []).some((cells) => cells.some((c) => c.endsWith(`AS ${d.tag}`)) && cells.includes('2'))) problems.push(`groups: ${JSON.stringify(d.groups)}`);
+    if (d.rerun !== true) problems.push('rerun did not open a tab');
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);

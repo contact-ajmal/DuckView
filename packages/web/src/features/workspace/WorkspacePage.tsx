@@ -14,6 +14,7 @@ import { ProfilePanel, type ProfileResult } from './ProfilePanel';
 import { ExploreView } from '../explore/ExploreView';
 import { SchemaTree } from './SchemaTree';
 import { SavedQueriesTree } from './SavedQueries';
+import { QueryHistoryDrawer, HistoryList } from './QueryHistory';
 import { REVERSE_DRAFT_KEY } from '../connections/ReversePanel';
 import { HistoryDrawer } from '../history/HistoryDrawer';
 import { ApprovalCard } from '../../components/ai';
@@ -68,6 +69,7 @@ export function WorkspacePage() {
   const [saved, setSaved] = useState<SavedQuery[]>([]);
   const [dbtModel, setDbtModel] = useState<string | null>(null);
   const [queryHistory, setQueryHistory] = useState<SavedQuery | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [saveModal, setSaveModal] = useState<{ open: boolean; name: string; folder: string; tags: string; description: string; existing?: SavedQuery }>({ open: false, name: '', folder: '', tags: '', description: '' });
   const importInput = useRef<HTMLInputElement>(null);
   const { canEdit: canWrite } = useWorkspaceAccess();
@@ -368,27 +370,13 @@ export function WorkspacePage() {
       key: 'history',
       title: 'History',
       hideId: 'query.history',
-      defaultHeight: 200,
+      defaultHeight: 220,
       meta: (
-        <button onClick={ws.clearHistory} className="text-zinc-500 hover:text-red-300" title="Clear history">
-          <Trash2 className="h-3 w-3" />
+        <button onClick={() => setHistoryOpen(true)} className="text-zinc-500 hover:text-zinc-200" title="All of the history, with filters" data-testid="history-open">
+          All history
         </button>
       ),
-      content:
-        ws.history.length === 0 ? (
-          <p className="px-4 py-3 text-2xs text-zinc-500">Executed queries appear here.</p>
-        ) : (
-          <div>
-            {ws.history.map((h) => (
-              <button key={h.id} onClick={() => replaceSql(h.sql)} className="block w-full border-b border-zinc-800/70 px-4 py-2 text-left last:border-0 hover:bg-zinc-800/50" title={h.sql}>
-                <div className="truncate font-mono text-2xs text-zinc-200">{h.sql.replace(/\s+/g, ' ')}</div>
-                <div className="mt-0.5 font-mono text-2xs text-zinc-500">
-                  {new Date(h.at).toLocaleTimeString()} · {h.status === 'ok' ? `${h.durationMs} ms · ${h.rows.toLocaleString()} rows` : <span className="text-red-300">error</span>}
-                </div>
-              </button>
-            ))}
-          </div>
-        ),
+      content: <HistoryList workspaceId={workspace.id} refreshKey={ws.history.length ? Date.parse(ws.history[0]!.at) : 0} onOpen={replaceSql} />,
     },
   ].filter((sec) => !isHidden(sec.hideId));
 
@@ -692,6 +680,17 @@ export function WorkspacePage() {
           </div>
         </div>
       </Modal>
+      <QueryHistoryDrawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        workspaceId={workspace.id}
+        isOwner={workspace.role === 'OWNER'}
+        onOpen={(q) => (tab && !sql.trim() ? replaceSql(q) : void ws.addTab({ title: 'From history', sql: q }))}
+        onRun={async (q) => {
+          const t = await ws.addTab({ title: 'From history', sql: q });
+          if (t) void ws.runQuery(t.id, q, {});
+        }}
+      />
       <LocationBrowser
         open={picker}
         workspaceId={workspace.id}

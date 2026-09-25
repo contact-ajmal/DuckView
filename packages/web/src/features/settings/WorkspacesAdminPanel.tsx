@@ -115,7 +115,7 @@ function WorkspaceList() {
     { key: 'engine', header: 'Engine', sortValue: (r) => r.engine.state, cell: (r) => <StatusDot tone={r.engine.state === 'running' ? (r.engine.active_queries ? 'busy' : 'ok') : 'idle'}>{r.engine.state === 'running' ? (r.engine.active_queries ? `Running ${r.engine.active_queries}` : r.engine.memory_bytes != null ? `Warm · ${formatBytes(r.engine.memory_bytes)}` : 'Warm') : r.engine.state === 'archived' ? 'Archived' : 'Stopped'}</StatusDot> },
     { key: 'activity', header: 'Last activity', sortValue: (r) => r.last_activity_at ?? '', cell: (r) => (r.last_activity_at ? <span title={new Date(r.last_activity_at).toLocaleString()}>{timeAgo(r.last_activity_at)}</span> : '—') },
     { key: 'cost', header: 'Cost this month', align: 'right', numeric: true, sortValue: (r) => r.cost_this_month, cell: (r) => money(r.cost_this_month) },
-    { key: 'budget', header: 'Budget', align: 'right', numeric: true, sortValue: (r) => r.budget?.percent ?? -1, cell: (r) => (r.budget ? <span className={r.budget.percent >= 100 ? 'text-red-400' : r.budget.percent >= 80 ? 'text-amber-300' : undefined}>{Math.round(r.budget.percent)}% of {money(r.budget.amount)}</span> : <span className="text-zinc-500">None</span>) },
+    { key: 'budget', header: 'Budget', align: 'right', numeric: true, sortValue: (r) => r.budget?.percent ?? -1, cell: (r) => (r.budget ? <span className={r.budget.percent >= 100 ? 'text-red-300' : r.budget.percent >= 80 ? 'text-amber-300' : undefined}>{Math.round(r.budget.percent)}% of {money(r.budget.amount)}</span> : <span className="text-zinc-500">None</span>) },
     { key: 'tags', header: 'Tags', cell: (r) => <div className="flex flex-wrap gap-1">{r.tags.map((t) => <Tag key={t}>{t}</Tag>)}</div> },
   ];
 

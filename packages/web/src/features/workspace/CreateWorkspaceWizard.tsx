@@ -311,7 +311,7 @@ export function CreateWorkspaceWizard({ open, onClose, initial }: { open: boolea
           )}
         </div>
 
-        {error && <p className="text-xs text-red-400" role="alert">{error.split('\n')[0]}</p>}
+        {error && <p className="text-xs text-red-300" role="alert">{error.split('\n')[0]}</p>}
         <div className="flex items-center gap-2 border-t border-zinc-800 pt-3">
           <span className="min-w-0 flex-1 truncate text-xs text-zinc-500">{problem ?? (cloneNeedsFile && step >= 3 ? 'A copy needs its own database file' : '')}</span>
           <Button variant="ghost" onClick={close}>Cancel</Button>

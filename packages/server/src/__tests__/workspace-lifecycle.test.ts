@@ -205,3 +205,14 @@ describe('workspace policy', () => {
     await policy(() => undefined);
   });
 });
+
+describe('deleting a workspace', () => {
+  it('removes its backups from the server', async () => {
+    const id = (await api('POST', '/api/workspaces', adminJwt, { name: 'Short-lived', active_db_path: 'short-lived.duckdb' })).json.workspace.id;
+    await sqlq(id, 'CREATE TABLE t AS SELECT 1 AS a');
+    const b = await api('POST', `/api/workspaces/${id}/backups`, adminJwt, {});
+    expect(fs.existsSync(b.json.backup.file)).toBe(true);
+    await api('DELETE', `/api/workspaces/${id}`, adminJwt);
+    expect(fs.existsSync(path.dirname(b.json.backup.file))).toBe(false);
+  });
+});

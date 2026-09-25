@@ -108,6 +108,7 @@ Use in this order: an existing primitive, then an extension of it, then a new sh
     - A restore always takes a safety backup first. Restoring objects is an opt-in checkbox.
     - Authenticated downloads use `downloadAuthed(url, name)` from `api/client`.
   - The organisation's workspace policy (quotas, the idle policy, creation rules) is Administration → Workspaces → Policies (`WorkspacePolicyPanel`). Quota usage shows as `QuotaBar`s on the Usage tab.
+- Red text for errors and failures on a plain surface is `text-red-300`. Light themes mirror the ramp, so it reads dark red there. `text-red-400` fails AA on the light themes at small sizes.
 - Counts in copy use real plurals ("1 table", "2 tables"), never "1 tables".
 - Charts
   - Every chart, KPI and table widget sits in `ChartFrame` (`components/data`). It provides the title, metadata, hover or focus actions (`actionsVisible` pins them) and the loading, error and empty states.

@@ -129,7 +129,7 @@ export function WorkspacePolicyPanel() {
         </>
       ))}
       <div className="flex items-center gap-2 pt-4">
-        <span className="min-w-0 flex-1 text-xs text-red-400">{problem}</span>
+        <span className="min-w-0 flex-1 text-xs text-red-300">{problem}</span>
         <Button variant="ghost" onClick={() => void runNow()} loading={running} title="Scheduled backups and the idle policy run every 10 minutes; run them now"><Play className="h-3.5 w-3.5" /> Run checks now</Button>
         <Button variant="primary" onClick={() => void save()} loading={saving} disabled={!!problem} data-testid="wp-save">Save policy</Button>
       </div>

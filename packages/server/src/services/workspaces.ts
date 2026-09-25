@@ -533,6 +533,8 @@ export class WorkspaceService {
     await this.get(p, id, 'OWNER');
     this.evict(id);
     await this.db.delete(this.s.workspaces).where(eq(this.s.workspaces.id, id));
+    // Its backups go with it (their records are deleted with the workspace); the database file itself stays.
+    fs.rmSync(path.join(this.jail.baseDir, '.duckview', 'backups', id), { recursive: true, force: true });
   }
 
   async ensureDefault(p: Principal): Promise<Workspace> {

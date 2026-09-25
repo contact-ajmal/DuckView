@@ -275,14 +275,14 @@ function Storage({ s, onChanged }: { s: Summary; onChanged: () => void }) {
           <dt className="text-zinc-500">Kind</dt><dd className="text-zinc-200">{STORAGE_LABEL[kind]}</dd>
           <dt className="text-zinc-500">Location</dt><dd className="break-all font-mono text-xs text-zinc-200">{w.active_db_path}</dd>
           <dt className="text-zinc-500">Size</dt><dd className="tabular-nums text-zinc-200">{s.size_bytes != null ? formatBytes(s.size_bytes) : '—'}</dd>
-          {w.cloud_sync && (<><dt className="text-zinc-500">Cloud sync</dt><dd className="text-zinc-200">{w.cloud_sync.last_error ? <span className="text-red-400">{w.cloud_sync.last_error}</span> : w.cloud_sync.dirty ? 'Changes waiting to be pushed' : w.cloud_sync.synced_at ? `Synced ${timeAgo(w.cloud_sync.synced_at)}` : 'Not synced yet'} {w.role !== 'VIEWER' && <Button size="sm" variant="ghost" loading={syncing} onClick={() => void sync()}><RefreshCw className="h-3 w-3" /> Sync now</Button>}</dd></>)}
+          {w.cloud_sync && (<><dt className="text-zinc-500">Cloud sync</dt><dd className="text-zinc-200">{w.cloud_sync.last_error ? <span className="text-red-300">{w.cloud_sync.last_error}</span> : w.cloud_sync.dirty ? 'Changes waiting to be pushed' : w.cloud_sync.synced_at ? `Synced ${timeAgo(w.cloud_sync.synced_at)}` : 'Not synced yet'} {w.role !== 'VIEWER' && <Button size="sm" variant="ghost" loading={syncing} onClick={() => void sync()}><RefreshCw className="h-3 w-3" /> Sync now</Button>}</dd></>)}
         </dl>
         {kind === 'memory' && <p className="text-xs text-zinc-500">Tables live in memory and are lost when the engine restarts. <a className="text-accent-300 hover:underline" href={`#/workspaces/${w.id}/engine`}>Make it persistent</a> without losing them.</p>}
       </Section>
       <Section title="Folders" meta="Read in place from the server's disk">
         {s.folders.length === 0 ? <p className="text-xs text-zinc-500">No folders. Add one from Data → Sources.</p> : (
           <ul className="divide-y divide-zinc-800/70 text-body">
-            {s.folders.map((f) => <li key={f.path} className="flex items-center gap-2 py-1.5"><StatusDot tone={f.missing ? 'error' : 'ok'} /><span className="text-zinc-200">{f.name}</span><span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-500" title={f.path}>{f.path}</span>{f.missing && <span className="text-xs text-red-400">Not found</span>}{f.upload_default && <span className="text-xs text-zinc-500">uploads</span>}</li>)}
+            {s.folders.map((f) => <li key={f.path} className="flex items-center gap-2 py-1.5"><StatusDot tone={f.missing ? 'error' : 'ok'} /><span className="text-zinc-200">{f.name}</span><span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-500" title={f.path}>{f.path}</span>{f.missing && <span className="text-xs text-red-300">Not found</span>}{f.upload_default && <span className="text-xs text-zinc-500">uploads</span>}</li>)}
           </ul>
         )}
       </Section>
@@ -371,7 +371,7 @@ function QuotaBar({ label, used, limit, format, hint }: { label: string; used: n
   const pct = Math.min(100, (used / limit) * 100);
   return (
     <li className="space-y-1 text-body">
-      <div className="flex justify-between"><span className="text-zinc-200">{label}</span><span className={pct >= 100 ? 'text-red-400' : pct >= 80 ? 'text-amber-300' : 'text-zinc-400'}>{format(used)} of {format(limit)}</span></div>
+      <div className="flex justify-between"><span className="text-zinc-200">{label}</span><span className={pct >= 100 ? 'text-red-300' : pct >= 80 ? 'text-amber-300' : 'text-zinc-400'}>{format(used)} of {format(limit)}</span></div>
       <div className="h-1.5 rounded-full bg-zinc-800" role="progressbar" aria-label={label} aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}><div className={pct >= 100 ? 'h-full rounded-full bg-red-500' : pct >= 80 ? 'h-full rounded-full bg-amber-500' : 'h-full rounded-full bg-emerald-500'} style={{ width: `${pct}%` }} /></div>
       <p className="text-2xs text-zinc-500">{hint}</p>
     </li>
@@ -411,7 +411,7 @@ function Usage({ id, isOwner }: { id: string; isOwner: boolean }) {
         {!budgets ? <Skeleton lines={1} /> : budgets.length === 0 ? <p className="text-xs text-zinc-500">No budget for this workspace.</p> : (
           <ul className="space-y-2">{budgets.map((b) => (
             <li key={b.id} className="space-y-1 text-body">
-              <div className="flex justify-between"><span className="text-zinc-200">{b.name || 'Monthly budget'}</span><span className={b.percent >= 100 ? 'text-red-400' : b.percent >= 80 ? 'text-amber-300' : 'text-zinc-400'}>{money(b.spent)} of {money(b.amount)} · {Math.round(b.percent)}%</span></div>
+              <div className="flex justify-between"><span className="text-zinc-200">{b.name || 'Monthly budget'}</span><span className={b.percent >= 100 ? 'text-red-300' : b.percent >= 80 ? 'text-amber-300' : 'text-zinc-400'}>{money(b.spent)} of {money(b.amount)} · {Math.round(b.percent)}%</span></div>
               <div className="h-1.5 rounded-full bg-zinc-800"><div className={b.percent >= 100 ? 'h-full rounded-full bg-red-500' : b.percent >= 80 ? 'h-full rounded-full bg-amber-500' : 'h-full rounded-full bg-emerald-500'} style={{ width: `${Math.min(100, b.percent)}%` }} /></div>
             </li>
           ))}</ul>

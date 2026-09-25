@@ -110,7 +110,7 @@ export function WorkspaceBackups({ w, onChanged }: { w: Workspace; onChanged: ()
           { key: 'kind', header: 'Kind', cell: (b) => KIND[b.kind] },
           { key: 'contents', header: 'Contents', cell: (b) => [n(b.tables, 'table'), n(b.objects.dashboards, 'dashboard'), n(b.objects.queries, 'query', 'queries'), n(b.objects.notebooks, 'notebook')].join(' · ') },
           { key: 'note', header: 'Note', truncate: true, cell: (b) => b.note ?? '' },
-          { key: 'size', header: 'Size', align: 'right', numeric: true, cell: (b) => (b.exists ? formatBytes(b.size_bytes) : <span className="text-red-400">File missing</span>) },
+          { key: 'size', header: 'Size', align: 'right', numeric: true, cell: (b) => (b.exists ? formatBytes(b.size_bytes) : <span className="text-red-300">File missing</span>) },
           {
             key: 'actions',
             header: '',

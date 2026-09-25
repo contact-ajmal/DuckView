@@ -43,6 +43,14 @@ export async function queryRoutes(app: FastifyInstance, ctx: AppContext) {
     return conditional(req, reply, (c) => ctx.queries.profile(req.principal!, id, body.target, c));
   });
 
+  // Query history from the audit log: search, who (me / everyone / agents), status, slowest, grouped by statement.
+  app.get('/api/workspaces/:id/history', { preHandler: app.authenticate }, async (req) => {
+    const q = z
+      .object({ q: z.string().max(500).optional(), who: z.enum(['me', 'everyone', 'agents']).optional(), status: z.enum(['all', 'ok', 'error']).optional(), sort: z.enum(['recent', 'slowest']).optional(), group: z.enum(['0', '1']).optional(), limit: z.coerce.number().int().min(1).max(500).optional(), offset: z.coerce.number().int().min(0).optional() })
+      .parse(req.query ?? {});
+    return ctx.queryHistory.list(req.principal!, (req.params as { id: string }).id, { ...q, group: q.group === '1' });
+  });
+
   app.get('/api/workspaces/:id/catalog', { preHandler: app.authenticate }, async (req) => {
     const { id } = req.params as { id: string };
     return ctx.queries.catalog(req.principal!, id);

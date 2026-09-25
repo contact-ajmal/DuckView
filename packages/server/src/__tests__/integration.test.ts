@@ -151,7 +151,7 @@ describe('MCP server (in-memory transport)', () => {
   });
   it('lists tools, resources, prompts', async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(['add_comment', 'ask_agent', 'browse_connector', 'browse_storage', 'build_dashboard', 'connector_query', 'create_alert', 'create_app', 'create_dashboard_widget', 'create_data_sync', 'create_dbt_model', 'create_dbt_project', 'create_metric_monitor', 'create_mosaic_dashboard', 'create_notebook', 'create_quality_suite', 'create_reverse_sync', 'detect_anomalies', 'execute_query', 'explain_query', 'get_app_logs', 'get_dbt_project', 'get_dbt_run', 'get_notebook', 'get_usage', 'inspect_schema', 'install_template', 'lakehouse_query', 'list_accessible_data', 'list_agents', 'list_alerts', 'list_apps', 'list_comments', 'list_dashboards', 'list_data_sources', 'list_dbt_projects', 'list_insights', 'list_metrics', 'list_notebooks', 'list_quality_suites', 'list_reverse_syncs', 'list_streams', 'list_templates', 'preview_app', 'profile_dataset', 'publish_app', 'query_metrics', 'run_alert', 'run_app', 'run_data_sync', 'run_dbt', 'run_notebook', 'run_quality_suite', 'run_reverse_sync', 'save_dataset', 'snapshot_dashboard', 'stop_app', 'suggest_quality_checks', 'update_app', 'update_data_sync', 'write_dbt_files']);
+    expect(tools).toEqual(['add_comment', 'annotate_table', 'ask_agent', 'backup_workspace', 'browse_connector', 'browse_storage', 'build_dashboard', 'connector_query', 'create_alert', 'create_app', 'create_dashboard_widget', 'create_data_sync', 'create_dbt_model', 'create_dbt_project', 'create_metric_monitor', 'create_mosaic_dashboard', 'create_notebook', 'create_quality_suite', 'create_reverse_sync', 'create_stream', 'define_metric', 'detect_anomalies', 'execute_query', 'explain_query', 'get_app_logs', 'get_dashboard', 'get_dbt_project', 'get_dbt_run', 'get_lineage', 'get_notebook', 'get_saved_query', 'get_usage', 'git_commit', 'git_status', 'inspect_schema', 'install_template', 'lakehouse_query', 'list_accessible_data', 'list_agents', 'list_alerts', 'list_apps', 'list_backups', 'list_comments', 'list_dashboards', 'list_data_sources', 'list_dbt_projects', 'list_insights', 'list_metrics', 'list_notebooks', 'list_quality_suites', 'list_reverse_syncs', 'list_saved_queries', 'list_streams', 'list_templates', 'preview_app', 'profile_dataset', 'publish_app', 'query_history', 'query_metrics', 'remove_widget', 'run_alert', 'run_app', 'run_data_sync', 'run_dbt', 'run_notebook', 'run_quality_suite', 'run_reverse_sync', 'save_dataset', 'save_query', 'search_catalog', 'snapshot_dashboard', 'stop_app', 'suggest_quality_checks', 'update_app', 'update_data_sync', 'update_widget', 'workspace_health', 'write_dbt_files']);
     const res = (await client.listResources()).resources.map((r) => r.uri);
     expect(res).toContain('duckdb://workspaces');
     expect(res).toContain('duckdb://system/resources');
@@ -267,7 +267,7 @@ describe('HTTP API + network MCP', () => {
     const audit = await api('GET', '/api/audit?actor_type=AGENT&limit=5');
     expect((audit.json.events as unknown[]).length).toBeGreaterThan(0);
     const info = await api('GET', '/api/mcp/info');
-    expect((info.json.tools as string[]).length).toBe(61);
+    expect((info.json.tools as string[]).length).toBe(78);
   });
   it('MCP over Streamable HTTP with bearer token', async () => {
     expect((await fetch(base + '/mcp', { method: 'POST' })).status).toBe(401);
@@ -275,7 +275,7 @@ describe('HTTP API + network MCP', () => {
     const client = new Client({ name: 't', version: '0' });
     await client.connect(transport);
     const tools = await client.listTools();
-    expect(tools.tools.length).toBe(61);
+    expect(tools.tools.length).toBe(78);
     const r = await client.callTool({ name: 'execute_query', arguments: { sql: 'SELECT 42 AS answer' } });
     expect((r.structuredContent as { rows: unknown[][] }).rows[0]).toEqual([42]);
     const sessions = await api('GET', '/api/mcp/sessions');
