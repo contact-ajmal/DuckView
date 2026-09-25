@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
@@ -57,7 +58,7 @@ export async function storageRoutes(app: FastifyInstance, ctx: AppContext) {
   app.get('/api/workspaces/:id/folders', async (req) => {
     const { id } = req.params as { id: string };
     const w = await ctx.workspaces.get(req.principal!, id);
-    return { folders: w.folders, data_directory: ctx.workspaces.jail.baseDir, upload_dir: ctx.workspaces.uploadDir(w), mode: ctx.cfg.security.filesystem_mode };
+    return { folders: w.folders.map((f) => ({ ...f, missing: !fs.existsSync(f.path) })), data_directory: ctx.workspaces.jail.baseDir, upload_dir: ctx.workspaces.uploadDir(w), mode: ctx.cfg.security.filesystem_mode };
   });
   app.post('/api/workspaces/:id/folders', async (req) => {
     requireWrite(req.principal!);

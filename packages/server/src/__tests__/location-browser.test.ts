@@ -150,3 +150,29 @@ describe('native picker availability and commands', () => {
     await expect(p.pick({ kind: 'folder' })).rejects.toThrow(/system dialog failed/);
   });
 });
+
+describe('sources: renaming files and folder health', () => {
+  it('renames a file in the data directory and refuses clashes and bad names', async () => {
+    fs.writeFileSync(path.join(dir, 'data', 'old.csv'), 'a\n1\n');
+    fs.writeFileSync(path.join(dir, 'data', 'taken.csv'), 'a\n1\n');
+    const ok = await api('PATCH', `/api/workspaces/${wsId}/files`, { path: 'old.csv', name: 'new.csv' });
+    expect(ok.status).toBe(200);
+    expect(ok.json.path).toBe('new.csv');
+    expect(fs.existsSync(path.join(dir, 'data', 'new.csv'))).toBe(true);
+    expect((await api('PATCH', `/api/workspaces/${wsId}/files`, { path: 'new.csv', name: 'taken.csv' })).status).toBe(400);
+    expect((await api('PATCH', `/api/workspaces/${wsId}/files`, { path: 'new.csv', name: '../x.csv' })).status).toBe(400);
+    // Outside the data directory and the workspace folders: refused even in full mode.
+    fs.writeFileSync(path.join(dir, 'stray.csv'), 'a\n');
+    expect((await api('PATCH', `/api/workspaces/${wsId}/files`, { path: path.join(dir, 'stray.csv'), name: 'moved.csv' })).status).toBe(400);
+  });
+
+  it('flags a workspace folder that no longer exists', async () => {
+    const gone = path.join(dir, 'gone');
+    fs.mkdirSync(gone);
+    await api('POST', `/api/workspaces/${wsId}/folders`, { path: gone });
+    fs.rmSync(gone, { recursive: true });
+    const r = await api('GET', `/api/workspaces/${wsId}/folders`);
+    expect(r.json.folders.find((f: { path: string }) => f.path === gone)).toMatchObject({ missing: true });
+    expect(r.json.folders.find((f: { path: string }) => f.path === path.join(dir, 'lake'))).toMatchObject({ missing: false });
+  });
+});

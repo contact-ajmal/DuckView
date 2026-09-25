@@ -176,6 +176,46 @@ export function Menu({ trigger, children, align = 'right', width = 'w-56', class
   );
 }
 
+/** A menu at the pointer (right-click); closes on outside click, Escape, scroll or choosing an item. */
+export function ContextMenu({ at, onClose, children, width = 'w-56', label = 'Actions' }: { at: { x: number; y: number } | null; onClose: () => void; children: ReactNode; width?: string; label?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!at) return;
+    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onClose, true);
+    const t = requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus());
+    return () => {
+      cancelAnimationFrame(t);
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onClose, true);
+    };
+  }, [at, onClose]);
+  if (!at) return null;
+  // Keep it on screen.
+  const x = Math.min(at.x, window.innerWidth - 240);
+  const y = Math.min(at.y, window.innerHeight - 300);
+  return createPortal(
+    <div
+      ref={ref}
+      role="menu"
+      aria-label={label}
+      style={{ left: x, top: y }}
+      className={cn('dv-pop fixed z-[60] rounded-lg border border-zinc-800 bg-zinc-950 p-1 shadow-xl', width)}
+      onClick={(e) => (e.target as HTMLElement).closest('[role="menuitem"]') && onClose()}
+      onKeyDown={(e) => {
+        if (moveFocus([...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])')], document.activeElement, e.key, 'vertical')) e.preventDefault();
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
 export function MenuItem({ icon, children, onClick, hint, danger, active }: { icon?: ReactNode; children: ReactNode; onClick?: () => void; hint?: ReactNode; danger?: boolean; active?: boolean }) {
   return (
     <button role="menuitem" onClick={onClick} className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors focus:outline-none', danger ? 'text-red-400 hover:bg-red-500/10 focus-visible:bg-red-500/10' : 'text-zinc-300 hover:bg-zinc-900 hover:text-zinc-50 focus-visible:bg-zinc-900 focus-visible:text-zinc-50', active && 'bg-zinc-900 text-zinc-50')}>

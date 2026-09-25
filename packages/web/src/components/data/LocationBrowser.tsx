@@ -11,7 +11,8 @@ import { Button, IconButton, Input, Modal, cn } from '../ui';
 import { Checkbox } from '../ui/forms';
 import { InlineError, Skeleton, errorText, promptAction, toast } from '../ui/feedback';
 
-type Where = { kind: 'local'; path?: string } | { kind: 'cloud'; connectionId: string; bucket?: string; prefix: string };
+export type BrowserLocation = { kind: 'local'; path?: string } | { kind: 'cloud'; connectionId: string; bucket?: string; prefix: string };
+type Where = BrowserLocation;
 interface Entry { name: string; path: string; uri: string; type: 'dir' | 'file' | 'table_dir' | 'bucket'; kind: string; size_bytes: number | null; modified_at: string | null; queryable: boolean }
 interface Listing { where: Where; path: string; display: string; parent: Where | null; writable: boolean; entries: Entry[]; next_token?: string | null }
 interface Place { name: string; path: string; kind: 'data' | 'home' | 'folder' | 'volume' }
@@ -31,6 +32,8 @@ export interface LocationBrowserProps {
   title?: string;
   /** The primary button, e.g. "Add this folder"; defaults to "Select". */
   confirmLabel?: string;
+  /** Where to open (default: the home directory, or the data directory when sandboxed). */
+  start?: BrowserLocation;
   /** Receives absolute paths (local) or URIs (remote). Throwing keeps the dialog open and shows the error. */
   onPick: (paths: string[]) => Promise<void> | void;
 }
@@ -51,7 +54,7 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString(undefin
 const sameWhere = (a: Where | null, b: Where | null) => JSON.stringify(a) === JSON.stringify(b);
 const isDir = (e: Entry) => e.type !== 'file';
 
-export function LocationBrowser({ open, onClose, workspaceId, mode, multiple = false, remote = true, title, confirmLabel, onPick }: LocationBrowserProps) {
+export function LocationBrowser({ open, onClose, workspaceId, mode, multiple = false, remote = true, title, confirmLabel, start, onPick }: LocationBrowserProps) {
   const [places, setPlaces] = useState<Places | null>(null);
   const [clouds, setClouds] = useState<CloudConnection[]>([]);
   const [listing, setListing] = useState<Listing | null>(null);
@@ -70,6 +73,7 @@ export function LocationBrowser({ open, onClose, workspaceId, mode, multiple = f
   const listRef = useRef<HTMLDivElement>(null);
   const anchor = useRef<number>(0);
   const seq = useRef(0);
+  const cloudsRef = useRef<CloudConnection[]>([]);
 
   const fetchListing = useCallback(
     async (where: Where): Promise<Listing> => {
@@ -77,7 +81,7 @@ export function LocationBrowser({ open, onClose, workspaceId, mode, multiple = f
         const r = await api.get<LocalListing>(`/api/storage/locate?workspace_id=${workspaceId}${where.path ? `&path=${encodeURIComponent(where.path)}` : ''}${hidden ? '&hidden=1' : ''}`);
         return { where: { kind: 'local', path: r.path }, path: r.path, display: r.path, parent: r.parent ? { kind: 'local', path: r.parent } : null, writable: r.writable, entries: r.entries.map((e) => ({ ...e, uri: e.path })) };
       }
-      const conn = clouds.find((c) => c.id === where.connectionId);
+      const conn = cloudsRef.current.find((c) => c.id === where.connectionId);
       const scheme = conn?.uri_scheme ?? 's3';
       if (!where.bucket) {
         const r = await api.get<{ buckets: { name: string; created_at: string | null }[] }>(`/api/storage/cloud?connection_id=${where.connectionId}`);
@@ -89,7 +93,7 @@ export function LocationBrowser({ open, onClose, workspaceId, mode, multiple = f
       const parent: Where | null = where.prefix ? { ...where, prefix: parentPrefix } : conn?.bucket ? null : { kind: 'cloud', connectionId: where.connectionId, prefix: '' };
       return { where, path: where.prefix, display: `${scheme}://${where.bucket}/${where.prefix}`, parent, writable: false, entries: r.entries.map((e) => ({ ...e, type: e.type })), next_token: r.next_token };
     },
-    [workspaceId, hidden, clouds],
+    [workspaceId, hidden],
   );
 
   const go = useCallback(
@@ -126,8 +130,13 @@ export function LocationBrowser({ open, onClose, workspaceId, mode, multiple = f
     setHistory({ stack: [], at: -1 });
     setListing(null);
     void api.get<Places>(`/api/storage/places?workspace_id=${workspaceId}`).then(setPlaces, setError);
-    if (remote) void api.get<{ connections: CloudConnection[] }>('/api/cloud-connections').then((r) => setClouds(r.connections), () => setClouds([]));
-    void go({ kind: 'local' });
+    // Cloud connections first: a remote start needs its URI scheme.
+    const connections = remote ? api.get<{ connections: CloudConnection[] }>('/api/cloud-connections').then((r) => r.connections, () => []) : Promise.resolve([] as CloudConnection[]);
+    void connections.then((c) => {
+      cloudsRef.current = c;
+      setClouds(c);
+      void go(start ?? { kind: 'local' });
+    });
   }, [open, workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Show hidden files: reload the same folder.

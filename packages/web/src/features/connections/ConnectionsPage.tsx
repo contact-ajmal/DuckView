@@ -1,22 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Plug, Database, Cloud, Layers, Globe, Warehouse, Boxes, Plus, RefreshCw, Play, Pause, Trash2, Pencil, CheckCircle2, AlertTriangle, Clock, ExternalLink, Search, Sparkles } from 'lucide-react';
+import { Plug, Plus, RefreshCw, Play, Pause, Trash2, Pencil, CheckCircle2, AlertTriangle, Clock, ExternalLink, Sparkles } from 'lucide-react';
 import { api, timeAgo, type SourceType, type SourceFamily, type CloudConnection, type LakehouseConnection, type DatabaseConnection, type PublicConnection, type DataSync, type DataSyncRun, type ConnectorConnection, type ConnectorSummary } from '../../api/client';
 import { useWorkspace, useWorkspaceAccess } from '../../store/workspace';
 import { useAuth } from '../../store/auth';
 import { useCopilot } from '../../store/copilot';
 import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { PageHeader } from '../../components/layout';
-import { Badge, Button, Empty, Input, Tabs, cn, confirmAction } from '../../components/ui';
-import { CloudWizard } from '../explorer/CloudWizard';
-import { LakehouseWizard } from '../explorer/LakehouseWizard';
-import { DatabaseWizard } from './DatabaseWizard';
+import { Badge, Button, Empty, Tabs, cn, confirmAction } from '../../components/ui';
 import { SyncEditor } from './SyncEditor';
 import { ReversePanel } from './ReversePanel';
 import { StreamsPanel } from './StreamsPanel';
-import { ConnectorWizard } from './ConnectorWizard';
-import { HttpWizard } from './HttpWizard';
-
-const FAMILY_ICON: Record<SourceFamily, ReactNode> = { storage: <Cloud className="h-4 w-4" />, lakehouse: <Layers className="h-4 w-4" />, database: <Database className="h-4 w-4" />, web: <Globe className="h-4 w-4" />, warehouse: <Warehouse className="h-4 w-4" />, saas: <Boxes className="h-4 w-4" /> };
+import { ConnectionWizards, FAMILY_ICON, SourceCatalog, wizardFor, type ConnectionWizard } from './SourceCatalog';
 
 type Tab = 'sources' | 'catalog' | 'syncs' | 'streams' | 'reverse';
 
@@ -37,8 +31,7 @@ export function ConnectionsPage() {
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [syncs, setSyncs] = useState<DataSync[]>([]);
   const [runs, setRuns] = useState<Record<string, DataSyncRun[]>>({});
-  const [filter, setFilter] = useState('');
-  const [wizard, setWizard] = useState<{ kind: 'cloud'; provider: CloudConnection['provider'] | null; edit: CloudConnection | null } | { kind: 'http' } | { kind: 'lakehouse'; provider: LakehouseConnection['provider'] | null; edit: LakehouseConnection | null } | { kind: 'database'; source: SourceType | null; edit: DatabaseConnection | null } | { kind: 'connector'; source: SourceType | null; connector: ConnectorSummary; edit: ConnectorConnection | null } | { kind: 'sync'; edit: DataSync | null; connectorId?: string; sourceKind?: 'table' | 'connector' | 'url' | 'sheet' | 'sql'; resource?: Record<string, unknown>; name?: string } | null>(null);
+  const [wizard, setWizard] = useState<ConnectionWizard | { kind: 'sync'; edit: DataSync | null; connectorId?: string; sourceKind?: 'table' | 'connector' | 'url' | 'sheet' | 'sql'; resource?: Record<string, unknown>; name?: string } | null>(null);
   const [testing, setTesting] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   // A wizard that saved something lands on Configured when it closes; a cancelled one stays where it was.
@@ -87,11 +80,10 @@ export function ConnectionsPage() {
   const go = (t: Tab) => { location.hash = `#/connections/${t}`; setTab(t); };
   // Every catalog card opens the form of that source — no second "pick a provider" step.
   const openWizard = (s: SourceType) => {
-    if (s.backend.family === 'cloud') setWizard({ kind: 'cloud', provider: s.backend.provider, edit: null });
-    else if (s.backend.family === 'lakehouse') setWizard({ kind: 'lakehouse', provider: s.backend.provider, edit: null });
-    else if (s.backend.family === 'database') setWizard({ kind: 'database', source: s, edit: null });
-    else if (s.backend.family === 'connector') { const c = connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector); if (c) setWizard({ kind: 'connector', source: s, connector: c, edit: null }); }
-    else if (s.backend.family === 'http') { if (s.id === 'google_sheets_link') { if (wsId) setWizard({ kind: 'sync', edit: null, sourceKind: 'sheet' }); } else setWizard({ kind: 'http' }); }
+    const w = wizardFor(s, connectorCatalog);
+    if (w === 'sheet') {
+      if (wsId) setWizard({ kind: 'sync', edit: null, sourceKind: 'sheet' });
+    } else if (w) setWizard(w);
   };
   const testConnector = async (c: ConnectorConnection) => {
     setTesting((t) => ({ ...t, [c.id]: 'testing…' }));
@@ -139,8 +131,6 @@ export function ConnectionsPage() {
   };
 
   const sources = catalog?.sources ?? [];
-  const q = filter.trim().toLowerCase();
-  const matches = (s: SourceType) => !q || `${s.label} ${s.vendor} ${s.blurb} ${s.family}`.toLowerCase().includes(q);
   const configuredCount = configured ? configured.cloud.length + configured.lakehouse.length + configured.databases.length + configured.http.length + configured.connectors.length : 0;
   const scheduleLabel = (s: DataSync) => (s.schedule.kind === 'manual' ? 'manual' : s.schedule.kind === 'interval' ? `every ${s.schedule.minutes} min` : `cron ${s.schedule.expression}`);
 
@@ -218,31 +208,7 @@ export function ConnectionsPage() {
 
       {tab === 'catalog' && catalog && (
         <div className="space-y-5">
-          <div className="relative max-w-md"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" /><Input autoFocus value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search sources — postgres, sheets, iceberg…" className="pl-8" /></div>
-          {(Object.keys(catalog.families) as SourceFamily[]).map((fam) => {
-            const items = sources.filter((s) => s.family === fam && matches(s));
-            if (!items.length) return null;
-            return (
-              <div key={fam}>
-                <div className="mb-2 flex items-baseline gap-2"><span className="text-zinc-500">{FAMILY_ICON[fam]}</span><h3 className="text-body font-semibold text-zinc-100">{catalog.families[fam].label}</h3><span className="truncate text-xs text-zinc-500">{catalog.families[fam].blurb}</span></div>
-                <div className="grid gap-x-6 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
-                  {items.map((s) => (
-                    <button key={s.id} type="button" data-source={s.id} disabled={s.status === 'planned' || !canEdit} onClick={() => openWizard(s)} className={cn('group flex items-start gap-3 border-b border-zinc-800/70 px-1 py-2.5 text-left', s.status === 'planned' ? 'cursor-default opacity-50' : 'hover:bg-zinc-900')} title={s.status === 'planned' ? 'Planned — not available yet' : `Connect ${s.label}`}>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-body font-medium text-zinc-100">{s.label}</span>
-                          {s.status === 'planned' && <Badge>planned</Badge>}
-                        </div>
-                        <div className="truncate text-xs text-zinc-500">{s.blurb}</div>
-                        <div className="mt-0.5 truncate text-2xs text-zinc-500">{[s.capabilities.attach && 'attach', s.capabilities.browse && 'browse', s.capabilities.remote_sql && 'remote SQL', s.capabilities.sync && 'sync'].filter(Boolean).join(' · ')}{' · '}{s.auth === 'keys' ? 'access keys' : s.auth === 'token' ? 'token' : s.auth === 'password' ? 'password' : s.auth === 'file' ? 'file' : s.auth === 'connection_string' ? 'connection string' : s.auth === 'oauth' ? (s.backend.family === 'connector' && connectorCatalog.find((k) => k.id === (s.backend as { connector: string }).connector)?.auth.kind === 'google' ? 'Google account' : 'OAuth') : 'no auth'}</div>
-                      </div>
-                      {s.status !== 'planned' && <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500 group-hover:text-zinc-200" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+          <SourceCatalog catalog={catalog} connectors={connectorCatalog} canEdit={canEdit} onChoose={openWizard} />
           <p className="text-2xs text-zinc-500">Missing a source? Anything that speaks Postgres wire, S3 or an Iceberg REST catalog works through those entries; warehouses and applications go through their own APIs. Ask for a connector at <a className="text-accent-300 hover:underline" href="https://github.com/contact-ajmal/DuckView/issues" target="_blank" rel="noreferrer">github.com/contact-ajmal/DuckView/issues <ExternalLink className="inline h-3 w-3" /></a>.</p>
         </div>
       )}
@@ -299,11 +265,7 @@ export function ConnectionsPage() {
       {tab === 'streams' && wsId && configured && <StreamsPanel key={wsId} workspaceId={wsId} clouds={configured.cloud} databases={configured.databases} />}
       {tab === 'reverse' && wsId && configured && <ReversePanel key={wsId} workspaceId={wsId} databases={configured.databases} clouds={configured.cloud} lakes={configured.lakehouse} />}
 
-      <CloudWizard open={wizard?.kind === 'cloud'} initialProvider={wizard?.kind === 'cloud' ? wizard.provider : null} initial={wizard?.kind === 'cloud' ? wizard.edit : null} onClose={closeWizard} onCreated={markSaved} />
-      <HttpWizard open={wizard?.kind === 'http'} onClose={closeWizard} onSaved={markSaved} />
-      <LakehouseWizard open={wizard?.kind === 'lakehouse'} initialProvider={wizard?.kind === 'lakehouse' ? wizard.provider : null} initial={wizard?.kind === 'lakehouse' ? wizard.edit : null} onClose={closeWizard} onCreated={markSaved} />
-      <DatabaseWizard open={wizard?.kind === 'database'} source={wizard?.kind === 'database' ? wizard.source : null} initial={wizard?.kind === 'database' ? wizard.edit : null} onClose={closeWizard} onSaved={markSaved} />
-      <ConnectorWizard open={wizard?.kind === 'connector'} source={wizard?.kind === 'connector' ? wizard.source : null} connector={wizard?.kind === 'connector' ? wizard.connector : null} initial={wizard?.kind === 'connector' ? wizard.edit : null} googleConfigured={!!configured?.google_configured} isAdmin={!!isAdmin} onClose={closeWizard} onSaved={markSaved} onGoogleConfigured={() => void load()} />
+      <ConnectionWizards wizard={wizard && wizard.kind !== 'sync' ? wizard : null} onClose={closeWizard} onSaved={markSaved} googleConfigured={!!configured?.google_configured} isAdmin={!!isAdmin} onGoogleConfigured={() => void load()} />
       {wsId && <SyncEditor open={wizard?.kind === 'sync'} workspaceId={wsId} initial={wizard?.kind === 'sync' ? wizard.edit : null} initialConnectorId={wizard?.kind === 'sync' ? wizard.connectorId : undefined} initialResource={wizard?.kind === 'sync' ? wizard.resource : undefined} initialName={wizard?.kind === 'sync' ? wizard.name : undefined} initialKind={wizard?.kind === 'sync' ? wizard.sourceKind : undefined} databases={configured?.databases ?? []} lakehouses={configured?.lakehouse ?? []} connectors={configured?.connectors ?? []} onClose={() => setWizard(null)} onSaved={() => { void load(); go('syncs'); }} />}
     </div>
     </div>

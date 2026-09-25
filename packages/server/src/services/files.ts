@@ -62,6 +62,26 @@ export class FileService {
     return { path: target.relative, kind: kindOf(base), size_bytes: stat.size, modified_at: stat.mtime.toISOString(), ...(root ? { root } : {}) };
   }
 
+  /** Renames a file (or a Delta/Iceberg table directory) in place: same folder, new name. */
+  async rename(p: Principal, workspaceId: string, relPath: string, name: string): Promise<{ path: string }> {
+    requireWrite(p);
+    const w = await this.workspaces.get(p, workspaceId, 'EDITOR');
+    const clean = name.trim();
+    if (!clean || clean === '.' || clean === '..' || /[\\/\0]/.test(clean) || clean.startsWith('.')) throw badRequest(`Not a valid file name: ${name}`);
+    const jail = this.workspaces.jail;
+    const from = jail.resolve(relPath);
+    if (!from.exists) throw notFound('File');
+    const within = (root: string) => from.absolute.startsWith(root + path.sep);
+    if (!within(jail.baseDir) && !w.folders.some((f) => within(f.path))) throw badRequest('Only files in the data directory or a workspace folder can be renamed');
+    if ((await this.workspaces.activeDatabaseFiles()).has(from.absolute)) throw badRequest('This database is open in a workspace; detach it before renaming');
+    const to = jail.resolve(path.join(path.dirname(from.absolute), clean));
+    if (to.exists) throw badRequest(`${clean} already exists in this folder`);
+    fs.renameSync(from.absolute, to.absolute);
+    this.audit.log({ userId: p.userId, actorType: p.actorType, action: 'file.rename', resource: `file:${from.relative} -> ${to.relative}`, ip: p.ip });
+    await this.workspaces.bumpVersion(workspaceId, 'file_renamed', p.userId).catch(() => undefined);
+    return { path: to.relative };
+  }
+
   async remove(p: Principal, workspaceId: string, relPath: string): Promise<void> {
     requireWrite(p);
     await this.workspaces.get(p, workspaceId, 'EDITOR');

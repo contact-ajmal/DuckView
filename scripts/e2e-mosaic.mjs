@@ -1257,8 +1257,10 @@ try {
     };
     const names = `[...document.querySelectorAll('[data-testid="lb-entry"]')].map(e => e.dataset.name)`;
     await evaluate(`location.hash = '#/data'; 'ok'`);
-    await waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Add a folder from this computer')`, 20000, 'add folder button');
-    await clickButton('Add a folder from this computer');
+    await waitFor(`!!document.querySelector('[data-testid="sources-add"]')`, 20000, 'add source button');
+    await evaluate(`document.querySelector('[data-testid="sources-add"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="add-source-folder"]')`, 5000, 'add source dialog');
+    await evaluate(`document.querySelector('[data-testid="add-source-folder"]').click(); 'ok'`);
     await waitFor(`!!document.querySelector('[data-testid="lb-places"]') && document.querySelector('[data-testid="lb-places"]').textContent.includes('Home')`, 10000, 'places');
     report.details.places = await evaluate(`[...document.querySelectorAll('[data-testid="lb-places"] li button')].map(b => b.textContent).slice(0, 3)`);
     report.details.native = await evaluate(`!!document.querySelector('[data-testid="lb-native"]')`);
@@ -1305,6 +1307,76 @@ try {
     await waitFor(`!document.querySelector('[data-testid="location-browser"]')`, 10000, 'browser closed');
     report.details.folders = (await (await authed(`/api/workspaces/${wsId}/folders`)).json()).folders.map((f) => f.path);
     report.details.sub = path.join(dir, 'sub');
+    report.details.charts = 1;
+  }
+  else if (scenario === 'sources') {
+    // Data → Sources: search, pin, rename from the right-click menu, Add source, a folder that went missing, remove.
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dv-e2e-src-')));
+    const gone = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dv-e2e-gone-')));
+    fs.writeFileSync(path.join(dir, 'alpha.csv'), 'id\n1\n');
+    fs.writeFileSync(path.join(dir, 'beta.csv'), 'id\n2\n');
+    for (const p of [dir, gone]) await authed(`/api/workspaces/${wsId}/folders`, { method: 'POST', body: JSON.stringify({ path: p }) });
+    fs.rmSync(gone, { recursive: true });
+    cleanup = async () => {
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      for (const p of [dir, gone]) await authed(`/api/workspaces/${wsId}/folders?path=${encodeURIComponent(p)}`, { method: 'DELETE' }).catch(() => {});
+      await evaluate(`localStorage.removeItem('duckview.sources.' + ${JSON.stringify(wsId)}); 'ok'`).catch(() => {});
+      fs.rmSync(dir, { recursive: true, force: true });
+    };
+    await evaluate(`location.hash = '#/data'; location.reload(); 'ok'`);
+    const group = (root) => `document.querySelector('[data-testid="source-group"][data-root=${JSON.stringify(root).replace(/"/g, '\\"')}]')`;
+    const filesIn = (root) => `[...(${group(root)}?.querySelectorAll('[data-testid="source-file"]') ?? [])].map(e => e.dataset.path.split('/').pop())`;
+    await waitFor(`${filesIn(dir)}.length === 2`, 30000, 'the added folder and its files');
+    report.details.goneDot = await evaluate(`${group(gone)}.textContent`);
+    // Search across sources.
+    await setField('[data-testid="sources-search"]', 'beta');
+    await waitFor(`JSON.stringify(${filesIn(dir)}) === '["beta.csv"]'`, 5000, 'search');
+    report.details.search = await evaluate(filesIn(dir));
+    await setField('[data-testid="sources-search"]', '');
+    await waitFor(`${filesIn(dir)}.length === 2`, 5000, 'search cleared');
+    const rightClick = (name) => evaluate(`(() => { const row = [...${group(dir)}.querySelectorAll('[data-testid="source-file"]')].find(e => e.dataset.path.endsWith('/' + ${JSON.stringify(name)})); const r = row.getBoundingClientRect(); row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 20, clientY: r.y + 5 })); return true; })()`);
+    const menuItem = (text) => evaluate(`(() => { const b = [...document.querySelectorAll('[role=menu] [role=menuitem]')].find(b => b.textContent.trim() === ${JSON.stringify(text)}); if (!b) throw new Error('no menu item ' + ${JSON.stringify(text)}); b.click(); return true; })()`);
+    // Pin from the right-click menu.
+    await rightClick('alpha.csv');
+    await waitFor(`!!document.querySelector('[role=menu]')`, 3000, 'context menu');
+    report.details.menu = await evaluate(`[...document.querySelectorAll('[role=menu] [role=menuitem]')].map(b => b.textContent.trim())`);
+    await menuItem('Pin');
+    await waitFor(`document.querySelector('[data-testid="sources-shelf"]')?.textContent.includes('alpha.csv')`, 3000, 'pinned');
+    report.details.shelf = await evaluate(`document.querySelector('[data-testid="sources-shelf"]').textContent`);
+    // Rename.
+    await rightClick('beta.csv');
+    await waitFor(`!!document.querySelector('[role=menu]')`, 3000, 'context menu again');
+    await menuItem('Rename…');
+    await waitFor(`!!document.querySelector('[data-testid="confirm-dialog"] input')`, 3000, 'rename prompt');
+    await setField('[data-testid="confirm-dialog"] input', 'gamma.csv');
+    await evaluate(`document.querySelector('[data-testid="confirm-ok"]').click(); 'ok'`);
+    await waitFor(`${filesIn(dir)}.includes('gamma.csv')`, 10000, 'renamed');
+    report.details.renamed = fs.existsSync(path.join(dir, 'gamma.csv')) && !fs.existsSync(path.join(dir, 'beta.csv'));
+    report.details.queryButton = await evaluate(`!!document.querySelector('[aria-label="Query gamma.csv"]')`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_sidebar.png'), Buffer.from(shot.result.data, 'base64')); }
+    // Add source: both tabs; a catalog entry opens its connection form.
+    await evaluate(`document.querySelector('[data-testid="sources-add"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="add-source-dialog"]')`, 5000, 'add source');
+    report.details.localTab = await evaluate(`[...document.querySelectorAll('[data-testid="add-source-dialog"] h3')].map(h => h.textContent)`);
+    await evaluate(`[...document.querySelectorAll('[data-testid="add-source-dialog"] [role=tab]')].find(t => t.textContent === 'Remote').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="add-source-dialog"] [data-source="postgres"]')`, 10000, 'remote catalog');
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_add.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`document.querySelector('[data-testid="add-source-dialog"] [data-source="postgres"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[role=dialog][aria-label="Connect PostgreSQL"]') && !document.querySelector('[data-testid="add-source-dialog"]')`, 5000, 'postgres form');
+    report.details.wizard = 'Connect PostgreSQL';
+    await evaluate(`document.querySelector('[role=dialog][aria-label="Connect PostgreSQL"] [aria-label="Close"]').click(); 'ok'`);
+    await waitFor(`!document.querySelector('[role=dialog]')`, 3000, 'form closed');
+    // The missing folder: remove it from its own menu.
+    await evaluate(`(() => { const row = ${group(gone)}.firstElementChild; const r = row.getBoundingClientRect(); row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 20, clientY: r.y + 5 })); return true; })()`);
+    await waitFor(`!!document.querySelector('[role=menu]')`, 3000, 'folder menu');
+    await menuItem('Remove from workspace…');
+    await waitFor(`!!document.querySelector('[data-testid="confirm-ok"]')`, 3000, 'confirm');
+    await evaluate(`document.querySelector('[data-testid="confirm-ok"]').click(); 'ok'`);
+    await waitFor(`!${group(gone)}`, 10000, 'folder removed');
+    report.details.removed = true;
     report.details.charts = 1;
   }
   else if (scenario === 'data-explorer') {
@@ -2324,6 +2396,16 @@ try {
     if (d.created !== true || d.selectedNew !== 'true') problems.push(`new folder: ${d.created} ${d.selectedNew}`);
     if (d.button !== 'Choose “sub”') problems.push(`button: ${d.button}`);
     if (!(d.folders ?? []).includes(d.sub)) problems.push(`folders: ${JSON.stringify(d.folders)}`);
+  }
+  if (scenario === 'sources') {
+    if (!/Folder not found/.test(d.goneDot ?? '')) problems.push(`missing folder: ${d.goneDot}`);
+    if (JSON.stringify(d.search) !== '["beta.csv"]') problems.push(`search: ${JSON.stringify(d.search)}`);
+    if (JSON.stringify(d.menu) !== JSON.stringify(['Open', 'Query in SQL', 'Pin', 'Copy path', 'Reveal in browser', 'Rename…'])) problems.push(`menu: ${JSON.stringify(d.menu)}`);
+    if (!/Pinned/.test(d.shelf ?? '') || !/alpha\.csv/.test(d.shelf ?? '')) problems.push(`shelf: ${d.shelf}`);
+    if (d.renamed !== true) problems.push('rename did not happen on disk');
+    if (d.queryButton !== true) problems.push('no Query hover action');
+    if (JSON.stringify(d.localTab) !== JSON.stringify(['Add a folder', 'Upload files', 'Open one file'])) problems.push(`local tab: ${JSON.stringify(d.localTab)}`);
+    if (d.removed !== true) problems.push('folder not removed');
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);

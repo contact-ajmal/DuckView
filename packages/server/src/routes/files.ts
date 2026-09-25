@@ -34,6 +34,12 @@ export async function fileRoutes(app: FastifyInstance, ctx: AppContext) {
     return { ok: true };
   });
 
+  app.patch('/api/workspaces/:id/files', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z.object({ path: z.string().min(1), name: z.string().min(1).max(255) }).parse(req.body);
+    return ctx.files.rename(req.principal!, id, body.path, body.name);
+  });
+
   // Streams a file from the jail (exports, uploads). Path is validated by the jail; directories are refused.
   app.get('/api/workspaces/:id/files/download', async (req, reply) => {
     const { id } = req.params as { id: string };
