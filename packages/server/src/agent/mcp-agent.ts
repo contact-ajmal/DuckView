@@ -30,6 +30,10 @@ export const AGENT_MCP_TOOLS = [
   { name: 'build_dashboard', title: 'Build a dashboard', description: 'Builds a dashboard in the workspace for a goal, from checked queries and defined metrics.' },
   { name: 'create_data_app', title: 'Create a data app', description: 'Builds a small data app in the workspace for a goal.' },
   { name: 'explain_data', title: 'Explain', description: 'Explains a table, a metric, a dashboard or a query in plain language.' },
+  { name: 'create_analysis', title: 'Create an analysis', description: 'Analyses chosen datasets for a question and returns charts, tables and findings.' },
+  { name: 'start_mission', title: 'Start a mission', description: 'Starts a mission: an intent (analyse, build, investigate, automate, explore, explain), the datasets to work on, and a request. Returns at once; follow it with get_mission.' },
+  { name: 'get_mission', title: 'Get a mission', description: 'A mission\'s status, progress, plan, findings and artifacts; can wait for it to finish.' },
+  { name: 'resume_mission', title: 'Resume a mission', description: 'Continues a mission with a new request, or carries on from where it stopped.' },
   { name: 'get_agent_task', title: 'Get an agent task', description: 'A task\'s status, answer and artifacts — for tasks that wait for a person\'s approval.' },
   { name: 'list_agent_sessions', title: 'List agent sessions', description: 'Your agent sessions in a workspace, newest first.' },
 ] as const;
@@ -88,9 +92,10 @@ export function buildAgentMcpServer(ctx: AppContext, principal: Principal, opts:
   };
 
   type Extra = { _meta?: { progressToken?: string | number }; sendNotification: (n: { method: 'notifications/progress'; params: { progressToken: string | number; progress: number; message?: string } }) => Promise<void>; signal?: AbortSignal };
-  const runTask = async (input: Omit<StartTaskInput, 'via'>, extra: Extra) => {
+  const runTask = async (input: Omit<StartTaskInput, 'via'>, extra: Extra) => waitFor((await ctx.agentRuntime.start(principal, { ...input, via: 'mcp' })).id, extra);
+  const waitFor = async (taskId: string, extra: Extra) => {
     const rt = ctx.agentRuntime;
-    const started = await rt.start(principal, { ...input, via: 'mcp' });
+    const started = { id: taskId };
     const token = extra._meta?.progressToken;
     let n = 0;
     const final = await new Promise<AgentTask>((resolve) => {
@@ -126,6 +131,57 @@ export function buildAgentMcpServer(ctx: AppContext, principal: Principal, opts:
   server.registerTool('build_dashboard', { title: meta('build_dashboard').title, description: meta('build_dashboard').description, inputSchema: { goal: z.string().min(1).max(4000), ...common }, annotations }, task((a) => ({ request: `Build a dashboard: ${a.goal}`, mode: 'build' })) as never);
   server.registerTool('create_data_app', { title: meta('create_data_app').title, description: meta('create_data_app').description, inputSchema: { goal: z.string().min(1).max(4000), ...common }, annotations }, task((a) => ({ request: `Build a data app: ${a.goal}`, mode: 'build' })) as never);
   server.registerTool('explain_data', { title: meta('explain_data').title, description: meta('explain_data').description, inputSchema: { subject: z.string().min(1).max(4000), ...common }, annotations: { ...annotations, readOnlyHint: true } }, task((a) => ({ request: `Explain ${a.subject}`, mode: 'explain' })) as never);
+  const MissionMode = z.enum(['auto', 'analyse', 'build', 'investigate', 'automate', 'explore', 'explain']).optional();
+  const Datasets = z.array(z.string().min(1)).max(50).optional().describe('Tables, views or files to work on (the agent may find others)');
+  const missionContract = (mm: Awaited<ReturnType<typeof ctx.agentRuntime.missions.get>>) => ({
+    missionId: mm.id, title: mm.title, status: mm.status, progress: mm.progress, activity: mm.activity, mode: mm.mode, workspaceId: mm.workspace_id,
+    context: mm.context,
+    findings: mm.tasks.flatMap((t) => t.artifacts.filter((a) => a.type === 'finding').flatMap((a) => (a.data?.items as string[] | undefined) ?? [])),
+    tasks: mm.tasks.map((t) => taskContract(t, publicUrl)),
+  });
+  const renderMission = (c: ReturnType<typeof missionContract>) => `${c.title} — ${c.status} (${c.progress}%)${c.activity ? `: ${c.activity}` : ''}${c.findings.length ? `\n\nFindings:\n${c.findings.map((f) => `- ${f}`).join('\n')}` : ''}\n\n(mission ${c.missionId})`;
+  server.registerTool('create_analysis', { title: meta('create_analysis').title, description: meta('create_analysis').description, inputSchema: { question: z.string().min(1).max(4000), datasets: Datasets, workspace_id: common.workspace_id }, annotations: { ...annotations, readOnlyHint: true } }, (async (a: { question: string; datasets?: string[]; workspace_id?: string }, extra: Extra) => {
+    try {
+      const ws = workspace(a.workspace_id);
+      const { mission } = await ctx.agentRuntime.missions.start(principal, { workspaceId: ws, request: a.question, mode: 'analyse', datasets: a.datasets, via: 'mcp' });
+      const task = mission.tasks.at(-1)!;
+      return await waitFor(task.id, extra);
+    } catch (err) {
+      return fail(err);
+    }
+  }) as never);
+  server.registerTool('start_mission', { title: meta('start_mission').title, description: meta('start_mission').description, inputSchema: { request: z.string().min(1).max(8000), mode: MissionMode, datasets: Datasets, title: z.string().max(200).optional(), workspace_id: common.workspace_id }, annotations }, (async (a: { request: string; mode?: AgentMode; datasets?: string[]; title?: string; workspace_id?: string }) => {
+    try {
+      const { mission } = await ctx.agentRuntime.missions.start(principal, { workspaceId: workspace(a.workspace_id), request: a.request, mode: a.mode, datasets: a.datasets, title: a.title, via: 'mcp' });
+      const c = missionContract(mission);
+      return { content: [{ type: 'text' as const, text: renderMission(c) }], structuredContent: c as unknown as Record<string, unknown> };
+    } catch (err) {
+      return fail(err);
+    }
+  }) as never);
+  server.registerTool('get_mission', { title: meta('get_mission').title, description: meta('get_mission').description, inputSchema: { mission_id: z.string().min(1), wait_seconds: z.number().int().min(0).max(600).optional() }, annotations: { readOnlyHint: true } }, (async (a: { mission_id: string; wait_seconds?: number }) => {
+    try {
+      let mission = await ctx.agentRuntime.missions.get(principal, a.mission_id);
+      const last = mission.tasks.at(-1);
+      if (a.wait_seconds && last && (last.status === 'running' || last.status === 'planning')) {
+        await ctx.agentRuntime.wait(principal, last.id, a.wait_seconds * 1000).catch(() => undefined);
+        mission = await ctx.agentRuntime.missions.get(principal, a.mission_id);
+      }
+      const c = missionContract(mission);
+      return { content: [{ type: 'text' as const, text: renderMission(c) }], structuredContent: c as unknown as Record<string, unknown> };
+    } catch (err) {
+      return fail(err);
+    }
+  }) as never);
+  server.registerTool('resume_mission', { title: meta('resume_mission').title, description: meta('resume_mission').description, inputSchema: { mission_id: z.string().min(1), request: z.string().max(8000).optional() }, annotations }, (async (a: { mission_id: string; request?: string }, extra: Extra) => {
+    try {
+      const { task } = await ctx.agentRuntime.missions.resume(principal, a.mission_id, { request: a.request ?? null, via: 'mcp' });
+      return await waitFor(task.id, extra);
+    } catch (err) {
+      return fail(err);
+    }
+  }) as never);
+
   server.registerTool('get_agent_task', { title: meta('get_agent_task').title, description: meta('get_agent_task').description, inputSchema: { task_id: z.string().min(1), wait_seconds: z.number().int().min(0).max(600).optional().describe('Wait this long for it to finish') }, annotations: { readOnlyHint: true } }, (async (a: { task_id: string; wait_seconds?: number }) => {
     try {
       const t = a.wait_seconds ? await ctx.agentRuntime.wait(principal, a.task_id, a.wait_seconds * 1000) : await ctx.agentRuntime.getTask(principal, a.task_id);

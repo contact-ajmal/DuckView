@@ -187,7 +187,9 @@ export async function buildApp(ctx: AppContext): Promise<{ app: FastifyInstance;
     await app.register(fastifyStatic, { root: webDist, prefix: '/', wildcard: true, index: ['index.html'], maxAge: '1h', immutable: false });
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api') && !req.url.startsWith('/mcp') && req.headers.accept?.includes('text/html')) {
-        return reply.type('text/html').send(fs.createReadStream(path.join(webDist, 'index.html')));
+        // The Analyst WebUI (/analyst) is its own page; everything else is the Console.
+        const page = /^\/analyst(\/|\?|$)/.test(req.url) && fs.existsSync(path.join(webDist, 'analyst.html')) ? 'analyst.html' : 'index.html';
+        return reply.type('text/html').send(fs.createReadStream(path.join(webDist, page)));
       }
       return reply.code(404).send({ error: 'NOT_FOUND', message: `Route ${req.method} ${req.url} not found` });
     });

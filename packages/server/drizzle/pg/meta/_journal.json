@@ -323,6 +323,13 @@
       "when": 1790365440732,
       "tag": "0045_agent_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1790416321580,
+      "tag": "0046_agent_missions",
+      "breakpoints": true
     }
   ]
 }

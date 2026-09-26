@@ -205,18 +205,21 @@ One vocabulary for Copilot turns, DuckView agent runs (`hosted_agent_runs.steps`
 - **Natural language** is an entry point everywhere: ⌘K "Ask…", "Ask about this" on tables, results, widgets and errors ("Fix with AI"). The answer changes application state (opens the SQL tab, applies the chart config) rather than only describing it.
 - There is no special AI colour or gradient, and no sparkle confetti. Mark AI with the `Sparkles` icon and structure.
 
-### The agent dock (`features/agent`)
+### The Agent Home and missions (`features/agent`)
 
-- The DuckView agent lives in **one** place: the dock at the bottom of the shell (`AgentDock`, ⌘I). Do not add another chat page or panel; new surfaces register what they show with `usePageObject`, and the dock picks it up as a removable `ContextChip`.
-- A task reads as request → plan (checklist) → steps as sentences (`ToolStep`, sentences from `components/ai/describe.ts`; add one for every new tool) → answer (`Markdown`) → artifacts (`AgentArtifacts`: open in the workspace, never only in the dock) → approval (`ApprovalCard`). Never render the model's raw text around tool calls, or anything like hidden reasoning.
-- The agent moves the workspace through workspace actions (`performAction`): open a dashboard, a dataset, a SQL tab. Pages must be deep-linkable for that to work; `#/…?agent_task=<id>` opens a task (approval links from other agents and the inbox).
-- Things the agent made say so: "made by the agent" on artifacts, "Agent for <name>" in version history.
-- Settings → Agents is the only place for the Agent MCP endpoint, its tokens (shown once), memory and usage.
+- DuckView opens on the **Agent Home** (`#/`, `features/agent/home/AgentHome.tsx`): the question, the composer, and in its context bar the Workspace (the console's active workspace — one source) and Dataset selectors (`ContextSelectors.tsx`; datasets load when the picker opens). Below: the intents (Analyse, Build, Investigate, Automate, Explore, Explain — hints to the same agent, never separate agents), active missions and recent work (`MissionList`). The workspace overview is `#/home`.
+  - The Agent Home is the one page that uses `text-display` for its question. It is a working surface, not a hero: no marketing copy, no illustration, no gradient.
+- A request starts a **mission** (`#/agent/missions/<id>`, `mission/MissionView.tsx`). While nothing is made yet, the page is the request, the plan and live activity in words. Then it is a workspace: summary, `Findings`, results as `ResultArtifact` (the dashboards' `ChartWidget` inside `ChartFrame`, with Table and SQL views), objects as `ObjectArtifact`, and a side column with Progress, Context ("You chose" / "The agent found") and Activity. The composer at the bottom continues the mission. Never render the model's raw text around tool calls, or anything like hidden reasoning.
+- **Open in Console** is `ConsoleButton`: it follows the server's `artifact.open` decision and shows the reason when not allowed. The console checks access again.
+- Any page reaches the agent with ⌘I (the object on screen comes along as context). Do not add another agent panel or a chat page.
+- Add a sentence to `components/ai/describe.ts` for every new tool; it is what activity shows.
+- The same pages run in the **Analyst WebUI** (`analyst.html`, `/analyst`). Links into the console go through `consoleHref()` / `openInConsole()` (`surface.ts`), never raw `#/…` hrefs.
+- Things the agent made say so: "made by the agent" on artifacts, "Agent for <name>" in version history. Settings → Agents holds the Agent MCP endpoint, its tokens (shown once), memory and usage.
 
 ## Layout and information architecture
 
 - **Shell:** rail (8 sections) | top bar | section sub-tabs | page.
-  - The rail sections are Home, Data, SQL, Dashboards, Apps, Agents (`#/agents`, which also accepts `#/mcp`), Connections and Settings.
+  - The rail sections are Agent (`#/`, the Agent Home), Data, SQL, Dashboards, Apps, Agents (`#/agents`, which also accepts `#/mcp`), Connections and Settings.
   - The top bar holds the workspace › section › page › object breadcrumb, ⌘K, the storage label, live status, the AI assistant and the account.
   - Add pages to `SUBPAGES` or `parseRoute`, not to the rail, which stays at eight items or fewer.
   - Agents opens on Activity, then Approvals; the agents, MCP clients and tools come after.

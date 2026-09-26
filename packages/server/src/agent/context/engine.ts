@@ -31,6 +31,8 @@ export interface PackInput {
   /** Tools already chosen for this step (carried in the pack for telemetry and rendering). */
   tools?: ToolDescriptor[];
   budget?: Partial<ContextBudget>;
+  /** Datasets the person chose (table names or file paths): always in the pack, marked explicit. */
+  explicit?: string[];
 }
 
 export function budgetFromConfig(cfg: AppContext['cfg']): ContextBudget {
@@ -151,6 +153,15 @@ export class ContextEngine {
       if (input.page.kind === 'dataset' && input.page.id) pinned.push(`table:${input.page.id}`);
       if (input.page.kind === 'dashboard' && input.page.id) pinned.push(`dashboard:${input.page.id}`);
     }
+    // Datasets the person chose are pinned and marked, so the model and the UI know they were chosen, not guessed.
+    const explicitIds = new Set((input.explicit ?? []).flatMap((d) => [`table:${d}`, `file:${d.replace(/^'|'$/g, '')}`]));
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i]!;
+      if (explicitIds.has(c.id)) {
+        candidates[i] = { ...c, pinned: true, metadata: { ...c.metadata, explicit: true } };
+        pinned.push(c.id);
+      }
+    }
     const sel = await this.decision.selectContext({ request: input.request, candidates, budget, intent: input.intent, pinned });
     const semanticContext = semanticOf(input.request, discovered, sel.selected);
     return { request: input.request, objects: sel.selected, tools: (input.tools ?? []).slice(0, budget.maxToolDefinitions), semanticContext, budget, stats: { considered: sel.considered, selected: sel.selected.length, tokens: sel.tokens, dropped: sel.dropped, durationMs: Math.round(performance.now() - started) } };
@@ -201,10 +212,10 @@ const SECTION: Partial<Record<ContextObject['type'], string>> = {
 export function renderPack(pack: ContextPack): string {
   const groups = new Map<string, string[]>();
   for (const o of pack.objects) {
-    const h = SECTION[o.type] ?? o.type;
+    const h = o.metadata.explicit ? 'Datasets the person chose (work with these first)' : SECTION[o.type] ?? o.type;
     groups.set(h, [...(groups.get(h) ?? []), `- ${o.text}`]);
   }
-  const order = Object.values(SECTION);
+  const order = ['Datasets the person chose (work with these first)', ...Object.values(SECTION)];
   const parts = ['## Workspace context (selected for this request)'];
   for (const h of [...new Set(order)].filter((x) => groups.has(x!)) as string[]) parts.push(`### ${h}\n${groups.get(h)!.join('\n')}`);
   for (const [h, lines] of groups) if (!order.includes(h)) parts.push(`### ${h}\n${lines.join('\n')}`);

@@ -18,6 +18,7 @@ export const AGENT_EVENT_TYPES = [
   'agent.tool.completed',
   'agent.tool.failed',
   'agent.observation.created',
+  'agent.dataset.discovered',
   'agent.approval.required',
   'agent.approval.granted',
   'agent.approval.denied',

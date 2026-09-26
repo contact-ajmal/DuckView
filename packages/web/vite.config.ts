@@ -24,5 +24,6 @@ export default defineConfig({
       '/metrics': backend,
     },
   },
-  build: { outDir: 'dist', sourcemap: false, chunkSizeWarningLimit: 1500 },
+  // Two entries: the Console (index.html) and the Analyst WebUI (analyst.html), sharing the agent's components and API.
+  build: { outDir: 'dist', sourcemap: false, chunkSizeWarningLimit: 1500, rollupOptions: { input: { main: path.resolve(here, 'index.html'), analyst: path.resolve(here, 'analyst.html') } } },
 });

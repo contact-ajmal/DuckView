@@ -94,7 +94,7 @@ describe('Agent MCP server (/mcp/agent)', () => {
     await expect(connect('/mcp/agent', noMcp)).rejects.toThrow();
     const client = await connect('/mcp/agent', token);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(['analyse_dataset', 'ask_data_agent', 'build_dashboard', 'create_data_app', 'explain_data', 'get_agent_task', 'investigate_data', 'list_agent_sessions']);
+    expect(names).toEqual(['analyse_dataset', 'ask_data_agent', 'build_dashboard', 'create_analysis', 'create_data_app', 'explain_data', 'get_agent_task', 'get_mission', 'investigate_data', 'list_agent_sessions', 'resume_mission', 'start_mission']);
     await client.close();
     // The low-level MCP server is unchanged beside it.
     const low = await connect('/mcp', token);

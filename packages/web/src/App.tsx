@@ -17,7 +17,12 @@ import { GovernancePage } from './features/governance/GovernancePage';
 import { TransformPage } from './features/transform/TransformPage';
 import { SnapshotView } from './features/dashboards/SnapshotView';
 import { CopilotDrawer } from './features/copilot/CopilotDrawer';
-import { AgentDock } from './features/agent/AgentDock';
+import { AgentHome } from './features/agent/home/AgentHome';
+import { MissionView } from './features/agent/mission/MissionView';
+import { useMissions } from './features/agent/missions';
+import { agentApi } from './features/agent/api';
+import { usePageContext } from './store/context';
+import { takePendingConsoleSql } from './features/agent/surface';
 import { ShareDialog } from './features/workspace/ShareDialog';
 import { CreateWorkspaceWizard } from './features/workspace/CreateWorkspaceWizard';
 import { WorkspaceDetailPage } from './features/workspace/WorkspaceDetailPage';
@@ -58,6 +63,34 @@ export default function App() {
     return stop;
   }, [auth.user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A SQL tab the Analyst WebUI asked the console to open.
+  useEffect(() => {
+    if (!ws.activeId) return;
+    const pending = takePendingConsoleSql();
+    if (pending) void ws.addTab({ title: pending.title, sql: pending.sql });
+  }, [ws.activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ⌘I from anywhere: to the agent, with what is on screen offered as context.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'i') return;
+      e.preventDefault();
+      const o = usePageContext.getState().object;
+      if (o && o.kind !== 'agent') useMissions.getState().setCarried({ kind: o.kind, id: o.id ?? null, label: o.label });
+      location.hash = '#/';
+      setTimeout(() => window.dispatchEvent(new Event('duckview:agent-focus')), 50);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  // #/?agent_task=<id> (an approval link from the inbox or another agent): open that task's mission.
+  useEffect(() => {
+    const m = /[?&]agent_task=([\w-]+)/.exec(location.hash);
+    if (!m || !auth.user) return;
+    void agentApi.task(m[1]!).then((t) => {
+      location.hash = `#/agent/missions/${t.session_id}`;
+    }).catch(() => undefined);
+  }, [route, auth.user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (auth.loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -71,6 +104,7 @@ export default function App() {
 
   const active = ws.workspaces.find((w) => w.id === ws.activeId);
   const page = route.page;
+  const missionId = page === 'agent' ? /^#\/agent\/missions\/([\w-]+)/.exec(location.hash)?.[1] ?? null : null;
 
   return (
     <div className="flex h-full">
@@ -81,6 +115,7 @@ export default function App() {
         <SectionNav route={route} />
         <div className="flex min-h-0 flex-1">
           <main id="main" className="@container min-h-0 min-w-0 flex-1 overflow-hidden bg-zinc-950">
+            {page === 'agent' && (missionId ? <MissionView key={missionId} id={missionId} /> : <AgentHome />)}
             {page === 'home' && <HomePage onNewWorkspace={() => setCreating(true)} />}
             {page === 'data' && <OverviewPage />}
             {page === 'query' && <WorkspacePage />}
@@ -99,7 +134,6 @@ export default function App() {
           </main>
           <CopilotDrawer />
         </div>
-        <AgentDock />
       </div>
       <CommandPalette />
 

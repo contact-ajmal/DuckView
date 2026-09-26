@@ -1,5 +1,5 @@
 /** Form controls beyond Input and Select: a labelled field with hint and error, text areas, checkboxes, switches. */
-import { useId, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { useId, type ComponentProps, type InputHTMLAttributes, type ReactNode } from 'react';
 import { cn } from './index';
 
 /** A label, the control, then a hint or the error that explains what to change. */
@@ -13,8 +13,9 @@ export function Field({ label, hint, error, children, className, htmlFor }: { la
   );
 }
 
-export function Textarea({ className, mono, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement> & { mono?: boolean }) {
-  return <textarea className={cn('w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-body text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500/40', mono && 'font-mono text-xs', className)} {...rest} />;
+/** `bare`: no border or background, for a composer that is itself the surface (the Agent Home). */
+export function Textarea({ className, mono, variant = 'default', ...rest }: ComponentProps<'textarea'> & { mono?: boolean; variant?: 'default' | 'bare' }) {
+  return <textarea className={cn('w-full text-body text-zinc-100', variant === 'bare' ? 'resize-none bg-transparent placeholder:text-zinc-500 focus:outline-none' : 'rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500/40', mono && 'font-mono text-xs', className)} {...rest} />;
 }
 
 /** A checkbox with its label on the right; the whole row is clickable. */

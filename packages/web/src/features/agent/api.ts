@@ -7,7 +7,7 @@ import { api, getToken } from '../../api/client';
 export type TaskStatus = 'planning' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
 export interface PlanStep { text: string; status: 'pending' | 'active' | 'done' | 'skipped' }
 export interface StepRecord { n: number; kind: 'route' | 'context' | 'decision' | 'tool' | 'approval' | 'action' | 'answer'; at: string; tool?: string; arguments?: Record<string, unknown>; status: 'ok' | 'error' | 'approval_required' | 'denied' | 'skipped'; summary: string; duration_ms?: number; retry?: number }
-export type ArtifactType = 'answer' | 'table' | 'chart' | 'sql' | 'notebook' | 'dashboard' | 'metric' | 'quality_suite' | 'dbt_model' | 'app' | 'saved_query' | 'file';
+export type ArtifactType = 'answer' | 'finding' | 'dataset' | 'table' | 'chart' | 'sql' | 'notebook' | 'dashboard' | 'metric' | 'quality_suite' | 'dbt_model' | 'app' | 'saved_query' | 'file';
 export interface Artifact { id: string; type: ArtifactType; title: string; href?: string | null; data?: Record<string, unknown>; tool?: string | null; created_at: string }
 export interface Approval { id: string; tool: string; arguments: Record<string, unknown>; action_class: string; reason: string; verb?: string | null; preview: string | null; requested_at: string; decision?: 'approved' | 'denied'; decided_by?: string | null; note?: string | null }
 export interface WorkspaceAction { action: string; target?: string | null; href?: string | null; args?: Record<string, unknown> }
@@ -75,3 +75,43 @@ export async function* taskEvents(taskId: string, after: number, signal?: AbortS
     }
   }
 }
+
+// ------------------------------------------------------------------------------------------ missions (Agent Home)
+
+export type MissionMode = 'auto' | 'analyse' | 'build' | 'investigate' | 'automate' | 'explore' | 'explain';
+export type MissionStatus = TaskStatus | 'new';
+export interface Capabilities {
+  workspace_id: string;
+  role: 'VIEWER' | 'EDITOR' | 'OWNER';
+  persona: 'viewer' | 'analyst' | 'engineer' | 'admin';
+  can_write: boolean;
+  console: { data: boolean; sql: 'read' | 'write'; notebooks: 'view' | 'edit'; dashboards: 'view' | 'edit'; semantic: 'view' | 'edit'; quality: 'view' | 'edit'; dbt: boolean; apps: 'view' | 'edit'; connections: boolean; mcp: boolean; admin: boolean };
+  agent: { approve: boolean; export: boolean };
+}
+export interface MissionSummary { id: string; workspace_id: string; title: string; mode: MissionMode; status: MissionStatus; progress: number; activity: string | null; datasets: string[]; artifacts: { total: number; kinds: string[] }; tasks: number; visibility: 'private' | 'workspace'; owner: { id: string; mine: boolean }; archived: boolean; created_at: string; updated_at: string }
+export type MissionArtifact = Artifact & { open?: { allowed: boolean; reason: string | null } };
+export interface Mission extends Omit<MissionSummary, 'tasks'> {
+  page: { kind: string; id?: string | null; label: string } | null;
+  tasks: (AgentTask & { artifacts: MissionArtifact[] })[];
+  context: { explicit: string[]; discovered: string[] };
+  restricted: boolean;
+  capabilities: Capabilities;
+}
+export interface AgentWorkspace { id: string; name: string; description: string | null; role: 'VIEWER' | 'EDITOR' | 'OWNER'; environment: string | null; tags: string[]; shared: boolean; members: number; last_agent_activity: string | null }
+export interface DatasetOption { name: string; kind: 'table' | 'view' | 'file' | 'semantic_model'; rows: number | null; columns: number | null; description: string | null; tags: string[]; selectable: boolean; relation: string | null }
+export interface AgentHomeData { user: { id: string; email: string; role: string }; workspace_id: string | null; workspaces: AgentWorkspace[]; capabilities: Capabilities | null; active: MissionSummary[]; recent: MissionSummary[]; approvals: number; features: { agentHome: boolean; missions: boolean; analystWebUI: boolean; agentMcp: boolean } }
+
+const q = (v: string) => encodeURIComponent(v);
+export const missionApi = {
+  home: (workspaceId?: string | null) => api.get<AgentHomeData>(`/api/agent/home${workspaceId ? `?workspace_id=${q(workspaceId)}` : ''}`),
+  datasets: (workspaceId: string, search = '') => api.get<{ datasets: DatasetOption[]; recent: string[]; recommended: string[]; total: number }>(`/api/agent/workspaces/${workspaceId}/datasets${search ? `?q=${q(search)}` : ''}`),
+  list: (opts: { workspaceId?: string | null; status?: 'active' | 'recent' | 'archived' } = {}) => api.get<{ missions: MissionSummary[] }>(`/api/agent/missions?${new URLSearchParams({ ...(opts.workspaceId ? { workspace_id: opts.workspaceId } : {}), ...(opts.status ? { status: opts.status } : {}) })}`).then((r) => r.missions),
+  get: (id: string) => api.get<{ mission: Mission }>(`/api/agent/missions/${id}`).then((r) => r.mission),
+  start: (body: Record<string, unknown>) => api.post<{ mission: Mission; task: AgentTask }>('/api/agent/missions', body),
+  message: (id: string, body: Record<string, unknown>) => api.post<{ mission: Mission; task: AgentTask }>(`/api/agent/missions/${id}/messages`, body),
+  resume: (id: string, body: Record<string, unknown> = {}) => api.post<{ mission: Mission; task: AgentTask }>(`/api/agent/missions/${id}/resume`, body),
+  cancel: (id: string) => api.post<{ mission: Mission }>(`/api/agent/missions/${id}/cancel`).then((r) => r.mission),
+  duplicate: (id: string) => api.post<{ mission: Mission }>(`/api/agent/missions/${id}/duplicate`).then((r) => r.mission),
+  update: (id: string, patch: { title?: string; archived?: boolean; visibility?: 'private' | 'workspace' }) => api.patch<{ mission: Mission }>(`/api/agent/missions/${id}`, patch).then((r) => r.mission),
+  runArtifact: (id: string) => api.post<{ result: { columns: { name: string; type: string; kind?: string }[]; rows: unknown[][]; row_count: number; sql: string } }>(`/api/agent/artifacts/${id}/run`, {}).then((r) => r.result),
+};

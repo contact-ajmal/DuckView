@@ -1213,10 +1213,13 @@ export const agentSessions = pgTable(
     via: text('via').notNull().default('ui'),
     page: jsonb('page').$type<AgentPageRef | null>(),
     archived: boolean('archived').notNull().default(false),
+    mode: text('mode').notNull().default('auto'),
+    datasets: jsonb('datasets').$type<string[]>().notNull().default([]),
+    visibility: text('visibility').notNull().default('private'),
     created_at: ts('created_at').notNull(),
     updated_at: ts('updated_at').notNull(),
   },
-  (t) => [index('agent_sessions_user_idx').on(t.user_id, t.workspace_id)],
+  (t) => [index('agent_sessions_user_idx').on(t.user_id, t.workspace_id), index('agent_sessions_ws_idx').on(t.workspace_id, t.visibility)],
 );
 
 export const agentTasks = pgTable(

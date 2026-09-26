@@ -39,7 +39,8 @@ export class AgentMemoryStore {
       if (o.kind === 'error' && o.tool) drafts.push({ scope: 'user', kind: 'failure', subject: `${o.tool}:${o.subject ?? ''}`, text: o.text.slice(0, 400) });
     }
     if (task.status === 'completed') {
-      for (const a of task.artifacts.filter((x) => x.href || x.type === 'saved_query')) drafts.push({ scope: 'user', kind: 'outcome', subject: `${a.type}:${a.title}`, text: `Made the ${a.type.replace('_', ' ')} "${a.title}" for "${task.request.slice(0, 160)}".` });
+      // Things made — not datasets it merely found, nor findings.
+      for (const a of task.artifacts.filter((x) => (x.href || x.type === 'saved_query') && x.type !== 'dataset' && x.type !== 'finding')) drafts.push({ scope: 'user', kind: 'outcome', subject: `${a.type}:${a.title}`, text: `Made the ${a.type.replace('_', ' ')} "${a.title}" for "${task.request.slice(0, 160)}".` });
       // A sum or an average written by hand, with no defined metric used: the semantic layer may be missing one.
       const usedMetric = observations.some((o) => o.kind === 'metric' && o.tool === 'query_metrics');
       const sql = observations.map((o) => String(o.data?.sql ?? '')).find((q) => /\b(sum|avg|count)\s*\(/i.test(q));

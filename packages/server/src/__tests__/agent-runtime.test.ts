@@ -102,7 +102,7 @@ describe('agent runtime', () => {
     expect(t.steps.map((s) => `${s.kind}:${s.status}`)).toEqual(['route:ok', 'context:ok', 'tool:ok', 'answer:ok']);
     expect(t.steps[2]!.summary).toBe('2 rows: region, revenue');
     // The model's workspace_id was replaced by the session's workspace.
-    expect(t.artifacts).toEqual([expect.objectContaining({ type: 'table', tool: 'execute_query', data: expect.objectContaining({ rows: [['EU', 150], ['US', 300]], row_count: 2 }) })]);
+    expect(t.artifacts).toEqual([expect.objectContaining({ type: 'table', tool: 'execute_query', data: expect.objectContaining({ rows: [['EU', 150], ['US', 300]], row_count: 2 }) }), expect.objectContaining({ type: 'dataset', title: 'customer_orders', data: { name: 'customer_orders', explicit: false } })]);
     expect(t.telemetry).toMatchObject({ decision_engine: 'default', tool_calls: 1, tool_failures: 0, llm_calls: 2, input_tokens: 200, output_tokens: 40 });
     expect(t.telemetry!.context_objects_selected).toBeGreaterThan(0);
     // The model saw a selection of tools and context, never the whole registry.

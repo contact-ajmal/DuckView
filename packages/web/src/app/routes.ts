@@ -3,14 +3,14 @@
  * used still resolves (links in docs, notifications, agents and snapshots keep working); pages that used to be
  * top-level now live inside the section they belong to.
  */
-import { House, Database, SquareTerminal, LayoutDashboard, AppWindow, Bot, Plug, Settings, type LucideIcon } from 'lucide-react';
+import { Sparkles, Database, SquareTerminal, LayoutDashboard, AppWindow, Bot, Plug, Settings, type LucideIcon } from 'lucide-react';
 
 export type Section = 'home' | 'data' | 'sql' | 'dashboards' | 'apps' | 'ai' | 'connections' | 'settings';
 /** Which component renders the page. */
-export type Page = 'home' | 'data' | 'query' | 'notebooks' | 'transform' | 'governance' | 'dashboards' | 'alerts' | 'apps' | 'mcp' | 'connections' | 'settings' | 'templates' | 'workspace' | 'compare';
+export type Page = 'agent' | 'home' | 'data' | 'query' | 'notebooks' | 'transform' | 'governance' | 'dashboards' | 'alerts' | 'apps' | 'mcp' | 'connections' | 'settings' | 'templates' | 'workspace' | 'compare';
 
 export const SECTIONS: { id: Section; label: string; hash: string; icon: LucideIcon; hint: string }[] = [
-  { id: 'home', label: 'Home', hash: '#/', icon: House, hint: 'Recent work and workspace status' },
+  { id: 'home', label: 'Agent', hash: '#/', icon: Sparkles, hint: 'Ask the agent, and pick up your missions' },
   { id: 'data', label: 'Data', hash: '#/data', icon: Database, hint: 'Datasets, models, metrics, quality, catalog and lineage' },
   { id: 'sql', label: 'SQL', hash: '#/query', icon: SquareTerminal, hint: 'The SQL workbench and notebooks' },
   { id: 'dashboards', label: 'Dashboards', hash: '#/dashboards', icon: LayoutDashboard, hint: 'Dashboards, alerts and scheduled snapshots' },
@@ -63,6 +63,9 @@ export function parseRoute(hash = location.hash): Route {
     const s = SUBPAGES[section]?.find((x) => x.id === id);
     return { sub: s?.id ?? null, crumb: s && s.id !== SUBPAGES[section]![0]!.id ? s.label : null };
   };
+  // The Agent Home is where DuckView opens; the workspace overview it replaced lives at #/home.
+  if (first === 'home') return { section: 'home', page: 'home', sub: null, crumb: 'Workspace overview' };
+  if (first === 'agent') return { section: 'home', page: 'agent', sub: null, crumb: second === 'missions' ? 'Mission' : null };
   if (first === 'data' || first === 'overview') return { section: 'data', page: 'data', ...sub('data', 'explorer') };
   if (first === 'compare') return { section: 'data', page: 'compare', ...sub('data', 'compare') };
   if (first === 'query') return { section: 'sql', page: 'query', ...sub('sql', 'query') };
@@ -80,7 +83,7 @@ export function parseRoute(hash = location.hash): Route {
   if (first === 'templates') return { section: 'home', page: 'templates', sub: null, crumb: 'Templates' };
   if (first === 'workspaces') return { section: 'settings', page: 'workspace', sub: null, crumb: 'Workspaces' };
   if (first === 'settings') return { section: 'settings', page: 'settings', sub: null, crumb: null };
-  return { section: 'home', page: 'home', sub: null, crumb: null };
+  return { section: 'home', page: 'agent', sub: null, crumb: null };
 }
 
 export const sectionOf = (id: Section) => SECTIONS.find((s) => s.id === id)!;

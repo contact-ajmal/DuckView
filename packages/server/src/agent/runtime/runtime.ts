@@ -39,9 +39,12 @@ import { OPEN_IN_WORKSPACE, resolveAction } from './actions.js';
 import { artifactsOf, observe } from './observe.js';
 import { initialPlan, systemPrompt } from './prompt.js';
 import { AgentMemoryStore } from '../memory/store.js';
+import { MissionService } from './missions.js';
 
-export type AgentMode = 'auto' | 'analysis' | 'investigate' | 'build' | 'explain';
-const MODE_INTENT: Partial<Record<AgentMode, Intent>> = { analysis: 'analyse', investigate: 'investigate', build: 'build', explain: 'explain' };
+/** A mission's intent hint (the Agent Home's Analyse, Build, Investigate, Automate, Explore, Explain; 'analysis' is the older name). */
+export const AGENT_MODES = ['auto', 'analyse', 'analysis', 'build', 'investigate', 'automate', 'explore', 'explain'] as const;
+export type AgentMode = (typeof AGENT_MODES)[number];
+const MODE_INTENT: Partial<Record<AgentMode, Intent>> = { analyse: 'analyse', analysis: 'analyse', investigate: 'investigate', build: 'build', explain: 'explain', explore: 'analyse', automate: 'create' };
 const MAX_RESULT_CHARS = 8000;
 const HISTORY_TASKS = 6;
 
@@ -53,6 +56,8 @@ export interface StartTaskInput {
   page?: AgentPageRef | null;
   via: 'ui' | 'mcp' | 'rest' | 'a2a';
   byok?: ByokModel | null;
+  /** Datasets the person chose (replaces the session's when given). */
+  datasets?: string[] | null;
 }
 
 /** What a running task holds between steps (and while it waits for an approval). */
@@ -62,6 +67,9 @@ interface TaskState {
   principal: Principal;
   /** Offered reading tools only (read-only account, or a viewer of this workspace). */
   readOnly: boolean;
+  /** Datasets the person chose, and the ones the agent found on its own. */
+  explicit: string[];
+  discovered: Set<string>;
   model: ReasoningModel;
   classification: ClassificationResult;
   messages: ReasoningMessage[];
@@ -83,6 +91,7 @@ const emptyTelemetry = (engine: string): AgentTelemetry => ({ decision_engine: e
 export class AgentRuntime {
   readonly events = new AgentEventBus();
   readonly memory: AgentMemoryStore;
+  readonly missions: MissionService;
   /** Builds the reasoning model for a task (the server's model, or the person's own key); replaceable in tests. */
   modelFactory: (byok: ByokModel | null) => Promise<ReasoningModel>;
   private readonly states = new Map<string, TaskState>();
@@ -91,6 +100,7 @@ export class AgentRuntime {
 
   constructor(private readonly ctx: AppContext) {
     this.memory = new AgentMemoryStore(ctx);
+    this.missions = new MissionService(ctx, this);
     this.modelFactory = async (byok) => new LlmReasoningModel((await ctx.copilot.serverModel(byok ?? null)).instance);
   }
 
@@ -103,11 +113,12 @@ export class AgentRuntime {
 
   // ------------------------------------------------------------------------------------------ sessions
 
-  async createSession(p: Principal, workspaceId: string, input: { title?: string | null; via?: StartTaskInput['via']; page?: AgentPageRef | null } = {}): Promise<AgentSession> {
+  async createSession(p: Principal, workspaceId: string, input: { title?: string | null; via?: StartTaskInput['via']; page?: AgentPageRef | null; mode?: AgentMode; datasets?: string[]; visibility?: 'private' | 'workspace' } = {}): Promise<AgentSession> {
     this.guard(p, workspaceId);
     await this.ctx.workspaces.get(p, workspaceId);
+    const datasets = input.datasets?.length ? await this.resolveDatasets(p, workspaceId, input.datasets) : [];
     const now = new Date();
-    const row: AgentSession = { id: newId(), workspace_id: workspaceId, user_id: p.userId, title: (input.title?.trim() || 'New session').slice(0, 200), via: input.via ?? 'ui', page: input.page ?? null, archived: false, created_at: now, updated_at: now };
+    const row: AgentSession = { id: newId(), workspace_id: workspaceId, user_id: p.userId, title: (input.title?.trim() || 'New session').slice(0, 200), via: input.via ?? 'ui', page: input.page ?? null, archived: false, mode: input.mode ?? 'auto', datasets, visibility: input.visibility ?? 'private', created_at: now, updated_at: now };
     await this.db.insert(this.s.agentSessions).values(row);
     return row;
   }
@@ -206,21 +217,24 @@ export class AgentRuntime {
     if (!request) throw badRequest('request is required');
     if (request.length > 8000) throw badRequest('The request is too long (8,000 characters at most)');
     const access = await this.ctx.workspaces.get(p, input.workspaceId);
-    const session = input.sessionId ? await this.getSession(p, input.sessionId) : await this.createSession(p, input.workspaceId, { title: request.slice(0, 80), via: input.via, page: input.page });
+    const session = input.sessionId ? await this.getSession(p, input.sessionId) : await this.createSession(p, input.workspaceId, { title: request.slice(0, 80), via: input.via, page: input.page, mode: input.mode, datasets: input.datasets ?? undefined });
+    // Datasets chosen for this request replace the mission's; otherwise the mission's stand.
+    const explicit = input.datasets ? await this.resolveDatasets(p, input.workspaceId, input.datasets) : session.datasets;
+    const mode = input.mode ?? (session.mode as AgentMode) ?? 'auto';
     if (session.workspace_id !== input.workspaceId) throw badRequest('The session belongs to another workspace');
     if ('tasks' in session && (session.tasks as AgentTask[]).some((t) => t.status === 'running' || t.status === 'planning' || t.status === 'waiting_approval')) throw badRequest('This session is still working on a task');
     // The model first: without one there is nothing to run (a clear error rather than a failed task).
     const model = await this.modelFactory(input.byok ?? null);
     const now = new Date();
-    const task: AgentTask = { id: newId(), session_id: session.id, workspace_id: input.workspaceId, user_id: p.userId, request, mode: input.mode ?? 'auto', intent: null, status: 'planning', plan: [], steps: [], artifacts: [], actions: [], approval: null, answer: null, error: null, provider: model.provider, model: model.model, telemetry: emptyTelemetry(this.ctx.decision.name), trace_id: newId(), created_at: now, finished_at: null };
+    const task: AgentTask = { id: newId(), session_id: session.id, workspace_id: input.workspaceId, user_id: p.userId, request, mode, intent: null, status: 'planning', plan: [], steps: [], artifacts: [], actions: [], approval: null, answer: null, error: null, provider: model.provider, model: model.model, telemetry: emptyTelemetry(this.ctx.decision.name), trace_id: newId(), created_at: now, finished_at: null };
     await this.db.insert(this.s.agentTasks).values(task);
-    await this.db.update(this.s.agentSessions).set({ updated_at: now, ...(input.page ? { page: input.page } : {}) }).where(eq(this.s.agentSessions.id, session.id));
+    await this.db.update(this.s.agentSessions).set({ updated_at: now, datasets: explicit, mode, ...(input.page ? { page: input.page } : {}) }).where(eq(this.s.agentSessions.id, session.id));
     const principal: Principal = { ...p, actorType: 'AGENT', workspaceScope: input.workspaceId };
     // A workspace viewer reads only, whatever their account can do elsewhere: offer them reading tools.
     const readOnly = !canWrite(p) || access.role === 'VIEWER';
     const offered = new Map(toolRegistry(this.ctx.cfg).availableTo(readOnly ? { ...principal, scopes: principal.scopes.filter((s) => s !== 'write') } : principal).map((t) => [t.name, toolRegistry(this.ctx.cfg).descriptor(t.name)!]));
     offered.set(OPEN_IN_WORKSPACE.name, OPEN_IN_WORKSPACE);
-    const state: TaskState = { task, via: input.via, principal, readOnly, model, classification: { intent: 'ask', confidence: 0, entities: [] }, messages: [], offered, used: [], failures: new Map(), observations: [], history: [], memories: [], controller: new AbortController(), toolCalls: 0, started: performance.now(), pending: null };
+    const state: TaskState = { task, via: input.via, principal, readOnly, explicit, discovered: new Set(), model, classification: { intent: 'ask', confidence: 0, entities: [] }, messages: [], offered, used: [], failures: new Map(), observations: [], history: [], memories: [], controller: new AbortController(), toolCalls: 0, started: performance.now(), pending: null };
     this.states.set(task.id, state);
     this.done.set(task.id, new Promise((resolve) => this.resolvers.set(task.id, resolve)));
     void this.begin(state, input).catch((err) => this.fail(state, err));
@@ -356,14 +370,14 @@ export class AgentRuntime {
       const t0 = performance.now();
       const toolSel = await withSpan('agent.decision', { 'duckview.task_id': task.id, 'duckview.decision_engine': this.ctx.decision.name }, () => this.ctx.decision.selectTools({ request: task.request, tools: [...state.offered.values()], intent: state.classification.intent, max: budget.maxToolDefinitions, used: state.used }));
       if (!toolSel.tools.some((t) => t.name === OPEN_IN_WORKSPACE.name)) toolSel.tools.push(OPEN_IN_WORKSPACE);
-      const pack = await this.ctx.contextEngine.pack(state.principal, task.workspace_id, { request: task.request, intent: state.classification.intent, page, extra: [...state.observations, ...state.history, ...state.memories], tools: toolSel.tools });
+      const pack = await this.ctx.contextEngine.pack(state.principal, task.workspace_id, { request: task.request, intent: state.classification.intent, page, extra: [...state.observations, ...state.history, ...state.memories], tools: toolSel.tools, explicit: state.explicit });
       task.telemetry!.decision_ms += performance.now() - t0;
       task.telemetry!.context_objects_considered = Math.max(task.telemetry!.context_objects_considered, pack.stats.considered);
       task.telemetry!.context_objects_selected = pack.stats.selected;
       task.telemetry!.context_tokens = pack.stats.tokens;
       if (turn === 0) {
         void this.memory.used(pack.objects.filter((o) => o.type === 'memory').map((o) => (o.content as { id: string }).id)).catch(() => undefined);
-        this.emit(state, 'agent.context.selected', { considered: pack.stats.considered, selected: pack.stats.selected, tokens: pack.stats.tokens, objects: pack.objects.map((o) => ({ type: o.type, title: o.title, relevance: o.relevance })), prefer_metrics: pack.semanticContext.preferMetrics, metrics: pack.semanticContext.matched });
+        this.emit(state, 'agent.context.selected', { considered: pack.stats.considered, selected: pack.stats.selected, tokens: pack.stats.tokens, explicit: state.explicit, objects: pack.objects.map((o) => ({ type: o.type, title: o.title, relevance: o.relevance, explicit: !!o.metadata.explicit })), prefer_metrics: pack.semanticContext.preferMetrics, metrics: pack.semanticContext.matched });
         this.step(state, { kind: 'context', status: 'ok', summary: `Selected ${pack.stats.selected} of ${pack.stats.considered} things in the workspace${pack.semanticContext.matched.length ? ` (metric ${pack.semanticContext.matched.join(', ')})` : ''}` });
       }
       const names = toolSel.tools.map((t) => t.name).join(',');
@@ -416,6 +430,12 @@ export class AgentRuntime {
     }
     task.plan = task.plan.map((s) => ({ ...s, status: s.status === 'pending' || s.status === 'active' ? 'done' : s.status }));
     this.step(state, { kind: 'answer', status: 'ok', summary: 'Answered' });
+    const findings = findingsOf(answer ?? '');
+    if (findings.length) {
+      const a: AgentArtifact = { id: newId(), type: 'finding', title: 'Key findings', tool: null, href: null, data: { items: findings }, created_at: new Date().toISOString() };
+      task.artifacts = [...task.artifacts, a];
+      this.emit(state, 'agent.artifact.created', { artifact: a });
+    }
     await this.finish(state, task, { status: 'completed', answer: answer || '(The agent did not write an answer.)' });
   }
 
@@ -492,7 +512,7 @@ export class AgentRuntime {
       state.observations.push({ id: `observation:${row.id}`, type: 'observation', workspaceId: task.workspace_id, source: 'task', title: o.subject ?? name, text: o.text, content: o.data, metadata: { boost: 1.2, kind: o.kind }, timestamp: row.created_at.toISOString() });
       this.emit(state, 'agent.observation.created', { kind: o.kind, subject: o.subject, text: o.text.slice(0, 300), tool: name });
     }
-    const made = artifactsOf(name, args, result, budget.maxResultRows);
+    const made = [...artifactsOf(name, args, result, budget.maxResultRows), ...(await this.discover(state, args, result.isError === true))];
     for (const a of made) {
       task.artifacts = [...task.artifacts, a];
       this.emit(state, 'agent.artifact.created', { artifact: a });
@@ -508,6 +528,43 @@ export class AgentRuntime {
   }
 
   // ------------------------------------------------------------------------------------------ helpers
+
+  /**
+   * The datasets named for a mission, as the person can see them: tables and views of the catalog (schema.name, or
+   * the bare name in main) and data files. Anything else is refused — a name is not a way around access.
+   */
+  async resolveDatasets(p: Principal, workspaceId: string, names: string[]): Promise<string[]> {
+    const objects = await this.ctx.contextEngine.discover(p, workspaceId);
+    const known = new Map(objects.filter((o) => o.type === 'table' || o.type === 'view' || o.type === 'file').map((o) => [o.title.toLowerCase(), o.title]));
+    const out: string[] = [];
+    for (const raw of names.slice(0, 50)) {
+      const n = raw.trim().replace(/^'|'$/g, '').replace(/^main\./, '');
+      const hit = known.get(n.toLowerCase());
+      if (!hit) throw badRequest(`There is no table, view or file called "${raw}" in this workspace that you can see`);
+      if (!out.includes(hit)) out.push(hit);
+    }
+    return out;
+  }
+
+  /** Datasets a call reached that the person did not choose: kept as dataset artifacts ("Agent discovered"). */
+  private async discover(state: TaskState, args: Record<string, unknown>, failed: boolean): Promise<AgentArtifact[]> {
+    if (failed) return [];
+    const objects = await this.ctx.contextEngine.discover(state.principal, state.task.workspace_id).catch(() => []);
+    const names = new Map(objects.filter((o) => o.type === 'table' || o.type === 'view').map((o) => [o.title.toLowerCase(), o.title]));
+    const found = new Set<string>();
+    for (const k of ['file_path_or_table', 'table_or_path', 'table', 'dataset', 'source', 'left', 'right']) if (typeof args[k] === 'string') found.add((args[k] as string).toLowerCase().replace(/^main\./, ''));
+    const sql = typeof args.sql === 'string' ? args.sql : '';
+    for (const m of sql.matchAll(/\b(?:from|join)\s+("?[\w.]+"?)/gi)) found.add(m[1]!.replace(/"/g, '').toLowerCase().replace(/^main\./, ''));
+    const out: AgentArtifact[] = [];
+    for (const f of found) {
+      const name = names.get(f);
+      if (!name || state.explicit.includes(name) || state.discovered.has(name)) continue;
+      state.discovered.add(name);
+      out.push({ id: newId(), type: 'dataset', title: name, tool: null, href: `#/data?table=${encodeURIComponent(name)}`, data: { name, explicit: false }, created_at: new Date().toISOString() });
+      this.emit(state, 'agent.dataset.discovered', { dataset: name });
+    }
+    return out;
+  }
 
   private async loadHistory(state: TaskState): Promise<void> {
     const { task } = state;
@@ -621,4 +678,13 @@ function summarizeResult(tool: string, result: { structuredContent?: Record<stri
     return `${n.toLocaleString('en')} row${n === 1 ? '' : 's'}: ${sc.columns.map((c) => c.name).join(', ')}`.slice(0, 240);
   }
   return (text.split('\n').find((l) => l.trim() && !/^(\||```)/.test(l.trim())) ?? tool).slice(0, 240);
+}
+
+/** The bullet points of an answer, as findings (a short answer with no bullets has none). */
+export function findingsOf(answer: string): string[] {
+  return answer
+    .split('\n')
+    .map((l) => /^\s*(?:[-*•]|\d+[.)])\s+(.+)$/.exec(l)?.[1]?.trim())
+    .filter((x): x is string => !!x && x.length > 3)
+    .slice(0, 12);
 }

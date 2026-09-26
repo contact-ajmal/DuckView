@@ -71,7 +71,8 @@ export function artifactsOf(tool: string, args: Record<string, unknown>, result:
       const sql = str(sc.sql ?? args.sql);
       if (!Array.isArray(sc.columns)) return [];
       const title = tool === 'query_metrics' ? `${((args.metrics as string[]) ?? []).join(', ')}${Array.isArray(args.group_by) && args.group_by.length ? ` by ${(args.group_by as string[]).join(', ')}` : ''}` : 'Query result';
-      return [a('table', title, { data: { sql, columns: sc.columns, rows: (sc.rows ?? []).slice(0, maxRows), row_count: sc.row_count ?? sc.total_rows ?? sc.rows?.length ?? 0, truncated: (sc.rows?.length ?? 0) > maxRows } })];
+      const rows = (sc.rows ?? []).slice(0, maxRows);
+      return [a('table', title, { data: { sql, columns: sc.columns, rows, row_count: sc.row_count ?? sc.total_rows ?? sc.rows?.length ?? 0, truncated: (sc.rows?.length ?? 0) > maxRows, chart: chartFor(sc.columns as { name: string; type?: string }[], rows) } })];
     }
     case 'create_dashboard_widget':
     case 'build_dashboard':
@@ -109,4 +110,23 @@ export function artifactsOf(tool: string, args: Record<string, unknown>, result:
     default:
       return [];
   }
+}
+
+export interface ChartHint { kind: 'bar' | 'line'; x: string; y: string[] }
+
+/**
+ * How a result is best drawn, when it can be: a time column and numbers → a line; a category and numbers → bars.
+ * Nothing when the result is a single value, has no number, or has too many categories to read.
+ */
+export function chartFor(columns: { name: string; type?: string }[], rows: unknown[][]): ChartHint | null {
+  if (rows.length < 2 || columns.length < 2) return null;
+  const isNum = (t?: string) => /INT|DECIMAL|NUMERIC|DOUBLE|FLOAT|REAL/i.test(t ?? '');
+  const isTime = (t?: string) => /DATE|TIME/i.test(t ?? '');
+  const nums = columns.filter((c) => isNum(c.type)).map((c) => c.name);
+  const time = columns.find((c) => isTime(c.type));
+  if (!nums.length) return null;
+  if (time) return { kind: 'line', x: time.name, y: nums.filter((n) => n !== time.name).slice(0, 4) };
+  const cat = columns.find((c) => !isNum(c.type));
+  if (!cat || rows.length > 40) return null;
+  return { kind: 'bar', x: cat.name, y: nums.slice(0, 3) };
 }

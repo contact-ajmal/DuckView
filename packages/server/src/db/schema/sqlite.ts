@@ -1348,7 +1348,7 @@ export type InboxItem = typeof inbox.$inferSelect;
 
 export const AGENT_TASK_STATUSES = ['planning', 'running', 'waiting_approval', 'completed', 'failed', 'cancelled'] as const;
 export type AgentTaskStatus = (typeof AGENT_TASK_STATUSES)[number];
-export const AGENT_ARTIFACT_TYPES = ['answer', 'table', 'chart', 'sql', 'notebook', 'dashboard', 'metric', 'quality_suite', 'dbt_model', 'app', 'saved_query', 'file'] as const;
+export const AGENT_ARTIFACT_TYPES = ['answer', 'finding', 'dataset', 'table', 'chart', 'sql', 'notebook', 'dashboard', 'metric', 'quality_suite', 'dbt_model', 'app', 'saved_query', 'file'] as const;
 export type AgentArtifactType = (typeof AGENT_ARTIFACT_TYPES)[number];
 export interface AgentPageRef { kind: string; id?: string | null; label: string }
 export interface AgentPlanStep { text: string; status: 'pending' | 'active' | 'done' | 'skipped' }
@@ -1918,10 +1918,16 @@ export const agentSessions = sqliteTable(
     /** What was on screen when it started (restored with the session). */
     page: text('page', { mode: 'json' }).$type<AgentPageRef | null>(),
     archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+    /** A session is a mission: its intent (analyse, build, investigate, automate, explore, explain, auto). */
+    mode: text('mode').notNull().default('auto'),
+    /** Datasets the person chose explicitly (tables, views, files) — the agent may discover others. */
+    datasets: text('datasets', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** private (its owner) or workspace (every member, each under their own access). */
+    visibility: text('visibility').notNull().default('private'),
     created_at: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updated_at: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
-  (t) => [index('agent_sessions_user_idx').on(t.user_id, t.workspace_id)],
+  (t) => [index('agent_sessions_user_idx').on(t.user_id, t.workspace_id), index('agent_sessions_ws_idx').on(t.workspace_id, t.visibility)],
 );
 export type AgentSession = typeof agentSessions.$inferSelect;
 

@@ -1860,18 +1860,17 @@ try {
     for (let i = 0; i < 50; i++) { const r = await q('SELECT count(*) FROM e2e_prep_clean'); if (r.rows) { report.details.saved = r.rows; break; } await sleep(200); }
     report.details.charts = 1;
   }
-  else if (scenario === 'agent-dock') {
-    // The agent in the workspace: ask from the dock on a dataset, see the steps in words and the result table,
-    // open its SQL in a tab, approve a change it wants to make, and move the workspace by asking.
+  else if (scenario === 'agent-home') {
+    // The Agent Home journey: ready → working → a mission's workspace, with explicit and discovered data, a chart,
+    // findings, "Open in console", a follow-up that builds a dashboard, an approval, and the mission on the home.
     const http = await import('node:http');
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
     const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
     const q = async (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
-    await q("CREATE OR REPLACE TABLE e2e_agent_orders AS SELECT * FROM (VALUES ('EU', 100.0), ('EU', 50.0), ('US', 300.0)) t(region, revenue)");
-    await q('DROP TABLE IF EXISTS e2e_agent_made');
-    const dash = (await j('POST', `/api/workspaces/${wsId}/dashboards`, { name: `E2E agent board ${Date.now()}` })).dashboard;
+    await q("CREATE OR REPLACE TABLE e2e_home_orders AS SELECT * FROM (VALUES ('EU', 100.0), ('EU', 50.0), ('US', 300.0), ('APAC', 80.0)) t(region, revenue)");
+    await q("CREATE OR REPLACE TABLE e2e_home_regions AS SELECT * FROM (VALUES ('EU', 'Europe'), ('US', 'Americas'), ('APAC', 'Asia Pacific')) t(region, name)");
+    await q('DROP TABLE IF EXISTS e2e_home_made');
     const calls = [];
-    // A model that asks for one tool, then answers from the result.
     const llm = http.createServer((req, res) => {
       let b = '';
       req.on('data', (d) => (b += d));
@@ -1880,14 +1879,14 @@ try {
         const body = JSON.parse(b);
         calls.push(body);
         const msgs = body.messages.filter((m) => m.role !== 'system');
-        const first = msgs.filter((m) => m.role === 'user').at(-1)?.content ?? '';
-        const lastUser = msgs.at(-1)?.content ?? '';
         const ask = msgs.filter((m) => m.role === 'user' && !m.content.startsWith('Result of') && !m.content.startsWith('The person')).at(-1)?.content ?? '';
+        const results = msgs.slice(msgs.findLastIndex((m) => m.content === ask)).filter((m) => m.role === 'user' && m.content.startsWith('Result of')).length;
+        const tool = (name, args) => '```tool\n' + JSON.stringify({ name, arguments: args }) + '\n```';
         let reply;
-        if (/Compare revenue by region/.test(ask)) reply = lastUser.startsWith('Result of') ? 'EU has **150** and US **300** in revenue.' : '```tool\n{"name": "execute_query", "arguments": {"sql": "SELECT region, sum(revenue) AS revenue FROM e2e_agent_orders GROUP BY 1 ORDER BY 1"}}\n```';
-        else if (/Create a table e2e_agent_made/.test(ask)) reply = lastUser.startsWith('Result of') ? 'Created e2e_agent_made.' : '```tool\n{"name": "execute_query", "arguments": {"sql": "CREATE TABLE e2e_agent_made AS SELECT 1 AS x"}}\n```';
+        if (/revenue by region/i.test(ask)) reply = results === 0 ? tool('execute_query', { sql: 'SELECT region, sum(revenue) AS revenue FROM e2e_home_orders GROUP BY 1 ORDER BY 2 DESC' }) : results === 1 ? tool('execute_query', { sql: 'SELECT count(*) AS regions FROM e2e_home_regions' }) : 'Revenue is led by the US.\n- US has 300 in revenue\n- EU has 150 in revenue\n- APAC has 80 in revenue';
+        else if (/Build a dashboard from this/.test(ask)) reply = results === 0 ? tool('create_dashboard_widget', { dashboard_name: 'E2E agent home board', title: 'Revenue by region', sql: 'SELECT region, sum(revenue) AS revenue FROM e2e_home_orders GROUP BY 1', widget_type: 'CHART', chart_config: { chart: 'bar', x: 'region', y: ['revenue'] } }) : 'Built the dashboard E2E agent home board.';
+        else if (/Create a table e2e_home_made/.test(ask)) reply = results === 0 ? tool('execute_query', { sql: 'CREATE TABLE e2e_home_made AS SELECT 1 AS x' }) : 'Created e2e_home_made.';
         else reply = 'I am not sure.';
-        void first;
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: { content: reply }, finish_reason: null }] })}\n\n`);
         res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`);
@@ -1897,56 +1896,101 @@ try {
     await new Promise((r) => llm.listen(0, '127.0.0.1', r));
     cleanup = async () => {
       llm.close();
-      await evaluate(`localStorage.removeItem('duckview.copilot.settings'); location.hash = '#/'; true`).catch(() => undefined);
-      await j('DELETE', `/api/dashboards/${dash.id}`);
-      for (const s of ((await j('GET', `/api/agent/sessions?workspace_id=${wsId}`)).sessions ?? [])) await j('DELETE', `/api/agent/sessions/${s.id}`);
-      await q('DROP TABLE IF EXISTS e2e_agent_made');
-      await q('DROP TABLE IF EXISTS e2e_agent_orders');
+      await evaluate(`localStorage.removeItem('duckview.copilot.settings'); localStorage.removeItem('duckview.agent.datasets.${wsId}'); location.hash = '#/home'; true`).catch(() => undefined);
+      for (const d of ((await j('GET', `/api/workspaces/${wsId}/dashboards`)).dashboards ?? []).filter((d) => d.name === 'E2E agent home board')) await j('DELETE', `/api/dashboards/${d.id}`);
+      for (const s of ((await j('GET', `/api/agent/sessions?workspace_id=${wsId}`)).sessions ?? []).filter((s) => /e2e|E2E|revenue by region/i.test(s.title))) await j('DELETE', `/api/agent/sessions/${s.id}`);
+      await q('DROP TABLE IF EXISTS e2e_home_made');
+      await q('DROP TABLE IF EXISTS e2e_home_regions');
+      await q('DROP TABLE IF EXISTS e2e_home_orders');
     };
-    await evaluate(`localStorage.setItem('duckview.copilot.settings', JSON.stringify({ provider: 'ollama', model: 'mock', apiKey: '', baseUrl: 'http://127.0.0.1:${llm.address().port}' })); location.hash = '#/data?table=e2e_agent_orders'; location.reload(); true`);
-    await waitFor(`document.querySelector('[data-testid="dataset-name"]')?.textContent === 'e2e_agent_orders'`, 30000, 'dataset open');
-    await waitFor(`!!document.querySelector('[data-testid="agent-input"]')`, 10000, 'agent dock');
-    report.details.chip = await evaluate(`document.querySelector('[data-testid="agent-context-page"]')?.textContent`);
-    const ask = async (text) => {
-      await evaluate(`document.querySelector('[data-testid="agent-input"]').focus(); true`);
-      await setField('[data-testid="agent-input"]', text);
-      await evaluate(`document.querySelector('[data-testid="agent-send"]').click(); true`);
-    };
-    const lastTask = `[...document.querySelectorAll('[data-testid="agent-task"]')].at(-1)`;
-    await ask('Compare revenue by region');
-    await waitFor(`${lastTask}?.dataset.status === 'completed'`, 30000, 'first task done');
-    report.details.steps = await evaluate(`[...${lastTask}.querySelectorAll('[data-testid="tool-sentence"]')].map((e) => e.textContent)`);
-    report.details.answer = await evaluate(`${lastTask}.querySelector('[data-testid="agent-answer"]')?.textContent`);
-    report.details.rows = await evaluate(`[...${lastTask}.querySelectorAll('[data-testid="agent-artifact"][data-type="table"] tbody tr')].map((r) => [...r.querySelectorAll('td')].map((c) => c.textContent).join('|'))`);
-    report.details.pagePrompt = calls[0]?.messages?.[0]?.content?.includes('on screen now: The dataset e2e_agent_orders') ?? false;
-    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_task.png'), Buffer.from(shot.result.data, 'base64')); }
-    await evaluate(`${lastTask}.querySelector('[data-testid="artifact-open-sql"]').click(); true`);
-    await waitFor(`location.hash.startsWith('#/query') && (document.querySelector('.cm-content')?.innerText ?? '').includes('FROM e2e_agent_orders GROUP BY 1')`, 15000, 'SQL opened in a tab');
-    report.details.sqlTab = true;
-    // A change: held for approval, run only once approved.
-    await ask('Create a table e2e_agent_made');
-    await waitFor(`${lastTask}?.dataset.status === 'waiting_approval' && !!${lastTask}.querySelector('[data-testid="approval-card"]')`, 30000, 'approval asked');
-    report.details.before = (await q("SELECT count(*) FROM information_schema.tables WHERE table_name = 'e2e_agent_made'")).rows;
-    report.details.card = await evaluate(`${lastTask}.querySelector('[data-testid="approval-card"]').textContent`);
-    // The same approval waits in the inbox; opening it from there leads back to the task (a deep link).
-    await waitFor(`!!document.querySelector('[data-testid="inbox-unread"]')`, 10000, 'inbox counts the approval');
-    await evaluate(`document.querySelector('[data-testid="agent-new-session"]').click(); document.querySelector('[data-testid="inbox-bell"]').click(); true`);
-    await waitFor(`!!document.querySelector('[data-inbox="agent-approval"]')`, 10000, 'approval in the inbox');
-    report.details.inbox = await evaluate(`document.querySelector('[data-inbox="agent-approval"]').textContent`);
-    await evaluate(`document.querySelector('[data-inbox="agent-approval"]').click(); true`);
-    await waitFor(`location.hash.includes('agent_task=') && ${lastTask}?.dataset.status === 'waiting_approval'`, 15000, 'deep link opened the task');
+    await evaluate(`localStorage.setItem('duckview.copilot.settings', JSON.stringify({ provider: 'ollama', model: 'mock', apiKey: '', baseUrl: 'http://127.0.0.1:${llm.address().port}' })); localStorage.removeItem('duckview.agent.datasets.${wsId}'); location.hash = '#/'; location.reload(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="agent-home"]') && !!document.querySelector('[data-testid="agent-workspace"]')`, 30000, 'agent home');
+    report.details.opensOnAgent = await evaluate(`!!document.querySelector('[data-testid="agent-prompt"]')`);
+    report.details.workspace = await evaluate(`document.querySelector('[data-testid="agent-workspace"]').textContent`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_ready.png'), Buffer.from(shot.result.data, 'base64')); }
+    // Choose the dataset explicitly.
+    await evaluate(`document.querySelector('[data-testid="agent-dataset"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="agent-dataset-search"]')`, 5000, 'dataset picker');
+    await setField('[data-testid="agent-dataset-search"]', 'e2e_home_orders');
+    await waitFor(`!!document.querySelector('[data-testid="agent-dataset-option"][data-name="e2e_home_orders"]')`, 15000, 'dataset listed');
+    await evaluate(`document.querySelector('[data-testid="agent-dataset-option"][data-name="e2e_home_orders"]').click(); document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`);
+    await waitFor(`document.querySelector('[data-testid="agent-dataset"]').textContent.includes('e2e_home_orders')`, 5000, 'dataset chosen');
+    await evaluate(`document.querySelector('[data-testid="agent-intent"][data-mode="investigate"]').click(); true`);
+    await setField('[data-testid="agent-prompt"]', 'Compare revenue by region');
+    await evaluate(`document.querySelector('[data-testid="agent-submit"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="mission-view"]')`, 20000, 'mission opened');
+    report.details.url = await evaluate(`location.hash`);
+    await waitFor(`document.querySelector('[data-testid="mission-view"]')?.dataset.status === 'completed' && !!document.querySelector('[data-testid="artifact-findings"]')`, 30000, 'mission done');
+    await sleep(600);
+    report.details.findings = await evaluate(`[...document.querySelectorAll('[data-testid="artifact-findings"] li')].map((l) => l.textContent)`);
+    report.details.chart = await evaluate(`!!document.querySelector('[data-testid="artifact-chart"] canvas')`);
+    report.details.explicit = await evaluate(`[...document.querySelectorAll('[data-testid="context-explicit"]')].map((e) => e.textContent)`);
+    report.details.discovered = await evaluate(`[...document.querySelectorAll('[data-testid="context-discovered"]')].map((e) => e.textContent)`);
+    report.details.modeSent = calls[0]?.messages?.[0]?.content?.includes('### Datasets the person chose (work with these first)\n- table e2e_home_orders') ?? false;
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_mission.png'), Buffer.from(shot.result.data, 'base64')); }
+    // Open the result's SQL in the console.
+    const missionHash = await evaluate(`location.hash`);
+    await evaluate(`document.querySelector('[data-testid="artifact-result"] [data-testid="console-open"]').click(); true`);
+    await waitFor(`location.hash.startsWith('#/query') && (document.querySelector('.cm-content')?.innerText ?? '').includes('FROM e2e_home_orders GROUP BY 1')`, 15000, 'SQL opened in the console');
+    report.details.console = true;
+    // Continue the mission: build a dashboard from it.
+    await evaluate(`location.hash = ${JSON.stringify(missionHash)}; 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="mission-prompt"]:not([disabled])')`, 15000, 'mission again');
+    await setField('[data-testid="mission-prompt"]', 'Build a dashboard from this');
+    await evaluate(`document.querySelector('[data-testid="mission-send"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="artifact-object"][data-type="dashboard"]') && document.querySelector('[data-testid="mission-view"]').dataset.status === 'completed'`, 30000, 'dashboard made');
+    await evaluate(`document.querySelector('[data-testid="artifact-object"][data-type="dashboard"] [data-testid="console-open"]').click(); true`);
+    await waitFor(`location.hash.startsWith('#/dashboards/') && document.querySelector('[data-testid="page-object"]')?.textContent === 'E2E agent home board'`, 15000, 'dashboard opened');
+    report.details.dashboard = true;
+    // A change: held until approved in the mission.
+    await evaluate(`location.hash = '#/'; 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="agent-prompt"]')`, 10000, 'home again');
+    await setField('[data-testid="agent-prompt"]', 'Create a table e2e_home_made');
+    await evaluate(`document.querySelector('[data-testid="agent-submit"]').click(); true`);
+    await waitFor(`document.querySelector('[data-testid="mission-view"]')?.dataset.status === 'waiting_approval' && !!document.querySelector('[data-testid="approval-card"] [data-testid="approve"]')`, 30000, 'approval asked');
+    report.details.before = (await q("SELECT count(*) FROM information_schema.tables WHERE table_name = 'e2e_home_made'")).rows;
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_approval.png'), Buffer.from(shot.result.data, 'base64')); }
-    await evaluate(`${lastTask}.querySelector('[data-testid="approve"]').click(); true`);
-    await waitFor(`${lastTask}?.dataset.status === 'completed'`, 30000, 'approved task done');
-    report.details.after = (await q('SELECT count(*) FROM e2e_agent_made')).rows;
-    // A move in the workspace: no model call.
-    const before = calls.length;
-    await ask(`Open the ${dash.name} dashboard`);
-    await waitFor(`location.hash === '#/dashboards/${dash.id}'`, 20000, 'dashboard opened by the agent');
-    report.details.navCalls = calls.length - before;
-    await evaluate(`document.querySelector('[data-testid="agent-history-toggle"]').click(); true`);
-    await waitFor(`document.querySelectorAll('[data-testid="agent-history-item"]').length > 0`, 10000, 'history');
-    report.details.history = await evaluate(`[...document.querySelectorAll('[data-testid="agent-history-item"]')].map((e) => e.textContent)`);
+    await evaluate(`document.querySelector('[data-testid="approval-card"] [data-testid="approve"]').click(); true`);
+    await waitFor(`document.querySelector('[data-testid="mission-view"]')?.dataset.status === 'completed'`, 30000, 'approved');
+    report.details.after = (await q('SELECT count(*) FROM e2e_home_made')).rows;
+    // The home lists the work.
+    await evaluate(`location.hash = '#/'; 'ok'`);
+    await waitFor(`document.querySelectorAll('[data-testid="agent-recent"] [data-testid="agent-mission-row"]').length >= 2`, 15000, 'recent work');
+    report.details.recent = await evaluate(`[...document.querySelectorAll('[data-testid="agent-recent"] [data-testid="agent-mission-row"]')].map((r) => r.textContent).slice(0, 3)`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_home.png'), Buffer.from(shot.result.data, 'base64')); }
+    // A phone: the home simplifies, nothing scrolls sideways.
+    await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await sleep(600);
+    report.details.mobileOverflow = await evaluate(`document.documentElement.scrollWidth - window.innerWidth`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_mobile.png'), Buffer.from(shot.result.data, 'base64')); }
+    await send('Emulation.clearDeviceMetricsOverride', {});
+    report.details.charts = 1;
+  }
+  else if (scenario === 'analyst-webui') {
+    // The Analyst WebUI (/analyst): the agent alone, on the same API — a mission opens there, and its SQL opens in
+    // the full console.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    await j('POST', `/api/workspaces/${wsId}/query`, { sql: "CREATE OR REPLACE TABLE e2e_analyst_t AS SELECT * FROM (VALUES ('a', 1), ('b', 2)) t(k, v)" });
+    // A finished mission to open, made through the API the WebUI uses (no model needed: a navigation request).
+    const started = await j('POST', '/api/agent/missions', { workspace_id: wsId, request: 'Open table e2e_analyst_t', datasets: ['e2e_analyst_t'] });
+    cleanup = async () => {
+      await j('DELETE', `/api/agent/sessions/${started.mission.id}`);
+      await j('POST', `/api/workspaces/${wsId}/query`, { sql: 'DROP TABLE IF EXISTS e2e_analyst_t' });
+      await evaluate(`location.href = '${BASE}/#/home'; true`).catch(() => undefined);
+    };
+    await evaluate(`location.href = '${BASE}/analyst'; true`);
+    await sleep(1500);
+    await waitFor(`!!document.querySelector('[data-testid="analyst-app"]') && !!document.querySelector('[data-testid="agent-prompt"]')`, 30000, 'analyst webui');
+    report.details.title = await evaluate(`document.title`);
+    report.details.rail = await evaluate(`!!document.querySelector('nav[aria-label="Primary"]')`);
+    await waitFor(`!!document.querySelector('[data-testid="analyst-console"]')`, 10000, 'console link');
+    report.details.consoleLink = await evaluate(`document.querySelector('[data-testid="analyst-console"]').getAttribute('href')`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_home.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`location.hash = '#/agent/missions/${started.mission.id}'; true`);
+    await waitFor(`!!document.querySelector('[data-testid="mission-view"]') && document.querySelector('[data-testid="mission-view"]').dataset.status === 'completed'`, 20000, 'mission in the webui');
+    report.details.explicit = await evaluate(`[...document.querySelectorAll('[data-testid="context-explicit"]')].map((e) => e.textContent)`);
+    report.details.datasetLink = await evaluate(`document.querySelector('[data-testid="context-explicit"] a').getAttribute('href')`);
     report.details.charts = 1;
   }
   else if (scenario === 'agent-settings') {
@@ -2607,6 +2651,7 @@ try {
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_monitors.png'), Buffer.from(shot.result.data, 'base64')); }
     // 3. Home shows what changed.
     await send('Page.navigate', { url: `${BASE}/#/` });
+    await evaluate(`location.hash = '#/home'; 'ok'`);
     await waitFor(`!!document.querySelector('[data-testid="home-insights"] [data-testid="insight-card"]')`, 20000, 'home insights');
     report.details.home = await evaluate(`document.querySelector('[data-testid="home-insights"] [data-testid="insight-summary"]').innerText`);
     // 4. Dismissing takes it off the feed.
@@ -3107,27 +3152,34 @@ try {
     if (JSON.stringify([...(d.result ?? [])].sort()) !== JSON.stringify(['1|ada', '2|bo'])) problems.push(`result: ${JSON.stringify(d.result)}`);
     if (JSON.stringify(d.saved) !== '[[2]]') problems.push(`saved view: ${JSON.stringify(d.saved)}`);
   }
-  if (scenario === 'agent-dock') {
-    if (!/e2e_agent_orders/.test(d.chip ?? '')) problems.push(`chip: ${d.chip}`);
-    if (!d.pagePrompt) problems.push('the dataset on screen did not reach the agent');
-    if (JSON.stringify(d.steps) !== JSON.stringify(['Ran a query on e2e_agent_orders'])) problems.push(`steps: ${JSON.stringify(d.steps)}`);
-    if (!/EU has 150 and US 300 in revenue/.test(d.answer ?? '')) problems.push(`answer: ${d.answer}`);
-    if (JSON.stringify(d.rows) !== JSON.stringify(['EU|150', 'US|300'])) problems.push(`rows: ${JSON.stringify(d.rows)}`);
-    if (JSON.stringify(d.before) !== '[[0]]') problems.push(`created before approval: ${JSON.stringify(d.before)}`);
-    if (!/CREATE TABLE e2e_agent_made/.test(d.card ?? '') || !/CREATE/.test(d.card ?? '')) problems.push(`card: ${d.card}`);
-    if (!/DuckView agent wants to change data in e2e_agent_made/.test(d.inbox ?? '')) problems.push(`inbox: ${d.inbox}`);
-    if (JSON.stringify(d.after) !== '[[1]]') problems.push(`after approval: ${JSON.stringify(d.after)}`);
-    if (d.navCalls !== 0) problems.push(`navigation called the model ${d.navCalls} times`);
-    if (!(d.history ?? []).some((h) => /Compare revenue by region/.test(h))) problems.push(`history: ${JSON.stringify(d.history)}`);
+  if (scenario === 'agent-home') {
+    if (!d.opensOnAgent) problems.push('DuckView did not open on the Agent Home');
+    if (!/Workspace/.test(d.workspace ?? '')) problems.push(`workspace: ${d.workspace}`);
+    if (!/^#\/agent\/missions\//.test(d.url ?? '')) problems.push(`url: ${d.url}`);
+    if (JSON.stringify(d.findings) !== JSON.stringify(['US has 300 in revenue', 'EU has 150 in revenue', 'APAC has 80 in revenue'])) problems.push(`findings: ${JSON.stringify(d.findings)}`);
+    if (!d.chart) problems.push('no chart');
+    if (JSON.stringify(d.explicit) !== '["e2e_home_orders"]') problems.push(`explicit: ${JSON.stringify(d.explicit)}`);
+    if (JSON.stringify(d.discovered) !== '["e2e_home_regions"]') problems.push(`discovered: ${JSON.stringify(d.discovered)}`);
+    if (!d.modeSent) problems.push('the chosen dataset did not reach the agent');
+    if (JSON.stringify(d.before) !== '[[0]]' || JSON.stringify(d.after) !== '[[1]]') problems.push(`approval: before ${JSON.stringify(d.before)} after ${JSON.stringify(d.after)}`);
+    if (!(d.recent ?? []).some((r) => /Compare revenue by region/.test(r))) problems.push(`recent: ${JSON.stringify(d.recent)}`);
+    if (d.mobileOverflow > 0) problems.push(`the home scrolls sideways on a phone by ${d.mobileOverflow}px`);
+  }
+  if (scenario === 'analyst-webui') {
+    if (d.title !== 'DuckView Agent') problems.push(`title: ${d.title}`);
+    if (d.rail) problems.push('the console rail shows in the analyst webui');
+    if (d.consoleLink !== '/#/') problems.push(`console link: ${d.consoleLink}`);
+    if (JSON.stringify(d.explicit) !== '["e2e_analyst_t"]') problems.push(`explicit: ${JSON.stringify(d.explicit)}`);
+    if (d.datasetLink !== '/#/data?table=e2e_analyst_t') problems.push(`dataset link: ${d.datasetLink}`);
   }
   if (scenario === 'agent-settings') {
     if (!/\/mcp\/agent$/.test(d.url ?? '')) problems.push(`url: ${d.url}`);
-    if (d.tools !== 8) problems.push(`tools: ${d.tools}`);
+    if (d.tools !== 12) problems.push(`tools: ${d.tools}`);
     if (!/Decision engine: default/.test(d.decision ?? '')) problems.push(`decision: ${d.decision}`);
     if (!d.configHasToken) problems.push('the configuration does not carry the new token');
     if (!/E2E client.*dv_.*••••••••.*read/.test(d.listed ?? '')) problems.push(`listed: ${d.listed}`);
     if (d.server !== 'duckview-agent') problems.push(`server: ${d.server}`);
-    if (JSON.stringify(d.mcpTools) !== JSON.stringify(['analyse_dataset', 'ask_data_agent', 'build_dashboard', 'create_data_app', 'explain_data', 'get_agent_task', 'investigate_data', 'list_agent_sessions'])) problems.push(`mcp tools: ${JSON.stringify(d.mcpTools)}`);
+    if (JSON.stringify(d.mcpTools) !== JSON.stringify(['analyse_dataset', 'ask_data_agent', 'build_dashboard', 'create_analysis', 'create_data_app', 'explain_data', 'get_agent_task', 'get_mission', 'investigate_data', 'list_agent_sessions', 'resume_mission', 'start_mission'])) problems.push(`mcp tools: ${JSON.stringify(d.mcpTools)}`);
     if (d.afterRevoke !== 401) problems.push(`after revoke: ${d.afterRevoke}`);
   }
   if (scenario === 'data-explorer') {
