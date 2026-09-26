@@ -29,20 +29,20 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-zinc-950 p-6">
+    <div className="flex min-h-full flex-col items-center justify-center bg-canvas p-6 max-sm:p-4">
       <div className="w-full max-w-sm">
-        <div className="mb-8 flex flex-col items-center gap-3">
-          <Logo className="h-12 w-12" />
+        <div className="mb-7 flex flex-col items-center gap-4" data-testid="login-brand">
+          <Logo className="h-11 w-11" label="DuckView" />
           <div className="text-center">
-            <h1 className="text-page font-semibold tracking-tight">DuckView Enterprise</h1>
-            <p className="text-xs text-zinc-500">Hardened DuckDB workspaces · MCP for agents</p>
+            <h1 className="text-page font-semibold tracking-tight text-fg-strong">{mode === 'register' ? (bootstrap ? 'Set up DuckView' : 'Create your account') : 'Sign in to DuckView'}</h1>
+            <p className="mt-0.5 text-body text-fg-secondary">Your intelligent data workspace.</p>
           </div>
         </div>
-        <form onSubmit={submit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-6 shadow-xl backdrop-blur">
-          {bootstrap && mode === 'register' && <div className="rounded-md border border-accent-700/50 bg-accent-600/10 px-3 py-2 text-xs text-accent-200">No users exist yet. The first account becomes the administrator.</div>}
+        <form onSubmit={submit} className="space-y-4 rounded-xl border border-line bg-raised p-6">
+          {bootstrap && mode === 'register' && <div className="rounded-md bg-accent-subtle px-3 py-2 text-xs text-fg">No users exist yet. The first account becomes the administrator.</div>}
           {cfg?.strategy === 'oidc' && cfg.oidc_login_url && (
             <>
-              <a href={cfg.oidc_login_url} className="flex h-10 w-full items-center justify-center rounded-md bg-accent-600 text-body font-medium text-white hover:bg-accent-500">
+              <a href={cfg.oidc_login_url} className="flex h-[var(--control-h)] w-full items-center justify-center rounded-md bg-accent-500 text-body font-medium text-[color:var(--accent-ink)] hover:bg-accent-600">
                 Continue with SSO
               </a>
               <div className="flex items-center gap-3 text-2xs text-zinc-500">
@@ -64,7 +64,7 @@ export function LoginPage() {
             <Label>Password</Label>
             <Input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••••" />
           </div>
-          {error && <div className="rounded-md border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-200">{error}</div>}
+          {error && <div role="alert" className="rounded-md border border-red-900/70 px-3 py-2 text-xs text-red-300">{error}</div>}
           <Button type="submit" variant="primary" className="w-full justify-center" loading={busy}>
             {mode === 'register' ? (bootstrap ? 'Create administrator' : 'Create account') : 'Sign in'}
           </Button>
@@ -74,6 +74,7 @@ export function LoginPage() {
             </button>
           )}
         </form>
+        <p className="mt-6 text-center text-2xs text-fg-muted">DuckDB workspaces, an agent that works with your access, and MCP for your other agents.</p>
       </div>
     </div>
   );

@@ -31,6 +31,7 @@ import { Sidebar } from './components/shell/Sidebar';
 import { TopBar } from './components/shell/TopBar';
 import { SectionNav } from './components/shell/SectionNav';
 import { CommandPalette } from './components/shell/CommandPalette';
+import { ShortcutsSheet } from './components/shell/AccountMenu';
 import { parseRoute, type Route } from './app/routes';
 import { Spinner } from './components/ui';
 
@@ -136,6 +137,7 @@ export default function App() {
         </div>
       </div>
       <CommandPalette />
+      <ShortcutsSheet />
 
       <ShareDialog open={sharing} onClose={() => setSharing(false)} workspace={active ?? null} />
 

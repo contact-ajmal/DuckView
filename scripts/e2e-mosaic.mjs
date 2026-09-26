@@ -1188,6 +1188,25 @@ try {
     await waitFor(`!document.querySelector('[data-testid="page-object"]')`, 5000, 'object cleared on another page');
     report.details.groups = await evaluate(`[...document.querySelectorAll('nav[aria-label="Settings"] > div > div:first-child')].map(d => d.textContent)`);
     report.details.rail = await evaluate(`[...document.querySelectorAll('nav[aria-label="Primary"] a')].map(a => a.textContent.trim()).filter(Boolean)`);
+    report.details.logo = await evaluate(`document.querySelector('nav[aria-label="Primary"] svg[data-logo]')?.getAttribute('data-logo') ?? null`);
+    // ⌘K: the agent's commands, and a command that narrows the palette to workspaces.
+    await evaluate(`document.querySelector('header button[aria-label="Search or run a command"]').click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[role="dialog"][aria-label="Command palette"] input')`, 5000, 'palette');
+    report.details.paletteAgent = await evaluate(`[...document.querySelectorAll('[role="dialog"] [role="option"]')].map(o => o.textContent.trim())`);
+    await evaluate(`[...document.querySelectorAll('[role="dialog"] [role="option"]')].find(o => o.textContent.startsWith('Switch workspace')).click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="palette-scope"]')`, 3000, 'palette narrowed');
+    report.details.paletteScope = await evaluate(`[...document.querySelectorAll('[role="dialog"] [role="option"]')].length`);
+    await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); document.querySelector('[role="dialog"] input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); 'ok'`);
+    await waitFor(`!document.querySelector('[data-testid="palette-scope"]')`, 3000, 'scope cleared');
+    await evaluate(`document.querySelector('[role="dialog"] input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); 'ok'`);
+    await waitFor(`!document.querySelector('[role="dialog"][aria-label="Command palette"]')`, 3000, 'palette closed');
+    // Help › Keyboard shortcuts.
+    await evaluate(`document.querySelector('[data-testid="help-menu"]').click(); 'ok'`);
+    await waitFor(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Keyboard shortcuts'))`, 3000, 'help menu');
+    await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.includes('Keyboard shortcuts')).click(); 'ok'`);
+    await waitFor(`!!document.querySelector('[data-testid="app-shortcuts"]')`, 3000, 'app shortcuts');
+    report.details.appShortcuts = await evaluate(`document.querySelectorAll('[data-testid="app-shortcuts"] dt').length`);
+    await evaluate(`document.querySelector('[role="dialog"] [data-close]')?.click(); 'ok'`);
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_settings.png'), Buffer.from(shot.result.data, 'base64')); }
     // Narrow: the settings nav becomes a picker; below 640 the rail hides behind a menu button.
     await send('Emulation.setDeviceMetricsOverride', { width: 900, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -1198,11 +1217,16 @@ try {
     report.details.phoneRail = await evaluate(`getComputedStyle(document.querySelector('nav[aria-label="Primary"]')).display`);
     await evaluate(`document.querySelector('[aria-label="Open navigation"]').click(); 'ok'`);
     await waitFor(`!!document.querySelector('nav[aria-label="Sections"]')`, 3000, 'navigation drawer');
-    report.details.drawer = await evaluate(`[...document.querySelectorAll('nav[aria-label="Sections"] a')].map(a => a.querySelector('span span').textContent)`);
+    report.details.drawer = await evaluate(`[...document.querySelectorAll('nav[aria-label="Sections"] a')].map(a => a.textContent.trim())`);
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_phone.png'), Buffer.from(shot.result.data, 'base64')); }
-    await evaluate(`[...document.querySelectorAll('nav[aria-label="Sections"] a')].find(a => a.textContent.startsWith('Agents')).click(); 'ok'`);
-    await waitFor(`location.hash === '#/agents' && !document.querySelector('nav[aria-label="Sections"]')`, 5000, 'navigated from the drawer');
+    await evaluate(`[...document.querySelectorAll('nav[aria-label="Sections"] a')].find(a => a.textContent.trim() === 'Connect').click(); 'ok'`);
+    await waitFor(`location.hash === '#/connections' && !document.querySelector('nav[aria-label="Sections"]')`, 5000, 'navigated from the drawer');
     await send('Emulation.clearDeviceMetricsOverride');
+    // Connect's second tab: agents and MCP (activity, approvals, tools).
+    await waitFor(`[...document.querySelectorAll('nav[aria-label="Section"] a')].some(a => a.textContent === 'Agents & MCP')`, 5000, 'connect tabs');
+    report.details.connectTabs = await evaluate(`[...document.querySelectorAll('nav[aria-label="Section"] a')].map(a => a.textContent)`);
+    await evaluate(`[...document.querySelectorAll('nav[aria-label="Section"] a')].find(a => a.textContent === 'Agents & MCP').click(); 'ok'`);
+    await waitFor(`location.hash === '#/agents'`, 5000, 'agents tab');
     await waitFor(`[...document.querySelectorAll('[role=tab]')].some(t => t.textContent.startsWith('Activity') && t.getAttribute('aria-selected') === 'true')`, 10000, 'agents open on activity');
     report.details.charts = 1;
   }
@@ -1915,7 +1939,7 @@ try {
     await waitFor(`!!document.querySelector('[data-testid="agent-dataset-option"][data-name="e2e_home_orders"]')`, 15000, 'dataset listed');
     await evaluate(`document.querySelector('[data-testid="agent-dataset-option"][data-name="e2e_home_orders"]').click(); document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); true`);
     await waitFor(`document.querySelector('[data-testid="agent-dataset"]').textContent.includes('e2e_home_orders')`, 5000, 'dataset chosen');
-    await evaluate(`document.querySelector('[data-testid="agent-intent"][data-mode="investigate"]').click(); true`);
+    await evaluate(`document.querySelector('[data-testid="agent-intents"] [role="radio"][data-value="investigate"]').click(); true`);
     await setField('[data-testid="agent-prompt"]', 'Compare revenue by region');
     await evaluate(`document.querySelector('[data-testid="agent-submit"]').click(); true`);
     await waitFor(`!!document.querySelector('[data-testid="mission-view"]')`, 20000, 'mission opened');
@@ -2113,9 +2137,9 @@ try {
     await evaluate(`document.querySelector('header button[aria-label="Search or run a command"]').click(); 'ok'`);
     await waitFor(`!!document.querySelector('[role="dialog"] input')`, 5000, 'palette');
     await setField('[role="dialog"] input', 'how many widgets are here');
-    await waitFor(`[...document.querySelectorAll('[role="dialog"] [role="option"], [role="dialog"] button')].some(b => b.textContent.includes('Ask AI: how many widgets are here'))`, 5000, 'ask entry');
+    await waitFor(`[...document.querySelectorAll('[role="dialog"] [role="option"], [role="dialog"] button')].some(b => b.textContent.includes('Ask about this screen: how many widgets are here'))`, 5000, 'ask entry');
     const n = prompts.length;
-    await evaluate(`[...document.querySelectorAll('[role="dialog"] [role="option"], [role="dialog"] button')].find(b => b.textContent.includes('Ask AI: how many widgets are here')).click(); true`);
+    await evaluate(`[...document.querySelectorAll('[role="dialog"] [role="option"], [role="dialog"] button')].find(b => b.textContent.includes('Ask about this screen: how many widgets are here')).click(); true`);
     for (let i = 0; i < 100 && prompts.length === n; i++) await sleep(100);
     report.details.fromPalette = prompts.length > n && JSON.stringify(prompts.at(-1).messages.at(-1)).includes('how many widgets are here');
     report.details.charts = 1;
@@ -3034,12 +3058,17 @@ try {
     if (!/^Deleted E2E confirm \d+$/.test(d.toast ?? '') || d.afterDelete !== 404) problems.push(`delete: ${d.toast} ${d.afterDelete}`);
   }
   if (scenario === 'shell') {
-    if (!/Dashboards \| .*E2E shell \d+/.test(d.crumb ?? '')) problems.push(`crumb: ${d.crumb}`);
+    if (!/Build \| Dashboards \| .*E2E shell \d+/.test(d.crumb ?? '')) problems.push(`crumb: ${d.crumb}`);
     if (JSON.stringify(d.groups) !== JSON.stringify(['Your account', `Workspace ${d.groups?.[1]?.slice(10)}`, 'Administration']) || !String(d.groups?.[1]).startsWith('Workspace ')) problems.push(`groups: ${JSON.stringify(d.groups)}`);
-    if (!(d.rail ?? []).includes('Agents') || (d.rail ?? []).includes('AI')) problems.push(`rail: ${JSON.stringify(d.rail)}`);
+    if (JSON.stringify(d.rail) !== JSON.stringify(['Agent', 'Workspaces', 'Data', 'Build', 'Connect'])) problems.push(`rail: ${JSON.stringify(d.rail)}`);
+    if (d.logo !== 'mark') problems.push(`logo: ${d.logo}`);
+    for (const c of ['Ask the agent', 'Start a mission', 'Switch workspace…', 'Select a dataset…', 'Search data…', 'Search agent tools…', 'Open SQL', 'Open a dashboard…', 'Open catalog', 'Open Agents & MCP', 'Settings']) if (!(d.paletteAgent ?? []).some((o) => o.startsWith(c))) problems.push(`palette lacks ${c}`);
+    if (!(d.paletteScope >= 1)) problems.push(`switch workspace listed ${d.paletteScope}`);
+    if (d.appShortcuts !== 7) problems.push(`app shortcuts: ${d.appShortcuts}`);
+    if (JSON.stringify(d.connectTabs) !== JSON.stringify(['Connections', 'Agents & MCP'])) problems.push(`connect tabs: ${JSON.stringify(d.connectTabs)}`);
     if (d.narrowSettings?.nav !== 'none' || !d.narrowSettings?.picker) problems.push(`narrow settings: ${JSON.stringify(d.narrowSettings)}`);
     if (d.phoneRail !== 'none') problems.push(`rail on a phone: ${d.phoneRail}`);
-    if ((d.drawer ?? []).length !== 8) problems.push(`drawer: ${JSON.stringify(d.drawer)}`);
+    if (JSON.stringify(d.drawer) !== JSON.stringify(['Agent', 'Workspaces', 'Data', 'Build', 'Connect', 'Settings'])) problems.push(`drawer: ${JSON.stringify(d.drawer)}`);
   }
   if (scenario === 'sql-workspace') {
     if (d.errorPanel?.title !== 'The query failed' || !(d.errorPanel?.goto ?? []).includes('Go to line 2') || !(d.errorPanel?.goto ?? []).includes('Fix with AI')) problems.push(`error panel: ${JSON.stringify(d.errorPanel)}`);
@@ -3154,7 +3183,7 @@ try {
   }
   if (scenario === 'agent-home') {
     if (!d.opensOnAgent) problems.push('DuckView did not open on the Agent Home');
-    if (!/Workspace/.test(d.workspace ?? '')) problems.push(`workspace: ${d.workspace}`);
+    if (!(d.workspace ?? '').trim()) problems.push(`workspace: ${d.workspace}`);
     if (!/^#\/agent\/missions\//.test(d.url ?? '')) problems.push(`url: ${d.url}`);
     if (JSON.stringify(d.findings) !== JSON.stringify(['US has 300 in revenue', 'EU has 150 in revenue', 'APAC has 80 in revenue'])) problems.push(`findings: ${JSON.stringify(d.findings)}`);
     if (!d.chart) problems.push('no chart');

@@ -3,7 +3,7 @@
  * allows more than the agent, the account), and two pages — the Agent Home (#/) and a mission (#/agent/missions/<id>).
  */
 import { useEffect, useState } from 'react';
-import { LogOut, SquareTerminal } from 'lucide-react';
+import { SquareTerminal } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { useWorkspace } from '../store/workspace';
 import { LoginPage } from '../features/auth/LoginPage';
@@ -12,7 +12,8 @@ import { MissionView } from '../features/agent/mission/MissionView';
 import { useMissions } from '../features/agent/missions';
 import { agentApi } from '../features/agent/api';
 import { Logo } from '../components/Logo';
-import { IconButton, Spinner } from '../components/ui';
+import { Spinner } from '../components/ui';
+import { ProfileMenu } from '../components/shell/AccountMenu';
 
 const missionOf = (hash: string) => /^#\/agent\/missions\/([\w-]+)/.exec(hash)?.[1] ?? null;
 
@@ -40,17 +41,16 @@ export function AnalystApp() {
   if (!auth.user) return <LoginPage />;
   const mission = missionOf(hash);
   return (
-    <div className="flex h-full flex-col bg-zinc-950" data-testid="analyst-app">
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-zinc-800 px-4">
-        <a href="#/" className="flex items-center gap-2 text-body font-semibold text-zinc-100" aria-label="DuckView agent home"><Logo className="h-6 w-6" /> DuckView</a>
+    <div className="flex h-full flex-col bg-canvas" data-testid="analyst-app">
+      <header className="flex h-[var(--topbar-h)] shrink-0 items-center gap-3 border-b border-line bg-canvas px-4 max-sm:px-3">
+        <a href="#/" className="flex h-6 items-center" aria-label="DuckView agent home"><Logo variant="full" className="h-6" /></a>
         <div className="flex-1" />
         {caps && (
-          <a href="/#/" className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900 hover:text-zinc-50" title={caps.persona === 'viewer' ? 'The console, with your view-only access' : 'The full DuckView console'} data-testid="analyst-console">
+          <a href="/#/" className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-fg-secondary transition-colors duration-[var(--dur-fast)] hover:bg-hover hover:text-fg" title={caps.persona === 'viewer' ? 'The console, with your view-only access' : 'The full DuckView console'} data-testid="analyst-console">
             <SquareTerminal className="h-3.5 w-3.5" /> {caps.persona === 'viewer' ? 'Console (view only)' : 'Open the console'}
           </a>
         )}
-        <span className="hidden text-2xs text-zinc-500 sm:inline">{auth.user.email}</span>
-        <IconButton label="Sign out" onClick={() => auth.logout()}><LogOut className="h-3.5 w-3.5" /></IconButton>
+        <ProfileMenu console={false} />
       </header>
       <main className="min-h-0 flex-1">{mission ? <MissionView key={mission} id={mission} /> : <AgentHome />}</main>
     </div>

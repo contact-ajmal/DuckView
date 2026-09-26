@@ -4,7 +4,7 @@
  */
 import { type ReactNode, type ButtonHTMLAttributes, type ComponentProps, type InputHTMLAttributes, type SelectHTMLAttributes, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, Check, Copy } from 'lucide-react';
+import { X, Loader2, Check, Copy, ChevronRight } from 'lucide-react';
 import { moveFocus, useFocusTrap, usingKeyboard } from './focus';
 
 export function cn(...parts: (string | false | null | undefined)[]) {
@@ -128,8 +128,80 @@ export function Tabs<T extends string>({ tabs, value, onChange, className, size 
   );
 }
 
+/**
+ * A small segmented choice (a radio group): the agent's intents, a result's Chart / Table / SQL. Arrow keys move and
+ * choose. Quieter than Tabs — no underline, the chosen segment is a filled `selected` surface.
+ */
+export function Segmented<T extends string>({ options, value, onChange, label, className, testid }: { options: { id: T; label: ReactNode; icon?: ReactNode; hidden?: boolean; title?: string }[]; value: T; onChange: (id: T) => void; label: string; className?: string; testid?: string }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={label}
+      data-testid={testid}
+      className={cn('inline-flex min-w-0 flex-wrap items-center gap-0.5', className)}
+      onKeyDown={(e) => {
+        const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')];
+        if (moveFocus(items, document.activeElement, e.key, 'horizontal')) {
+          e.preventDefault();
+          (document.activeElement as HTMLElement | null)?.click();
+        }
+      }}
+    >
+      {options.filter((o) => !o.hidden).map((o) => {
+        const on = value === o.id;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            tabIndex={on ? 0 : -1}
+            title={o.title}
+            data-value={o.id}
+            onClick={() => onChange(o.id)}
+            className={cn('inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors duration-[var(--dur-fast)]', on ? 'bg-selected text-fg-strong' : 'text-fg-secondary hover:bg-hover hover:text-fg')}
+          >
+            {o.icon}
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A disclosure: a quiet button with `aria-expanded` and a body that reveals in 200ms. Controlled or not. */
+export function Disclosure({ summary, children, open: openProp, onOpenChange, defaultOpen = false, className, testid }: { summary: ReactNode; children: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void; defaultOpen?: boolean; className?: string; testid?: string }) {
+  const [own, setOwn] = useState(defaultOpen);
+  const open = openProp ?? own;
+  const set = (v: boolean) => {
+    setOwn(v);
+    onOpenChange?.(v);
+  };
+  return (
+    <div className={className} data-testid={testid} data-open={open || undefined}>
+      <button type="button" aria-expanded={open} onClick={() => set(!open)} className="group inline-flex items-center gap-1 rounded-md py-0.5 text-xs text-fg-secondary transition-colors duration-[var(--dur-fast)] hover:text-fg">
+        <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-fg-muted transition-transform duration-[var(--dur-med)]', open && 'rotate-90')} />
+        {summary}
+      </button>
+      {open && <div className="dv-reveal mt-2">{children}</div>}
+    </div>
+  );
+}
+
+/** Progress as a thin bar, with its value for assistive tech. Tone follows the state it belongs to. */
+export function ProgressBar({ value, tone = 'busy', className, label = 'Progress' }: { value: number; tone?: 'busy' | 'warn' | 'error' | 'ok'; className?: string; label?: string }) {
+  const fill = { busy: 'bg-zinc-300', warn: 'bg-amber-500', error: 'bg-red-500', ok: 'bg-emerald-500' }[tone];
+  return (
+    <div className={cn('h-1 w-full overflow-hidden rounded-full bg-zinc-800', className)} role="progressbar" aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+      <div className={cn('h-full rounded-full transition-[width] duration-[var(--dur-med)]', fill)} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+    </div>
+  );
+}
+
 /** A dropdown menu anchored to its trigger; closes on outside click and Escape. */
-export function Menu({ trigger, children, align = 'right', width = 'w-56', className }: { trigger: (open: boolean, toggle: () => void) => ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right'; width?: string; className?: string }) {
+/** `placement="beside"` opens to the right, bottom-aligned with the trigger — for the foot of the rail. */
+export function Menu({ trigger, children, align = 'right', width = 'w-56', className, placement = 'below' }: { trigger: (open: boolean, toggle: () => void) => ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right'; width?: string; className?: string; placement?: 'below' | 'beside' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -165,7 +237,7 @@ export function Menu({ trigger, children, align = 'right', width = 'w-56', class
         <div
           ref={menuRef}
           role="menu"
-          className={cn('dv-pop absolute top-full z-50 mt-1 rounded-lg border border-zinc-800 bg-zinc-950 p-1 shadow-xl', align === 'right' ? 'right-0' : 'left-0', width)}
+          className={cn('dv-pop absolute z-50 rounded-lg border border-zinc-800 bg-zinc-950 p-1 shadow-xl', placement === 'beside' ? 'bottom-0 left-full ml-2' : cn('top-full mt-1', align === 'right' ? 'right-0' : 'left-0'), width)}
           onKeyDown={(e) => {
             if (moveFocus([...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])')], document.activeElement, e.key, 'vertical')) e.preventDefault();
           }}

@@ -1,10 +1,13 @@
 /**
- * Missions as a list: active ones with their progress and what they are doing, recent ones with what they made.
- * A row opens the mission's workspace (#/agent/missions/<id>).
+ * Missions on the Agent Home. Active ones carry weight — a raised row with the status, the progress and what the
+ * agent is doing now. Recent ones are a compact list (title, what they made, when) with Duplicate and Archive on
+ * hover or focus (always visible on touch). A row opens the mission's workspace (#/agent/missions/<id>).
  */
+import { useState } from 'react';
+import { Archive, Copy } from 'lucide-react';
 import { timeAgo } from '../../../api/client';
-import { StatusDot, cn } from '../../../components/ui';
-import type { MissionStatus, MissionSummary } from '../api';
+import { IconButton, ProgressBar as Bar, StatusDot, cn, toast } from '../../../components/ui';
+import { missionApi, type MissionStatus, type MissionSummary } from '../api';
 
 export const MISSION_STATUS: Record<MissionStatus, [tone: 'busy' | 'idle' | 'warn' | 'ok' | 'error', word: string]> = {
   new: ['idle', 'Not started'],
@@ -18,40 +21,76 @@ export const MISSION_STATUS: Record<MissionStatus, [tone: 'busy' | 'idle' | 'war
 
 const KIND: Record<string, string> = { table: 'result', dashboard: 'dashboard', notebook: 'notebook', app: 'app', quality_suite: 'checks', dbt_model: 'model', metric: 'metrics', saved_query: 'query', chart: 'chart', dataset: 'dataset', file: 'file' };
 
-/** The mission's progress, as a thin bar with its value for assistive tech. */
+/** A mission's progress; the bar's tone follows its state. */
 export function ProgressBar({ value, status, className }: { value: number; status: MissionStatus; className?: string }) {
+  return <Bar value={value} className={className} tone={status === 'waiting_approval' ? 'warn' : status === 'failed' ? 'error' : status === 'completed' ? 'ok' : 'busy'} />;
+}
+
+export function ActiveMissions({ missions }: { missions: MissionSummary[] }) {
   return (
-    <div className={cn('h-1 w-full overflow-hidden rounded-full bg-zinc-800', className)} role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100} aria-label="Progress">
-      <div className={cn('h-full rounded-full transition-[width] duration-200', status === 'waiting_approval' ? 'bg-amber-500' : status === 'failed' ? 'bg-red-500' : status === 'completed' ? 'bg-emerald-500' : 'bg-zinc-300')} style={{ width: `${value}%` }} />
-    </div>
+    <section aria-label="Active missions" data-testid="agent-active">
+      <h2 className="mb-2 flex items-baseline gap-2 text-body font-medium text-fg">Running now <span className="text-2xs tabular-nums text-fg-muted">{missions.length}</span></h2>
+      <ul className="space-y-1.5">
+        {missions.slice(0, 6).map((m) => {
+          const [tone, word] = MISSION_STATUS[m.status];
+          return (
+            <li key={m.id}>
+              <a href={`#/agent/missions/${m.id}`} className="block rounded-lg border border-line bg-raised px-3.5 py-3 transition-colors duration-[var(--dur-fast)] hover:border-line-strong" data-testid="agent-mission-row" data-status={m.status}>
+                <div className="flex items-center gap-3">
+                  <span className="min-w-0 flex-1 truncate text-body font-medium text-fg-strong">{m.title}</span>
+                  {!m.owner.mine && <span className="shrink-0 text-2xs text-fg-muted">shared</span>}
+                  <StatusDot tone={tone} pulse={tone === 'busy'} className="shrink-0">{word}</StatusDot>
+                </div>
+                <ProgressBar value={m.progress} status={m.status} className="mt-2.5" />
+                <div className="mt-1.5 truncate text-xs text-fg-secondary">{m.activity ?? 'Starting…'}</div>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
-export function MissionList({ title, missions, empty, testid }: { title: string; missions: MissionSummary[]; empty: string; testid: string }) {
+export function RecentMissions({ missions, onChanged }: { missions: MissionSummary[]; onChanged: () => void }) {
+  const [pending, setPending] = useState<string | null>(null);
+  const act = async (id: string, fn: () => Promise<unknown>, done: string) => {
+    setPending(id);
+    try {
+      await fn();
+      toast.success(done);
+      onChanged();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setPending(null);
+    }
+  };
   return (
-    <section aria-label={title} data-testid={testid}>
-      <h2 className="mb-2 text-body font-semibold text-zinc-100">{title}</h2>
+    <section aria-label="Recent work" data-testid="agent-recent">
+      <h2 className="mb-1 text-body font-medium text-fg">Recent</h2>
       {missions.length === 0 ? (
-        <p className="text-xs text-zinc-500">{empty}</p>
+        <p className="py-2 text-xs text-fg-muted">Finished missions appear here, with what they made.</p>
       ) : (
-        <ul className="-mx-2 space-y-0.5">
-          {missions.slice(0, 8).map((m) => {
+        <ul className="-mx-2">
+          {missions.slice(0, 10).map((m) => {
             const [tone, word] = MISSION_STATUS[m.status];
-            const running = m.status === 'running' || m.status === 'planning' || m.status === 'waiting_approval';
             const made = m.artifacts.kinds.filter((k) => k !== 'dataset').map((k) => KIND[k] ?? k);
+            const meta = [m.status !== 'completed' ? word : null, made.length ? made.join(', ') : null].filter(Boolean).join(' · ');
             return (
-              <li key={m.id}>
-                <a href={`#/agent/missions/${m.id}`} className="block rounded-md px-2 py-2 hover:bg-zinc-900 focus-visible:bg-zinc-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-500" data-testid="agent-mission-row" data-status={m.status}>
-                  <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-100">{m.title}</span>
-                    {!m.owner.mine && <span className="shrink-0 text-2xs text-zinc-500">shared</span>}
-                    {running ? <StatusDot tone={tone} pulse={tone === 'busy'} className="shrink-0">{word}</StatusDot> : <span className="shrink-0 text-2xs text-zinc-500">{timeAgo(m.updated_at)}</span>}
-                  </div>
-                  {running && <ProgressBar value={m.progress} status={m.status} className="mt-1.5" />}
-                  <div className="mt-1 truncate text-2xs text-zinc-500">
-                    {running ? m.activity : [m.status !== 'completed' ? word : null, made.length ? made.join(', ') : null, m.datasets.length ? `${m.datasets.length} dataset${m.datasets.length === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || m.activity}
-                  </div>
+              <li key={m.id} className="group relative flex items-center rounded-md transition-colors duration-[var(--dur-fast)] hover:bg-hover focus-within:bg-hover">
+                <a href={`#/agent/missions/${m.id}`} className="flex min-w-0 flex-1 items-center gap-2.5 px-2 py-1.5" data-testid="agent-mission-row" data-status={m.status}>
+                  <StatusDot tone={tone} className="shrink-0" />
+                  <span className="min-w-0 flex-1 truncate text-body text-fg">{m.title}</span>
+                  {meta && <span className="hidden max-w-[40%] shrink-0 truncate text-2xs text-fg-muted sm:inline">{meta}</span>}
+                  {!m.owner.mine && <span className="shrink-0 text-2xs text-fg-muted">shared</span>}
+                  <span className="w-14 shrink-0 text-right text-2xs tabular-nums text-fg-muted group-hover:invisible group-focus-within:invisible max-sm:hidden">{timeAgo(m.updated_at)}</span>
                 </a>
+                {/* Hover or keyboard focus reveals the row's actions; touch screens always show them. */}
+                <span className={cn('flex shrink-0 items-center pr-1 sm:absolute sm:right-1 sm:opacity-0 sm:transition-opacity sm:duration-[var(--dur-fast)] sm:group-hover:opacity-100 sm:group-focus-within:opacity-100', pending === m.id && 'sm:opacity-100')}>
+                  <IconButton label={`Duplicate "${m.title}"`} disabled={pending === m.id} onClick={() => void act(m.id, () => missionApi.duplicate(m.id), 'Duplicated')} data-testid="mission-row-duplicate"><Copy className="h-3.5 w-3.5" /></IconButton>
+                  {m.owner.mine && <IconButton label={`Archive "${m.title}"`} disabled={pending === m.id} onClick={() => void act(m.id, () => missionApi.update(m.id, { archived: true }), 'Archived')} data-testid="mission-row-archive"><Archive className="h-3.5 w-3.5" /></IconButton>}
+                </span>
               </li>
             );
           })}

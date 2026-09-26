@@ -116,7 +116,8 @@ export function OverviewPage() {
     if (!ws.catalog || !wsId) return;
     // The store, not this render: a link (?table=) may have set the target in the same commit.
     const target = useWorkspace.getState().overviewTarget[wsId] ?? null;
-    const first = ws.catalog.files[0]?.path ?? ws.catalog.objects[0]?.name ?? null;
+    // The first previewable dataset: a database file (.duckdb, .db, .sqlite) in the folder is not one by itself.
+    const first = ws.catalog.files.find((f) => !/\.(duckdb|db|sqlite3?|ddb)$/i.test(f.path))?.path ?? ws.catalog.objects[0]?.name ?? null;
     if (!target) {
       if (first) setTarget(first);
       return;

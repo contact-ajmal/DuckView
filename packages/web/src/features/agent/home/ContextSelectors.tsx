@@ -4,7 +4,7 @@
  * the datasets their access shows. Datasets load when the picker opens, never on the first paint.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, Database, FileText, Layers, Search, Sigma, X } from 'lucide-react';
+import { Boxes, Check, ChevronDown, Database, FileText, Layers, Plus, Search, Sigma, X } from 'lucide-react';
 import { Badge, Button, Input, Menu, Spinner, cn } from '../../../components/ui';
 import { timeAgo } from '../../../api/client';
 import { useWorkspace } from '../../../store/workspace';
@@ -20,9 +20,9 @@ export function WorkspaceSelector({ workspaces }: { workspaces: AgentWorkspace[]
       align="left"
       width="w-80"
       trigger={(open, toggle) => (
-        <button type="button" onClick={toggle} aria-expanded={open} aria-haspopup="menu" className="group flex min-w-0 max-w-[16rem] items-center gap-1.5 rounded px-1.5 py-1 text-left hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-500" data-testid="agent-workspace">
-          <span className="text-2xs text-zinc-500">Workspace</span>
-          <span className="min-w-0 truncate text-xs font-medium text-zinc-100">{current?.name ?? 'Choose a workspace'}</span>
+        <button type="button" onClick={toggle} aria-expanded={open} aria-haspopup="menu" aria-label={`Workspace: ${current?.name ?? 'none'}`} title="The workspace the agent works in" className="group flex min-w-0 max-w-[14rem] items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors duration-[var(--dur-fast)] hover:bg-zinc-800/60" data-testid="agent-workspace">
+          <Boxes className="h-3.5 w-3.5 shrink-0 text-fg-muted" aria-hidden />
+          <span className="min-w-0 truncate text-xs font-medium text-fg">{current?.name ?? 'Choose a workspace'}</span>
           {current?.environment && <Badge tone="zinc" className="shrink-0">{current.environment}</Badge>}
           <ChevronDown className="h-3 w-3 shrink-0 text-zinc-500 group-hover:text-zinc-300" />
         </button>
@@ -101,7 +101,7 @@ export function DatasetSelector({ selected, onChange }: { selected: string[]; on
       </button>
     );
   };
-  const label = selected.length === 0 ? 'Any data' : selected.length === 1 ? selected[0]! : `${selected[0]} +${selected.length - 1}`;
+  const label = selected.length === 1 ? selected[0]! : `${selected[0]} +${selected.length - 1}`;
   return (
     <div className="flex min-w-0 items-center gap-0.5">
       <Menu
@@ -116,12 +116,24 @@ export function DatasetSelector({ selected, onChange }: { selected: string[]; on
             }}
             aria-expanded={isOpen}
             aria-haspopup="menu"
-            className="group flex min-w-0 max-w-[18rem] items-center gap-1.5 rounded px-1.5 py-1 text-left hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-500"
+            aria-label={selected.length ? `Data: ${selected.join(', ')}. Change` : 'Add context: choose data for the agent (optional)'}
+            title={selected.length ? selected.join(', ') : 'Choose the data to work on. Optional: the agent finds what fits.'}
+            className="group flex min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors duration-[var(--dur-fast)] hover:bg-zinc-800/60"
             data-testid="agent-dataset"
           >
-            <span className="text-2xs text-zinc-500">Dataset</span>
-            <span className={cn('min-w-0 truncate text-xs', selected.length ? 'font-mono text-zinc-100' : 'text-zinc-400')}>{label}</span>
-            <ChevronDown className="h-3 w-3 shrink-0 text-zinc-500 group-hover:text-zinc-300" />
+            {selected.length ? (
+              <>
+                <Database className="h-3.5 w-3.5 shrink-0 text-accent-400" aria-hidden />
+                <span className="min-w-0 truncate font-mono text-xs text-fg">{label}</span>
+                <ChevronDown className="h-3 w-3 shrink-0 text-fg-muted group-hover:text-fg-secondary" />
+              </>
+            ) : (
+              <>
+                <Plus className="h-3.5 w-3.5 shrink-0 text-fg-muted group-hover:text-fg" aria-hidden />
+                <span className="text-xs text-fg-secondary group-hover:text-fg">Context</span>
+                <span className="truncate text-2xs text-fg-muted max-sm:hidden">· no dataset chosen</span>
+              </>
+            )}
           </button>
         )}
       >

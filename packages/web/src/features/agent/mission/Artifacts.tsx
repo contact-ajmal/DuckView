@@ -6,7 +6,7 @@
 import { useState, type ReactNode } from 'react';
 import { AppWindow, BookOpenText, Boxes, FileDown, LayoutDashboard, LineChart, ListChecks, Lock, Play, Save, Sigma, SquareTerminal, Table2 } from 'lucide-react';
 import { ChartFrame, ResultPreview } from '../../../components/data';
-import { Button, InlineError, Tabs, cn } from '../../../components/ui';
+import { Button, InlineError, Segmented, cn } from '../../../components/ui';
 import type { ColumnSchema, WidgetChartConfig } from '../../../api/client';
 import { ChartWidget } from '../../dashboards/widgets';
 import { missionApi, type MissionArtifact } from '../api';
@@ -77,11 +77,11 @@ export function ResultArtifact({ a, onAsk }: { a: MissionArtifact; onAsk?: (text
       actionsVisible
       actions={
         <span className="flex items-center gap-1">
-          {!hidden && <Tabs<'chart' | 'table' | 'sql'> size="sm" className="border-b-0" value={view} onChange={setView} tabs={[{ id: 'chart', label: 'Chart', hidden: !chart }, { id: 'table', label: 'Table' }, { id: 'sql', label: 'SQL', hidden: !d.sql }]} />}
+          {!hidden && <Segmented<'chart' | 'table' | 'sql'> label="View" value={view} onChange={setView} options={[{ id: 'chart', label: 'Chart', hidden: !chart }, { id: 'table', label: 'Table' }, { id: 'sql', label: 'SQL', hidden: !d.sql }]} />}
           {d.sql && <ConsoleButton artifact={a} onOpen={() => openInConsole({ action: 'open_query', args: { sql: d.sql, title: a.title } })} />}
         </span>
       }
-      className="rounded-md border border-zinc-800"
+      className="rounded-lg border border-line"
       testid="artifact-result"
     >
       <div className="min-h-0 px-3 pb-3" data-view={view}>
@@ -106,11 +106,11 @@ export function ResultArtifact({ a, onAsk }: { a: MissionArtifact; onAsk?: (text
 
 export function ObjectArtifact({ a }: { a: MissionArtifact }) {
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-md border border-zinc-800 px-3 py-2.5" data-testid="artifact-object" data-type={a.type}>
-      <span className="text-accent-400">{ICON[a.type] ?? <Table2 className="h-4 w-4" />}</span>
+    <div className="flex min-w-0 items-center gap-3 px-1 py-2" data-testid="artifact-object" data-type={a.type}>
+      <span className="text-fg-muted">{ICON[a.type] ?? <Table2 className="h-4 w-4" />}</span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-xs font-medium text-zinc-100">{a.title}</div>
-        <div className="text-2xs text-zinc-500">{KIND[a.type] ?? a.type} · made by the agent</div>
+        <div className="truncate text-body text-fg">{a.title}</div>
+        <div className="text-2xs text-fg-muted">{KIND[a.type] ?? a.type}</div>
       </div>
       {(a.href || typeof a.data?.sql === 'string') && <ConsoleButton artifact={a} onOpen={() => (a.href ? openInConsole({ action: 'open', href: a.href }) : openInConsole({ action: 'open_query', args: { sql: a.data!.sql, title: a.title } }))} />}
     </div>
@@ -120,11 +120,11 @@ export function ObjectArtifact({ a }: { a: MissionArtifact }) {
 export function Findings({ items, className }: { items: string[]; className?: string }) {
   if (!items.length) return null;
   return (
-    <section className={cn('rounded-md border border-zinc-800 px-4 py-3', className)} aria-label="Key findings" data-testid="artifact-findings">
-      <h3 className="mb-1.5 text-xs font-semibold text-zinc-200">Key findings</h3>
+    <section className={cn('min-w-0', className)} aria-label="Key findings" data-testid="artifact-findings">
+      <h3 className="mb-1.5 text-xs font-medium text-fg-secondary">Key findings</h3>
       <ul className="space-y-1">
         {items.map((f, i) => (
-          <li key={i} className="flex gap-2 text-body text-zinc-200"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-zinc-500" aria-hidden /><span className="min-w-0">{f.replace(/\*\*/g, '')}</span></li>
+          <li key={i} className="flex gap-2.5 text-body text-fg"><span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-fg-muted" aria-hidden /><span className="min-w-0">{f.replace(/\*\*/g, '')}</span></li>
         ))}
       </ul>
     </section>

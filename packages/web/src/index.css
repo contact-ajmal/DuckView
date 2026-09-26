@@ -116,6 +116,18 @@
   --color-fg-secondary: var(--t-zinc-400); /* labels, descriptions */
   --color-fg-muted: var(--t-zinc-500);     /* metadata */
   --color-fg-faint: var(--t-zinc-600);     /* placeholders, disabled, NULL */
+  /* Surface levels: canvas (0) → raised (1) → overlay (2, with a shadow). Resting surfaces never cast one. */
+  --color-raised: var(--t-zinc-900);       /* rail, side panels, composer fields */
+  --color-overlay: var(--t-zinc-950);      /* menus, dialogs, the palette (with shadow-xl + border-line) */
+  /* Interaction layers. */
+  --color-hover: var(--t-zinc-900);        /* a row or ghost control under the pointer */
+  --color-line-subtle: color-mix(in oklab, var(--t-zinc-800) 60%, transparent); /* dividers inside a list */
+  /* Accent roles: the one accent means "act here". */
+  --color-accent: var(--t-accent-500);
+  --color-accent-subtle: color-mix(in oklab, var(--t-accent-500) 12%, transparent);
+  /* Motion. */
+  --animate-rise: dv-rise var(--dur-slow) var(--ease-out);
+  --animate-reveal: dv-reveal var(--dur-med) var(--ease-out);
 }
 
 :root {
@@ -141,6 +153,8 @@
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-fast: 120ms;
   --dur-med: 200ms;
+  --dur-slow: 320ms;
+  --focus-ring: var(--color-accent-500);
   /* Text on an accent (duckbill-yellow) fill. */
   --accent-ink: #1a1300;
 }
@@ -149,7 +163,7 @@ html, body, #root { height: 100%; }
 body { background: var(--color-zinc-950); color: var(--color-zinc-100); font-size: 13px; font-feature-settings: "cv11", "ss01"; }
 
 /* One focus treatment everywhere: visible for keyboard users, invisible for mouse clicks. */
-:where(button, a, [role="button"], [role="tab"], [tabindex]):focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 1px; border-radius: var(--radius-md); }
+:where(button, a, [role="button"], [role="tab"], [tabindex]):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: var(--radius-md); }
 :where(input, select, textarea):focus-visible { outline: none; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -159,6 +173,11 @@ body { background: var(--color-zinc-950); color: var(--color-zinc-100); font-siz
 @keyframes dv-slide-in-right { from { opacity: 0; transform: translateX(12px) } to { opacity: 1; transform: none } }
 .dv-pop { animation: dv-fade-in var(--dur-med) var(--ease-out); }
 .dv-drawer { animation: dv-slide-in-right var(--dur-med) var(--ease-out); }
+/* Content the person's own action brought in (Home → working), and a disclosure's body. Never on page load. */
+@keyframes dv-rise { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+@keyframes dv-reveal { from { opacity: 0; transform: translateY(-2px) } to { opacity: 1; transform: none } }
+.dv-rise { animation: dv-rise var(--dur-slow) var(--ease-out); }
+.dv-reveal { animation: dv-reveal var(--dur-med) var(--ease-out); }
 
 * { scrollbar-width: thin; scrollbar-color: var(--color-zinc-700) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }

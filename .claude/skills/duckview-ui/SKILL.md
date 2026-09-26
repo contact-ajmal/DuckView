@@ -23,7 +23,7 @@ Stack: React 19, Vite 7, Tailwind v4 (`src/index.css` `@theme`), zustand stores 
 
 Themes (`src/theme/themes.ts`: Midnight, Graphite, Fjord dark; Daylight, Professional, Paper light) rewrite `--t-*` variables. Light themes **mirror** the neutral ramp, so the ramp classes below flip correctly. Dark is the first-class default, but check both.
 
-Semantic colours exist in `@theme` (`index.css`); prefer them in new code — `bg-canvas`, `bg-surface`, `bg-selected`, `border-line`, `border-line-strong`, `text-fg-strong`, `text-fg`, `text-fg-body`, `text-fg-secondary`, `text-fg-muted`, `text-fg-faint`. They alias the ramp below, which older code uses directly:
+Semantic colours exist in `@theme` (`index.css`; roles explained in `docs/design/design-system.md`); prefer them in new code — surface levels `bg-canvas` → `bg-raised` → `bg-overlay` (menus, dialogs), interaction `bg-hover`, `bg-selected`, `border-line-subtle` (list dividers), accent roles `bg-accent`, `bg-accent-subtle`, and `bg-surface`, `border-line`, `border-line-strong`, `text-fg-strong`, `text-fg`, `text-fg-body`, `text-fg-secondary`, `text-fg-muted`, `text-fg-faint`. They alias the ramp below, which older code uses directly:
 
 | Role | Class |
 |---|---|
@@ -65,7 +65,7 @@ Arbitrary sizes (`text-[13px]`) and `text-sm/base/lg/xl` fail `pnpm --filter @du
 
 **Elevation:** shadows only on things that float (menus, dialogs, drawers, palette). A resting surface never has a shadow.
 
-**Motion:** 120ms state changes, 200ms for opening. `dv-pop` for popovers, `dv-drawer` for drawers. There are no entrance animations on page content. Respect reduced motion (global rule in `index.css`).
+**Motion:** 120ms state changes (`--dur-fast`), 200ms for opening (`--dur-med`), 320ms for a layout change the person caused (`--dur-slow`). `dv-pop` for popovers, `dv-drawer` for drawers, `dv-reveal` for a disclosure's body, `dv-rise` only for content the person's own action brought in (Home → a mission's working state). There are no entrance animations on page load. Respect reduced motion (global rule in `index.css`).
 
 ## Components
 
@@ -79,7 +79,9 @@ Use in this order: an existing primitive, then an extension of it, then a new sh
 - `components/panes.tsx`
   - Resizable split panes. Work surfaces (workbench, explorer, notebooks) use panes, not stacked cards.
 - `components/shell`
-  - Sidebar (rail), TopBar (workspace switcher, breadcrumb, storage, live status, AI), SectionNav (sub-tabs from `SUBPAGES`), CommandPalette (⌘K), InboxBell.
+  - Sidebar (rail), TopBar (workspace switcher, breadcrumb, ⌘K, storage, live status only when degraded, inbox, "Ask about this screen"), SectionNav (sub-tabs from `SUBPAGES`, filtered by `useNavAccess`), CommandPalette (⌘K, with scoped sub-lists), InboxBell, `AccountMenu.tsx` (HelpMenu, ProfileMenu, ShortcutsSheet).
+- `Logo` (`components/Logo.tsx`): the D-viewport mark with a 2×2 grid. Variants `mark`, `compact`, `mono` (currentColor), `full` (with the wordmark). The favicons in `index.html` and `analyst.html` are the same drawing. Never draw a duck.
+- `Segmented` (a small radio group with arrow keys: intents, a result's Chart/Table/SQL, a page's own views), `Disclosure` ("Show the work"), `ProgressBar` (tone busy/warn/error/ok) are in `components/ui`; `ContextChip` is in `components/ai`.
 - Data (`components/data`). Three tables, each for one job; a raw `<table>` fails lint.
   - **`DataTable`** is for lists of things: runs, members, apps, tokens, stats. It takes columns as `{ key, header, cell, sortValue?, align?, width?, truncate?, numeric?, responsive?, defaultHidden? }`.
     - It provides sorting (with `aria-sort`), `search` (a filter box), `columnPicker` (remembered), and loading skeletons when `rows === null`.
@@ -207,9 +209,9 @@ One vocabulary for Copilot turns, DuckView agent runs (`hosted_agent_runs.steps`
 
 ### The Agent Home and missions (`features/agent`)
 
-- DuckView opens on the **Agent Home** (`#/`, `features/agent/home/AgentHome.tsx`): the question, the composer, and in its context bar the Workspace (the console's active workspace — one source) and Dataset selectors (`ContextSelectors.tsx`; datasets load when the picker opens). Below: the intents (Analyse, Build, Investigate, Automate, Explore, Explain — hints to the same agent, never separate agents), active missions and recent work (`MissionList`). The workspace overview is `#/home`.
-  - The Agent Home is the one page that uses `text-display` for its question. It is a working surface, not a hero: no marketing copy, no illustration, no gradient.
-- A request starts a **mission** (`#/agent/missions/<id>`, `mission/MissionView.tsx`). While nothing is made yet, the page is the request, the plan and live activity in words. Then it is a workspace: summary, `Findings`, results as `ResultArtifact` (the dashboards' `ChartWidget` inside `ChartFrame`, with Table and SQL views), objects as `ObjectArtifact`, and a side column with Progress, Context ("You chose" / "The agent found") and Activity. The composer at the bottom continues the mission. Never render the model's raw text around tool calls, or anything like hidden reasoning.
+- DuckView opens on the **Agent Home** (`#/`, `features/agent/home/AgentHome.tsx`; principles in `docs/design/agent-ui-principles.md`). The prompt is the centre: a `text-page` question, the composer, and inside it one compact context line — workspace · data ("+ Context" when none is chosen) · a carried `ContextChip` (`ContextSelectors.tsx`; datasets load when the picker opens). Under it five quick intents as a `Segmented` (Analyse, Build, Investigate, Automate, Explore; Explain appears only when chosen) — hints to the same agent, never separate agents. Below: `ActiveMissions` (raised rows with status, progress and activity) above `RecentMissions` (a compact list with Duplicate / Archive on hover or focus). The workspace overview is `#/home`.
+  - It is a working surface, not a hero: no marketing copy, no illustration, no gradient, and one primary action (Start).
+- A request starts a **mission** (`#/agent/missions/<id>`, `mission/MissionView.tsx`). While nothing is made yet, the page is the request (as its heading, at the Home's reading width), the plan and the current step; the rest of the activity sits behind a `Disclosure` ("Show the work"), open by itself only on a failure or an approval. Then it is a workspace with few frames: summary, `Findings` (a list on the canvas), results as `ResultArtifact` (the dashboards' `ChartWidget` inside `ChartFrame`, with a Chart / Table / SQL `Segmented`), made objects as `ObjectArtifact` rows under a hairline, and a side column with Progress, Context ("You chose" / "The agent found") and Activity. The composer at the bottom continues the mission. Never render the model's raw text around tool calls, or anything like hidden reasoning.
 - **Open in Console** is `ConsoleButton`: it follows the server's `artifact.open` decision and shows the reason when not allowed. The console checks access again.
 - Any page reaches the agent with ⌘I (the object on screen comes along as context). Do not add another agent panel or a chat page.
 - Add a sentence to `components/ai/describe.ts` for every new tool; it is what activity shows.
@@ -218,18 +220,20 @@ One vocabulary for Copilot turns, DuckView agent runs (`hosted_agent_runs.steps`
 
 ## Layout and information architecture
 
-- **Shell:** rail (8 sections) | top bar | section sub-tabs | page.
-  - The rail sections are Agent (`#/`, the Agent Home), Data, SQL, Dashboards, Apps, Agents (`#/agents`, which also accepts `#/mcp`), Connections and Settings.
-  - The top bar holds the workspace › section › page › object breadcrumb, ⌘K, the storage label, live status, the AI assistant and the account.
-  - Add pages to `SUBPAGES` or `parseRoute`, not to the rail, which stays at eight items or fewer.
-  - Agents opens on Activity, then Approvals; the agents, MCP clients and tools come after.
+- **Shell:** rail | top bar | section sub-tabs | page (`docs/design/information-architecture.md`).
+  - The rail has five primary destinations — **Agent** (`#/`), **Workspaces** (Overview `#/home`, Templates), **Data** (Explorer, Catalog, Quality, Lineage, Compare, Access policies), **Build** (SQL, Notebooks, Dashboards, Apps, Alerts ┆ Prepare, Models, Metrics), **Connect** (Connections, Agents & MCP `#/agents`) — and at its foot Help, Settings and the profile.
+  - Navigation is permission-aware: a `SubPage` with `write: true` is hidden for viewers and read-only accounts (`useNavAccess`, mirroring the server's capabilities), and a section with no visible tab disappears. The server still enforces.
+  - The top bar holds the workspace › section › page › object breadcrumb, ⌘K, the storage label, the live status only when it is not live, the inbox and "Ask about this screen" (⌘J). On a phone it also shows the profile.
+  - One AI entry per job: the Agent (missions, ⌘I), "Ask about this screen" (the contextual panel, ⌘J), and Agents & MCP (operations: other agents, approvals, tools).
+  - Add pages to `SUBPAGES` or `parseRoute`, never to the rail. Every old hash keeps resolving.
+  - Agents & MCP opens on Activity, then Approvals; the agents, MCP clients and tools come after.
 - **Work surfaces** (SQL, explorer, notebooks, dashboards) are full-bleed panes. Settings-like pages use `PageHeader` and a centred `max-w-5xl` column.
 - **Settings** has three groups: **Your account** (profile, teams, appearance, layout, credentials, integrations, AI keys), **Workspace *name*** (engine, SQL clients, orchestration, Git, embedding), and **Administration** (usage & cost, users, audit, provisioning, resources, cluster, data apps).
   - Put a new category in the group it belongs to; hash routes stay `#/settings/<id>`.
   - Below 1024px the category list becomes a picker.
 - **Responsive:** optimise for 1280–1920 wide.
   - Below 1024: side panes collapse to toggles, grids scroll horizontally, and dialogs become full-width sheets.
-  - Below 640 the rail hides; the top bar's menu button opens the sections in a drawer.
+  - Below 640 the rail hides; the top bar's menu button opens the sections (one line each) and Keyboard shortcuts in a drawer.
   - Below 640: only reading tasks (dashboards, results, runs) need to work.
   - Never shrink the text below the scale to fit.
 
