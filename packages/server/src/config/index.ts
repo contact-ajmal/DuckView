@@ -467,6 +467,8 @@ export const ConfigSchema = z.object({
       /** Retries of a failed tool call (with the error shown to the model) before the task gives up on it. */
       max_retries: z.coerce.number().int().min(0).max(5).default(2),
       max_output_tokens: z.coerce.number().int().min(256).max(64_000).default(2000),
+      /** Prices per million tokens by model (a substring of its name), for estimated cost in telemetry: { "claude-sonnet": { input: 3, output: 15 } }. */
+      pricing: z.record(z.string(), z.object({ input: z.coerce.number().min(0), output: z.coerce.number().min(0) })).default({}),
       /** Agent MCP server: high-level agent tools at /mcp/agent. */
       mcp: z.object({ enabled: z.coerce.boolean().default(true) }).default({}),
     })

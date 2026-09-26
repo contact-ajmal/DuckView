@@ -5,7 +5,9 @@ import { useWorkspaceAccess } from '../../store/workspace';
 import { Button, Drawer, Empty, Input, Spinner, cn, confirmAction } from '../../components/ui';
 
 export type RevisionType = 'notebook' | 'dashboard' | 'query' | 'semantic' | 'dbt';
-interface RevisionRow { id: string; number: number; message: string | null; named: boolean; author: string | null; created_at: string; updated_at: string }
+interface RevisionRow { id: string; number: number; message: string | null; named: boolean; author: string | null; actor_type?: string | null; created_at: string; updated_at: string }
+/** "Ana", or "Agent for Ana" when the DuckView agent (or another agent) made the change on their behalf. */
+const byline = (r: RevisionRow) => (r.actor_type === 'AGENT' ? `Agent for ${r.author ?? 'someone'}` : r.author ?? 'someone');
 
 type DiffLine = { kind: 'same' | 'add' | 'del'; text: string };
 
@@ -110,7 +112,7 @@ export function HistoryDrawer({ open, onClose, workspaceId, objectType, objectId
                 {r.named && <Bookmark className="h-3 w-3 shrink-0 text-accent-400" />}
                 <span className="truncate">{r.message ?? (i === 0 ? 'Current version' : `Version ${r.number}`)}</span>
               </span>
-              <span className="text-2xs text-zinc-500" title={new Date(r.updated_at).toLocaleString()}>{r.author ?? 'someone'} · {timeAgo(r.updated_at)}</span>
+              <span className="text-2xs text-zinc-500" title={new Date(r.updated_at).toLocaleString()}>{byline(r)} · {timeAgo(r.updated_at)}</span>
             </button>
           ))}
         </div>
@@ -121,7 +123,7 @@ export function HistoryDrawer({ open, onClose, workspaceId, objectType, objectId
               <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-body font-semibold text-zinc-100">Version {pickedRow.number}{pickedRow.message ? ` — ${pickedRow.message}` : ''}</div>
-                  <div className="text-2xs text-zinc-500">{pickedRow.author ?? 'someone'} · {new Date(pickedRow.updated_at).toLocaleString()}</div>
+                  <div className="text-2xs text-zinc-500">{byline(pickedRow)} · {new Date(pickedRow.updated_at).toLocaleString()}</div>
                 </div>
                 {canEdit && rows![0]?.id !== pickedRow.id && (
                   <Button size="sm" variant="primary" loading={busy} data-testid="restore-revision" onClick={async () => { if ((await confirmAction(`Restore version ${pickedRow.number}? The current state stays in the history.`))) void act(async () => { await api.post(`/api/revisions/${pickedRow.id}/restore`, {}); setPicked(null); await load(); onRestored?.(); }); }}><RotateCcw className="h-3.5 w-3.5" /> Restore</Button>

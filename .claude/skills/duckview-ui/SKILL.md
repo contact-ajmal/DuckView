@@ -205,6 +205,14 @@ One vocabulary for Copilot turns, DuckView agent runs (`hosted_agent_runs.steps`
 - **Natural language** is an entry point everywhere: ⌘K "Ask…", "Ask about this" on tables, results, widgets and errors ("Fix with AI"). The answer changes application state (opens the SQL tab, applies the chart config) rather than only describing it.
 - There is no special AI colour or gradient, and no sparkle confetti. Mark AI with the `Sparkles` icon and structure.
 
+### The agent dock (`features/agent`)
+
+- The DuckView agent lives in **one** place: the dock at the bottom of the shell (`AgentDock`, ⌘I). Do not add another chat page or panel; new surfaces register what they show with `usePageObject`, and the dock picks it up as a removable `ContextChip`.
+- A task reads as request → plan (checklist) → steps as sentences (`ToolStep`, sentences from `components/ai/describe.ts`; add one for every new tool) → answer (`Markdown`) → artifacts (`AgentArtifacts`: open in the workspace, never only in the dock) → approval (`ApprovalCard`). Never render the model's raw text around tool calls, or anything like hidden reasoning.
+- The agent moves the workspace through workspace actions (`performAction`): open a dashboard, a dataset, a SQL tab. Pages must be deep-linkable for that to work; `#/…?agent_task=<id>` opens a task (approval links from other agents and the inbox).
+- Things the agent made say so: "made by the agent" on artifacts, "Agent for <name>" in version history.
+- Settings → Agents is the only place for the Agent MCP endpoint, its tokens (shown once), memory and usage.
+
 ## Layout and information architecture
 
 - **Shell:** rail (8 sections) | top bar | section sub-tabs | page.

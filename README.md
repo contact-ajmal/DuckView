@@ -197,9 +197,11 @@ Browsing is lazy — DuckView lists namespaces and tables without loading table 
 
 ## 🤖 Built for AI agents
 
+**The DuckView agent works in the workspace with you.** Ask from the dock at the bottom of any page (⌘I) — "compare revenue by region", "why did churn go up?", "build me an executive dashboard" — and it finds the tables and the canonical metrics, runs what it needs as you (your access, your policies), shows each step in words, asks before it changes anything that matters, and leaves real objects behind: result tables, SQL tabs, dashboards, notebooks, checks, models. Other agents reach it too: the **Agent MCP server** (`/mcp/agent`) takes whole tasks from Claude, Cursor or any MCP client. A provider-independent Decision Engine keeps every model call small — only the context and tools that matter. See [the architecture](docs/architecture/agentic-target-state.md).
+
 DuckView treats agents as first-class users. **One tool registry** backs three surfaces, so they can never drift:
 
-- **MCP server** — stdio, legacy SSE and Streamable HTTP; **61 tools**, 4 resources (workspaces, schemas, system resources, the Mosaic, data-app and dbt guides) and 6 guided prompts (`data_quality_audit`, `sql_optimization`, `build_mosaic_dashboard`, `build_data_pipeline`, `build_data_app`, `build_dbt_models`).
+- **MCP server** — stdio, legacy SSE and Streamable HTTP; **90 tools** with machine-readable semantics, 4 resources (workspaces, schemas, system resources, the Mosaic, data-app and dbt guides) and 6 guided prompts (`data_quality_audit`, `sql_optimization`, `build_mosaic_dashboard`, `build_data_pipeline`, `build_data_app`, `build_dbt_models`).
 - **REST façade** — `POST /api/agent/v1/tools/<tool>` for frameworks that prefer plain HTTPS.
 - **OpenAPI 3.0** — generated on the fly for Bedrock Agents action groups and AgentCore Gateway targets.
 

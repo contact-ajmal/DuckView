@@ -39,8 +39,9 @@ const INTENT_CATEGORIES: Record<Intent, ToolCategory[]> = {
 const INTENT_RULES: [Intent, RegExp][] = [
   ['navigate', /^\s*(open|go to|show me the|take me to|switch to|jump to)\b/i],
   ['investigate', /\b(why|root cause|what caused|investigat\w*|drivers?|drop(ped)?|declin\w*|spike\w*|anomal\w*|unusual|outliers?|fell|went down|went up)\b/i],
-  ['quality', /\b(quality|null|nulls|missing values|duplicates?|validat\w*|checks?|expectations?|freshness|stale)\b/i],
+  // Cleaning is a transformation even when it names duplicates or nulls; checking for them is quality.
   ['transform', /\b(dbt|model|staging|mart|clean|dedupe|reshape|prepare|wrangle|transform\w*)\b/i],
+  ['quality', /\b(quality|null|nulls|missing values|duplicates?|validat\w*|checks?|expectations?|freshness|stale)\b/i],
   ['build', /\b(build|dashboard|data app|streamlit|app\b|executive (summary|view)|report)\b/i],
   ['modify', /^\s*(change|turn (this|it) into|make (this|it)|filter (this|it)|rename|update|add .* to (this|the)|remove|switch (this|it))\b/i],
   ['explain', /^\s*(explain|what does|what is|what's|what are|describe|define|how is .* (calculated|defined))\b/i],

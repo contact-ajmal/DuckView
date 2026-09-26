@@ -671,6 +671,22 @@ API:
 - `GET /api/hosted-agent-runs/:id`
 - `GET /api/hosted-agent-tools`
 
+## The DuckView agent
+
+The agent operates the workspace for the person who asks — from the agent dock at the bottom of every work surface (⌘I), from REST, or from any MCP client through the Agent MCP server. Architecture and rationale: [docs/architecture](architecture/agentic-target-state.md).
+
+**How a request runs.** The Decision Engine (`agent.decision.provider`, built-in `default`: deterministic, local, no model call) classifies and routes it; plain moves ("open the revenue dashboard") become workspace actions without a model. Otherwise a loop: the Context Engine discovers structured objects the person can read (tables and columns, files, metrics and semantic models, dbt projects, dashboards, notebooks, saved queries, quality suites, apps, insights, the page on screen, session observations and memory), ranks and packs them within `agent.budget`; the Decision Engine picks the tools (the core ones plus the best specialists, at most `max_tool_definitions`); the reasoning model (the server's model, or the person's own key) answers or calls one tool with the fenced protocol; the tool runs through the shared registry; observations and artifacts are recorded, the plan advances, failed calls are repaired from their errors (`max_retries`) — until an answer, `max_steps`, a cancellation or an approval.
+
+**Security.** The agent is the person who asked, marked `actorType: AGENT` and pinned to the session's workspace. Scopes, workspace roles (viewers are offered reading tools only), row policies, column masks, the SQL guard, the file jail, HITL and audit apply unchanged. A held change pauses the task; only the person, signed in to DuckView (not a token), can approve it — then, and only then, is the call repeated with `dry_run=false`. Revisions record agent-made changes ("Agent for Ana").
+
+**Memory.** Workspace memories hold only catalog-level facts every member can see (a table's columns, which metric answered a kind of question — never result values); everything else is private to its author (outcomes, failures, suggestions such as defining a metric for a sum computed by hand). Recalled through the Context Engine; forgotten from Settings → Agents.
+
+**Agent MCP** (`/mcp/agent`, Streamable HTTP, a token with the `mcp` scope, bound to a workspace): `ask_data_agent(request, mode?, session_id?)`, `analyse_dataset(dataset, question?)`, `investigate_data(question)`, `build_dashboard(goal)`, `create_data_app(goal)`, `explain_data(subject)`, `get_agent_task(task_id, wait_seconds?)`, `list_agent_sessions()`. Results are a stable contract — `{taskId, sessionId, status, answer, plan, steps, artifacts, actions, approval, telemetry}` — with progress notifications while it runs. The low-level tools stay at `/mcp`. Settings → Agents creates workspace tokens and generates the client configuration.
+
+**Configuration** (`agent:`): `enabled`, `decision.provider`, `budget.{max_objects, max_tokens, max_tool_definitions, max_observations, max_result_rows}`, `max_steps`, `max_retries`, `max_output_tokens`, `pricing` (per million tokens by model name, for estimated cost), `mcp.enabled`.
+
+**Decision engines.** A provider implements `DecisionEngine` (`agent/decision/types.ts`) and registers with `registerDecisionProvider(name, factory)`; nothing else changes. `duckview agent-eval [--provider name] [--json]` scores an engine on the built-in fixtures (tool and context recall, precision, MRR, intent accuracy, latency); `GET /api/agent/telemetry` compares engines and models on real tasks.
+
 ## Agent2Agent (A2A)
 
 **DuckView speaks A2A (protocol 0.3), both ways** (`services/a2a.ts`, `routes/a2a.ts`).
@@ -1103,6 +1119,7 @@ claude mcp add --transport http duckview http://localhost:4200/mcp --header "Aut
 | Watches | `GET/POST /api/workspaces/:id/watches` · `PATCH/DELETE /api/watches/:id` · `POST /api/watches/:id/check` · `…/accept` |
 | Data prep | `POST /api/workspaces/:id/prep/preview {source, steps, limit?}` · `POST …/prep/save {source, steps, name, as: view\|table\|dbt, project_id?, replace?}` |
 | Query APIs | `GET/POST /api/workspaces/:id/endpoints` · `PATCH/DELETE /api/endpoints/:id` · `POST /api/endpoints/:id/rotate-key` · callers: `GET /q/:slug?param=…[&format=csv]` with `Authorization: Bearer dvq_…` or `x-api-key` (none when public) |
+| Agent | `GET /api/agent/config` · `GET /api/agent/tools` · `GET/POST /api/agent/sessions` · `GET/PATCH/DELETE /api/agent/sessions/:id` · `…/observations` · `POST /api/agent/tasks {workspace_id, request, session_id?, mode?, page?, wait?}` · `GET /api/agent/tasks/:id` · `GET …/events` (SSE) · `POST …/cancel` · `POST …/approval {decision}` · `GET /api/agent/approvals` · `GET/DELETE /api/agent/memory` · `GET /api/agent/telemetry` · Agent MCP: `POST|GET|DELETE /mcp/agent` |
 | Probes | `GET /healthz` · `GET /readyz` · `GET /metrics` |
 
 Errors are uniform JSON: `{ error, message, request_id, challenge? }` — `403 SANDBOX_VIOLATION`, `403 FORBIDDEN` (role or scope too low), `404 NOT_FOUND` (also for workspaces the caller has no grant on), `409 APPROVAL_REQUIRED` (with the HITL challenge), `408 QUERY_TIMEOUT`, `400 SQL_ERROR` (DuckDB parser/binder errors), `429 RATE_LIMITED`.
@@ -1116,13 +1133,14 @@ duckview migrate
 duckview create-user --email … --password … [--role ADMIN|USER|READ_ONLY]
 duckview create-token --email … --name … [--scopes read,write,mcp] [--workspace id] [--days n]
 duckview config
+duckview agent-eval [--provider name] [--json]
 ```
 
 ## Observability
 
 - **Logs:** pino structured JSON (pretty in dev TTYs), `x-request-id` propagated.
-- **Metrics (`/metrics`):** `duckview_queries_total{actor,class,status}`, `duckview_query_duration_seconds` histogram, `duckview_query_rows_returned`, `duckview_active_queries`, `duckview_engines_active`, `duckview_mcp_connections_active{transport}`, `duckview_mcp_tool_calls_total{tool,status}`, `duckview_mcp_tool_duration_seconds`, `duckview_mcp_hitl_challenges_total`, `duckview_sandbox_violations_total{actor}`, `duckview_ws_connections_active`, `duckview_cache_lookups_total{kind,result}`, `duckview_cache_bytes`, `duckview_cache_entries`, host/DuckDB memory gauges, plus Node process defaults.
-- **Traces:** `duckdb.query` and `mcp.tool.<name>` spans (`db.system`, `db.statement`, workspace, actor, statement class) via OpenTelemetry; exported over OTLP/HTTP when `observability.otel.enabled`.
+- **Metrics (`/metrics`):** `duckview_queries_total{actor,class,status}`, `duckview_query_duration_seconds` histogram, `duckview_query_rows_returned`, `duckview_active_queries`, `duckview_engines_active`, `duckview_mcp_connections_active{transport}`, `duckview_mcp_tool_calls_total{tool,status}`, `duckview_mcp_tool_duration_seconds`, `duckview_mcp_hitl_challenges_total`, `duckview_sandbox_violations_total{actor}`, `duckview_ws_connections_active`, `duckview_cache_lookups_total{kind,result}`, `duckview_cache_bytes`, `duckview_cache_entries`, host/DuckDB memory gauges, the agent's `duckview_agent_tasks_total{status,decision_engine,via}`, `duckview_agent_task_duration_seconds`, `duckview_agent_decision_seconds`, `duckview_agent_reasoning_seconds{provider}`, `duckview_agent_tool_calls_total{tool,status}`, `duckview_agent_context_objects{stage}`, `duckview_agent_context_tokens`, `duckview_agent_llm_tokens_total{provider,direction}`, `duckview_agent_estimated_cost_usd_total{provider}`, plus Node process defaults.
+- **Traces:** `duckdb.query`, `mcp.tool.<name>`, `agent.task` and `agent.decision` spans (`db.system`, `db.statement`, workspace, actor, statement class) via OpenTelemetry; exported over OTLP/HTTP when `observability.otel.enabled`.
 
 ## Project layout
 

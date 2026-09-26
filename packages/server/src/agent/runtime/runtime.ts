@@ -15,7 +15,7 @@
  * Durability: sessions, tasks (plan, steps, artifacts, actions, approval, telemetry) and observations are rows; the
  * events of a running task stream on the AgentEventBus (SSE per task, the live feed for the workspace).
  */
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import type { AppContext } from '../../context.js';
 import type { AgentApprovalRecord, AgentArtifact, AgentPageRef, AgentPlanStep, AgentSession, AgentStepRecord, AgentTask, AgentTelemetry, AgentWorkspaceAction } from '../../db/schema/sqlite.js';
 import { newId } from '../../security/crypto.js';
@@ -23,7 +23,8 @@ import type { Principal } from '../../services/principal.js';
 import { canWrite, requireScope } from '../../services/principal.js';
 import { badRequest, forbidden, notFound } from '../../services/errors.js';
 import { logger } from '../../observability/logger.js';
-import { tracer } from '../../observability/tracing.js';
+import { tracer, withSpan } from '../../observability/tracing.js';
+import { metrics } from '../../observability/metrics.js';
 import type { ByokModel } from '../../services/hosted-agents.js';
 import { runTool, type ToolEnv } from '../tools.js';
 import { toolRegistry, type ToolDescriptor } from '../registry.js';
@@ -37,6 +38,7 @@ import { LlmReasoningModel } from '../reasoning/llm.js';
 import { OPEN_IN_WORKSPACE, resolveAction } from './actions.js';
 import { artifactsOf, observe } from './observe.js';
 import { initialPlan, systemPrompt } from './prompt.js';
+import { AgentMemoryStore } from '../memory/store.js';
 
 export type AgentMode = 'auto' | 'analysis' | 'investigate' | 'build' | 'explain';
 const MODE_INTENT: Partial<Record<AgentMode, Intent>> = { analysis: 'analyse', investigate: 'investigate', build: 'build', explain: 'explain' };
@@ -56,6 +58,7 @@ export interface StartTaskInput {
 /** What a running task holds between steps (and while it waits for an approval). */
 interface TaskState {
   task: AgentTask;
+  via: StartTaskInput['via'];
   principal: Principal;
   /** Offered reading tools only (read-only account, or a viewer of this workspace). */
   readOnly: boolean;
@@ -67,6 +70,8 @@ interface TaskState {
   failures: Map<string, number>;
   observations: ContextObject[];
   history: ContextObject[];
+  /** What earlier work in the workspace found (workspace memories, and the person's own). */
+  memories: ContextObject[];
   controller: AbortController;
   toolCalls: number;
   started: number;
@@ -77,6 +82,7 @@ const emptyTelemetry = (engine: string): AgentTelemetry => ({ decision_engine: e
 
 export class AgentRuntime {
   readonly events = new AgentEventBus();
+  readonly memory: AgentMemoryStore;
   /** Builds the reasoning model for a task (the server's model, or the person's own key); replaceable in tests. */
   modelFactory: (byok: ByokModel | null) => Promise<ReasoningModel>;
   private readonly states = new Map<string, TaskState>();
@@ -84,6 +90,7 @@ export class AgentRuntime {
   private readonly resolvers = new Map<string, (t: AgentTask) => void>();
 
   constructor(private readonly ctx: AppContext) {
+    this.memory = new AgentMemoryStore(ctx);
     this.modelFactory = async (byok) => new LlmReasoningModel((await ctx.copilot.serverModel(byok ?? null)).instance);
   }
 
@@ -151,6 +158,39 @@ export class AgentRuntime {
     return t;
   }
 
+  /**
+   * What the agent cost and how it decided, over a period: the person's own tasks, or everyone's for an admin.
+   * Grouped by decision engine and model so engines and models can be compared on real work.
+   */
+  async telemetry(p: Principal, opts: { days?: number; workspaceId?: string | null; all?: boolean } = {}) {
+    const since = new Date(Date.now() - (opts.days ?? 30) * 86_400_000);
+    const rows = (await this.db.select().from(this.s.agentTasks).where(and(gte(this.s.agentTasks.created_at, since), ...(opts.all ? [] : [eq(this.s.agentTasks.user_id, p.userId)]), ...(opts.workspaceId ? [eq(this.s.agentTasks.workspace_id, opts.workspaceId)] : []))).limit(20_000));
+    const groups = new Map<string, AgentTask[]>();
+    for (const t of rows) {
+      const k = `${t.telemetry?.decision_engine ?? 'default'}|${t.provider ?? '?'}|${t.model ?? '?'}`;
+      groups.set(k, [...(groups.get(k) ?? []), t]);
+    }
+    const sum = (ts: AgentTask[], f: (x: AgentTelemetry) => number) => ts.reduce((a, t) => a + (t.telemetry ? f(t.telemetry) : 0), 0);
+    const avg = (ts: AgentTask[], f: (x: AgentTelemetry) => number) => (ts.length ? Math.round((sum(ts, f) / ts.length) * 10) / 10 : 0);
+    return {
+      since: since.toISOString(),
+      tasks: rows.length,
+      by_status: Object.fromEntries(['completed', 'failed', 'cancelled', 'waiting_approval', 'running', 'planning'].map((s) => [s, rows.filter((t) => t.status === s).length])),
+      groups: [...groups].map(([k, ts]) => {
+        const [decision_engine, provider, model] = k.split('|');
+        return {
+          decision_engine, provider, model, tasks: ts.length,
+          completed: ts.filter((t) => t.status === 'completed').length,
+          avg_duration_ms: avg(ts, (x) => x.duration_ms), avg_decision_ms: avg(ts, (x) => x.decision_ms), avg_reasoning_ms: avg(ts, (x) => x.reasoning_ms),
+          avg_tool_calls: avg(ts, (x) => x.tool_calls), tool_failures: sum(ts, (x) => x.tool_failures),
+          avg_context_considered: avg(ts, (x) => x.context_objects_considered), avg_context_selected: avg(ts, (x) => x.context_objects_selected), avg_context_tokens: avg(ts, (x) => x.context_tokens),
+          input_tokens: sum(ts, (x) => x.input_tokens), output_tokens: sum(ts, (x) => x.output_tokens),
+          estimated_cost_usd: ts.some((t) => t.telemetry?.estimated_cost_usd != null) ? Math.round(sum(ts, (x) => x.estimated_cost_usd ?? 0) * 1e4) / 1e4 : null,
+        };
+      }),
+    };
+  }
+
   /** Tasks of this person waiting for their approval (in one workspace, or all). */
   async pendingApprovals(p: Principal, workspaceId?: string | null): Promise<AgentTask[]> {
     const rows = await this.db.select().from(this.s.agentTasks).where(and(eq(this.s.agentTasks.user_id, p.userId), eq(this.s.agentTasks.status, 'waiting_approval')));
@@ -180,7 +220,7 @@ export class AgentRuntime {
     const readOnly = !canWrite(p) || access.role === 'VIEWER';
     const offered = new Map(toolRegistry(this.ctx.cfg).availableTo(readOnly ? { ...principal, scopes: principal.scopes.filter((s) => s !== 'write') } : principal).map((t) => [t.name, toolRegistry(this.ctx.cfg).descriptor(t.name)!]));
     offered.set(OPEN_IN_WORKSPACE.name, OPEN_IN_WORKSPACE);
-    const state: TaskState = { task, principal, readOnly, model, classification: { intent: 'ask', confidence: 0, entities: [] }, messages: [], offered, used: [], failures: new Map(), observations: [], history: [], controller: new AbortController(), toolCalls: 0, started: performance.now(), pending: null };
+    const state: TaskState = { task, via: input.via, principal, readOnly, model, classification: { intent: 'ask', confidence: 0, entities: [] }, messages: [], offered, used: [], failures: new Map(), observations: [], history: [], memories: [], controller: new AbortController(), toolCalls: 0, started: performance.now(), pending: null };
     this.states.set(task.id, state);
     this.done.set(task.id, new Promise((resolve) => this.resolvers.set(task.id, resolve)));
     void this.begin(state, input).catch((err) => this.fail(state, err));
@@ -277,8 +317,9 @@ export class AgentRuntime {
           return;
         }
       }
-      // Earlier tasks of the session: their requests and answers, and what they found.
+      // Earlier tasks of the session: their requests and answers, and what they found; and the workspace's memory.
       await this.loadHistory(state);
+      state.memories = await this.memory.recall(state.principal, task.workspace_id).catch(() => []);
       task.plan = initialPlan(state.classification.intent);
       this.emit(state, 'agent.plan.created', { plan: task.plan });
       task.status = 'running';
@@ -313,14 +354,15 @@ export class AgentRuntime {
       if (state.controller.signal.aborted) return void (await this.finish(state, task, { status: 'cancelled', error: 'Cancelled' }));
       // Context and tools for this step.
       const t0 = performance.now();
-      const toolSel = await this.ctx.decision.selectTools({ request: task.request, tools: [...state.offered.values()], intent: state.classification.intent, max: budget.maxToolDefinitions, used: state.used });
+      const toolSel = await withSpan('agent.decision', { 'duckview.task_id': task.id, 'duckview.decision_engine': this.ctx.decision.name }, () => this.ctx.decision.selectTools({ request: task.request, tools: [...state.offered.values()], intent: state.classification.intent, max: budget.maxToolDefinitions, used: state.used }));
       if (!toolSel.tools.some((t) => t.name === OPEN_IN_WORKSPACE.name)) toolSel.tools.push(OPEN_IN_WORKSPACE);
-      const pack = await this.ctx.contextEngine.pack(state.principal, task.workspace_id, { request: task.request, intent: state.classification.intent, page, extra: [...state.observations, ...state.history], tools: toolSel.tools });
+      const pack = await this.ctx.contextEngine.pack(state.principal, task.workspace_id, { request: task.request, intent: state.classification.intent, page, extra: [...state.observations, ...state.history, ...state.memories], tools: toolSel.tools });
       task.telemetry!.decision_ms += performance.now() - t0;
       task.telemetry!.context_objects_considered = Math.max(task.telemetry!.context_objects_considered, pack.stats.considered);
       task.telemetry!.context_objects_selected = pack.stats.selected;
       task.telemetry!.context_tokens = pack.stats.tokens;
       if (turn === 0) {
+        void this.memory.used(pack.objects.filter((o) => o.type === 'memory').map((o) => (o.content as { id: string }).id)).catch(() => undefined);
         this.emit(state, 'agent.context.selected', { considered: pack.stats.considered, selected: pack.stats.selected, tokens: pack.stats.tokens, objects: pack.objects.map((o) => ({ type: o.type, title: o.title, relevance: o.relevance })), prefer_metrics: pack.semanticContext.preferMetrics, metrics: pack.semanticContext.matched });
         this.step(state, { kind: 'context', status: 'ok', summary: `Selected ${pack.stats.selected} of ${pack.stats.considered} things in the workspace${pack.semanticContext.matched.length ? ` (metric ${pack.semanticContext.matched.join(', ')})` : ''}` });
       }
@@ -417,6 +459,7 @@ export class AgentRuntime {
     const t0 = performance.now();
     const result = await runTool(env, tool, args);
     const ms = Math.round(performance.now() - t0);
+    metrics.agentToolCalls.inc({ tool: name, status: result.isError ? 'error' : (result.structuredContent as { status?: string } | undefined)?.status === 'approval_required' && !opts.approved ? 'approval_required' : 'ok' });
     task.telemetry!.tool_ms += ms;
     task.telemetry!.tool_calls++;
     if (!state.used.includes(name)) state.used.push(name);
@@ -507,17 +550,46 @@ export class AgentRuntime {
     const t: AgentTask = { ...task, status: end.status, answer: end.answer ?? task.answer, error: end.error ?? null, finished_at: new Date() };
     if (state) {
       t.telemetry = { ...t.telemetry!, duration_ms: Math.round(performance.now() - state.started), decision_ms: Math.round(t.telemetry!.decision_ms), reasoning_ms: Math.round(t.telemetry!.reasoning_ms) };
+      t.telemetry.estimated_cost_usd = this.cost(t.model, t.telemetry.input_tokens, t.telemetry.output_tokens);
       state.task = t;
+      this.observe(t, state.via);
     }
     await this.db.update(this.s.agentTasks).set({ status: t.status, intent: t.intent, plan: t.plan, steps: t.steps, artifacts: t.artifacts, actions: t.actions, approval: t.approval, answer: t.answer, error: t.error, telemetry: t.telemetry, finished_at: t.finished_at }).where(eq(this.s.agentTasks.id, t.id));
     const type: AgentEventType = end.status === 'completed' ? 'agent.completed' : end.status === 'cancelled' ? 'agent.cancelled' : 'agent.failed';
     this.emit({ task: t }, type, { status: t.status, answer: t.answer, error: t.error, artifacts: t.artifacts.map((a) => ({ id: a.id, type: a.type, title: a.title, href: a.href })), actions: t.actions, telemetry: t.telemetry });
+    if (t.status === 'completed' || t.status === 'failed') {
+      const obs = await this.db.select().from(this.s.agentObservations).where(eq(this.s.agentObservations.task_id, t.id)).catch(() => []);
+      await this.memory.remember(t, obs).catch((err) => logger().debug({ err: (err as Error).message }, 'Agent memory not written'));
+    }
     this.ctx.audit.log({ userId: t.user_id, actorType: 'AGENT', action: 'agent.task', resource: `agent_task:${t.id}`, queryText: t.request.slice(0, 2000), durationMs: t.telemetry?.duration_ms ?? null, ip: 'agent', status: t.status === 'completed' ? 'ok' : 'error', error: t.error ?? undefined });
     this.states.delete(t.id);
     this.resolvers.get(t.id)?.(t);
     this.resolvers.delete(t.id);
     setTimeout(() => this.done.delete(t.id), 60_000).unref();
     return t;
+  }
+
+  /** Estimated cost from agent.pricing (per million tokens, matched on the model's name); null when unpriced. */
+  private cost(model: string | null, input: number, output: number): number | null {
+    const m = (model ?? '').toLowerCase();
+    const hit = Object.entries(this.ctx.cfg.agent.pricing).find(([k]) => m.includes(k.toLowerCase()));
+    return hit ? Math.round(((input * hit[1].input + output * hit[1].output) / 1e6) * 1e6) / 1e6 : null;
+  }
+
+  /** Prometheus: what the task cost and how it was decided. */
+  private observe(t: AgentTask, via: string): void {
+    const tel = t.telemetry!;
+    const engine = tel.decision_engine;
+    metrics.agentTasks.inc({ status: t.status, decision_engine: engine, via });
+    metrics.agentTaskDuration.observe({ decision_engine: engine }, tel.duration_ms / 1000);
+    metrics.agentDecisionDuration.observe({ decision_engine: engine }, tel.decision_ms / 1000);
+    if (tel.llm_calls) metrics.agentReasoningDuration.observe({ provider: t.provider ?? 'unknown' }, tel.reasoning_ms / 1000);
+    metrics.agentContextObjects.observe({ stage: 'considered' }, tel.context_objects_considered);
+    metrics.agentContextObjects.observe({ stage: 'selected' }, tel.context_objects_selected);
+    if (tel.context_tokens) metrics.agentContextTokens.observe(tel.context_tokens);
+    if (tel.input_tokens) metrics.agentLlmTokens.inc({ provider: t.provider ?? 'unknown', direction: 'input' }, tel.input_tokens);
+    if (tel.output_tokens) metrics.agentLlmTokens.inc({ provider: t.provider ?? 'unknown', direction: 'output' }, tel.output_tokens);
+    if (tel.estimated_cost_usd) metrics.agentCost.inc({ provider: t.provider ?? 'unknown' }, tel.estimated_cost_usd);
   }
 
   private async fail(state: TaskState, err: unknown): Promise<void> {

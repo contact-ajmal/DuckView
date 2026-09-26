@@ -1,5 +1,7 @@
 # Agent-native migration plan
 
+Status (September 2026): phases 0–10 done — 8785ec0 (0–1), 6a04dde (2), c914d65 (3), 6ab943a (4), a133202 (5–7), then memory, observability and evaluation, and polish.
+
 Small vertical slices, each one commit. Before each commit: web typecheck and `ui-lint`, the full server suite, the
 build, and the full browser end-to-end run (plus the phase's new scenarios). No existing test is removed or weakened.
 

@@ -173,6 +173,21 @@ program
     process.stdout.write(JSON.stringify(redactConfig(cfg), null, 2) + '\n');
   });
 
+program
+  .command('agent-eval')
+  .description('score a Decision Engine on the built-in fixtures (tool and context selection, ranking, intent)')
+  .option('--provider <name>', 'a registered decision engine (default: agent.decision.provider)')
+  .option('--json', 'print the full report as JSON')
+  .action(async (opts: { provider?: string; json?: boolean }) => {
+    const cfg = boot();
+    const { toolRegistry } = await import('./agent/registry.js');
+    const { createDecisionEngine } = await import('./agent/decision/providers.js');
+    const { DecisionEngineEvaluator, formatReport } = await import('./agent/decision/evaluator.js');
+    const engine = createDecisionEngine(opts.provider ? { ...cfg, agent: { ...cfg.agent, decision: { provider: opts.provider } } } : cfg);
+    const report = await new DecisionEngineEvaluator(engine, toolRegistry(cfg).descriptors(), { maxTools: cfg.agent.budget.max_tool_definitions }).run();
+    process.stdout.write(opts.json ? `${JSON.stringify(report, null, 2)}\n` : `${formatReport(report)}\n`);
+  });
+
 program.parseAsync(process.argv).catch((err) => {
   process.stderr.write(`duckview: ${(err as Error).message}\n`);
   process.exit(1);

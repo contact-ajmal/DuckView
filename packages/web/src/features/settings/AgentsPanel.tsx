@@ -12,6 +12,11 @@ import { api, timeAgo, type ApiToken } from '../../api/client';
 import { DataTable } from '../../components/data';
 import { Button, Checkbox, CopyButton, Field, IconButton, Input, InlineError, Modal, StatusDot, confirmAction, errorText, toast } from '../../components/ui';
 
+interface Memory { id: string; scope: 'workspace' | 'user'; kind: string; subject: string | null; text: string; uses: number; updated_at: string }
+const MEMORY_KIND: Record<string, string> = { discovery: 'Found', outcome: 'Made', failure: 'Failed', suggestion: 'Suggests', preference: 'Prefers' };
+
+interface TelemetryGroup { decision_engine: string; provider: string; model: string; tasks: number; completed: number; avg_duration_ms: number; avg_decision_ms: number; avg_tool_calls: number; tool_failures: number; avg_context_selected: number; avg_context_considered: number; input_tokens: number; output_tokens: number; estimated_cost_usd: number | null }
+
 interface AgentConfig {
   enabled: boolean;
   mcp: { enabled: boolean; url: string; low_level_url: string; tools: { name: string; title: string; description: string }[] };
@@ -28,6 +33,8 @@ export function mcpConfig(url: string, token: string): string {
 export function AgentsPanel({ workspaceId, workspaceName, canEdit }: { workspaceId: string; workspaceName: string; canEdit: boolean }) {
   const [config, setConfig] = useState<AgentConfig | null>(null);
   const [tokens, setTokens] = useState<ApiToken[] | null>(null);
+  const [memories, setMemories] = useState<Memory[] | null>(null);
+  const [usage, setUsage] = useState<TelemetryGroup[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [draft, setDraft] = useState<{ name: string; write: boolean } | null>(null);
   const [issued, setIssued] = useState<string | null>(null);
@@ -35,8 +42,10 @@ export function AgentsPanel({ workspaceId, workspaceName, canEdit }: { workspace
 
   const load = useCallback(async () => {
     try {
-      const [c, t] = await Promise.all([api.get<AgentConfig>('/api/agent/config'), api.get<{ tokens: ApiToken[] }>('/api/tokens')]);
+      const [c, t, m] = await Promise.all([api.get<AgentConfig>('/api/agent/config'), api.get<{ tokens: ApiToken[] }>('/api/tokens'), api.get<{ memories: Memory[] }>(`/api/agent/memory?workspace_id=${encodeURIComponent(workspaceId)}`)]);
       setConfig(c);
+      setMemories(m.memories);
+      void api.get<{ groups: TelemetryGroup[] }>(`/api/agent/telemetry?days=30&workspace_id=${encodeURIComponent(workspaceId)}`).then((u) => setUsage(u.groups)).catch(() => setUsage([]));
       setTokens(t.tokens.filter((x) => x.workspace_id === workspaceId && x.scopes.includes('mcp')));
     } catch (e) {
       setError(e);
@@ -123,10 +132,50 @@ export function AgentsPanel({ workspaceId, workspaceName, canEdit }: { workspace
         </div>
       </section>
 
+      <section className="space-y-3 border-t border-zinc-800 pt-5">
+        <div>
+          <h2 className="text-title font-semibold text-zinc-100">What the agent remembers</h2>
+          <p className="text-xs text-zinc-500">Facts earlier tasks found, used as context later. Shared ones hold only what every member can see in the catalog; the rest are yours alone. Forget anything that is wrong or out of date.</p>
+        </div>
+        <DataTable
+          label="Agent memory"
+          testid="agent-memory"
+          rows={memories}
+          rowKey={(m) => m.id}
+          rowProps={(m) => ({ 'data-kind': m.kind, 'data-scope': m.scope })}
+          empty="Nothing yet. The agent keeps what it learns about this workspace as it works."
+          columns={[
+            { key: 'kind', header: 'What', cell: (m) => MEMORY_KIND[m.kind] ?? m.kind },
+            { key: 'text', header: 'Memory', truncate: true, cell: (m) => <span className="text-zinc-300" title={m.text}>{m.text}</span> },
+            { key: 'scope', header: 'Seen by', cell: (m) => (m.scope === 'workspace' ? 'Everyone here' : 'You') },
+            { key: 'uses', header: 'Used', align: 'right', numeric: true, cell: (m) => m.uses.toLocaleString() },
+            { key: 'x', header: '', align: 'right', cell: (m) => <IconButton label={`Forget: ${m.text.slice(0, 60)}`} onClick={() => void api.del(`/api/agent/memory/${m.id}`).then(load).catch((e) => toast.error(errorText(e)))}><Trash2 className="h-3.5 w-3.5" /></IconButton> },
+          ]}
+        />
+      </section>
+
       {config && (
         <section className="space-y-1 border-t border-zinc-800 pt-5 text-xs text-zinc-400" data-testid="agent-decision">
           <h2 className="text-title font-semibold text-zinc-100">How the agent decides</h2>
           <p>Decision engine: <span className="font-mono text-zinc-200">{config.decision.provider}</span>{config.decision.available.length > 1 ? ` (available: ${config.decision.available.join(', ')})` : ''}. It picks at most {config.budget.max_tool_definitions} tools and {config.budget.max_objects} things from the workspace for each step, within {config.budget.max_tokens.toLocaleString()} tokens of context, and up to {config.max_steps} tool calls a task.</p>
+          {usage && usage.length > 0 && (
+            <DataTable
+              label="Your agent tasks in the last 30 days"
+              testid="agent-usage"
+              rows={usage}
+              rowKey={(g) => `${g.decision_engine}|${g.provider}|${g.model}`}
+              density="compact"
+              columns={[
+                { key: 'm', header: 'Engine · model', cell: (g) => <span className="font-mono">{g.decision_engine} · {g.model}</span> },
+                { key: 't', header: 'Tasks', align: 'right', numeric: true, cell: (g) => `${g.completed}/${g.tasks}` },
+                { key: 'd', header: 'Avg time', align: 'right', numeric: true, cell: (g) => `${(g.avg_duration_ms / 1000).toFixed(1)} s` },
+                { key: 'c', header: 'Context', align: 'right', numeric: true, cell: (g) => `${Math.round(g.avg_context_selected)} of ${Math.round(g.avg_context_considered)}` },
+                { key: 'k', header: 'Tool calls', align: 'right', numeric: true, cell: (g) => `${g.avg_tool_calls}${g.tool_failures ? ` · ${g.tool_failures} failed` : ''}` },
+                { key: 'o', header: 'Tokens', align: 'right', numeric: true, cell: (g) => (g.input_tokens + g.output_tokens).toLocaleString() },
+                { key: '$', header: 'Est. cost', align: 'right', numeric: true, cell: (g) => (g.estimated_cost_usd == null ? '—' : `$${g.estimated_cost_usd.toFixed(4)}`) },
+              ]}
+            />
+          )}
           <p>The model is the one set under AI assistant. The engine and budget are set in the server configuration (agent.decision, agent.budget).</p>
         </section>
       )}

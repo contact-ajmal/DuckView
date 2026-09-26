@@ -15,6 +15,9 @@
  *   POST   /api/agent/tasks/:id/cancel
  *   POST   /api/agent/tasks/:id/approval           {decision: approve | deny, note?}  (the person, signed in)
  *   GET    /api/agent/approvals?workspace_id=      the person's tasks waiting for approval
+ *   GET    /api/agent/telemetry?days=&workspace_id=&all=  tasks, latency, tokens, cost and context size by decision engine and model
+ *   GET    /api/agent/memory?workspace_id=         what the agent remembers there (the workspace's, and yours)
+ *   DELETE /api/agent/memory/:id                   forget it (yours, or as a workspace owner)
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -22,6 +25,7 @@ import type { AppContext } from '../context.js';
 import { toolRegistry } from '../agent/registry.js';
 import { TERMINAL } from '../agent/events.js';
 import { PROVIDER_IDS } from '../services/llm.js';
+import { requireAdmin } from '../services/principal.js';
 import { AGENT_MCP_TOOLS } from '../agent/mcp-agent.js';
 import { decisionProviders } from '../agent/decision/providers.js';
 import type { ProviderId } from '../services/llm.js';
@@ -99,6 +103,22 @@ export async function agentRuntimeRoutes(app: FastifyInstance, ctx: AppContext) 
     const b = z.object({ decision: z.enum(['approve', 'deny']), note: z.string().max(500).optional() }).parse(req.body ?? {});
     return { task: await rt().decide(req.principal!, (req.params as { id: string }).id, b.decision, b.note ?? null) };
   });
+  app.get('/api/agent/memory', async (req) => {
+    const q = z.object({ workspace_id: z.string().min(1) }).parse(req.query ?? {});
+    return { memories: await rt().memory.visible(req.principal!, q.workspace_id) };
+  });
+  app.delete('/api/agent/memory/:id', async (req) => {
+    await rt().memory.forget(req.principal!, (req.params as { id: string }).id);
+    return { ok: true };
+  });
+
+  app.get('/api/agent/telemetry', async (req) => {
+    const q = z.object({ days: z.coerce.number().int().min(1).max(365).optional(), workspace_id: z.string().optional(), all: z.coerce.boolean().optional() }).parse(req.query ?? {});
+    if (q.all) requireAdmin(req.principal!);
+    if (q.workspace_id) await ctx.workspaces.get(req.principal!, q.workspace_id);
+    return rt().telemetry(req.principal!, { days: q.days, workspaceId: q.workspace_id ?? null, all: q.all });
+  });
+
   app.get('/api/agent/approvals', async (req) => {
     const q = z.object({ workspace_id: z.string().optional() }).parse(req.query ?? {});
     return { tasks: await rt().pendingApprovals(req.principal!, q.workspace_id ?? null) };
