@@ -1952,6 +1952,14 @@ try {
     report.details.discovered = await evaluate(`[...document.querySelectorAll('[data-testid="context-discovered"]')].map((e) => e.textContent)`);
     report.details.modeSent = calls[0]?.messages?.[0]?.content?.includes('### Datasets the person chose (work with these first)\n- table e2e_home_orders') ?? false;
     { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_mission.png'), Buffer.from(shot.result.data, 'base64')); }
+    // The same workspace in the dark theme.
+    { const theme = await evaluate(`localStorage.getItem('duckview.theme')`);
+      await evaluate(`localStorage.setItem('duckview.theme', JSON.stringify({ themeId: 'midnight' })); location.reload(); true`);
+      await waitFor(`document.querySelector('[data-testid="mission-view"]')?.dataset.status === 'completed' && !!document.querySelector('[data-testid="artifact-chart"] canvas')`, 30000, 'mission in the dark theme');
+      await sleep(600);
+      const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_mission_dark.png'), Buffer.from(shot.result.data, 'base64'));
+      await evaluate(`${theme ? `localStorage.setItem('duckview.theme', ${JSON.stringify(theme)})` : `localStorage.removeItem('duckview.theme')`}; location.reload(); true`);
+      await waitFor(`!!document.querySelector('[data-testid="mission-view"]')`, 30000, 'mission again'); }
     // Open the result's SQL in the console.
     const missionHash = await evaluate(`location.hash`);
     await evaluate(`document.querySelector('[data-testid="artifact-result"] [data-testid="console-open"]').click(); true`);
@@ -2202,8 +2210,10 @@ try {
       }
       return { unnamed, unlabeled, contrast: { checked: texts.length, low: low.length, worst: low.sort((a, b) => a.ratio - b.ratio).slice(0, 6) }, overflow: document.documentElement.scrollWidth > innerWidth + 1 };
     })()`;
-    const pages = ['#/', '#/data', '#/query', '#/dashboards', '#/apps', '#/agents', '#/connections', '#/transform/metrics', '#/governance/catalog', '#/templates', '#/settings/usage', '#/settings/users'];
-    const runs = [{ theme: 'midnight', width: 1440 }, { theme: 'daylight', width: 1440 }, { theme: 'midnight', width: 1024 }];
+    const pages = ['#/', '#/home', '#/data', '#/query', '#/dashboards', '#/apps', '#/agents', '#/connections', '#/transform/metrics', '#/governance/catalog', '#/templates', '#/settings/usage', '#/settings/users'];
+    // A mission's workspace too, when there is one to open.
+    { const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`); const ms = ((await (await authed(`/api/agent/missions?workspace_id=${wsId}&status=recent`)).json()).missions ?? []).filter((m) => m.status === 'completed'); if (ms[0]) pages.push(`#/agent/missions/${ms[0].id}`); }
+    const runs = [{ theme: 'midnight', width: 1440 }, { theme: 'daylight', width: 1440 }, { theme: 'daylight', width: 1280 }, { theme: 'midnight', width: 1024 }, { theme: 'midnight', width: 768 }];
     const dir = out.replace(/\.png$/, '');
     fs.mkdirSync(dir, { recursive: true });
     const results = [];
@@ -2219,7 +2229,7 @@ try {
         const res = await evaluate(audit);
         results.push({ theme: r.theme, width: r.width, page: pg, unnamed: res.unnamed.length, unlabeled: res.unlabeled.length, low: res.contrast.low, overflow: res.overflow, examples: { unnamed: res.unnamed.slice(0, 2), unlabeled: res.unlabeled.slice(0, 2), contrast: res.contrast.worst.slice(0, 3) } });
         const shot = await send('Page.captureScreenshot', { format: 'png' });
-        fs.writeFileSync(`${dir}/${r.theme}-${r.width}-${pg.replace(/[#/]+/g, '_').replace(/^_|_$/g, '') || 'home'}.png`, Buffer.from(shot.result.data, 'base64'));
+        fs.writeFileSync(`${dir}/${r.theme}-${r.width}-${pg.replace(/[#/]+/g, '_').replace(/^_|_$/g, '') || 'agent'}.png`, Buffer.from(shot.result.data, 'base64'));
       }
     }
     report.details.pages = results.map((x) => `${x.theme}@${x.width} ${x.page}: ${x.unnamed} unnamed · ${x.unlabeled} unlabeled · ${x.low} low-contrast${x.overflow ? ' · OVERFLOW' : ''}`);
