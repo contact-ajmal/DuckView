@@ -2,7 +2,8 @@
  * Network MCP transports (Fastify plugin):
  *   GET  /mcp/sse        → legacy HTTP+SSE stream (spec 2024-11-05)
  *   POST /mcp/messages   → client→server messages for the SSE session
- *   POST|GET|DELETE /mcp → Streamable HTTP (spec 2025-03-26)
+ *   POST|GET|DELETE /mcp → Streamable HTTP (spec 2025-03-26): the low-level tools
+ *   POST|GET|DELETE /mcp/agent → Streamable HTTP: DuckView's agent (agent/mcp-agent.ts)
  * All require `Authorization: Bearer <dv_ api token>` (or a UI JWT) with the `mcp` scope.
  */
 import { randomUUID } from 'node:crypto';
@@ -11,7 +12,9 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { AppContext } from '../context.js';
 import type { Principal } from '../services/principal.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { buildMcpServer, agentRef } from './server.js';
+import { buildAgentMcpServer } from '../agent/mcp-agent.js';
 import { metrics } from '../observability/metrics.js';
 import { logger } from '../observability/logger.js';
 import { liveEvents } from '../observability/events.js';
@@ -135,62 +138,72 @@ export async function registerMcpHttp(app: FastifyInstance, ctx: AppContext, reg
     await transport.handlePostMessage(req.raw, reply.raw, req.body);
   });
 
-  // ---- Streamable HTTP ----
-  const streamable = new Map<string, StreamableHTTPServerTransport>();
-  const handleStreamable = async (req: FastifyRequest, reply: FastifyReply) => {
-    const principal = await requirePrincipal(req, reply);
-    if (!principal) return;
-    const sessionHeader = req.headers['mcp-session-id'];
-    const sessionId = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
-    let transport = sessionId ? streamable.get(sessionId) : undefined;
-    if (transport) {
-      const s = registry.get(sessionId!);
-      if (s && s.principal.userId !== principal.userId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Session belongs to another principal' });
-      registry.touch(sessionId!);
-    } else {
-      if (req.method !== 'POST') return reply.code(400).send({ error: 'BAD_REQUEST', message: 'No active MCP session; initialise with a POST first' });
-      const workspaceId = workspaceFor(req, principal);
-      const t = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (id) => {
-          streamable.set(id, t);
-          registry.add({ id, transport: 'streamable-http', principal, workspaceId, startedAt: new Date(), lastActivity: new Date(), ip: req.ip, close: async () => t.close() });
-          ctx.audit.log({ userId: principal.userId, actorType: 'AGENT', action: 'mcp.connect', resource: 'transport:streamable-http', ip: req.ip });
-        },
-        onsessionclosed: (id) => {
-          streamable.delete(id);
-          registry.remove(id);
-          ctx.audit.log({ userId: principal.userId, actorType: 'AGENT', action: 'mcp.disconnect', resource: 'transport:streamable-http', ip: req.ip });
-        },
-      });
-      const server = buildMcpServer(ctx, principal, { defaultWorkspaceId: workspaceId ?? (await ctx.agents.byTokenId(principal.tokenId))?.workspace_id ?? null, agent: await agentRef(ctx, principal) });
-      let closed = false;
-      t.onclose = () => {
-        if (closed) return;
-        closed = true;
-        if (t.sessionId) {
-          streamable.delete(t.sessionId);
-          registry.remove(t.sessionId);
-        }
-        server.close().catch(() => undefined);
-      };
-      await server.connect(t);
-      transport = t;
-    }
-    reply.hijack();
-    try {
-      await transport.handleRequest(req.raw, reply.raw, req.body);
-    } catch (err) {
-      logger().error({ err }, 'MCP streamable transport error');
-      if (!reply.raw.headersSent) {
-        reply.raw.writeHead(500, { 'content-type': 'application/json' });
-        reply.raw.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null }));
+  // ---- Streamable HTTP: one handler per MCP server (the low-level tools at /mcp, the agent at /mcp/agent) ----
+  type Build = (principal: Principal, workspaceId: string | null) => Promise<McpServer>;
+  const streamableHandler = (build: Build, label: string) => {
+    const streamable = new Map<string, StreamableHTTPServerTransport>();
+    return async (req: FastifyRequest, reply: FastifyReply) => {
+      const principal = await requirePrincipal(req, reply);
+      if (!principal) return;
+      const sessionHeader = req.headers['mcp-session-id'];
+      const sessionId = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
+      let transport = sessionId ? streamable.get(sessionId) : undefined;
+      if (transport) {
+        const s = registry.get(sessionId!);
+        if (s && s.principal.userId !== principal.userId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Session belongs to another principal' });
+        registry.touch(sessionId!);
+      } else {
+        if (req.method !== 'POST') return reply.code(400).send({ error: 'BAD_REQUEST', message: 'No active MCP session; initialise with a POST first' });
+        const workspaceId = workspaceFor(req, principal);
+        const t = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (id) => {
+            streamable.set(id, t);
+            registry.add({ id, transport: 'streamable-http', principal, workspaceId, startedAt: new Date(), lastActivity: new Date(), ip: req.ip, close: async () => t.close() });
+            ctx.audit.log({ userId: principal.userId, actorType: 'AGENT', action: 'mcp.connect', resource: `transport:streamable-http${label}`, ip: req.ip });
+          },
+          onsessionclosed: (id) => {
+            streamable.delete(id);
+            registry.remove(id);
+            ctx.audit.log({ userId: principal.userId, actorType: 'AGENT', action: 'mcp.disconnect', resource: `transport:streamable-http${label}`, ip: req.ip });
+          },
+        });
+        const server = await build(principal, workspaceId);
+        let closed = false;
+        t.onclose = () => {
+          if (closed) return;
+          closed = true;
+          if (t.sessionId) {
+            streamable.delete(t.sessionId);
+            registry.remove(t.sessionId);
+          }
+          server.close().catch(() => undefined);
+        };
+        await server.connect(t);
+        transport = t;
       }
-    }
+      reply.hijack();
+      try {
+        await transport.handleRequest(req.raw, reply.raw, req.body);
+      } catch (err) {
+        logger().error({ err }, 'MCP streamable transport error');
+        if (!reply.raw.headersSent) {
+          reply.raw.writeHead(500, { 'content-type': 'application/json' });
+          reply.raw.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null }));
+        }
+      }
+    };
   };
-  app.post('/mcp', handleStreamable);
-  app.get('/mcp', handleStreamable);
-  app.delete('/mcp', handleStreamable);
+  const tools = streamableHandler(async (principal, workspaceId) => buildMcpServer(ctx, principal, { defaultWorkspaceId: workspaceId ?? (await ctx.agents.byTokenId(principal.tokenId))?.workspace_id ?? null, agent: await agentRef(ctx, principal) }), '');
+  app.post('/mcp', tools);
+  app.get('/mcp', tools);
+  app.delete('/mcp', tools);
+  if (ctx.cfg.agent.enabled && ctx.cfg.agent.mcp.enabled) {
+    const agent = streamableHandler(async (principal, workspaceId) => buildAgentMcpServer(ctx, principal, { defaultWorkspaceId: workspaceId ?? (await ctx.agents.byTokenId(principal.tokenId))?.workspace_id ?? null }), ' agent');
+    app.post('/mcp/agent', agent);
+    app.get('/mcp/agent', agent);
+    app.delete('/mcp/agent', agent);
+  }
 
   app.addHook('onClose', async () => {
     await registry.closeAll();

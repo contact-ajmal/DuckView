@@ -14,6 +14,8 @@ export type LiveEvent =
   | { type: 'quality'; at: string; workspace_id: string; suite_id: string; status: 'pass' | 'warn' | 'fail' | 'error'; changed: boolean }
   | { type: 'dbt'; at: string; workspace_id: string; project_id: string; run_id: string; status: 'running' | 'ok' | 'error'; summary: string | null }
   | { type: 'stream'; at: string; workspace_id: string; stream_id: string; rows: number; rows_total: number; duration_ms: number; error: string | null }
+  /** A DuckView agent task moved (its milestones; the person's own tasks only). */
+  | { type: 'agent'; at: string; workspace_id: string; user_id: string; task_id: string; session_id: string; event: string; data: Record<string, unknown> }
   | { type: 'ready'; scope: string };
 
 /** Subscribes to /api/ws/events; reconnects with backoff. Returns an unsubscribe function. */

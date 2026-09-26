@@ -1,6 +1,7 @@
 /**
  * The DuckView agent over HTTP, for the UI and any client with a session or a token (`read` scope; a token bound
  * to a workspace works there only):
+ *   GET    /api/agent/config                       how the agent is set up: Agent MCP endpoint and tools, decision engine, budget
  *   GET    /api/agent/tools                        the tools this principal may be offered, with their semantics
  *   GET    /api/agent/sessions?workspace_id=       the person's sessions (newest first)
  *   POST   /api/agent/sessions                     {workspace_id, title?, page?}
@@ -21,6 +22,8 @@ import type { AppContext } from '../context.js';
 import { toolRegistry } from '../agent/registry.js';
 import { TERMINAL } from '../agent/events.js';
 import { PROVIDER_IDS } from '../services/llm.js';
+import { AGENT_MCP_TOOLS } from '../agent/mcp-agent.js';
+import { decisionProviders } from '../agent/decision/providers.js';
 import type { ProviderId } from '../services/llm.js';
 
 const Page = z.object({ kind: z.string().min(1).max(40), id: z.string().max(400).nullable().optional(), label: z.string().max(400) }).nullable().optional();
@@ -30,6 +33,19 @@ export async function agentRuntimeRoutes(app: FastifyInstance, ctx: AppContext) 
   app.addHook('preHandler', app.authenticate);
   const registry = toolRegistry(ctx.cfg);
   const rt = () => ctx.agentRuntime;
+
+  app.get('/api/agent/config', async (req) => {
+    const base = (ctx.cfg.server.public_url ?? `${req.protocol}://${req.host}`).replace(/\/+$/, '');
+    const a = ctx.cfg.agent;
+    return {
+      enabled: a.enabled,
+      mcp: { enabled: a.enabled && a.mcp.enabled, url: `${base}/mcp/agent`, low_level_url: `${base}/mcp`, tools: AGENT_MCP_TOOLS },
+      decision: { provider: ctx.decision.name, available: decisionProviders() },
+      budget: a.budget,
+      max_steps: a.max_steps,
+      max_retries: a.max_retries,
+    };
+  });
 
   app.get('/api/agent/tools', async (req) => {
     const offered = new Set(registry.availableTo(req.principal!).map((t) => t.name));

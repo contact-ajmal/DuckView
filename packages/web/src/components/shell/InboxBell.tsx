@@ -6,6 +6,7 @@ import { subscribeLiveEvents } from '../../lib/liveEvents';
 import { Menu, cn } from '../ui';
 import { describeIntent } from '../ai';
 import { useAuth } from '../../store/auth';
+import { agentApi, type AgentTask } from '../../features/agent/api';
 
 /**
  * The inbox: changes your agents are waiting for you to approve (this session), then mentions and replies, newest
@@ -17,18 +18,23 @@ export function InboxBell() {
   const me = useAuth((a) => a.user?.id);
   const [held, setHeld] = useState<{ id: string; at: string; text: string; agent: string }[]>([]);
   const [heldSeen, setHeldSeen] = useState(0);
+  /** Tasks of the DuckView agent paused for your approval (in any workspace): durable, unlike the held calls above. */
+  const [agentWaiting, setAgentWaiting] = useState<AgentTask[]>([]);
+  const loadAgent = useCallback(() => void agentApi.approvals().then(setAgentWaiting).catch(() => undefined), []);
   const load = useCallback(() => void api.get<{ items: InboxItem[]; unread: number }>('/api/inbox?limit=30').then((r) => { setItems(r.items); setUnread(r.unread); }).catch(() => undefined), []);
   useEffect(() => {
     load();
+    loadAgent();
     return subscribeLiveEvents((e) => {
       if (e.type === 'inbox') load();
+      if (e.type === 'agent' && /^agent\.(approval|completed|failed|cancelled)/.test(e.event)) loadAgent();
       // An agent acting as you tried to change data: it waits for your approval in its client.
       if (e.type === 'mcp_tool' && e.status === 'approval_required' && e.user_id === me) {
         setHeld((h) => [{ id: `${e.at}-${e.tool}`, at: e.at, text: describeIntent(e.tool, e.args, e.title), agent: e.agent?.name ?? 'An agent' }, ...h].slice(0, 10));
       }
     });
-  }, [load, me]);
-  const heldNew = held.length - heldSeen;
+  }, [load, loadAgent, me]);
+  const heldNew = held.length - heldSeen + agentWaiting.length;
   const open = async (i: InboxItem) => {
     if (!i.read) await api.post('/api/inbox/read', { ids: [i.id] }).catch(() => undefined);
     const ws = useWorkspace.getState();
@@ -52,9 +58,18 @@ export function InboxBell() {
             <span className="font-semibold text-zinc-200">Inbox</span>
             {unread > 0 && <button className="text-zinc-500 hover:text-zinc-200" onClick={() => void api.post('/api/inbox/read', { all: true }).then(load)}>Mark all read</button>}
           </div>
-          {held.length > 0 && (
+          {(held.length > 0 || agentWaiting.length > 0) && (
             <div className="mb-1 border-b border-zinc-800 pb-1" data-testid="inbox-approvals">
               <div className="px-2 pb-1 text-2xs font-medium text-zinc-500">Waiting for your approval</div>
+              {agentWaiting.map((t) => (
+                <button key={t.id} role="menuitem" onClick={() => { close(); location.hash = `#/?agent_task=${t.id}`; }} className="flex w-full gap-2.5 rounded-md px-2 py-2 text-left hover:bg-zinc-900" data-inbox="agent-approval">
+                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs text-zinc-300"><b className="font-semibold text-zinc-100">DuckView agent</b> wants to {t.approval ? describeIntent(t.approval.tool, t.approval.arguments) : 'make a change'}</span>
+                    <span className="mt-0.5 line-clamp-2 block text-2xs text-zinc-500">{t.request} · {timeAgo(t.approval?.requested_at ?? t.created_at)}</span>
+                  </span>
+                </button>
+              ))}
               {held.map((h) => (
                 <button key={h.id} role="menuitem" onClick={() => { close(); location.hash = '#/agents/approvals'; }} className="flex w-full gap-2.5 rounded-md px-2 py-2 text-left hover:bg-zinc-900" data-inbox="approval">
                   <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />

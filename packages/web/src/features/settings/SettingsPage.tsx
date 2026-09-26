@@ -28,9 +28,10 @@ import { ClusterPanel } from './ClusterPanel';
 import { UsagePanel } from './UsagePanel';
 import { WorkspacesAdminPanel } from './WorkspacesAdminPanel';
 import { EndpointsPanel } from './EndpointsPanel';
+import { AgentsPanel } from './AgentsPanel';
 import { DataTable } from '../../components/data';
 
-type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients' | 'orchestration' | 'cluster' | 'usage' | 'workspaces' | 'query-apis';
+type Category = 'appearance' | 'layout' | 'hardware' | 'engine' | 'storage' | 'copilot' | 'integrations' | 'account' | 'teams' | 'apps' | 'users' | 'audit' | 'provisioning' | 'git' | 'embedding' | 'sql-clients' | 'orchestration' | 'cluster' | 'usage' | 'workspaces' | 'query-apis' | 'agents';
 const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.ReactNode; group: string; admin?: boolean }[] = [
   { id: 'account', group: 'Your account', label: 'Account', blurb: 'Your password and identity', icon: <UserRound className="h-4 w-4" /> },
   { id: 'usage', group: 'Administration', label: 'Usage & cost', blurb: 'Queries, AI and storage, what they cost, and monthly budgets', icon: <ReceiptText className="h-4 w-4" /> },
@@ -43,6 +44,7 @@ const CATEGORIES: { id: Category; label: string; blurb: string; icon: React.Reac
   { id: 'users', group: 'Administration', label: 'Users', blurb: 'Roles, access and deactivation', icon: <ShieldCheck className="h-4 w-4" />, admin: true },
   { id: 'audit', group: 'Administration', label: 'Audit log', blurb: 'Who did what, and where the log is streamed', icon: <ScrollText className="h-4 w-4" /> },
   { id: 'provisioning', group: 'Administration', label: 'Provisioning', blurb: 'SCIM 2.0 users and teams from your identity provider', icon: <KeyRound className="h-4 w-4" />, admin: true },
+  { id: 'agents', group: 'This workspace', label: 'Agents', blurb: 'DuckView\'s agent for Claude, Cursor and other MCP clients', icon: <Bot className="h-4 w-4" /> },
   { id: 'query-apis', group: 'This workspace', label: 'Query APIs', blurb: 'Publish a query as a JSON or CSV endpoint for other systems', icon: <Webhook className="h-4 w-4" /> },
   { id: 'embedding', group: 'This workspace', label: 'Embedding', blurb: 'Show dashboards and notebooks inside your own application', icon: <Code2 className="h-4 w-4" /> },
   { id: 'copilot', group: 'Your account', label: 'AI assistant', blurb: 'The model DuckView AI uses, keys and usage', icon: <Bot className="h-4 w-4" /> },
@@ -181,6 +183,7 @@ export function SettingsPage() {
           {cat === 'git' && ws.activeId && <GitPanel key={ws.activeId} workspaceId={ws.activeId} />}
 
           {cat === 'embedding' && ws.activeId && <EmbedPanel key={ws.activeId} workspaceId={ws.activeId} />}
+          {cat === 'agents' && ws.activeId && <AgentsPanel key={ws.activeId} workspaceId={ws.activeId} workspaceName={ws.workspaces.find((w) => w.id === ws.activeId)?.name ?? 'this workspace'} canEdit={ws.workspaces.find((w) => w.id === ws.activeId)?.role !== 'VIEWER'} />}
           {cat === 'query-apis' && ws.activeId && <EndpointsPanel key={ws.activeId} workspaceId={ws.activeId} canEdit={ws.workspaces.find((w) => w.id === ws.activeId)?.role !== 'VIEWER'} />}
           {cat === 'sql-clients' && <PgWirePanel />}
           {cat === 'cluster' && isAdmin && <ClusterPanel />}

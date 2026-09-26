@@ -1860,6 +1860,139 @@ try {
     for (let i = 0; i < 50; i++) { const r = await q('SELECT count(*) FROM e2e_prep_clean'); if (r.rows) { report.details.saved = r.rows; break; } await sleep(200); }
     report.details.charts = 1;
   }
+  else if (scenario === 'agent-dock') {
+    // The agent in the workspace: ask from the dock on a dataset, see the steps in words and the result table,
+    // open its SQL in a tab, approve a change it wants to make, and move the workspace by asking.
+    const http = await import('node:http');
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    const j = async (method, url, body) => (await authed(url, { method, body: body ? JSON.stringify(body) : undefined })).json();
+    const q = async (sql) => j('POST', `/api/workspaces/${wsId}/query`, { sql });
+    await q("CREATE OR REPLACE TABLE e2e_agent_orders AS SELECT * FROM (VALUES ('EU', 100.0), ('EU', 50.0), ('US', 300.0)) t(region, revenue)");
+    await q('DROP TABLE IF EXISTS e2e_agent_made');
+    const dash = (await j('POST', `/api/workspaces/${wsId}/dashboards`, { name: `E2E agent board ${Date.now()}` })).dashboard;
+    const calls = [];
+    // A model that asks for one tool, then answers from the result.
+    const llm = http.createServer((req, res) => {
+      let b = '';
+      req.on('data', (d) => (b += d));
+      req.on('end', () => {
+        if (!req.url.includes('chat/completions')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"models":[],"data":[]}'); return; }
+        const body = JSON.parse(b);
+        calls.push(body);
+        const msgs = body.messages.filter((m) => m.role !== 'system');
+        const first = msgs.filter((m) => m.role === 'user').at(-1)?.content ?? '';
+        const lastUser = msgs.at(-1)?.content ?? '';
+        const ask = msgs.filter((m) => m.role === 'user' && !m.content.startsWith('Result of') && !m.content.startsWith('The person')).at(-1)?.content ?? '';
+        let reply;
+        if (/Compare revenue by region/.test(ask)) reply = lastUser.startsWith('Result of') ? 'EU has **150** and US **300** in revenue.' : '```tool\n{"name": "execute_query", "arguments": {"sql": "SELECT region, sum(revenue) AS revenue FROM e2e_agent_orders GROUP BY 1 ORDER BY 1"}}\n```';
+        else if (/Create a table e2e_agent_made/.test(ask)) reply = lastUser.startsWith('Result of') ? 'Created e2e_agent_made.' : '```tool\n{"name": "execute_query", "arguments": {"sql": "CREATE TABLE e2e_agent_made AS SELECT 1 AS x"}}\n```';
+        else reply = 'I am not sure.';
+        void first;
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: { content: reply }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', model: 'mock', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`);
+        res.end('data: [DONE]\n\n');
+      });
+    });
+    await new Promise((r) => llm.listen(0, '127.0.0.1', r));
+    cleanup = async () => {
+      llm.close();
+      await evaluate(`localStorage.removeItem('duckview.copilot.settings'); location.hash = '#/'; true`).catch(() => undefined);
+      await j('DELETE', `/api/dashboards/${dash.id}`);
+      for (const s of ((await j('GET', `/api/agent/sessions?workspace_id=${wsId}`)).sessions ?? [])) await j('DELETE', `/api/agent/sessions/${s.id}`);
+      await q('DROP TABLE IF EXISTS e2e_agent_made');
+      await q('DROP TABLE IF EXISTS e2e_agent_orders');
+    };
+    await evaluate(`localStorage.setItem('duckview.copilot.settings', JSON.stringify({ provider: 'ollama', model: 'mock', apiKey: '', baseUrl: 'http://127.0.0.1:${llm.address().port}' })); location.hash = '#/data?table=e2e_agent_orders'; location.reload(); true`);
+    await waitFor(`document.querySelector('[data-testid="dataset-name"]')?.textContent === 'e2e_agent_orders'`, 30000, 'dataset open');
+    await waitFor(`!!document.querySelector('[data-testid="agent-input"]')`, 10000, 'agent dock');
+    report.details.chip = await evaluate(`document.querySelector('[data-testid="agent-context-page"]')?.textContent`);
+    const ask = async (text) => {
+      await evaluate(`document.querySelector('[data-testid="agent-input"]').focus(); true`);
+      await setField('[data-testid="agent-input"]', text);
+      await evaluate(`document.querySelector('[data-testid="agent-send"]').click(); true`);
+    };
+    const lastTask = `[...document.querySelectorAll('[data-testid="agent-task"]')].at(-1)`;
+    await ask('Compare revenue by region');
+    await waitFor(`${lastTask}?.dataset.status === 'completed'`, 30000, 'first task done');
+    report.details.steps = await evaluate(`[...${lastTask}.querySelectorAll('[data-testid="tool-sentence"]')].map((e) => e.textContent)`);
+    report.details.answer = await evaluate(`${lastTask}.querySelector('[data-testid="agent-answer"]')?.textContent`);
+    report.details.rows = await evaluate(`[...${lastTask}.querySelectorAll('[data-testid="agent-artifact"][data-type="table"] tbody tr')].map((r) => [...r.querySelectorAll('td')].map((c) => c.textContent).join('|'))`);
+    report.details.pagePrompt = calls[0]?.messages?.[0]?.content?.includes('on screen now: The dataset e2e_agent_orders') ?? false;
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_task.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`${lastTask}.querySelector('[data-testid="artifact-open-sql"]').click(); true`);
+    await waitFor(`location.hash.startsWith('#/query') && (document.querySelector('.cm-content')?.innerText ?? '').includes('FROM e2e_agent_orders GROUP BY 1')`, 15000, 'SQL opened in a tab');
+    report.details.sqlTab = true;
+    // A change: held for approval, run only once approved.
+    await ask('Create a table e2e_agent_made');
+    await waitFor(`${lastTask}?.dataset.status === 'waiting_approval' && !!${lastTask}.querySelector('[data-testid="approval-card"]')`, 30000, 'approval asked');
+    report.details.before = (await q("SELECT count(*) FROM information_schema.tables WHERE table_name = 'e2e_agent_made'")).rows;
+    report.details.card = await evaluate(`${lastTask}.querySelector('[data-testid="approval-card"]').textContent`);
+    // The same approval waits in the inbox; opening it from there leads back to the task (a deep link).
+    await waitFor(`!!document.querySelector('[data-testid="inbox-unread"]')`, 10000, 'inbox counts the approval');
+    await evaluate(`document.querySelector('[data-testid="agent-new-session"]').click(); document.querySelector('[data-testid="inbox-bell"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-inbox="agent-approval"]')`, 10000, 'approval in the inbox');
+    report.details.inbox = await evaluate(`document.querySelector('[data-inbox="agent-approval"]').textContent`);
+    await evaluate(`document.querySelector('[data-inbox="agent-approval"]').click(); true`);
+    await waitFor(`location.hash.includes('agent_task=') && ${lastTask}?.dataset.status === 'waiting_approval'`, 15000, 'deep link opened the task');
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_approval.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`${lastTask}.querySelector('[data-testid="approve"]').click(); true`);
+    await waitFor(`${lastTask}?.dataset.status === 'completed'`, 30000, 'approved task done');
+    report.details.after = (await q('SELECT count(*) FROM e2e_agent_made')).rows;
+    // A move in the workspace: no model call.
+    const before = calls.length;
+    await ask(`Open the ${dash.name} dashboard`);
+    await waitFor(`location.hash === '#/dashboards/${dash.id}'`, 20000, 'dashboard opened by the agent');
+    report.details.navCalls = calls.length - before;
+    await evaluate(`document.querySelector('[data-testid="agent-history-toggle"]').click(); true`);
+    await waitFor(`document.querySelectorAll('[data-testid="agent-history-item"]').length > 0`, 10000, 'history');
+    report.details.history = await evaluate(`[...document.querySelectorAll('[data-testid="agent-history-item"]')].map((e) => e.textContent)`);
+    report.details.charts = 1;
+  }
+  else if (scenario === 'agent-settings') {
+    // Settings → Agents: the Agent MCP endpoint, a token shown once with its client configuration, a real MCP
+    // handshake with it, and revoking it.
+    const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
+    cleanup = async () => {
+      await evaluate(`location.hash = '#/'; 'ok'`).catch(() => {});
+      for (const t of ((await (await authed('/api/tokens')).json()).tokens ?? []).filter((t) => t.name === 'E2E client')) await authed(`/api/tokens/${t.id}`, { method: 'DELETE' }).catch(() => {});
+    };
+    await evaluate(`location.hash = '#/settings/agents'; location.reload(); 'ok'`);
+    await waitFor(`document.querySelectorAll('[data-testid="agent-mcp-tools"] li').length > 0 && !!document.querySelector('[data-testid="agent-decision"]')`, 20000, 'agents settings');
+    report.details.url = await evaluate(`document.querySelector('[data-testid="agent-mcp-url"]').value`);
+    report.details.tools = await evaluate(`document.querySelectorAll('[data-testid="agent-mcp-tools"] li').length`);
+    report.details.decision = await evaluate(`document.querySelector('[data-testid="agent-decision"]')?.textContent`);
+    await evaluate(`document.querySelector('[data-testid="agent-token-new"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="agent-token-name"]')`, 5000, 'token form');
+    await setField('[data-testid="agent-token-name"]', 'E2E client');
+    await evaluate(`document.querySelector('[data-testid="agent-token-create"]').click(); true`);
+    await waitFor(`!!document.querySelector('[data-testid="agent-token-value"]')?.value`, 10000, 'token shown');
+    const token = await evaluate(`document.querySelector('[data-testid="agent-token-value"]').value`);
+    report.details.configHasToken = await evaluate(`document.querySelector('[data-testid="agent-token-issued"] pre').textContent.includes(${JSON.stringify(token)})`);
+    { const shot = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out.replace('.png', '_token.png'), Buffer.from(shot.result.data, 'base64')); }
+    await evaluate(`[...document.querySelectorAll('[data-testid="agent-token-issued"] button')].find((b) => b.textContent.trim() === 'Done').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[data-testid="agent-tokens"] tbody tr')].some((r) => r.textContent.includes('E2E client'))`, 10000, 'token listed');
+    report.details.listed = await evaluate(`[...document.querySelectorAll('[data-testid="agent-tokens"] tbody tr')].find((r) => r.textContent.includes('E2E client')).textContent`);
+    // A real MCP client exchange over Streamable HTTP.
+    const rpc = async (body, session) => {
+      const r = await fetch(`${BASE}/mcp/agent`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${token}`, ...(session ? { 'mcp-session-id': session, 'mcp-protocol-version': '2025-03-26' } : {}) }, body: JSON.stringify(body) });
+      const text = await r.text();
+      const json = text.startsWith('{') ? JSON.parse(text) : JSON.parse((/^data: (.*)$/m.exec(text) ?? [])[1] ?? 'null');
+      return { status: r.status, session: r.headers.get('mcp-session-id'), json };
+    };
+    const init = await rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'e2e', version: '0' } } });
+    report.details.server = init.json?.result?.serverInfo?.name;
+    await rpc({ jsonrpc: '2.0', method: 'notifications/initialized' }, init.session);
+    const list = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, init.session);
+    report.details.mcpTools = (list.json?.result?.tools ?? []).map((t) => t.name).sort();
+    // Revoke from the page: the client is locked out at once.
+    await evaluate(`[...document.querySelectorAll('[data-testid="agent-tokens"] tbody tr')].find((r) => r.textContent.includes('E2E client')).querySelector('button[aria-label^="Revoke"]').click(); true`);
+    await waitFor(`[...document.querySelectorAll('[role="dialog"] button, [role="alertdialog"] button')].some((b) => b.textContent.trim() === 'Revoke')`, 5000, 'confirm');
+    await evaluate(`[...document.querySelectorAll('[role="dialog"] button, [role="alertdialog"] button')].find((b) => b.textContent.trim() === 'Revoke').click(); true`);
+    await waitFor(`![...document.querySelectorAll('[data-testid="agent-tokens"] tbody tr')].some((r) => r.textContent.includes('E2E client'))`, 10000, 'token revoked');
+    report.details.afterRevoke = (await rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'e2e', version: '0' } } }).catch(() => ({ status: 0 }))).status;
+    report.details.charts = 1;
+  }
   else if (scenario === 'data-explorer') {
     // A dataset, then one of its columns in depth, then where the table comes from.
     const wsId = await evaluate(`localStorage.getItem('duckview.workspace')`);
@@ -2973,6 +3106,29 @@ try {
     if (JSON.stringify(d.steps) !== JSON.stringify(['Remove duplicate rows', 'Lowercase name', 'Trim name', 'Keep rows where name IS NOT NULL'])) problems.push(`steps: ${JSON.stringify(d.steps)}`);
     if (JSON.stringify([...(d.result ?? [])].sort()) !== JSON.stringify(['1|ada', '2|bo'])) problems.push(`result: ${JSON.stringify(d.result)}`);
     if (JSON.stringify(d.saved) !== '[[2]]') problems.push(`saved view: ${JSON.stringify(d.saved)}`);
+  }
+  if (scenario === 'agent-dock') {
+    if (!/e2e_agent_orders/.test(d.chip ?? '')) problems.push(`chip: ${d.chip}`);
+    if (!d.pagePrompt) problems.push('the dataset on screen did not reach the agent');
+    if (JSON.stringify(d.steps) !== JSON.stringify(['Ran a query on e2e_agent_orders'])) problems.push(`steps: ${JSON.stringify(d.steps)}`);
+    if (!/EU has 150 and US 300 in revenue/.test(d.answer ?? '')) problems.push(`answer: ${d.answer}`);
+    if (JSON.stringify(d.rows) !== JSON.stringify(['EU|150', 'US|300'])) problems.push(`rows: ${JSON.stringify(d.rows)}`);
+    if (JSON.stringify(d.before) !== '[[0]]') problems.push(`created before approval: ${JSON.stringify(d.before)}`);
+    if (!/CREATE TABLE e2e_agent_made/.test(d.card ?? '') || !/CREATE/.test(d.card ?? '')) problems.push(`card: ${d.card}`);
+    if (!/DuckView agent wants to change data in e2e_agent_made/.test(d.inbox ?? '')) problems.push(`inbox: ${d.inbox}`);
+    if (JSON.stringify(d.after) !== '[[1]]') problems.push(`after approval: ${JSON.stringify(d.after)}`);
+    if (d.navCalls !== 0) problems.push(`navigation called the model ${d.navCalls} times`);
+    if (!(d.history ?? []).some((h) => /Compare revenue by region/.test(h))) problems.push(`history: ${JSON.stringify(d.history)}`);
+  }
+  if (scenario === 'agent-settings') {
+    if (!/\/mcp\/agent$/.test(d.url ?? '')) problems.push(`url: ${d.url}`);
+    if (d.tools !== 8) problems.push(`tools: ${d.tools}`);
+    if (!/Decision engine: default/.test(d.decision ?? '')) problems.push(`decision: ${d.decision}`);
+    if (!d.configHasToken) problems.push('the configuration does not carry the new token');
+    if (!/E2E client.*dv_.*••••••••.*read/.test(d.listed ?? '')) problems.push(`listed: ${d.listed}`);
+    if (d.server !== 'duckview-agent') problems.push(`server: ${d.server}`);
+    if (JSON.stringify(d.mcpTools) !== JSON.stringify(['analyse_dataset', 'ask_data_agent', 'build_dashboard', 'create_data_app', 'explain_data', 'get_agent_task', 'investigate_data', 'list_agent_sessions'])) problems.push(`mcp tools: ${JSON.stringify(d.mcpTools)}`);
+    if (d.afterRevoke !== 401) problems.push(`after revoke: ${d.afterRevoke}`);
   }
   if (scenario === 'data-explorer') {
     if (d.object !== 'e2e_explorer') problems.push(`page object: ${d.object}`);

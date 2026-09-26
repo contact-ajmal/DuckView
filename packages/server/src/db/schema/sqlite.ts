@@ -1370,6 +1370,8 @@ export interface AgentApprovalRecord {
   arguments: Record<string, unknown>;
   action_class: string;
   reason: string;
+  /** What it does, in SQL terms when there is SQL (CREATE, DROP…). */
+  verb?: string | null;
   preview: string | null;
   requested_at: string;
   decision?: 'approved' | 'denied';

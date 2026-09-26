@@ -2,7 +2,7 @@
  * DuckView's primitives. One control height (30px, `sm` 26px), one radius per level (controls 4px, panels 6px,
  * dialogs 8px), neutral surfaces, and the accent reserved for "what to do" (primary actions, the active item, focus).
  */
-import { type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type ButtonHTMLAttributes, type ComponentProps, type InputHTMLAttributes, type SelectHTMLAttributes, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Loader2, Check, Copy } from 'lucide-react';
 import { moveFocus, useFocusTrap, usingKeyboard } from './focus';
@@ -44,8 +44,9 @@ export function IconButton({ label, active, className, children, ...rest }: Butt
   );
 }
 
-export function Input({ className, uiSize = 'md', ...rest }: InputHTMLAttributes<HTMLInputElement> & { uiSize?: 'sm' | 'md' }) {
-  return <input className={cn(!hasW(className) && 'w-full', 'rounded-md border border-zinc-800 bg-zinc-950 text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500/40', uiSize === 'sm' ? 'px-2' : 'px-2.5', !hasH(className) && (uiSize === 'sm' ? 'h-[26px]' : 'h-[var(--control-h)]'), !hasText(className) && (uiSize === 'sm' ? 'text-xs' : 'text-body'), className)} {...rest} />;
+/** `bare`: no border or background, for a command bar that is itself the surface (the agent dock). */
+export function Input({ className, uiSize = 'md', variant = 'default', ...rest }: ComponentProps<'input'> & { uiSize?: 'sm' | 'md'; variant?: 'default' | 'bare' }) {
+  return <input className={cn(!hasW(className) && 'w-full', variant === 'bare' ? 'bg-transparent text-zinc-100 placeholder:text-zinc-500 focus:outline-none' : 'rounded-md border border-zinc-800 bg-zinc-950 text-zinc-100 placeholder:text-zinc-600 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500/40', uiSize === 'sm' ? 'px-2' : 'px-2.5', !hasH(className) && (uiSize === 'sm' ? 'h-[26px]' : 'h-[var(--control-h)]'), !hasText(className) && (uiSize === 'sm' ? 'text-xs' : 'text-body'), className)} {...rest} />;
 }
 
 export function Select({ className, children, uiSize = 'md', ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { uiSize?: 'sm' | 'md' }) {

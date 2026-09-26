@@ -420,15 +420,15 @@ export class AgentRuntime {
     task.telemetry!.tool_ms += ms;
     task.telemetry!.tool_calls++;
     if (!state.used.includes(name)) state.used.push(name);
-    const sc = (result.structuredContent ?? {}) as { status?: string; reason?: string; statements?: { preview?: string }[] };
+    const sc = (result.structuredContent ?? {}) as { status?: string; reason?: string; statements?: { preview?: string; verb?: string }[]; mutating_verbs?: string[] };
     if (sc.status === 'approval_required' && !opts.approved) {
-      const approval: AgentApprovalRecord = { id: newId(), tool: name, arguments: args, action_class: descriptor.semantics.action, reason: String(sc.reason ?? 'This change needs your approval.'), preview: sc.statements?.map((s) => s.preview).filter(Boolean).join('\n').slice(0, 4000) || null, requested_at: new Date().toISOString() };
+      const approval: AgentApprovalRecord = { id: newId(), tool: name, arguments: args, action_class: descriptor.semantics.action, reason: String(sc.reason ?? 'This change needs your approval.'), verb: sc.mutating_verbs?.join(', ') || sc.statements?.[0]?.verb || null, preview: sc.statements?.map((s) => s.preview).filter(Boolean).join('\n').slice(0, 4000) || null, requested_at: new Date().toISOString() };
       state.pending = { tool: name, arguments: args };
       task.approval = approval;
       task.status = 'waiting_approval';
       this.step(state, { kind: 'approval', tool: name, arguments: shorten(args), status: 'approval_required', summary: approval.reason, duration_ms: ms });
       await this.save(state);
-      this.emit(state, 'agent.approval.required', { approval_id: approval.id, tool: name, title: tool.title, action_class: approval.action_class, reason: approval.reason, preview: approval.preview });
+      this.emit(state, 'agent.approval.required', { approval_id: approval.id, tool: name, title: tool.title, action_class: approval.action_class, reason: approval.reason, verb: approval.verb, preview: approval.preview });
       return true;
     }
     const resultText = result.content.map((c) => (c.type === 'text' ? c.text : '')).join('\n') || JSON.stringify(result.structuredContent ?? {});

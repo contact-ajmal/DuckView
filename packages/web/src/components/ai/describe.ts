@@ -15,8 +15,9 @@ const q = (s: string) => (s ? `“${s}”` : '');
 const VERBS: Record<string, (a: Args) => string> = {
   execute_query: (a) => { const t = tableOf(str(a.sql)); return /^\s*(insert|update|delete|create|drop|alter|copy|merge)/i.test(str(a.sql)) ? `Changed data${t ? ` in ${t}` : ''}` : `Ran a query${t ? ` on ${t}` : ''}`; },
   explain_query: (a) => { const t = tableOf(str(a.sql)); return `Explained a query${t ? ` on ${t}` : ''}`; },
-  profile_dataset: (a) => `Profiled ${str(a.target) || 'a dataset'}`,
-  inspect_schema: (a) => `Read the schema of ${str(a.target) || 'a dataset'}`,
+  profile_dataset: (a) => `Profiled ${str(a.table_or_path ?? a.target) || 'a dataset'}`,
+  inspect_schema: (a) => `Read the schema of ${str(a.file_path_or_table ?? a.target) || 'a dataset'}`,
+  open_in_workspace: (a) => (a.action === 'open_query' ? 'Opened a SQL tab' : `Opened ${str(a.target) || 'something'} in the workspace`),
   list_accessible_data: () => 'Listed the data it can reach',
   browse_storage: (a) => `Browsed ${str(a.path) || 'storage'}`,
   save_dataset: (a) => `Saved a dataset${a.name ? ` as ${str(a.name)}` : ''}`,

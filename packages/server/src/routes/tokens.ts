@@ -49,6 +49,7 @@ export async function tokenRoutes(app: FastifyInstance, ctx: AppContext, registr
       transports: {
         sse: `${base}/mcp/sse`,
         streamable_http: `${base}/mcp`,
+        ...(ctx.cfg.agent.enabled && ctx.cfg.agent.mcp.enabled ? { agent: `${base}/mcp/agent` } : {}),
         stdio: 'duckview mcp --token <token> [--workspace <id>]',
       },
       tools: [...TOOL_NAMES],

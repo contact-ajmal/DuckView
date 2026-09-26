@@ -17,6 +17,7 @@ import { GovernancePage } from './features/governance/GovernancePage';
 import { TransformPage } from './features/transform/TransformPage';
 import { SnapshotView } from './features/dashboards/SnapshotView';
 import { CopilotDrawer } from './features/copilot/CopilotDrawer';
+import { AgentDock } from './features/agent/AgentDock';
 import { ShareDialog } from './features/workspace/ShareDialog';
 import { CreateWorkspaceWizard } from './features/workspace/CreateWorkspaceWizard';
 import { WorkspaceDetailPage } from './features/workspace/WorkspaceDetailPage';
@@ -98,6 +99,7 @@ export default function App() {
           </main>
           <CopilotDrawer />
         </div>
+        <AgentDock />
       </div>
       <CommandPalette />
 
